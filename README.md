@@ -40,6 +40,11 @@ npm test
 npm run build
 ```
 
+Общие TypeScript-типы создаются из схем backend в OpenAPI. После изменения
+Pydantic-моделей обновите снимок OpenAPI и типы командой `npm run types:generate`
+из `frontend/`. Команда `npm run types:check` проверяет актуальность обоих
+сгенерированных файлов без их перезаписи.
+
 Чтобы добавить компонент shadcn/ui, используйте CLI из `frontend/`:
 
 ```bash
