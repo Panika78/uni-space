@@ -42,6 +42,7 @@ cp .env.example .env
 
 ```bash
 docker compose up -d db
+docker compose build api
 docker compose run --rm api alembic upgrade head
 docker compose up -d api
 ```
