@@ -20,6 +20,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY backend/app ./app
 COPY backend/alembic ./alembic
 COPY backend/alembic.ini ./
+COPY backend/docker-entrypoint.sh ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
@@ -27,5 +28,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 ENV PATH="/opt/venv/bin:$PATH"
 
+ENTRYPOINT ["sh", "/app/docker-entrypoint.sh"]
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

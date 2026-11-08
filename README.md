@@ -47,6 +47,9 @@ docker compose up -d api
 ```
 
 Внутри Compose API подключается к PostgreSQL по адресу `db:5432`.
+API получает компоненты подключения отдельно и собирает `DATABASE_URL` через
+SQLAlchemy `URL.create()`, поэтому специальные символы в `POSTGRES_PASSWORD`
+не требуют ручной подстановки или двойного URL-кодирования.
 
 `POSTGRES_PASSWORD` используется образом PostgreSQL только при первой
 инициализации пустого volume. Изменение значения в `.env` не меняет пароль уже
@@ -118,6 +121,11 @@ uv run python -c \
   'from sqlalchemy import text; from app.core.database import engine; print(engine.connect().execute(text("SELECT 1")).scalar_one())'
 uv run uvicorn app.main:app --reload
 ```
+
+Для host `DATABASE_URL` пароль с URI-символами должен быть закодирован один раз
+при формировании URL; не подставляйте такой пароль в строку вручную. В Compose
+пароль передаётся отдельной переменной и кодируется entrypoint через
+`URL.create()`.
 
 Проверки backend:
 
