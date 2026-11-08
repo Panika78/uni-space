@@ -1,0 +1,1 @@
+Generic single-database configuration using the application's shared SQLAlchemy metadata.

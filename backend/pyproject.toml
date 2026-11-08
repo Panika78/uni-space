@@ -1,0 +1,38 @@
+[project]
+name = "uni-space-backend"
+version = "0.1.0"
+description = "Uni Space API"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic==1.16.2",
+    "fastapi==0.115.14",
+    "psycopg[binary]==3.2.9",
+    "pydantic-settings==2.10.1",
+    "sqlalchemy==2.0.41",
+    "uvicorn[standard]==0.34.3",
+]
+
+[dependency-groups]
+dev = [
+    "anyio==4.9.0",
+    "httpx==0.28.1",
+    "pytest==8.4.1",
+    "ruff==0.12.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
