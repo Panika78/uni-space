@@ -21,7 +21,7 @@ TypeScript и Vite. Предметные модели и API будут доба
 
 ## Frontend
 
-Требуется Node.js 24.22.1 (см. `frontend/.nvmrc`) и npm 11.9.0. Установите
+Требуется Node.js 24.22.1 (см. `frontend/.nvmrc`) и npm 11.19.1. Установите
 точные зависимости из lock-файла и запустите Vite:
 
 ```bash
