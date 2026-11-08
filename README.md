@@ -63,7 +63,7 @@ Swagger доступен по адресу <http://localhost:8000/api/docs>, Ope
 Проверить соединение с PostgreSQL через SQLAlchemy можно так:
 
 ```bash
-docker compose exec api python -c \
+docker compose run --rm api python -c \
   'from sqlalchemy import text; from app.core.database import engine; print(engine.connect().execute(text("SELECT 1")).scalar_one())'
 ```
 
