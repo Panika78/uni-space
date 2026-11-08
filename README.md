@@ -36,6 +36,8 @@ Python-зависимостей записаны в `backend/uv.lock`.
 cp .env.example .env
 ```
 
+### Backend и PostgreSQL в Docker Compose
+
 Поднимите PostgreSQL, примените миграции и запустите API:
 
 ```bash
@@ -43,6 +45,8 @@ docker compose up -d db
 docker compose run --rm api alembic upgrade head
 docker compose up -d api
 ```
+
+Внутри Compose API подключается к PostgreSQL по адресу `db:5432`.
 
 Swagger доступен по адресу <http://localhost:8000/api/docs>, OpenAPI — по
 <http://localhost:8000/api/openapi.json>.
@@ -84,18 +88,21 @@ docker compose down --volumes
 
 Последняя команда удаляет все локальные данные PostgreSQL этого Compose-проекта.
 
-## Разработка backend без контейнера API
+### Backend на хосте, PostgreSQL в Docker Compose
 
-При уже запущенном PostgreSQL установите зафиксированные зависимости и загрузите
-переменные из `.env`:
+Compose публикует PostgreSQL только на `127.0.0.1:5432`. Поднимите БД, установите
+зафиксированные зависимости и загрузите переменные из `.env`:
 
 ```bash
+docker compose up -d db
 cd backend
 uv sync --frozen
 set -a
 source ../.env
 set +a
 uv run alembic upgrade head
+uv run python -c \
+  'from sqlalchemy import text; from app.core.database import engine; print(engine.connect().execute(text("SELECT 1")).scalar_one())'
 uv run uvicorn app.main:app --reload
 ```
 
