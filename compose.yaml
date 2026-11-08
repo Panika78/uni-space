@@ -6,7 +6,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?Copy .env.example to .env and set POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Copy .env.example to .env and set POSTGRES_PASSWORD}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test:
+        - CMD-SHELL
+        - >-
+          PGPASSWORD="$${POSTGRES_PASSWORD}"
+          psql --host="$${HOSTNAME}" --username="$${POSTGRES_USER}"
+          --dbname="$${POSTGRES_DB}" --no-password --tuples-only
+          --command="SELECT 1" >/dev/null 2>&1
       interval: 2s
       timeout: 5s
       retries: 15

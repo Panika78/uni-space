@@ -48,6 +48,12 @@ docker compose up -d api
 
 Внутри Compose API подключается к PostgreSQL по адресу `db:5432`.
 
+`POSTGRES_PASSWORD` используется образом PostgreSQL только при первой
+инициализации пустого volume. Изменение значения в `.env` не меняет пароль уже
+существующей роли в сохранённой БД. Сначала обновите пароль роли в PostgreSQL
+или продолжайте использовать прежнее значение; иначе healthcheck пометит БД как
+`unhealthy`, а сервис `api` не запустится через `depends_on`.
+
 Swagger доступен по адресу <http://localhost:8000/api/docs>, OpenAPI — по
 <http://localhost:8000/api/openapi.json>.
 
@@ -72,6 +78,13 @@ docker compose logs -f api db
 ```bash
 docker compose run --rm api alembic upgrade head
 docker compose run --rm api alembic heads
+```
+
+Проверить healthcheck с правильным и заведомо неправильным паролем, не удаляя
+volume:
+
+```bash
+bash backend/tests/test_compose_db_healthcheck.sh
 ```
 
 Остановить контейнеры, сохранив данные PostgreSQL:
