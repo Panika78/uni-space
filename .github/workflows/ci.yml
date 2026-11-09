@@ -104,7 +104,9 @@ jobs:
         run: npm run lint
       - name: Prettier
         working-directory: frontend
-        run: npm run format:check
+        run: |
+          npm run format:check
+          npx prettier --config .prettierrc.json --check ../deploy/spa.browser.mjs
 
   frontend-typecheck:
     name: Frontend TypeScript
@@ -270,6 +272,14 @@ jobs:
           version: 0.13.5
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+      - name: Install isolated browser test tooling
+        run: |
+          npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
+          node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell
+          echo "PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
       - name: Build production API and SPA images
         run: |
           docker build -f backend/Dockerfile -t uni-space-api:task019 .
@@ -278,5 +288,6 @@ jobs:
         run: |
           uv run --locked --python 3.12.12 --project backend ruff check deploy/test_production.py
           uv run --locked --python 3.12.12 --project backend ruff format --check deploy/test_production.py
+          node --check deploy/spa.browser.mjs
       - name: Test isolated HTTPS deployment and backup recovery
         run: uv run --locked --python 3.12.12 --project backend python deploy/test_production.py

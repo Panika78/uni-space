@@ -102,11 +102,13 @@ bash scripts/production-compose.sh up -d --wait --wait-timeout 120
 ```bash
 docker build -f backend/Dockerfile -t uni-space-api:task019 .
 docker build -f deploy/Dockerfile.web -t uni-space-web:task019 .
+# Сначала установите Playwright/Chromium по docs/PRODUCTION.md.
 uv run --locked --python 3.12.12 --project backend python deploy/test_production.py
 ```
 
 Он использует уникальный тестовый project/volume, проверяет реальный HTTPS,
-SPA/API, auth/Origin/cookie, proxy/IP spoofing, отказы небезопасного запуска и
+SPA/API и реальный браузерный переход `/schedule` → `/login` с загрузкой JS/CSS,
+auth/Origin/cookie, proxy/IP spoofing, отказы небезопасного запуска и
 backup/restore в отдельную БД; затем удаляет только свои тестовые данные.
 Публичное развёртывание, реальный домен/TLS, доступность из России и фактическое
 расписание backup остаются в TASK-020. Локальный прогон их не подтверждает.

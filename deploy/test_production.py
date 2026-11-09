@@ -77,7 +77,7 @@ def main():
                 [
                     "RELEASE_TAG=task019",
                     "SERVER_NAME=uni.test",
-                    "ALLOWED_ORIGINS='[\"https://uni.test\"]'",
+                    f"ALLOWED_ORIGINS='{json.dumps(['https://uni.test', f'https://127.0.0.1:{https_port}'])}'",
                     "POSTGRES_DB=deployment_check",
                     "POSTGRES_USER=deployment_check",
                     f"JWT_SIGNING_KEY_FILE={temp / 'jwt'}",
@@ -195,6 +195,12 @@ def main():
             dc("up", "-d", "--wait", "--wait-timeout", "120")
             dc("exec", "-T", "nginx", "nginx", "-t")
             print("PASS: topology, startup, HTTP/DB/schema readiness", flush=True)
+            browser_env = env | {
+                "PRODUCTION_TEST_URL": f"https://127.0.0.1:{https_port}",
+                "PRODUCTION_TEST_CERT_FILE": str(temp / "tls.pem"),
+            }
+            result = run(["node", "deploy/spa.browser.mjs"], env=browser_env)
+            print(result.stdout.strip(), flush=True)
             password = secrets.token_urlsafe(24)
             dc(
                 "exec",
@@ -234,7 +240,9 @@ with SessionLocal.begin() as db:
                 assert page.status_code == 200 and '<div id="root">' in page.text
                 assert page.headers["strict-transport-security"] == "max-age=31536000"
                 assert page.headers["cache-control"] == "no-cache"
+                # This unknown URL tests only nginx fallback, not React routing.
                 assert client.get("/schedule/deep/link").text == page.text
+                assert client.get("/schedule").text == page.text
                 assert (
                     client.get("/api/openapi.json").json()["info"]["title"]
                     == "Uni Space API"

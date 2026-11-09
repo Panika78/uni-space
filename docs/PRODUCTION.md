@@ -166,7 +166,21 @@ env-файле на имя восстановленной БД, пересозд
 
 ## Воспроизводимый интеграционный стенд
 
-Используются существующие Python/uv/HTTPX, Docker и OpenSSL, без новых зависимостей.
+Используются Python/uv/HTTPX, Docker, OpenSSL, Node и внешний Playwright/Chromium
+(тот же подход, что в `frontend/e2e/auth.browser.mjs`). Зависимости приложения
+не меняются. Для браузерного smoke-теста установите изолированные инструменты:
+
+```bash
+npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
+node work/browser-tooling/node_modules/playwright/cli.js install chromium --only-shell
+export PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_modules/playwright/index.mjs"
+```
+
+Системные библиотеки Chromium должны быть установлены; CI использует
+`install --with-deps chromium --only-shell`. Если Chromium уже есть в окружении,
+задайте `CHROMIUM_PATH=/absolute/path/to/chromium`; `PLAYWRIGHT_MODULE` может
+указывать на уже установленный Playwright. Отсутствие браузера/Playwright приводит
+к ошибке прогона, а не пропуску проверки.
 Должны быть свободны `172.30.19.0/24` и место для Docker images/build cache.
 В обычной среде флаг `--secret` можно опустить; здесь он нужен только proxy CA:
 
@@ -183,6 +197,17 @@ Origin, схему HTTPS, два клиентских IP и лимиты при 
 отказы реальной production-команды при небезопасных параметрах (даже с внешним
 development), backup/restore, повторное применение миграций, пересоздание с
 сохранением volume, отсутствие секретов в логах/config/bundle.
+Проверка неизвестного `/schedule/deep/link` через HTTP подтверждает только
+Nginx fallback. Дополнительно `deploy/spa.browser.mjs` открывает зарегистрированный
+`/schedule` в новой вкладке Chromium шириной 360 px: проверяет реальные JS/CSS
+(200, корректный MIME, применение CSS), отсутствие ошибок загрузки и JS-исключений,
+настоящий `401` refresh без cookie и редирект React на `/login` с формой входа.
+Никаких browser route mocks, фиктивных endpoint или тестовых данных для этого
+smoke-теста нет. В тестовый allowlist добавляется точный loopback HTTPS-origin
+со случайным портом. Chromium доверяет только SPKI сгенерированного сертификата
+через `--ignore-certificate-errors-spki-list`; глобального `ignoreHTTPSErrors` нет.
+Основная HTTPX-проверка по-прежнему проверяет CA и hostname. Перед закрытием
+браузера собираются ошибки ресурсов; недоступный JS/CSS не считается успехом.
 В `finally` удаляет **только собственный** тестовый project с volume.
 Не запускайте тест параллельно с другим стендом на том же proxy subnet.
 GitHub Actions выполняет этот прогон отдельным job; остальные проверки — в README.
