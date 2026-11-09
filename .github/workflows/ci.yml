@@ -277,8 +277,16 @@ jobs:
           node-version: 24.22.1
       - name: Install isolated browser test tooling
         run: |
-          npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
-          node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell
+          mkdir -p work/browser-tooling
+          if ! (
+            set -e
+            npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
+            node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell
+          ) > work/browser-install.log 2>&1; then
+            cat work/browser-install.log
+            tail -n 20 work/browser-install.log | sed 's/%/%25/g;s/\r/%0D/g;s/^/::error title=Browser tooling::/'
+            exit 1
+          fi
           echo "PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
       - name: Build production API and SPA images
         run: |
