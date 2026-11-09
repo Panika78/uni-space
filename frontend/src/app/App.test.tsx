@@ -8,11 +8,17 @@ describe('application navigation', () => {
     const user = userEvent.setup()
     render(<App />)
 
-    expect(screen.getByRole('heading', { name: 'Добро пожаловать в Uni Space' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Добро пожаловать в Uni Space' }),
+    ).toBeInTheDocument()
     const document = window.document
     await user.click(screen.getByRole('link', { name: 'О проекте' }))
 
-    expect(screen.getByRole('heading', { name: 'Всё важное об учёбе — в одном месте' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', {
+        name: 'Всё важное об учёбе — в одном месте',
+      }),
+    ).toBeInTheDocument()
     expect(window.document).toBe(document)
   })
 })

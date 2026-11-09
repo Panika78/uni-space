@@ -35,9 +35,12 @@ Vite доступен по адресу <http://localhost:5173>. Запросы 
 ниже. Проверки клиента:
 
 ```bash
+npm run lint
+npm run format:check
 npm run typecheck
 npm test
 npm run build
+npm run types:check
 ```
 
 Общие TypeScript-типы создаются из схем backend в OpenAPI. После изменения
@@ -176,3 +179,72 @@ uv run ruff format --check .
 `DATABASE_URL` — обязательная настройка API. Если она отсутствует или
 некорректна, процесс завершается с именем проблемной настройки, не выводя её
 значение.
+
+## Проверки проекта
+
+Для локальных тестов и проверки миграций используется отдельный PostgreSQL
+17.6 в Compose-файле `compose.test.yaml`. Он имеет отдельную базу и тестовые
+учётные данные, не читает `.env`, не подключается к рабочему `db` и не хранит
+данные в постоянном volume. Порт опубликован только на loopback (`55432`), он
+должен быть свободен.
+
+Из корня репозитория поднимите тестовую БД и установите зафиксированные
+зависимости:
+
+```bash
+docker compose -p uni-space-test -f compose.test.yaml up -d --wait test-db
+cd backend
+uv sync --frozen
+export APP_ENV=test
+export DATABASE_URL=postgresql+psycopg://uni_space_test:test-only-password@127.0.0.1:55432/uni_space_test
+```
+
+В `backend/` запустите backend lint/format и тесты:
+
+```bash
+uv run --frozen ruff check .
+uv run --frozen ruff format --check .
+uv run --frozen pytest
+```
+
+На той же тестовой PostgreSQL проверьте миграции на пустой базе и совпадение
+текущих ревизий БД с heads Alembic:
+
+```bash
+uv run --frozen alembic upgrade head
+uv run --frozen python scripts/check_migrations.py
+```
+
+Сейчас каталог Alembic не содержит ревизий, поэтому эти команды проверяют
+успешное подключение к чистой PostgreSQL и совпадение пустого графа миграций с
+пустым состоянием БД. Когда появятся миграции, те же команды применят их и
+потребуют, чтобы база достигла всех текущих heads.
+
+В `frontend/` установите зависимости по lock-файлу и выполните frontend-проверки:
+
+```bash
+cd ../frontend
+npm ci
+npm run lint
+npm run format:check
+npm run typecheck
+npm test
+npm run build
+npm run types:check
+```
+
+`types:check` только сравнивает актуальную генерацию OpenAPI и TypeScript-типы с
+закоммиченными файлами и завершается с ошибкой при расхождении; он не
+перезаписывает их. Для обновления файлов используется отдельная команда
+`npm run types:generate`.
+
+После проверки остановите и удалите только эфемерный контейнер тестовой БД:
+
+```bash
+cd ..
+docker compose -p uni-space-test -f compose.test.yaml down --volumes
+```
+
+GitHub Actions выполняет проверки отдельными jobs для pull request в `main` и
+push в `main`. В CI используются отдельные временные PostgreSQL и тестовые
+учётные данные; secrets и production-конфигурация не используются.

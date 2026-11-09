@@ -54,7 +54,12 @@ describe('Vite API proxy', () => {
         plugins: [],
         configFile: false,
         root: envDirectory,
-        server: { ...config.server, host: '127.0.0.1', port: viteAddress.port, strictPort: true },
+        server: {
+          ...config.server,
+          host: '127.0.0.1',
+          port: viteAddress.port,
+          strictPort: true,
+        },
       })
       await viteServer.listen()
 
@@ -66,7 +71,9 @@ describe('Vite API proxy', () => {
       const response = await fetch(`http://127.0.0.1:${listeningAddress.port}/api/openapi.json`)
 
       expect(response.status).toBe(200)
-      await expect(response.json()).resolves.toEqual({ path: '/api/openapi.json' })
+      await expect(response.json()).resolves.toEqual({
+        path: '/api/openapi.json',
+      })
     } finally {
       await viteServer?.close()
       await new Promise<void>((resolve) => upstream.close(() => resolve()))
