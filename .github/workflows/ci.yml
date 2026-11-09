@@ -230,6 +230,18 @@ jobs:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
         run: uv run --locked --python 3.12.12 alembic upgrade head
+      - name: Verify repeated migration upgrade
+        working-directory: backend
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
+        run: uv run --locked --python 3.12.12 alembic upgrade head
+      - name: Check ORM metadata against PostgreSQL schema
+        working-directory: backend
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
+        run: uv run --locked --python 3.12.12 alembic check
       - name: Verify database matches current Alembic heads
         working-directory: backend
         env:
