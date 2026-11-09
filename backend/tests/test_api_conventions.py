@@ -1,18 +1,25 @@
+import asyncio
 import base64
 import json
 import logging
+import socket
+import threading
+import time
+import traceback
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated
 from urllib.parse import urlencode
 
+import httpx
 import pytest
+import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
-from pydantic import Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from app.core.errors import install_exception_handlers
-from app.core.middleware import REQUEST_ID_PATTERN, ApiHeadersMiddleware
+from app.core.middleware import REQUEST_ID_PATTERN, ApiHeadersMiddleware, ResponseStreamAborted
 from app.core.pagination import (
     InvalidCursorError,
     SortDirection,
@@ -27,6 +34,21 @@ from app.main import app, create_openapi_schema
 class RequestBody(RequestModel):
     name: str
     count: Annotated[int, Field(ge=1, le=5)]
+
+
+class LocationNestedBody(BaseModel):
+    body: int
+
+
+class LocationItemBody(BaseModel):
+    header: int
+
+
+class LocationBody(BaseModel):
+    body: int
+    form_data: LocationNestedBody
+    query: int
+    items: list[LocationItemBody]
 
 
 SYNTHETIC_SECRET = "f06-synthetic-token-7b10"
@@ -85,6 +107,14 @@ def make_error_test_app() -> FastAPI:
 
         return StreamingResponse(body(), media_type="text/plain")
 
+    @test_app.get("/api/v1/stream-ok")
+    def stream_ok() -> StreamingResponse:
+        def body():
+            yield b"first "
+            yield b"second"
+
+        return StreamingResponse(body(), media_type="text/plain")
+
     @test_app.get("/api/v1/limited")
     def limited() -> None:
         raise HTTPException(status_code=429, detail="rate_limited", headers={"Retry-After": "30"})
@@ -92,6 +122,14 @@ def make_error_test_app() -> FastAPI:
     @test_app.post("/api/v1/validate")
     def validate(body: RequestBody) -> RequestBody:
         return body
+
+    @test_app.post("/api/v1/field-locations")
+    def field_locations(body: LocationBody) -> LocationBody:
+        return body
+
+    @test_app.get("/api/v1/query-location")
+    def query_location(cursor: int = Query(...)) -> dict[str, int]:
+        return {"cursor": cursor}
 
     @test_app.get("/api/v1/page")
     def page(params: Annotated[PaginationParams, Query()]) -> dict[str, object]:
@@ -584,20 +622,134 @@ def test_validation_and_internal_errors_are_safely_normalized(
     assert len([record for record in caplog.records if record.name == "app.core.errors"]) == 1
 
 
-def test_stream_exception_after_response_start_is_safely_logged_and_not_rethrown(
+def test_validation_error_locations_preserve_field_names_and_array_indices() -> None:
+    client = TestClient(make_error_test_app())
+    body_response = client.post(
+        "/api/v1/field-locations",
+        json={"form_data": {"body": "invalid"}, "items": [{"header": "invalid"}]},
+    )
+
+    assert body_response.status_code == 422
+    assert body_response.json()["error"]["code"] == "validation_error"
+    assert [detail["field"] for detail in body_response.json()["error"]["details"]] == [
+        "body",
+        "form_data.body",
+        "query",
+        "items.0.header",
+    ]
+
+    query_response = client.get("/api/v1/query-location", params={"cursor": "not-an-int"})
+    assert query_response.status_code == 422
+    assert query_response.json()["error"]["code"] == "validation_error"
+    assert query_response.json()["error"]["details"] == [
+        {"field": "cursor", "code": "invalid_value"}
+    ]
+
+
+def test_stream_exception_after_response_start_aborts_without_final_body_or_secret_logs(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    client = TestClient(make_error_test_app())
+    sent_messages = []
 
-    with caplog.at_level(logging.ERROR, logger="app.core.errors"):
-        response = client.get("/api/v1/stream-crash")
+    async def crashing_app(scope, _receive, send) -> None:
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"partial response", "more_body": True})
+        raise RuntimeError(f"stream failed with token {SYNTHETIC_SECRET}")
 
-    assert response.status_code == 200
-    assert response.content == b"partial response"
-    assert SYNTHETIC_SECRET not in response.text
+    async def receive() -> dict[str, object]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message) -> None:
+        sent_messages.append(dict(message))
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/v1/stream-crash",
+        "headers": [(b"x-request-id", b"f09-safe-request-id")],
+        "state": {},
+    }
+
+    with (
+        caplog.at_level(logging.ERROR, logger="app.core.errors"),
+        pytest.raises(ResponseStreamAborted) as raised,
+    ):
+        asyncio.run(ApiHeadersMiddleware(crashing_app)(scope, receive, send))
+
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert SYNTHETIC_SECRET not in "".join(traceback.format_exception(raised.value))
     assert SYNTHETIC_SECRET not in caplog.text
     assert "Traceback" not in caplog.text
     assert "RuntimeError" in caplog.text
+    assert "f09-safe-request-id" in caplog.text
+    assert [message["type"] for message in sent_messages] == [
+        "http.response.start",
+        "http.response.body",
+    ]
+    assert sent_messages[-1]["more_body"] is True
+
+
+def test_successful_stream_finishes_with_complete_body() -> None:
+    response = TestClient(make_error_test_app()).get("/api/v1/stream-ok")
+
+    assert response.status_code == 200
+    assert response.content == b"first second"
+    assert response.headers.get("x-request-id")
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_uvicorn_client_detects_stream_interruption_without_secret_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        host, port = listener.getsockname()
+
+    server = uvicorn.Server(
+        uvicorn.Config(
+            make_error_test_app(),
+            host=host,
+            port=port,
+            log_level="error",
+            access_log=False,
+        )
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    with caplog.at_level(logging.ERROR):
+        thread.start()
+        try:
+            deadline = time.monotonic() + 5
+            while not server.started and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert server.started, "Uvicorn did not start in time"
+
+            with httpx.Client(timeout=5) as client:
+                response = client.send(
+                    client.build_request(
+                        "GET",
+                        f"http://{host}:{port}/api/v1/stream-crash",
+                        headers={"X-Request-ID": "f09-uvicorn-request-id"},
+                    ),
+                    stream=True,
+                )
+                try:
+                    assert response.status_code == 200
+                    assert response.headers["x-request-id"] == "f09-uvicorn-request-id"
+                    assert response.headers["cache-control"] == "no-store"
+                    received_body = bytearray()
+                    with pytest.raises(httpx.RemoteProtocolError):
+                        for chunk in response.iter_bytes():
+                            received_body.extend(chunk)
+                    assert received_body == b"partial response"
+                finally:
+                    response.close()
+        finally:
+            server.should_exit = True
+            thread.join(timeout=5)
+
+    assert not thread.is_alive()
+    assert SYNTHETIC_SECRET not in caplog.text
 
 
 def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:

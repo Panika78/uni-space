@@ -68,14 +68,13 @@ def internal_error_response(
 def _validation_details(errors: list[dict[str, Any]]) -> list[ErrorDetail]:
     details: list[ErrorDetail] = []
     for error in errors:
-        location = [
-            str(part)
-            for part in error.get("loc", ())
-            if part not in {"body", "query", "path", "header", "cookie"}
-        ]
+        location = tuple(error.get("loc", ()))
+        if location and location[0] in ("body", "query", "path", "header", "cookie"):
+            location = location[1:]
+        field = ".".join(str(part) for part in location) or None
         details.append(
             ErrorDetail(
-                field=".".join(location) or None,
+                field=field,
                 code="required" if error.get("type") == "missing" else "invalid_value",
             )
         )

@@ -6,6 +6,10 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
+class ResponseStreamAborted(RuntimeError):
+    """Sanitized signal that an already-started response could not finish."""
+
+
 class ApiHeadersMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -24,10 +28,9 @@ class ApiHeadersMiddleware:
         )
         scope.setdefault("state", {})["request_id"] = request_id
         response_started = False
-        response_complete = False
 
         async def send_with_api_headers(message: Message) -> None:
-            nonlocal response_started, response_complete
+            nonlocal response_started
             if message["type"] == "http.response.start":
                 response_headers = list(message.get("headers", []))
                 response_headers = [
@@ -48,9 +51,9 @@ class ApiHeadersMiddleware:
             await send(message)
             if message["type"] == "http.response.start":
                 response_started = True
-            elif message["type"] == "http.response.body" and not message.get("more_body", False):
-                response_complete = True
 
+        response = None
+        stream_error = None
         try:
             await self.app(scope, receive, send_with_api_headers)
         except Exception as exc:
@@ -58,11 +61,13 @@ class ApiHeadersMiddleware:
 
             if response_started:
                 log_unhandled_exception(exc, request_id)
-                if not response_complete:
-                    await send_with_api_headers(
-                        {"type": "http.response.body", "body": b"", "more_body": False}
-                    )
-                return
+                stream_error = ResponseStreamAborted("Response transfer aborted")
+            else:
+                response = internal_error_response(exc, request_id=request_id)
 
-            response = internal_error_response(exc, request_id=request_id)
+        if stream_error is not None:
+            # Raise after leaving the except block so the original exception is not
+            # attached as __context__ and cannot appear in outer ASGI server logs.
+            raise stream_error
+        if response is not None:
             await response(scope, receive, send_with_api_headers)
