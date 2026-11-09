@@ -1,9 +1,16 @@
 import re
 from functools import lru_cache
-from ipaddress import IPv4Address, IPv6Address
+from ipaddress import IPv4Address, IPv6Address, collapse_addresses, ip_network
 from typing import Literal
 
-from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
+from pydantic import (
+    Field,
+    SecretStr,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
@@ -37,6 +44,39 @@ class Settings(BaseSettings):
     session_ttl_seconds: int = Field(default=604800, ge=1, le=2592000)
     cookie_secure: bool = True
     allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+
+    proxy_headers_enabled: bool = False
+    trusted_proxy_ips: list[str] = Field(default_factory=list)
+
+    @field_validator("trusted_proxy_ips")
+    @classmethod
+    def validate_trusted_proxies(cls, values: list[str], info: ValidationInfo) -> list[str]:
+        if bool(values) != info.data.get("proxy_headers_enabled", False):
+            raise ValueError(
+                "proxy headers require an explicitly enabled, nonempty trusted IP list"
+            )
+        networks = []
+        for value in values:
+            # Uvicorn also accepts arbitrary literals and '*'; this application
+            # deliberately permits only exact IP addresses or canonical CIDRs.
+            try:
+                network = ip_network(value)
+            except ValueError:
+                raise ValueError(
+                    "trusted proxies must be IP addresses or canonical CIDRs"
+                ) from None
+            if value != value.strip() or network.prefixlen == 0:
+                raise ValueError("trusting all addresses or whitespace is forbidden")
+            networks.append(network)
+        for version in (4, 6):
+            if any(
+                network.prefixlen == 0
+                for network in collapse_addresses(
+                    network for network in networks if network.version == version
+                )
+            ):
+                raise ValueError("trusted networks must not cover every address")
+        return values
 
     @field_validator("jwt_signing_key")
     @classmethod

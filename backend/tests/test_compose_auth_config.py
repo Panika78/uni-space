@@ -11,16 +11,20 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.parametrize(
-    "mode,cookie_secure,weak_key,expected_success",
+    "mode,cookie_secure,weak_key,proxy_enabled,proxies,expected_success",
     [
-        (None, False, True, True),
-        ("production", True, False, True),
-        ("production", False, False, False),
-        ("production", True, True, False),
+        (None, False, True, False, [], True),
+        ("production", True, False, False, [], True),
+        ("production", False, False, False, [], False),
+        ("production", True, True, False, [], False),
+        ("production", True, False, True, ["127.0.0.1"], True),
+        ("production", True, False, True, [], False),
+        ("production", True, False, True, ["*"], False),
+        ("production", True, False, False, ["127.0.0.1"], False),
     ],
 )
 def test_compose_effective_environment_controls_application_startup(
-    mode, cookie_secure, weak_key, expected_success
+    mode, cookie_secure, weak_key, proxy_enabled, proxies, expected_success
 ):
     environment = os.environ.copy()
     environment.pop("APP_ENV", None)
@@ -31,6 +35,8 @@ def test_compose_effective_environment_controls_application_startup(
         JWT_SIGNING_KEY=key,
         COOKIE_SECURE=str(cookie_secure).lower(),
         ALLOWED_ORIGINS='["https://uni.example"]',
+        PROXY_HEADERS_ENABLED=str(proxy_enabled).lower(),
+        TRUSTED_PROXY_IPS=json.dumps(proxies),
     )
     rendered = subprocess.run(
         [
@@ -50,6 +56,8 @@ def test_compose_effective_environment_controls_application_startup(
     )
     api = json.loads(rendered.stdout)["services"]["api"]
     assert api["environment"]["APP_ENV"] == (mode or "development")
+    assert api["environment"]["PROXY_HEADERS_ENABLED"] == str(proxy_enabled).lower()
+    assert json.loads(api["environment"]["TRUSTED_PROXY_IPS"]) == proxies
     assert api["ports"][0]["host_ip"] == "127.0.0.1"
     assert api["ports"][0]["target"] == 8000
 

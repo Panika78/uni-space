@@ -35,14 +35,25 @@ def create_login_session(
     db: Session, login: str, password: str, settings: Settings
 ) -> tuple[AuthSession, str]:
     with db.begin():
+        # Read scalar values: an ORM refresh under the later lock must not mutate
+        # the hash snapshot against which the expensive verification succeeded.
+        snapshot = db.execute(
+            select(User.id, User.password_hash, User.is_active).where(User.login == login)
+        ).one_or_none()
+        valid = verify_password(
+            snapshot.password_hash if snapshot else DUMMY_PASSWORD_HASH, password
+        )
+        if not valid or snapshot is None or not snapshot.is_active:
+            raise HTTPException(401, "invalid_credentials")
         user = db.scalar(
             select(User)
-            .where(User.login == login)
+            .where(User.id == snapshot.id, User.login == login)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
-        valid = verify_password(user.password_hash if user else DUMMY_PASSWORD_HASH, password)
-        if not valid or user is None or not user.is_active:
+        # Changed hashes are rejected rather than re-running Argon2id under a lock.
+        # The user lock remains held through session + first refresh commit.
+        if user is None or not user.is_active or user.password_hash != snapshot.password_hash:
             raise HTTPException(401, "invalid_credentials")
         now = datetime.now(UTC)
         session = AuthSession(

@@ -84,7 +84,10 @@ cp .env.example .env
 `127.0.0.1:8000`. По умолчанию используется `APP_ENV=development`, но явный
 `APP_ENV=production` передаётся приложению и включает production-валидацию.
 Файл не предоставляет TLS, reverse proxy и другие средства публичного
-production-развёртывания. Настройки безопасности описаны в [AUTH.md](docs/AUTH.md).
+production-развёртывания. Сервер запускается через `app.core.server`: forwarded-
+заголовки по умолчанию отключены, доверенный proxy включается только явно через
+`PROXY_HEADERS_ENABLED` и `TRUSTED_PROXY_IPS`. Это не заменяет настройку proxy и
+сетевую изоляцию backend; обязательные действия описаны в [AUTH.md](docs/AUTH.md).
 
 Поднимите PostgreSQL, примените миграции и запустите API:
 
@@ -169,7 +172,7 @@ set +a
 uv run --locked --python 3.12.12 alembic upgrade head
 uv run --locked --python 3.12.12 python -c \
   'from sqlalchemy import text; from app.core.database import engine; print(engine.connect().execute(text("SELECT 1")).scalar_one())'
-uv run --locked --python 3.12.12 uvicorn app.main:app --reload --no-proxy-headers
+uv run --locked --python 3.12.12 python -m app.core.server --reload
 ```
 
 Для host `DATABASE_URL` пароль с URI-символами должен быть закодирован один раз

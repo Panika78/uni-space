@@ -568,3 +568,136 @@ def test_rate_limit_counts_invalid_bodies_and_skips_disallowed_origins(auth, mon
     for _ in range(5):
         assert_error(client.login(json={}), 422, "validation_error")
     assert_error(client.login(json={"login": logins[0], "password": PASSWORD}), 429, "rate_limited")
+
+
+def test_invalid_logins_do_not_wait_for_existing_user_row_lock(auth):
+    client, engine, ids, logins, _students = auth
+    with Session(engine) as blocker:
+        blocker.scalar(select(User).where(User.id == ids[0]).with_for_update())
+        blocker_pid = blocker.connection().connection.driver_connection.info.backend_pid
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            try:
+                existing = pool.submit(
+                    client.login,
+                    json={"login": logins[0], "password": "incorrect-fictional-password"},
+                )
+                absent = pool.submit(
+                    client.login,
+                    json={
+                        "login": "absent-" + uuid4().hex,
+                        "password": "incorrect-fictional-password",
+                    },
+                )
+                # Both HTTP requests must finish while the external lock is still held.
+                existing_response, absent_response = existing.result(5), absent.result(5)
+                assert_error(existing_response, 401, "invalid_credentials")
+                assert existing_response.json() == absent_response.json()
+                assert absent_response.status_code == 401
+                assert (
+                    blocker.connection().connection.driver_connection.info.backend_pid
+                    == blocker_pid
+                )
+            finally:
+                blocker.rollback()
+    with Session(engine) as db:
+        assert not db.scalar(select(AuthSession).where(AuthSession.user_id == ids[0]))
+
+
+def test_concurrent_invalid_logins_do_not_lock_user_during_argon2id(auth, monkeypatch):
+    from threading import Barrier
+
+    from app.auth import service
+
+    client, engine, ids, logins, _students = auth
+    verifying = Barrier(3)
+    release_verification = Event()
+    pids = set()
+    original = service.verify_password
+
+    def observe_verification(password_hash, password):
+        verifying.wait(timeout=5)
+        assert release_verification.wait(10)
+        return original(password_hash, password)  # Real Argon2id, not a stub.
+
+    def observe_query(connection, _cursor, statement, _parameters, _context, _many):
+        if "FROM users" in statement and "FOR UPDATE" not in statement:
+            pids.add(connection.connection.driver_connection.info.backend_pid)
+
+    monkeypatch.setattr(service, "verify_password", observe_verification)
+    event.listen(engine, "before_cursor_execute", observe_query)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(client.login, json={"login": logins[0], "password": "wrong"})
+                for _ in range(2)
+            ]
+            try:
+                verifying.wait(timeout=5)
+                assert len(pids) == 2
+                with Session(engine) as probe:
+                    probe_pid = probe.connection().connection.driver_connection.info.backend_pid
+                    assert probe_pid not in pids
+                    # A third real transaction can acquire the user lock without waiting.
+                    probe.scalar(select(User).where(User.id == ids[0]).with_for_update(nowait=True))
+                    release_verification.set()
+                    for future in futures:
+                        assert_error(future.result(5), 401, "invalid_credentials")
+                    probe.rollback()
+            finally:
+                release_verification.set()
+    finally:
+        event.remove(engine, "before_cursor_execute", observe_query)
+
+
+@pytest.mark.parametrize("mutation", ["deactivate", "change_password"])
+def test_login_rechecks_user_after_waiting_for_concurrent_update(auth, mutation):
+    import time
+
+    client, engine, ids, logins, _students = auth
+    waiting = Event()
+    login_pids = []
+    replacement_hash = PASSWORD_HASHER.hash("new-fictional-password")
+
+    def observe_lock(connection, _cursor, statement, _parameters, _context, _many):
+        if "FROM users" in statement and "FOR UPDATE" in statement:
+            login_pids.append(connection.connection.driver_connection.info.backend_pid)
+            waiting.set()
+
+    with Session(engine) as updater:
+        user = updater.scalar(select(User).where(User.id == ids[0]).with_for_update())
+        updater_pid = updater.connection().connection.driver_connection.info.backend_pid
+        if mutation == "deactivate":
+            user.is_active = False
+        else:
+            user.password_hash = replacement_hash
+        updater.flush()  # Uncommitted: the login snapshot must still see the old version.
+        event.listen(engine, "before_cursor_execute", observe_lock)
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(client.login, json={"login": logins[0], "password": PASSWORD})
+                try:
+                    assert waiting.wait(5)
+                    assert login_pids[0] != updater_pid
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        with engine.connect() as monitor:
+                            blockers = monitor.scalar(
+                                text("SELECT pg_blocking_pids(:pid)"), {"pid": login_pids[0]}
+                            )
+                        if updater_pid in blockers:
+                            break
+                        time.sleep(0.01)
+                    else:
+                        pytest.fail("valid login must wait for the concurrent user update")
+                    assert not future.done()
+                    updater.commit()
+                    assert_error(future.result(5), 401, "invalid_credentials")
+                finally:
+                    updater.rollback()
+        finally:
+            event.remove(engine, "before_cursor_execute", observe_lock)
+    with Session(engine) as db:
+        assert not db.scalar(select(AuthSession).where(AuthSession.user_id == ids[0]))
+        assert not db.scalar(
+            select(RefreshToken).join(AuthSession).where(AuthSession.user_id == ids[0])
+        )
