@@ -1,0 +1,246 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend-lint:
+    name: Backend lint and format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.13.5
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Verify uv.lock matches pyproject.toml
+        working-directory: backend
+        run: uv lock --check
+      - name: Install pinned Python
+        run: uv python install 3.12.12
+      - name: Verify project Python version
+        working-directory: backend
+        run: uv run --locked --python 3.12.12 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)"
+      - name: Ruff lint
+        working-directory: backend
+        run: uv run --locked --python 3.12.12 ruff check .
+      - name: Ruff format
+        working-directory: backend
+        run: uv run --locked --python 3.12.12 ruff format --check .
+
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_DB: uni_space_test
+          POSTGRES_USER: uni_space_test
+          POSTGRES_PASSWORD: test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U uni_space_test -d uni_space_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.13.5
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Verify uv.lock matches pyproject.toml
+        working-directory: backend
+        run: uv lock --check
+      - name: Install pinned Python
+        run: uv python install 3.12.12
+      - name: Verify project Python version
+        working-directory: backend
+        run: uv run --locked --python 3.12.12 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)"
+      - name: Run unit and HTTPX tests
+        working-directory: backend
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
+        run: uv run --locked --python 3.12.12 pytest -m "not integration"
+      - name: Run PostgreSQL integration tests
+        working-directory: backend
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
+        run: uv run --locked --python 3.12.12 pytest -m integration
+
+  frontend-lint:
+    name: Frontend ESLint and Prettier
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install pinned npm
+        run: npm install --global npm@11.19.1
+      - name: Install locked frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: ESLint
+        working-directory: frontend
+        run: npm run lint
+      - name: Prettier
+        working-directory: frontend
+        run: npm run format:check
+
+  frontend-typecheck:
+    name: Frontend TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install pinned npm
+        run: npm install --global npm@11.19.1
+      - name: Install locked frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: TypeScript typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+  frontend-tests:
+    name: Frontend Vitest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install pinned npm
+        run: npm install --global npm@11.19.1
+      - name: Install locked frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run Vitest and React Testing Library
+        working-directory: frontend
+        run: npm test
+
+  frontend-build:
+    name: Frontend production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install pinned npm
+        run: npm install --global npm@11.19.1
+      - name: Install locked frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build production frontend
+        working-directory: frontend
+        run: npm run build
+
+  api-types:
+    name: Generated API types current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.13.5
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Verify uv.lock matches pyproject.toml
+        working-directory: backend
+        run: uv lock --check
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install pinned npm
+        run: npm install --global npm@11.19.1
+      - name: Install locked frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install pinned Python
+        run: uv python install 3.12.12
+      - name: Verify project Python version
+        working-directory: backend
+        run: uv run --locked --python 3.12.12 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)"
+      - name: Check generated OpenAPI types without rewriting files
+        working-directory: frontend
+        run: npm run types:check
+
+  migrations:
+    name: PostgreSQL migrations at current Alembic heads
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_DB: uni_space_test
+          POSTGRES_USER: uni_space_test
+          POSTGRES_PASSWORD: test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U uni_space_test -d uni_space_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.13.5
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Verify uv.lock matches pyproject.toml
+        working-directory: backend
+        run: uv lock --check
+      - name: Install pinned Python
+        run: uv python install 3.12.12
+      - name: Verify project Python version
+        working-directory: backend
+        run: uv run --locked --python 3.12.12 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)"
+      - name: Apply migrations to empty PostgreSQL
+        working-directory: backend
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
+        run: uv run --locked --python 3.12.12 alembic upgrade head
+      - name: Verify database matches current Alembic heads
+        working-directory: backend
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
+        run: uv run --locked --python 3.12.12 python scripts/check_migrations.py
+
+  db-healthcheck:
+    name: Compose PostgreSQL healthcheck regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated Compose healthcheck regression
+        run: bash backend/tests/test_compose_db_healthcheck.sh

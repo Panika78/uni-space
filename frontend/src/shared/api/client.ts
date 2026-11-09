@@ -37,7 +37,8 @@ function isApiError(value: unknown): value is { error: ApiErrorBody } {
 }
 
 export async function apiFetch<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {
-  const requestHeaders = typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined
+  const requestHeaders =
+    typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined
   const headers = new Headers(requestHeaders)
   new Headers(init.headers).forEach((value, name) => headers.set(name, value))
   headers.set('Accept', 'application/json')

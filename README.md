@@ -35,15 +35,20 @@ Vite доступен по адресу <http://localhost:5173>. Запросы 
 ниже. Проверки клиента:
 
 ```bash
+npm run lint
+npm run format:check
 npm run typecheck
 npm test
 npm run build
+npm run types:check
 ```
 
 Общие TypeScript-типы создаются из схем backend в OpenAPI. После изменения
 Pydantic-моделей обновите снимок OpenAPI и типы командой `npm run types:generate`
 из `frontend/`. Команда `npm run types:check` проверяет актуальность обоих
-сгенерированных файлов без их перезаписи.
+сгенерированных файлов без их перезаписи. Обе команды запускают Python 3.12.12
+через `uv run --locked --python 3.12.12`, поэтому не переписывают
+`backend/uv.lock`. Если lock устарел, обновите его явной командой `uv lock`.
 
 Чтобы добавить компонент shadcn/ui, используйте CLI из `frontend/`:
 
@@ -120,8 +125,8 @@ docker compose run --rm api alembic upgrade head
 docker compose run --rm api alembic heads
 ```
 
-Проверить healthcheck с правильным и заведомо неправильным паролем, не удаляя
-volume:
+Проверить healthcheck с правильным и заведомо неправильным паролем в отдельном
+Compose-проекте:
 
 ```bash
 bash backend/tests/test_compose_db_healthcheck.sh
@@ -149,14 +154,15 @@ Compose публикует PostgreSQL только на `127.0.0.1:5432`. Под
 ```bash
 docker compose up -d db
 cd backend
-uv sync --frozen
+uv python install 3.12.12
+uv sync --locked
 set -a
 source ../.env
 set +a
-uv run alembic upgrade head
-uv run python -c \
+uv run --locked --python 3.12.12 alembic upgrade head
+uv run --locked --python 3.12.12 python -c \
   'from sqlalchemy import text; from app.core.database import engine; print(engine.connect().execute(text("SELECT 1")).scalar_one())'
-uv run uvicorn app.main:app --reload
+uv run --locked --python 3.12.12 uvicorn app.main:app --reload
 ```
 
 Для host `DATABASE_URL` пароль с URI-символами должен быть закодирован один раз
@@ -168,11 +174,89 @@ uv run uvicorn app.main:app --reload
 
 ```bash
 cd backend
-DATABASE_URL=postgresql+psycopg://unused:unused@localhost/unused uv run pytest
-uv run ruff check .
-uv run ruff format --check .
+DATABASE_URL=postgresql+psycopg://unused:unused@localhost/unused uv run --locked --python 3.12.12 pytest
+uv run --locked --python 3.12.12 ruff check .
+uv run --locked --python 3.12.12 ruff format --check .
 ```
 
 `DATABASE_URL` — обязательная настройка API. Если она отсутствует или
 некорректна, процесс завершается с именем проблемной настройки, не выводя её
 значение.
+
+## Проверки проекта
+
+Для локальных тестов и проверки миграций используется отдельный PostgreSQL
+17.6 в Compose-файле `compose.test.yaml`. Он имеет отдельную базу и тестовые
+учётные данные, не читает `.env`, не подключается к рабочему `db` и не хранит
+данные в постоянном volume. Порт опубликован только на loopback (`55432`), он
+должен быть свободен.
+
+Каждый раз перед проверкой миграций удаляйте только выделенный тестовый Compose
+project со всеми его данными, затем создавайте новый контейнер PostgreSQL. Это
+обеспечивает пустую БД и при первом, и при повторном запуске:
+
+```bash
+docker compose -p uni-space-test -f compose.test.yaml down --volumes --remove-orphans
+docker compose -p uni-space-test -f compose.test.yaml up -d --wait test-db
+cd backend
+uv python install 3.12.12
+uv sync --locked
+export APP_ENV=test
+export DATABASE_URL=postgresql+psycopg://uni_space_test:test-only-password@127.0.0.1:55432/uni_space_test
+uv run --locked --python 3.12.12 python -c \
+  'import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)'
+```
+
+В `backend/` запустите backend lint/format и тесты:
+
+```bash
+uv lock --check
+uv run --locked --python 3.12.12 ruff check .
+uv run --locked --python 3.12.12 ruff format --check .
+uv run --locked --python 3.12.12 pytest -m "not integration"
+uv run --locked --python 3.12.12 pytest -m integration
+```
+
+На той же тестовой PostgreSQL проверьте миграции на пустой базе и совпадение
+текущих ревизий БД с heads Alembic:
+
+```bash
+uv run --locked --python 3.12.12 alembic upgrade head
+uv run --locked --python 3.12.12 python scripts/check_migrations.py
+```
+
+Сейчас каталог Alembic не содержит ревизий, поэтому эти команды проверяют
+успешное подключение к чистой PostgreSQL и совпадение пустого графа миграций с
+пустым состоянием БД. Когда появятся миграции, те же команды применят их и
+потребуют, чтобы база достигла всех текущих heads.
+
+В `frontend/` установите зависимости по lock-файлу и выполните frontend-проверки:
+
+```bash
+cd ../frontend
+npm ci
+npm run lint
+npm run format:check
+npm run typecheck
+npm test
+npm run build
+npm run types:check
+```
+
+`types:check` только сравнивает актуальную генерацию OpenAPI и TypeScript-типы с
+закоммиченными файлами и завершается с ошибкой при расхождении; он не
+перезаписывает их. Обе команды используют `uv run --locked` и не меняют
+`backend/uv.lock`. Для явного обновления файлов используется отдельная команда
+`npm run types:generate`. Unit-тесты запускаются без PostgreSQL по умолчанию;
+job CI дополнительно запускает отмеченные `integration`-тесты на тестовой БД.
+
+После проверки остановите и удалите только эфемерный контейнер тестовой БД:
+
+```bash
+cd ..
+docker compose -p uni-space-test -f compose.test.yaml down --volumes --remove-orphans
+```
+
+GitHub Actions выполняет проверки отдельными jobs для pull request в `main` и
+push в `main`. В CI используются отдельные временные PostgreSQL и тестовые
+учётные данные; secrets и production-конфигурация не используются.

@@ -83,7 +83,13 @@ describe('apiFetch', () => {
       'fetch',
       vi.fn().mockResolvedValue(
         Response.json(
-          { error: { code: 'validation_error', message: 'Invalid input', details: [] } },
+          {
+            error: {
+              code: 'validation_error',
+              message: 'Invalid input',
+              details: [],
+            },
+          },
           { status: 422 },
         ),
       ),
@@ -122,7 +128,9 @@ describe('apiFetch', () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError('failed to fetch'))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(apiFetch('/api/v1/example')).rejects.toMatchObject({ code: 'network_error' })
+    await expect(apiFetch('/api/v1/example')).rejects.toMatchObject({
+      code: 'network_error',
+    })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

@@ -29,6 +29,8 @@ packages = ["app"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = ["integration: requires the isolated PostgreSQL test database"]
 
 [tool.ruff]
 target-version = "py312"
