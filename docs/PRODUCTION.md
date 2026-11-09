@@ -177,7 +177,9 @@ export PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_modules/playwright/inde
 ```
 
 Системные библиотеки Chromium должны быть установлены; CI использует
-`install --with-deps chromium --only-shell`. Если Chromium уже есть в окружении,
+`install --with-deps chromium --only-shell` на закреплённом Ubuntu 24.04:
+Playwright 1.57.0 не поддерживает Ubuntu 26.04 из `ubuntu-latest`.
+Если Chromium уже есть в окружении,
 задайте `CHROMIUM_PATH=/absolute/path/to/chromium`; `PLAYWRIGHT_MODULE` может
 указывать на уже установленный Playwright. Отсутствие браузера/Playwright приводит
 к ошибке прогона, а не пропуску проверки.

@@ -264,7 +264,8 @@ jobs:
 
   production-deployment:
     name: Production Compose HTTPS and recovery
-    runs-on: ubuntu-latest
+    # Playwright 1.57 supports Ubuntu 24.04; ubuntu-latest may select 26.04.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -279,8 +280,7 @@ jobs:
         run: |
           mkdir -p work/browser-tooling
           if ! (
-            set -e
-            npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
+            npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0 &&
             node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell
           ) > work/browser-install.log 2>&1; then
             cat work/browser-install.log
