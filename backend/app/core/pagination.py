@@ -2,7 +2,8 @@ import base64
 import binascii
 import json
 import math
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
+from itertools import islice
 from typing import Literal, TypeVar
 
 from app.core.schemas import Page
@@ -58,6 +59,77 @@ def _validate_key(key: CursorKey, key_types: CursorKeyTypes, *, cursor: bool) ->
         raise ValueError("key() returned a key that does not match key_types")
 
 
+def _validate_page_options(
+    key_types: CursorKeyTypes,
+    direction: SortDirection,
+    limit: int,
+) -> None:
+    if not 1 <= limit <= 100:
+        raise ValueError("limit must be between 1 and 100")
+    if not key_types or any(value_type not in (str, int, float) for value_type in key_types):
+        raise ValueError("key_types must declare one or more supported scalar types")
+    if direction not in ("asc", "desc"):
+        raise ValueError("direction must be 'asc' or 'desc'")
+
+
+def decode_page_cursor(
+    cursor: str | None,
+    *,
+    key_types: CursorKeyTypes,
+    direction: SortDirection,
+) -> CursorKey | None:
+    """Decode and validate a cursor before using its key in an SQL keyset filter.
+
+    Compose an ascending filter with `key > cursor_key`, or a descending filter
+    with `key < cursor_key`, using the same ordered columns as the query.
+    """
+    _validate_page_options(key_types, direction, limit=20)
+    if cursor is None:
+        return None
+    cursor_direction, cursor_key = _decode_cursor(cursor)
+    _validate_key(cursor_key, key_types, cursor=True)
+    if cursor_direction != direction:
+        raise InvalidCursorError("Cursor sort direction does not match this selection")
+    return cursor_key
+
+
+def paginate_results(
+    items: Iterable[T],
+    *,
+    key: Callable[[T], CursorKey],
+    key_types: CursorKeyTypes,
+    direction: SortDirection,
+    limit: int = 20,
+) -> Page[T]:
+    """Build a page from already cursor-filtered, ordered query results.
+
+    The query must apply `decode_page_cursor()`'s keyset boundary, use the declared
+    order and limit its result to `limit + 1`. This function consumes at most that
+    many rows, checks only that bounded window for order and unique tie breakers,
+    and uses the extra row to decide whether to return a next cursor. It never
+    applies the cursor filter a second time.
+    """
+    _validate_page_options(key_types, direction, limit)
+    fetched: list[tuple[T, CursorKey]] = []
+    previous_key: CursorKey | None = None
+    for row in islice(items, limit + 1):
+        row_key = key(row)
+        _validate_key(row_key, key_types, cursor=False)
+        if previous_key is not None:
+            is_ordered = row_key > previous_key if direction == "asc" else row_key < previous_key
+            if not is_ordered:
+                raise ValueError(
+                    "query results must be strictly ordered by key in the declared direction"
+                )
+        fetched.append((row, row_key))
+        previous_key = row_key
+
+    has_more = len(fetched) > limit
+    selected = fetched[:limit]
+    next_cursor = _encode_cursor(selected[-1][1], direction) if selected and has_more else None
+    return Page[T](items=[row for row, _row_key in selected], next_cursor=next_cursor)
+
+
 def paginate(
     items: Iterable[T],
     *,
@@ -67,28 +139,14 @@ def paginate(
     limit: int = 20,
     cursor: str | None = None,
 ) -> Page[T]:
-    """Page records already ordered by a strict, unique key in the declared direction.
+    """Page an in-memory ordered selection, applying its cursor filter locally.
 
-    `key_types` declares the full key schema so an empty selection can still reject a
-    cursor created for another selection. Include a unique tie breaker (normally the
-    record ID). `direction` must match the database order, such as `created_at DESC,
-    id DESC`. This helper validates the supplied order and does not define SQL queries.
+    `paginate_results()` is the bounded alternative for SQL results whose cursor
+    filter and `limit + 1` bound were already applied by the query.
     """
-    if not 1 <= limit <= 100:
-        raise ValueError("limit must be between 1 and 100")
-    if not key_types or any(value_type not in (str, int, float) for value_type in key_types):
-        raise ValueError("key_types must declare one or more supported scalar types")
-    if direction not in ("asc", "desc"):
-        raise ValueError("direction must be 'asc' or 'desc'")
-
-    after_key: CursorKey | None = None
-    if cursor is not None:
-        cursor_direction, after_key = _decode_cursor(cursor)
-        _validate_key(after_key, key_types, cursor=True)
-        if cursor_direction != direction:
-            raise InvalidCursorError("Cursor sort direction does not match this selection")
-
-    rows: Sequence[T] = list(items)
+    _validate_page_options(key_types, direction, limit)
+    after_key = decode_page_cursor(cursor, key_types=key_types, direction=direction)
+    rows = list(items)
     ordered_rows: list[tuple[T, CursorKey]] = []
     previous_key: CursorKey | None = None
     for row in rows:
@@ -101,15 +159,16 @@ def paginate(
         ordered_rows.append((row, row_key))
         previous_key = row_key
 
-    if after_key is not None:
-        if direction == "asc":
-            ordered_rows = [pair for pair in ordered_rows if pair[1] > after_key]
-        else:
-            ordered_rows = [pair for pair in ordered_rows if pair[1] < after_key]
-    selected_pairs = ordered_rows[:limit]
-    has_more = len(ordered_rows) > limit
-    next_cursor = (
-        _encode_cursor(selected_pairs[-1][1], direction) if selected_pairs and has_more else None
+    if after_key is None:
+        filtered_rows = (row for row, _row_key in ordered_rows)
+    elif direction == "asc":
+        filtered_rows = (row for row, row_key in ordered_rows if row_key > after_key)
+    else:
+        filtered_rows = (row for row, row_key in ordered_rows if row_key < after_key)
+    return paginate_results(
+        filtered_rows,
+        key=key,
+        key_types=key_types,
+        direction=direction,
+        limit=limit,
     )
-    selected = [row for row, _row_key in selected_pairs]
-    return Page[T](items=list(selected), next_cursor=next_cursor)

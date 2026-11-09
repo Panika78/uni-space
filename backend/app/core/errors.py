@@ -48,8 +48,20 @@ def _error_response(
     )
 
 
-def internal_error_response(exc: Exception) -> JSONResponse:
-    logger.exception("Unhandled API exception", exc_info=exc)
+def log_unhandled_exception(exc: Exception, request_id: str | None = None) -> None:
+    logger.error(
+        "Unhandled API exception type=%s request_id=%s",
+        type(exc).__name__,
+        request_id or "unknown",
+    )
+
+
+def internal_error_response(
+    exc: Exception,
+    *,
+    request_id: str | None = None,
+) -> JSONResponse:
+    log_unhandled_exception(exc, request_id)
     return _error_response(500, "internal_error", "Внутренняя ошибка сервера")
 
 
@@ -113,5 +125,5 @@ def install_exception_handlers(app: FastAPI) -> None:
         return _error_response(exc.status_code, code, message, headers=headers)
 
     @app.exception_handler(Exception)
-    async def handle_unexpected_exception(_request: Request, exc: Exception) -> JSONResponse:
-        return internal_error_response(exc)
+    async def handle_unexpected_exception(request: Request, exc: Exception) -> JSONResponse:
+        return internal_error_response(exc, request_id=getattr(request.state, "request_id", None))

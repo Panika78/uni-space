@@ -22,12 +22,13 @@ class ApiHeadersMiddleware:
             if REQUEST_ID_PATTERN.fullmatch(supplied_request_id)
             else str(uuid4())
         )
+        scope.setdefault("state", {})["request_id"] = request_id
         response_started = False
+        response_complete = False
 
         async def send_with_api_headers(message: Message) -> None:
-            nonlocal response_started
+            nonlocal response_started, response_complete
             if message["type"] == "http.response.start":
-                response_started = True
                 response_headers = list(message.get("headers", []))
                 response_headers = [
                     (key, value)
@@ -45,13 +46,23 @@ class ApiHeadersMiddleware:
                     response_headers.append((b"cache-control", b"no-store"))
                 message["headers"] = response_headers
             await send(message)
+            if message["type"] == "http.response.start":
+                response_started = True
+            elif message["type"] == "http.response.body" and not message.get("more_body", False):
+                response_complete = True
 
         try:
             await self.app(scope, receive, send_with_api_headers)
         except Exception as exc:
-            if response_started:
-                raise
-            from app.core.errors import internal_error_response
+            from app.core.errors import internal_error_response, log_unhandled_exception
 
-            response = internal_error_response(exc)
+            if response_started:
+                log_unhandled_exception(exc, request_id)
+                if not response_complete:
+                    await send_with_api_headers(
+                        {"type": "http.response.body", "body": b"", "more_body": False}
+                    )
+                return
+
+            response = internal_error_response(exc, request_id=request_id)
             await response(scope, receive, send_with_api_headers)

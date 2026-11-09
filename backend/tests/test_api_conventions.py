@@ -1,23 +1,35 @@
 import base64
 import json
+import logging
+from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Annotated
 from urllib.parse import urlencode
 
 import pytest
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 from pydantic import Field, TypeAdapter, ValidationError
 
 from app.core.errors import install_exception_handlers
 from app.core.middleware import REQUEST_ID_PATTERN, ApiHeadersMiddleware
-from app.core.pagination import InvalidCursorError, paginate
-from app.core.schemas import DateTime, Id, Page, PaginationParams, RequestModel
+from app.core.pagination import (
+    InvalidCursorError,
+    SortDirection,
+    decode_page_cursor,
+    paginate,
+    paginate_results,
+)
+from app.core.schemas import Date, DateTime, Id, Page, PaginationParams, RequestModel
 from app.main import app, create_openapi_schema
 
 
 class RequestBody(RequestModel):
     name: str
     count: Annotated[int, Field(ge=1, le=5)]
+
+
+SYNTHETIC_SECRET = "f06-synthetic-token-7b10"
 
 
 def make_error_test_app() -> FastAPI:
@@ -63,7 +75,15 @@ def make_error_test_app() -> FastAPI:
 
     @test_app.get("/api/v1/crash")
     def crash() -> None:
-        raise RuntimeError("private database password")
+        raise RuntimeError(f"database credential: {SYNTHETIC_SECRET}")
+
+    @test_app.get("/api/v1/stream-crash")
+    def stream_crash() -> StreamingResponse:
+        def body():
+            yield b"partial response"
+            raise RuntimeError(f"stream failed with token {SYNTHETIC_SECRET}")
+
+        return StreamingResponse(body(), media_type="text/plain")
 
     @test_app.get("/api/v1/limited")
     def limited() -> None:
@@ -130,6 +150,99 @@ def test_id_is_a_positive_integer_string_and_page_defaults_to_empty_items() -> N
 
     with pytest.raises(ValidationError):
         Page[dict[str, str]](items=[{"id": "0"}], next_cursor=None, extra="ignored")
+
+
+@pytest.mark.parametrize("value", ["0001-01-01", "2024-02-29", "9999-12-31"])
+def test_date_accepts_contract_strings_and_calendar_boundaries(value: str) -> None:
+    adapter = TypeAdapter(Date)
+    assert adapter.validate_json(json.dumps(value)).isoformat() == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2023-02-29",
+        "2024-02-30",
+        "2024-2-09",
+        "2024-02-29T00:00:00Z",
+        "0000-01-01",
+        "2024-00-01",
+        "2024-13-01",
+        "2024-01-00",
+    ],
+)
+def test_date_rejects_invalid_json_formats_and_calendar_values(value: str) -> None:
+    with pytest.raises(ValidationError):
+        TypeAdapter(Date).validate_json(json.dumps(value))
+
+
+def test_date_rejects_json_unix_timestamps_and_accepts_python_date_values() -> None:
+    adapter = TypeAdapter(Date)
+    with pytest.raises(ValidationError):
+        adapter.validate_json("1793563200")
+    assert adapter.validate_python(date(2024, 2, 29)) == date(2024, 2, 29)
+    assert adapter.dump_json(date(2024, 2, 29)) == b'"2024-02-29"'
+    with pytest.raises(ValidationError):
+        adapter.validate_python(datetime(2024, 2, 29, tzinfo=UTC))
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2026-11-01T12:00:00Z", "2026-11-01T12:00:00+00:00"),
+        ("2026-11-01T15:00:00+03:00", "2026-11-01T12:00:00+00:00"),
+        ("2026-11-01T07:00:00-05:00", "2026-11-01T12:00:00+00:00"),
+        ("2026-11-01T15:00:00+0300", "2026-11-01T12:00:00+00:00"),
+    ],
+)
+def test_datetime_accepts_iso_8601_timezone_forms_and_normalizes_to_utc(
+    value: str,
+    expected: str,
+) -> None:
+    adapter = TypeAdapter(DateTime)
+    assert adapter.validate_json(json.dumps(value)).isoformat() == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2026-11-01T12:00:00",
+        "2026-11-01 12:00:00Z",
+        "2026-11-01T12:00:00UTC",
+        "2026-11-01T12:00:00+25:00",
+        "2026-11-01T12:00:00+03:99",
+        "2026-02-30T12:00:00Z",
+    ],
+)
+def test_datetime_rejects_missing_or_invalid_timezone_and_calendar_values(value: str) -> None:
+    with pytest.raises(ValidationError):
+        TypeAdapter(DateTime).validate_json(json.dumps(value))
+
+
+@pytest.mark.parametrize("timestamp", [1793563200, 1793563200.0])
+def test_datetime_rejects_json_unix_timestamps(timestamp: int | float) -> None:
+    with pytest.raises(ValidationError):
+        TypeAdapter(DateTime).validate_json(json.dumps(timestamp))
+
+
+def test_datetime_accepts_aware_python_values_and_serializes_utc() -> None:
+    adapter = TypeAdapter(DateTime)
+    source = datetime(2026, 11, 1, 15, 0, tzinfo=timezone(timedelta(hours=3)))
+    normalized = adapter.validate_python(source)
+    assert normalized == datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
+    assert adapter.dump_json(normalized) == b'"2026-11-01T12:00:00Z"'
+
+    with pytest.raises(ValidationError):
+        adapter.validate_python(datetime(2026, 11, 1, 12, 0))
+
+
+def test_openapi_common_date_schemas_keep_standard_formats() -> None:
+    date_schema = TypeAdapter(Date).json_schema()
+    datetime_schema = TypeAdapter(DateTime).json_schema()
+    assert date_schema["type"] == "string"
+    assert date_schema["format"] == "date"
+    assert datetime_schema["type"] == "string"
+    assert datetime_schema["format"] == "date-time"
 
 
 @pytest.mark.parametrize("limit", [0, 101, -1])
@@ -269,6 +382,98 @@ def test_wrong_item_order_is_rejected_instead_of_silently_skipping_rows() -> Non
         )
 
 
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+def test_bounded_query_pages_walk_composite_key_without_gaps_or_duplicates(
+    direction: SortDirection,
+) -> None:
+    ascending_rows = [
+        {"created_at": "2026-11-01", "id": 1},
+        {"created_at": "2026-11-01", "id": 4},
+        {"created_at": "2026-11-02", "id": 2},
+        {"created_at": "2026-11-02", "id": 7},
+        {"created_at": "2026-11-03", "id": 3},
+        {"created_at": "2026-11-03", "id": 8},
+        {"created_at": "2026-11-04", "id": 9},
+    ]
+    ordered_rows = ascending_rows if direction == "asc" else list(reversed(ascending_rows))
+    pages = []
+    collected = []
+    cursor = None
+
+    for _ in range(10):
+        cursor_key = decode_page_cursor(
+            cursor,
+            key_types=(str, int),
+            direction=direction,
+        )
+        # This bounded list models the SQL cursor predicate, ORDER BY, and LIMIT 3.
+        if cursor_key is None:
+            query_rows = ordered_rows
+        elif direction == "asc":
+            query_rows = [
+                row for row in ordered_rows if (row["created_at"], row["id"]) > cursor_key
+            ]
+        else:
+            query_rows = [
+                row for row in ordered_rows if (row["created_at"], row["id"]) < cursor_key
+            ]
+        query_rows = query_rows[:3]
+        page = paginate_results(
+            iter(query_rows),
+            key=lambda row: (row["created_at"], row["id"]),
+            key_types=(str, int),
+            direction=direction,
+            limit=2,
+        )
+        pages.append(page)
+        collected.extend(page.items)
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+        assert decode_page_cursor(
+            cursor,
+            key_types=(str, int),
+            direction=direction,
+        ) == (page.items[-1]["created_at"], page.items[-1]["id"])
+    else:
+        pytest.fail("bounded keyset pagination did not terminate")
+
+    actual = [(row["created_at"], row["id"]) for row in collected]
+    expected = [(row["created_at"], row["id"]) for row in ordered_rows]
+    assert actual == expected
+    assert len(actual) == len(set(actual)) == len(ordered_rows)
+    assert [len(page.items) for page in pages] == [2, 2, 2, 1]
+    assert pages[-1].next_cursor is None
+
+
+def test_paginate_results_consumes_only_limit_plus_one_generator_items() -> None:
+    consumed = 0
+
+    def rows():
+        nonlocal consumed
+        for identifier in range(100):
+            consumed += 1
+            yield {"id": identifier}
+
+    page = paginate_results(
+        rows(),
+        key=lambda row: (row["id"],),
+        key_types=(int,),
+        direction="asc",
+        limit=2,
+    )
+    assert [row["id"] for row in page.items] == [0, 1]
+    assert page.next_cursor is not None
+    assert decode_page_cursor(page.next_cursor, key_types=(int,), direction="asc") == (1,)
+    assert consumed == 3
+
+
+def test_decode_page_cursor_rejects_incompatible_key_before_query_construction() -> None:
+    cursor = make_cursor(["2026-11-01", "4"], direction="desc")
+    with pytest.raises(InvalidCursorError):
+        decode_page_cursor(cursor, key_types=(str, int), direction="desc")
+
+
 def test_pagination_rejects_invalid_runtime_arguments() -> None:
     with pytest.raises(InvalidCursorError):
         paginate([], key=lambda row: (row,), key_types=(str,), cursor="invalid")
@@ -340,8 +545,10 @@ def test_explicit_http_500_is_generic_and_preserves_required_headers() -> None:
     assert response.headers["cache-control"] == "no-store"
 
 
-def test_validation_and_internal_errors_are_safely_normalized() -> None:
-    client = TestClient(make_error_test_app(), raise_server_exceptions=False)
+def test_validation_and_internal_errors_are_safely_normalized(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = TestClient(make_error_test_app())
     extra_field = client.post(
         "/api/v1/validate",
         json={"name": "valid", "count": 2, "unexpected": "reject me"},
@@ -353,7 +560,12 @@ def test_validation_and_internal_errors_are_safely_normalized() -> None:
     ]
     assert extra_field.headers.get("x-request-id")
 
-    server_error = client.get("/api/v1/crash")
+    caplog.clear()
+    with caplog.at_level(logging.ERROR, logger="app.core.errors"):
+        server_error = client.get(
+            "/api/v1/crash",
+            headers={"X-Request-ID": "f06-safe-request-id"},
+        )
     assert server_error.status_code == 500
     assert server_error.json() == {
         "error": {
@@ -362,9 +574,30 @@ def test_validation_and_internal_errors_are_safely_normalized() -> None:
             "details": [],
         }
     }
-    assert "password" not in server_error.text
-    assert server_error.headers.get("x-request-id")
+    assert SYNTHETIC_SECRET not in server_error.text
+    assert SYNTHETIC_SECRET not in caplog.text
+    assert "Traceback" not in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "f06-safe-request-id" in caplog.text
+    assert server_error.headers["x-request-id"] == "f06-safe-request-id"
     assert server_error.headers["cache-control"] == "no-store"
+    assert len([record for record in caplog.records if record.name == "app.core.errors"]) == 1
+
+
+def test_stream_exception_after_response_start_is_safely_logged_and_not_rethrown(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = TestClient(make_error_test_app())
+
+    with caplog.at_level(logging.ERROR, logger="app.core.errors"):
+        response = client.get("/api/v1/stream-crash")
+
+    assert response.status_code == 200
+    assert response.content == b"partial response"
+    assert SYNTHETIC_SECRET not in response.text
+    assert SYNTHETIC_SECRET not in caplog.text
+    assert "Traceback" not in caplog.text
+    assert "RuntimeError" in caplog.text
 
 
 def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
