@@ -223,29 +223,52 @@ export class AuthSession {
     const epoch = crypto.randomUUID()
     // Intents use their own key. Only lock owners write the operation journal.
     // A mismatched journal/epoch blocks restoration even if this tab closes now.
+    let previousEpoch: string
     try {
+      previousEpoch = this.readEpoch()
       localStorage.setItem(authEpochStorageKey, epoch)
     } catch {
       throw new ApiClientError('Auth storage unavailable', 'coordination_unavailable')
     }
     this.epoch = epoch
     this.update('unauthenticated', '', true)
-    return epoch
+    return { epoch, previousEpoch }
   }
 
   login = async (body: LoginRequest) => {
     let epoch: string | undefined
     try {
-      epoch = this.beginChange()
+      const change = this.beginChange()
+      epoch = change.epoch
       await this.withLock(async () => {
         this.requireCurrent(epoch!)
+        const previousState = this.readState()
+        const hasConfirmedAbsence =
+          previousState.epoch === change.previousEpoch &&
+          previousState.ended === true &&
+          !previousState.pending
         this.writeState({ epoch: epoch!, blocked: true, pending: false })
-        const result = await apiFetch<TokenResponse>('/api/v1/auth/login', {
-          method: 'POST',
-          credentials: 'same-origin',
-          signal: AbortSignal.timeout(15000),
-          body: JSON.stringify(body),
-        })
+        let result: TokenResponse
+        try {
+          result = await apiFetch<TokenResponse>('/api/v1/auth/login', {
+            method: 'POST',
+            credentials: 'same-origin',
+            signal: AbortSignal.timeout(15000),
+            body: JSON.stringify(body),
+          })
+        } catch (error) {
+          this.requireCurrent(epoch!)
+          if (
+            hasConfirmedAbsence &&
+            error instanceof ApiClientError &&
+            error.status === 401 &&
+            error.code === 'invalid_credentials'
+          ) {
+            // A definitive rejection cannot create a session; uncertainty still stays blocked.
+            this.writeState({ epoch: epoch!, blocked: true, pending: false, ended: true })
+          }
+          throw error
+        }
         this.requireCurrent(epoch!)
         requireTokenResponse(result)
         this.writeState({ epoch: epoch!, blocked: false, pending: false })
@@ -261,7 +284,7 @@ export class AuthSession {
   logout = async () => {
     let epoch: string | undefined
     try {
-      epoch = this.beginChange()
+      epoch = this.beginChange().epoch
       await this.withLock(async () => {
         this.requireCurrent(epoch!)
         this.writeState({ epoch: epoch!, blocked: true, pending: false })

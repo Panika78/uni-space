@@ -106,6 +106,14 @@ try {
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
   await page.getByText('Неверный логин или пароль.', { exact: true }).waitFor()
   check('real invalid_credentials feedback')
+  const afterRejectedLogin = requests.length
+  await page.reload()
+  await heading(page, 'Вход')
+  assert.equal(await page.getByRole('status').count(), 0)
+  assert.equal(requests.length, afterRejectedLogin)
+  check(
+    'confirmed absence followed by rejected login stays quiet after reload without refresh or login retry',
+  )
   await login(page, loginA)
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
   const cookie = (await context.cookies()).find((value) => value.name === 'uni_space_refresh')

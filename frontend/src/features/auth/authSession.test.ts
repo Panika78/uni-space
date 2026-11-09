@@ -789,3 +789,137 @@ describe('bounded Web Lock acquisition', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
+
+describe('rejected login preserves only confirmed absence', () => {
+  it.each(['invalid_refresh', 'confirmed_logout'])(
+    'keeps reload quiet after %s followed by invalid_credentials',
+    async (source) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          source === 'invalid_refresh'
+            ? error('invalid_refresh')
+            : new Response(null, { status: 204 }),
+        )
+        .mockResolvedValueOnce(error('invalid_credentials'))
+      vi.stubGlobal('fetch', fetchMock)
+      const { session } = createSession()
+      if (source === 'invalid_refresh') await session.start()
+      else await session.logout()
+      await session.login({ login: 'fictional', password: 'incorrect' })
+      expect(session.getSnapshot().message).toBe('Неверный логин или пароль.')
+      const reloaded = createSession().session
+      await reloaded.start()
+      expect(reloaded.getSnapshot()).toEqual({
+        status: 'unauthenticated',
+        message: '',
+        busy: false,
+      })
+      expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+        source === 'invalid_refresh' ? '/api/v1/auth/refresh' : '/api/v1/auth/logout',
+        '/api/v1/auth/login',
+      ])
+    },
+  )
+
+  it('does not silently restore account A after account B login is rejected', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(token('fictional-account-a')))
+    const { session, cache } = createSession()
+    await session.start()
+    cache.setQueryData(['private'], 'fictional-account-a')
+    const old = session.beginRequest()
+    const fetchMock = vi.fn().mockResolvedValue(error('invalid_credentials'))
+    vi.stubGlobal('fetch', fetchMock)
+    await session.login({ login: 'fictional-account-b', password: 'incorrect' })
+    expect(old.signal.aborted).toBe(true)
+    expect(cache.getQueryData(['private'])).toBeUndefined()
+    const reloaded = createSession().session
+    await reloaded.start()
+    expect(reloaded.getSnapshot().status).toBe('unauthenticated')
+    expect(reloaded.getSnapshot().message).toContain('Не удалось подтвердить состояние сессии')
+    expect(JSON.parse(localStorage.getItem(authStorageKey)!).ended).not.toBe(true)
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
+  })
+
+  it.each(['network', 'timeout', 'server', 'invalid_credentials_with_500'])(
+    'blocks recovery after %s even if absence was confirmed before login',
+    async (failure) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(error('invalid_refresh')))
+      const { session } = createSession()
+      await session.start()
+      const controller = new AbortController()
+      if (failure === 'timeout')
+        vi.spyOn(AbortSignal, 'timeout').mockReturnValueOnce(controller.signal)
+      const fetchMock = vi.fn().mockImplementation((_path: string, init: RequestInit) => {
+        if (failure === 'network') return Promise.reject(new TypeError('offline'))
+        if (failure === 'timeout')
+          return new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(init.signal?.reason), {
+              once: true,
+            })
+          })
+        return Promise.resolve(
+          error(failure === 'server' ? 'internal_error' : 'invalid_credentials', 500),
+        )
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const login = session.login({ login: 'fictional', password: 'fictional' })
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      if (failure === 'timeout') controller.abort(new DOMException('timed out', 'TimeoutError'))
+      await login
+      const reloaded = createSession().session
+      await reloaded.start()
+      expect(reloaded.getSnapshot().message).toContain('Не удалось подтвердить состояние сессии')
+      expect(JSON.parse(localStorage.getItem(authStorageKey)!).ended).not.toBe(true)
+      expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
+    },
+  )
+
+  it.each(['rejected', 'successful'])(
+    'does not overwrite another tab generation with a late %s login response',
+    async (result) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(error('invalid_refresh')))
+      const first = createSession().session
+      await first.start()
+      const late = deferred<Response>()
+      const fetchMock = vi
+        .fn()
+        .mockReturnValueOnce(late.promise)
+        .mockResolvedValueOnce(token('fictional-new-account'))
+      vi.stubGlobal('fetch', fetchMock)
+      const firstLogin = first.login({ login: 'fictional-old-account', password: 'incorrect' })
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      const second = createSession().session
+      const secondLogin = second.login({ login: 'fictional-new-account', password: 'fictional' })
+      late.resolve(
+        result === 'rejected' ? error('invalid_credentials') : token('fictional-stale-token'),
+      )
+      await Promise.all([firstLogin, secondLogin])
+      const journal = JSON.parse(localStorage.getItem(authStorageKey)!)
+      expect(journal.epoch).toBe(localStorage.getItem('uni-space.auth-epoch'))
+      expect(journal.blocked).toBe(false)
+      expect(journal.ended).not.toBe(true)
+      expect(first.getSnapshot().status).toBe('unauthenticated')
+      expect(first.getSnapshot().message).not.toContain('Неверный логин')
+      expect(second.beginRequest().token).toBe('fictional-new-account')
+      expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+        '/api/v1/auth/login',
+        '/api/v1/auth/login',
+      ])
+    },
+  )
+})
+
+it('does not reuse an ended journal belonging to an older auth intent after rejected login', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(error('invalid_refresh')))
+  const { session } = createSession()
+  await session.start()
+  localStorage.setItem('uni-space.auth-epoch', 'unconfirmed-newer-intent')
+  const fetchMock = vi.fn().mockResolvedValue(error('invalid_credentials'))
+  vi.stubGlobal('fetch', fetchMock)
+  await session.login({ login: 'fictional', password: 'incorrect' })
+  const reloaded = createSession().session
+  await reloaded.start()
+  expect(reloaded.getSnapshot().message).toContain('Не удалось подтвердить состояние сессии')
+  expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
+})
