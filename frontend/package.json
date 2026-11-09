@@ -14,8 +14,8 @@
     "lint": "eslint .",
     "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"*.{js,ts,json}\"",
     "typecheck": "tsc -b --pretty false",
-    "types:generate": "uv run --project ../backend python ../backend/scripts/export_openapi.py && openapi-typescript ../backend/openapi.json -o src/shared/api/schema.ts",
-    "types:check": "uv run --project ../backend python ../backend/scripts/export_openapi.py --check && openapi-typescript ../backend/openapi.json -o /tmp/uni-space-openapi-types.ts && cmp src/shared/api/schema.ts /tmp/uni-space-openapi-types.ts",
+    "types:generate": "uv run --locked --project ../backend python ../backend/scripts/export_openapi.py && openapi-typescript ../backend/openapi.json -o src/shared/api/schema.ts",
+    "types:check": "uv run --locked --project ../backend python ../backend/scripts/export_openapi.py --check && openapi-typescript ../backend/openapi.json -o /tmp/uni-space-openapi-types.ts && cmp src/shared/api/schema.ts /tmp/uni-space-openapi-types.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

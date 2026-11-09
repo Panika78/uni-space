@@ -4,21 +4,55 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$repo_root"
 
-restore_database() {
-    docker compose rm -sf db >/dev/null 2>&1 || true
-    docker compose up -d --wait db >/dev/null 2>&1 || true
-}
-trap restore_database EXIT
+project_name="uni-space-healthcheck-${BASHPID}-${RANDOM}"
+temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/uni-space-healthcheck.XXXXXX")
+env_file="$temp_dir/test.env"
+override_file="$temp_dir/compose.override.yaml"
 
-docker compose rm -sf db >/dev/null
-docker compose up -d --wait db >/dev/null
-db_container=$(docker compose ps -q db)
+cat > "$env_file" <<'EOF'
+POSTGRES_DB=uni_space_healthcheck_test
+POSTGRES_USER=uni_space_healthcheck_test
+POSTGRES_PASSWORD=healthcheck-test-password
+EOF
+
+cat > "$override_file" <<'EOF'
+services:
+  db:
+    ports: !override []
+EOF
+
+compose=(
+    docker compose
+    --project-name "$project_name"
+    --env-file "$env_file"
+    --file "$repo_root/compose.yaml"
+    --file "$override_file"
+)
+
+cleanup() {
+    local result=$?
+    trap - EXIT
+    if ! "${compose[@]}" down --volumes --remove-orphans; then
+        printf 'failed to clean isolated Compose project %s\n' "$project_name" >&2
+        result=1
+    fi
+    rm -rf "$temp_dir"
+    exit "$result"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+printf 'isolated Compose project: %s\n' "$project_name"
+"${compose[@]}" up -d --wait db >/dev/null
+db_container=$("${compose[@]}" ps -q db)
 test "$(docker inspect --format '{{.State.Health.Status}}' "$db_container")" = "healthy"
 printf 'correct password health -> healthy\n'
 
-docker compose rm -sf db >/dev/null
-POSTGRES_PASSWORD=incorrect-healthcheck-test docker compose up -d db >/dev/null
-db_container=$(docker compose ps -q db)
+"${compose[@]}" rm -sf db >/dev/null
+POSTGRES_PASSWORD=incorrect-healthcheck-test "${compose[@]}" up -d db >/dev/null
+db_container=$("${compose[@]}" ps -q db)
 
 health_status=starting
 for ((attempt = 1; attempt <= 45; attempt++)); do
@@ -42,9 +76,8 @@ fi
 printf 'incorrect password health -> unhealthy\n'
 printf 'health diagnostics secret probe -> absent\n'
 
-docker compose rm -sf db >/dev/null
-docker compose up -d --wait db >/dev/null
-db_container=$(docker compose ps -q db)
+"${compose[@]}" rm -sf db >/dev/null
+"${compose[@]}" up -d --wait db >/dev/null
+db_container=$("${compose[@]}" ps -q db)
 test "$(docker inspect --format '{{.State.Health.Status}}' "$db_container")" = "healthy"
-trap - EXIT
 printf 'restored password health -> healthy\n'

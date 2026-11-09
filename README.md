@@ -46,7 +46,9 @@ npm run types:check
 Общие TypeScript-типы создаются из схем backend в OpenAPI. После изменения
 Pydantic-моделей обновите снимок OpenAPI и типы командой `npm run types:generate`
 из `frontend/`. Команда `npm run types:check` проверяет актуальность обоих
-сгенерированных файлов без их перезаписи.
+сгенерированных файлов без их перезаписи. Обе команды запускают Python через
+`uv run --locked`, поэтому не переписывают `backend/uv.lock`. Если lock устарел,
+обновите его явной командой `uv lock`.
 
 Чтобы добавить компонент shadcn/ui, используйте CLI из `frontend/`:
 
@@ -123,8 +125,8 @@ docker compose run --rm api alembic upgrade head
 docker compose run --rm api alembic heads
 ```
 
-Проверить healthcheck с правильным и заведомо неправильным паролем, не удаляя
-volume:
+Проверить healthcheck с правильным и заведомо неправильным паролем в отдельном
+Compose-проекте:
 
 ```bash
 bash backend/tests/test_compose_db_healthcheck.sh
@@ -152,14 +154,14 @@ Compose публикует PostgreSQL только на `127.0.0.1:5432`. Под
 ```bash
 docker compose up -d db
 cd backend
-uv sync --frozen
+uv sync --locked
 set -a
 source ../.env
 set +a
-uv run alembic upgrade head
-uv run python -c \
+uv run --locked alembic upgrade head
+uv run --locked python -c \
   'from sqlalchemy import text; from app.core.database import engine; print(engine.connect().execute(text("SELECT 1")).scalar_one())'
-uv run uvicorn app.main:app --reload
+uv run --locked uvicorn app.main:app --reload
 ```
 
 Для host `DATABASE_URL` пароль с URI-символами должен быть закодирован один раз
@@ -171,9 +173,9 @@ uv run uvicorn app.main:app --reload
 
 ```bash
 cd backend
-DATABASE_URL=postgresql+psycopg://unused:unused@localhost/unused uv run pytest
-uv run ruff check .
-uv run ruff format --check .
+DATABASE_URL=postgresql+psycopg://unused:unused@localhost/unused uv run --locked pytest
+uv run --locked ruff check .
+uv run --locked ruff format --check .
 ```
 
 `DATABASE_URL` — обязательная настройка API. Если она отсутствует или
@@ -194,7 +196,7 @@ uv run ruff format --check .
 ```bash
 docker compose -p uni-space-test -f compose.test.yaml up -d --wait test-db
 cd backend
-uv sync --frozen
+uv sync --locked
 export APP_ENV=test
 export DATABASE_URL=postgresql+psycopg://uni_space_test:test-only-password@127.0.0.1:55432/uni_space_test
 ```
@@ -202,17 +204,19 @@ export DATABASE_URL=postgresql+psycopg://uni_space_test:test-only-password@127.0
 В `backend/` запустите backend lint/format и тесты:
 
 ```bash
-uv run --frozen ruff check .
-uv run --frozen ruff format --check .
-uv run --frozen pytest
+uv lock --check
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked pytest -m "not integration"
+uv run --locked pytest -m integration
 ```
 
 На той же тестовой PostgreSQL проверьте миграции на пустой базе и совпадение
 текущих ревизий БД с heads Alembic:
 
 ```bash
-uv run --frozen alembic upgrade head
-uv run --frozen python scripts/check_migrations.py
+uv run --locked alembic upgrade head
+uv run --locked python scripts/check_migrations.py
 ```
 
 Сейчас каталог Alembic не содержит ревизий, поэтому эти команды проверяют
@@ -235,8 +239,10 @@ npm run types:check
 
 `types:check` только сравнивает актуальную генерацию OpenAPI и TypeScript-типы с
 закоммиченными файлами и завершается с ошибкой при расхождении; он не
-перезаписывает их. Для обновления файлов используется отдельная команда
-`npm run types:generate`.
+перезаписывает их. Обе команды используют `uv run --locked` и не меняют
+`backend/uv.lock`. Для явного обновления файлов используется отдельная команда
+`npm run types:generate`. Unit-тесты запускаются без PostgreSQL по умолчанию;
+job CI дополнительно запускает отмеченные `integration`-тесты на тестовой БД.
 
 После проверки остановите и удалите только эфемерный контейнер тестовой БД:
 

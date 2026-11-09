@@ -20,12 +20,15 @@ jobs:
           version: 0.13.5
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
+      - name: Verify uv.lock matches pyproject.toml
+        working-directory: backend
+        run: uv lock --check
       - name: Ruff lint
         working-directory: backend
-        run: uv run --frozen ruff check .
+        run: uv run --locked ruff check .
       - name: Ruff format
         working-directory: backend
-        run: uv run --frozen ruff format --check .
+        run: uv run --locked ruff format --check .
 
   backend-tests:
     name: Backend tests
@@ -51,12 +54,21 @@ jobs:
           version: 0.13.5
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
-      - name: Run pytest with HTTPX
+      - name: Verify uv.lock matches pyproject.toml
+        working-directory: backend
+        run: uv lock --check
+      - name: Run unit and HTTPX tests
         working-directory: backend
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
-        run: uv run --frozen pytest
+        run: uv run --locked pytest -m "not integration"
+      - name: Run PostgreSQL integration tests
+        working-directory: backend
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
+        run: uv run --locked pytest -m integration
 
   frontend-lint:
     name: Frontend ESLint and Prettier
@@ -147,6 +159,9 @@ jobs:
           version: 0.13.5
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
+      - name: Verify uv.lock matches pyproject.toml
+        working-directory: backend
+        run: uv lock --check
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
@@ -185,15 +200,26 @@ jobs:
           version: 0.13.5
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
+      - name: Verify uv.lock matches pyproject.toml
+        working-directory: backend
+        run: uv lock --check
       - name: Apply migrations to empty PostgreSQL
         working-directory: backend
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
-        run: uv run --frozen alembic upgrade head
+        run: uv run --locked alembic upgrade head
       - name: Verify database matches current Alembic heads
         working-directory: backend
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
-        run: uv run --frozen python scripts/check_migrations.py
+        run: uv run --locked python scripts/check_migrations.py
+
+  db-healthcheck:
+    name: Compose PostgreSQL healthcheck regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated Compose healthcheck regression
+        run: bash backend/tests/test_compose_db_healthcheck.sh
