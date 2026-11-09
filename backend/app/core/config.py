@@ -126,6 +126,24 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_production_auth(self) -> "Settings":
         if self.app_env == "production":
+            private_ranges = [
+                ip_network(value)
+                for value in (
+                    "10.0.0.0/8",
+                    "172.16.0.0/12",
+                    "192.168.0.0/16",
+                    "127.0.0.0/8",
+                    "fc00::/7",
+                    "::1/128",
+                )
+            ]
+            for value in self.trusted_proxy_ips:
+                network = ip_network(value)
+                if not any(
+                    network.version == private.version and network.subnet_of(private)
+                    for private in private_ranges
+                ):
+                    raise ValueError("production proxy trust must use private or loopback networks")
             key = self.jwt_signing_key.get_secret_value().lower()
             if (
                 not self.cookie_secure

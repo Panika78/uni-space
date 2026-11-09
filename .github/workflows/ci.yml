@@ -259,3 +259,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run isolated Compose healthcheck regression
         run: bash backend/tests/test_compose_db_healthcheck.sh
+
+  production-deployment:
+    name: Production Compose HTTPS and recovery
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.13.5
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - name: Build production API and SPA images
+        run: |
+          docker build -f backend/Dockerfile -t uni-space-api:task019 .
+          docker build -f deploy/Dockerfile.web -t uni-space-web:task019 .
+      - name: Check deployment test formatting
+        run: |
+          uv run --locked --python 3.12.12 --project backend ruff check deploy/test_production.py
+          uv run --locked --python 3.12.12 --project backend ruff format --check deploy/test_production.py
+      - name: Test isolated HTTPS deployment and backup recovery
+        run: uv run --locked --python 3.12.12 --project backend python deploy/test_production.py

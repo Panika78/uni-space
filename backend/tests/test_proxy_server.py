@@ -345,3 +345,17 @@ def test_real_development_launcher_keeps_local_example_settings_usable(tmp_path)
             client.post("/api/v1/auth/login", json={}, headers={"Origin": ORIGIN}).status_code
             == 422
         )
+
+
+@pytest.mark.parametrize("proxy", ["8.8.8.8", "8.8.8.0/24", "100.64.0.0/10", "2000::/3"])
+def test_production_rejects_proxy_trust_outside_private_networks(proxy):
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            database_url="postgresql+psycopg://unused:unused@localhost/unused",
+            jwt_signing_key="2ghJj3eYC65ZV4zuLr8s-91QTNpXvWbA",
+            allowed_origins=["https://uni.example"],
+            proxy_headers_enabled=True,
+            trusted_proxy_ips=[proxy],
+        )

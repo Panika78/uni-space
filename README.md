@@ -21,6 +21,7 @@ logout, проверка пользователя и сессии). Frontend п�
 - [Модель данных](docs/DB.md) — сущности, связи и ограничения.
 - [API-контракт](docs/API.md) — принятый контракт MVP 1; приоритет над предварительным перечнем API в архитектуре.
 - [Серверная авторизация](docs/AUTH.md) — настройки, Origin, транзакции, rate limiting и ограничения TASK-006.
+- [Production-конфигурация](docs/PRODUCTION.md) — отдельный Compose, TLS, секреты, обновление и backup/restore (TASK-019).
 - [AGENTS.md](AGENTS.md) — правила работы coding-агентов.
 
 Основные спецификации приняты; явно помеченные `TBD` и предварительные решения требуют отдельного согласования. Issues со статусом `Draft` — черновики задач. Прямое поручение пользователя реализовать конкретную задачу разрешает её выполнение в указанном объёме; окончательная приёмка выполняется отдельно.
@@ -77,6 +78,39 @@ npx shadcn@latest add button
 В контейнерах зафиксированы Python 3.12.12 и PostgreSQL 17.6. Точные версии
 Python-зависимостей записаны в `backend/uv.lock`.
 
+## Production-конфигурация
+
+Подготовлен отдельный `compose.prod.yaml`: Nginx с HTTPS отдаёт сборку SPA и
+проксирует API; FastAPI и PostgreSQL доступны только во внутренних сетях.
+Используются существующий launcher `--production`, внешние файлы секретов,
+постоянный volume и readiness по HTTP/БД/Alembic. Dev Compose остаётся отдельным.
+
+Полные инструкции запуска, диагностики, обновления/отката, backup и отдельного
+восстановления — в [PRODUCTION.md](docs/PRODUCTION.md). Из корня проекта:
+
+```bash
+export PROD_ENV_FILE=/absolute/private/path/production.env
+bash scripts/production-compose.sh build
+bash scripts/production-compose.sh up -d --wait db
+bash scripts/production-compose.sh run --rm api alembic upgrade head
+bash scripts/production-compose.sh up -d --wait --wait-timeout 120
+```
+
+Сначала создайте внешний env-файл по `deploy/production.env.example`, случайные
+секреты и TLS-файлы по инструкции. Проверочный стенд с тестовым сертификатом:
+
+```bash
+docker build -f backend/Dockerfile -t uni-space-api:task019 .
+docker build -f deploy/Dockerfile.web -t uni-space-web:task019 .
+uv run --locked --python 3.12.12 --project backend python deploy/test_production.py
+```
+
+Он использует уникальный тестовый project/volume, проверяет реальный HTTPS,
+SPA/API, auth/Origin/cookie, proxy/IP spoofing, отказы небезопасного запуска и
+backup/restore в отдельную БД; затем удаляет только свои тестовые данные.
+Публичное развёртывание, реальный домен/TLS, доступность из России и фактическое
+расписание backup остаются в TASK-020. Локальный прогон их не подтверждает.
+
 ## Локальный запуск
 
 Создайте локальный файл окружения. Значения в примере предназначены только для
@@ -95,8 +129,7 @@ cp .env.example .env
 production-развёртывания. Для публичного запуска API предусмотрена явная команда
 `python -m app.core.server --production`: она принудительно включает production-
 валидацию до запуска Uvicorn, даже при development в окружении или `.env`.
-Это частичная защита SEC-03, не готовая инфраструктура; границы гарантии и
-обязательные действия — в [AUTH.md](docs/AUTH.md#режим-запуска-production-sec-03).
+Границы гарантии SEC-03 и обязательные действия — в [AUTH.md](docs/AUTH.md#режим-запуска-production-sec-03).
 Сервер запускается через `app.core.server`: forwarded-
 заголовки по умолчанию отключены, доверенный proxy включается только явно через
 `PROXY_HEADERS_ENABLED` и `TRUSTED_PROXY_IPS`. Это не заменяет настройку proxy и
