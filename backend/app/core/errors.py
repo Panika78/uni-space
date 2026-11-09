@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core.pagination import InvalidCursorError
 from app.core.schemas import ApiError, ErrorBody, ErrorDetail
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,11 @@ def internal_error_response(exc: Exception) -> JSONResponse:
 def _validation_details(errors: list[dict[str, Any]]) -> list[ErrorDetail]:
     details: list[ErrorDetail] = []
     for error in errors:
-        location = [str(part) for part in error.get("loc", ()) if part != "body"]
+        location = [
+            str(part)
+            for part in error.get("loc", ())
+            if part not in {"body", "query", "path", "header", "cookie"}
+        ]
         details.append(
             ErrorDetail(
                 field=".".join(location) or None,
@@ -46,6 +51,15 @@ def _validation_details(errors: list[dict[str, Any]]) -> list[ErrorDetail]:
 
 
 def install_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(InvalidCursorError)
+    async def handle_invalid_cursor(_request: Request, _exc: InvalidCursorError) -> JSONResponse:
+        return _error_response(
+            422,
+            "validation_error",
+            "Проверьте введённые данные",
+            [ErrorDetail(field="cursor", code="invalid_value")],
+        )
+
     @app.exception_handler(RequestValidationError)
     async def handle_request_validation_error(
         _request: Request, exc: RequestValidationError

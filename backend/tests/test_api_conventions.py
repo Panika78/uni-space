@@ -1,4 +1,7 @@
+import base64
+import json
 from typing import Annotated
+from urllib.parse import urlencode
 
 import pytest
 from fastapi import FastAPI, HTTPException, Query
@@ -43,10 +46,40 @@ def make_error_test_app() -> FastAPI:
         return body
 
     @test_app.get("/api/v1/page")
-    def page(params: Annotated[PaginationParams, Query()]) -> dict[str, int]:
-        return {"limit": params.limit}
+    def page(params: Annotated[PaginationParams, Query()]) -> dict[str, object]:
+        rows = [
+            {"published_at": "2026-11-03", "id": 9},
+            {"published_at": "2026-11-03", "id": 5},
+            {"published_at": "2026-11-02", "id": 8},
+            {"published_at": "2026-11-02", "id": 4},
+            {"published_at": "2026-11-01", "id": 7},
+            {"published_at": "2026-11-01", "id": 3},
+        ]
+        result = paginate(
+            rows,
+            key=lambda row: (row["published_at"], row["id"]),
+            key_types=(str, int),
+            direction="desc",
+            limit=params.limit,
+            cursor=params.cursor,
+        )
+        return {"limit": params.limit, "items": result.items, "next_cursor": result.next_cursor}
 
     return test_app
+
+
+def make_cursor(
+    key: list[str | int | float],
+    *,
+    version: int = 2,
+    direction: str = "desc",
+    extra: dict[str, object] | None = None,
+) -> str:
+    payload: dict[str, object] = {"v": version, "direction": direction, "key": key}
+    if extra:
+        payload.update(extra)
+    raw = json.dumps(payload, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
 def test_id_is_a_positive_integer_string_and_page_defaults_to_empty_items() -> None:
@@ -98,34 +131,121 @@ def test_invalid_pagination_query_returns_422(query: str) -> None:
     assert response.headers.get("x-request-id")
 
 
-def test_cursor_pagination_keeps_equal_sort_values_without_gaps_or_duplicates() -> None:
-    rows = [{"published_at": "2026-11-01", "id": str(index)} for index in range(7, 0, -1)]
-    first_page = paginate(rows, key=lambda row: (row["published_at"], -int(row["id"])), limit=3)
-    second_page = paginate(
-        rows,
-        key=lambda row: (row["published_at"], -int(row["id"])),
-        limit=3,
-        cursor=first_page.next_cursor,
-    )
-    final_page = paginate(
-        rows,
-        key=lambda row: (row["published_at"], -int(row["id"])),
-        limit=3,
-        cursor=second_page.next_cursor,
-    )
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        make_cursor(["2026-11-03", "9"]),
+        make_cursor(["2026-11-03"]),
+        make_cursor(["2026-11-03", 9], version=1),
+        make_cursor(["2026-11-03", 9], extra={"unexpected": True}),
+        make_cursor(["2026-11-03", 9], direction="asc"),
+    ],
+)
+def test_selection_incompatible_cursor_returns_api_422(cursor: str) -> None:
+    client = TestClient(make_error_test_app())
+    response = client.get(f"/api/v1/page?{urlencode({'limit': 2, 'cursor': cursor})}")
+    assert response.status_code == 422
+    assert response.json() == {
+        "error": {
+            "code": "validation_error",
+            "message": "Проверьте введённые данные",
+            "details": [{"field": "cursor", "code": "invalid_value"}],
+        }
+    }
 
-    assert [row["id"] for row in first_page.items + second_page.items + final_page.items] == [
-        str(index) for index in range(7, 0, -1)
+
+def test_desc_cursor_pagination_preserves_multi_date_order_without_gaps_or_duplicates() -> None:
+    rows = [
+        {"published_at": "2026-11-03", "id": 9},
+        {"published_at": "2026-11-03", "id": 5},
+        {"published_at": "2026-11-02", "id": 8},
+        {"published_at": "2026-11-02", "id": 4},
+        {"published_at": "2026-11-01", "id": 7},
+        {"published_at": "2026-11-01", "id": 3},
+        {"published_at": "2026-10-31", "id": 99},
     ]
-    assert len({row["id"] for row in first_page.items + second_page.items + final_page.items}) == 7
-    assert final_page.next_cursor is None
+    pages = []
+    cursor = None
+    for _ in range(10):
+        page = paginate(
+            rows,
+            key=lambda row: (row["published_at"], row["id"]),
+            key_types=(str, int),
+            direction="desc",
+            limit=2,
+            cursor=cursor,
+        )
+        pages.append(page)
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    else:
+        pytest.fail("pagination did not terminate")
+
+    actual = [(row["published_at"], row["id"]) for page in pages for row in page.items]
+    expected = [(row["published_at"], row["id"]) for row in rows]
+    assert actual == expected
+    assert len(actual) == len(set(actual)) == 7
+    assert [len(page.items) for page in pages] == [2, 2, 2, 1]
+    assert pages[-1].next_cursor is None
+
+
+def test_cursor_is_validated_against_empty_selection_schema() -> None:
+    def key(row: dict[str, str | int]) -> tuple[str, int]:
+        return row["published_at"], row["id"]
+
+    valid_cursor = make_cursor(["2026-11-01", 2])
+    page = paginate(
+        [],
+        key=key,
+        key_types=(str, int),
+        direction="desc",
+        cursor=valid_cursor,
+    )
+    assert page.items == []
+    assert page.next_cursor is None
+
+    with pytest.raises(InvalidCursorError):
+        paginate(
+            [],
+            key=key,
+            key_types=(str, int),
+            direction="desc",
+            cursor=make_cursor(["2026-11-01", "2"]),
+        )
+
+
+def test_wrong_item_order_is_rejected_instead_of_silently_skipping_rows() -> None:
+    wrong_order = [
+        {"published_at": "2026-11-01", "id": 1},
+        {"published_at": "2026-11-02", "id": 2},
+    ]
+    with pytest.raises(ValueError, match="strictly ordered"):
+        paginate(
+            wrong_order,
+            key=lambda row: (row["published_at"], row["id"]),
+            key_types=(str, int),
+            direction="desc",
+        )
+
+    duplicated_key = [
+        {"published_at": "2026-11-02", "id": 2},
+        {"published_at": "2026-11-02", "id": 2},
+    ]
+    with pytest.raises(ValueError, match="strictly ordered"):
+        paginate(
+            duplicated_key,
+            key=lambda row: (row["published_at"], row["id"]),
+            key_types=(str, int),
+            direction="desc",
+        )
 
 
 def test_pagination_rejects_invalid_runtime_arguments() -> None:
     with pytest.raises(InvalidCursorError):
-        paginate([], key=lambda row: (row,), cursor="invalid")
+        paginate([], key=lambda row: (row,), key_types=(str,), cursor="invalid")
     with pytest.raises(ValueError):
-        paginate([], key=lambda row: (row,), limit=0)
+        paginate([], key=lambda row: (row,), key_types=(str,), limit=0)
 
 
 def test_request_ids_and_cache_headers_cover_success_and_errors() -> None:
