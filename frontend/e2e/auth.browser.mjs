@@ -1,4 +1,4 @@
-/* global process, console, URL, document, innerWidth, localStorage, sessionStorage, setTimeout, AbortController, performance */
+/* global process, console, URL, document, innerWidth, localStorage, sessionStorage, setTimeout, AbortController, performance, Navigator, Storage, DOMException */
 // Run against local Vite + the real backend using two prepared fictional accounts.
 // Playwright is supplied by the environment; no production test route is installed.
 import assert from 'node:assert/strict'
@@ -67,7 +67,8 @@ const testPath = '/api/v1/task007-test-only'
 const apiError = (code) => ({ error: { code, message: 'internal server detail', details: [] } })
 const requests = []
 context.on('request', (request) => {
-  if (request.url().includes('/api/')) requests.push(new URL(request.url()).pathname)
+  if (new URL(request.url()).pathname.startsWith('/api/'))
+    requests.push(new URL(request.url()).pathname)
 })
 const check = (name) => console.log(`PASS ${name}`)
 const heading = (target, name) => target.getByRole('heading', { name, exact: true }).waitFor()
@@ -191,10 +192,12 @@ try {
   const beforeReload = requests.length
   await page.reload()
   await heading(page, 'Вход')
+  await page.getByText(/Не удалось подтвердить состояние сессии/).waitFor()
   assert.equal(requests.slice(beforeReload).filter((path) => path.endsWith('/refresh')).length, 0)
   fault = ''
   await page.getByRole('button', { name: 'Повторить выход', exact: true }).click()
   await page.getByText('Выход подтверждён сервером.', { exact: true }).waitFor()
+  assert.ok(!(await page.locator('body').innerText()).includes('сервер не подтвердил выход'))
   check('lost real logout response, reload blocks restoration and explicit retry succeeds')
 
   await login(page, loginA)
@@ -239,7 +242,16 @@ try {
   check('closing the lock holder after rotation leaves a durable recovery barrier')
   await page.getByRole('button', { name: 'Выйти', exact: true }).click()
   await Promise.all([heading(page, 'Вход'), heading(second, 'Вход')])
-  check('confirmed logout hides protected screens in both tabs')
+  await second.waitForFunction(() => document.querySelector('[role="status"]') === null)
+  const refreshAfterLogout = requests.filter((path) => path.endsWith('/refresh')).length
+  await Promise.all([page.reload(), second.reload()])
+  await Promise.all([heading(page, 'Вход'), heading(second, 'Вход')])
+  assert.equal(await page.getByRole('status').count(), 0)
+  assert.equal(await second.getByRole('status').count(), 0)
+  assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, refreshAfterLogout)
+  check(
+    'confirmed logout synchronizes both tabs and reload shows login without warnings or refresh',
+  )
 
   // Auth errors controlled only for feedback; backend origin protection stays enabled.
   await context.route('**/api/v1/auth/login', (route) =>
@@ -254,6 +266,76 @@ try {
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
   await page.getByText('Слишком много попыток. Повторите через 37 сек.', { exact: true }).waitFor()
   check('controlled Retry-After feedback')
+  await context.unroute('**/api/v1/auth/login')
+  for (const scenario of ['server', 'network', 'timeout']) {
+    let releaseLogin = () => {}
+    const heldLogin = new Promise((resolve) => {
+      releaseLogin = resolve
+    })
+    await context.route('**/api/v1/auth/login', async (route) => {
+      if (scenario === 'server')
+        await route.fulfill({ status: 500, json: apiError('internal_error') })
+      else if (scenario === 'network') await route.abort('failed')
+      else {
+        await heldLogin
+        await route.abort('failed').catch(() => {})
+      }
+    })
+    const countBefore = requests.filter((path) => path.endsWith('/login')).length
+    await page.getByLabel('Логин', { exact: true }).fill(loginA)
+    await page.getByLabel('Пароль', { exact: true }).fill(password)
+    await page.getByRole('button', { name: 'Войти', exact: true }).click()
+    const expected =
+      scenario === 'server'
+        ? 'Сервис входа временно недоступен'
+        : scenario === 'network'
+          ? 'Проверьте соединение'
+          : 'Запрос мог быть выполнен'
+    await page.getByText(new RegExp(expected)).waitFor()
+    const message = await page.getByRole('status').innerText()
+    assert.ok(!/Web Locks|internal server detail|Проверьте данные/.test(message))
+    releaseLogin()
+    await context.unroute('**/api/v1/auth/login')
+    assert.equal(requests.filter((path) => path.endsWith('/login')).length, countBefore + 1)
+    const beforeRecovery = requests.length
+    await page.reload()
+    await heading(page, 'Вход')
+    assert.equal(requests.length, beforeRecovery)
+    check(`controlled login ${scenario} has correct feedback, one POST and no automatic recovery`)
+  }
+
+  for (const unavailable of ['locks', 'storage']) {
+    const unsupportedContext = await browser.newContext({ viewport: { width: 360, height: 800 } })
+    await unsupportedContext.addInitScript((mode) => {
+      if (mode === 'locks')
+        Object.defineProperty(Navigator.prototype, 'locks', { get: () => undefined })
+      else
+        Object.defineProperty(Storage.prototype, 'setItem', {
+          value() {
+            throw new DOMException('blocked by test', 'SecurityError')
+          },
+        })
+    }, unavailable)
+    const unsupported = await unsupportedContext.newPage()
+    let unsupportedRequests = 0
+    unsupported.on('request', (request) => {
+      if (new URL(request.url()).pathname.startsWith('/api/')) unsupportedRequests++
+    })
+    await unsupported.goto(`${baseURL}/login`)
+    await heading(unsupported, 'Вход')
+    await unsupported.getByLabel('Логин', { exact: true }).fill(loginA)
+    await unsupported.getByLabel('Пароль', { exact: true }).fill(password)
+    await unsupported.getByRole('button', { name: 'Войти', exact: true }).click()
+    await unsupported
+      .getByText(
+        'Вход недоступен в этом браузере. Проверьте поддержку Web Locks и доступ к хранилищу.',
+        { exact: true },
+      )
+      .waitFor()
+    assert.equal(unsupportedRequests, 0)
+    await unsupportedContext.close()
+    check(`unavailable ${unavailable} shows browser feedback without HTTP requests`)
+  }
   const storage = await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))
   assert.ok(!storage.includes('access_token') && !storage.includes(password))
   check('no tokens or credentials in persistent storage')

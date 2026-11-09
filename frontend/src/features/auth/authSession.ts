@@ -74,15 +74,20 @@ export class AuthSession {
     try {
       const state = this.readState()
       const epoch = this.readEpoch()
+      const hasEnded = state.epoch === epoch && state.ended === true && !state.pending
       if (
         epoch !== this.epoch ||
+        (hasEnded &&
+          (this.snapshot.status !== 'unauthenticated' || this.snapshot.message !== '')) ||
         ((state.blocked || state.ended) && this.snapshot.status === 'authenticated')
       ) {
         this.epoch = epoch
         this.clearSession(
-          state.blocked
-            ? interruptedMessage
-            : 'Авторизация изменена в другой вкладке. Войдите снова или обновите страницу.',
+          hasEnded
+            ? ''
+            : state.blocked
+              ? interruptedMessage
+              : 'Авторизация изменена в другой вкладке. Войдите снова или обновите страницу.',
         )
       }
     } catch {
@@ -97,7 +102,8 @@ export class AuthSession {
   }
 
   private async withLock<T>(action: () => Promise<T>): Promise<T> {
-    if (!navigator.locks) throw new Error('Web Locks unavailable')
+    if (!navigator.locks)
+      throw new ApiClientError('Web Locks unavailable', 'coordination_unavailable')
     return navigator.locks.request('uni-space.auth', action)
   }
 
@@ -138,7 +144,8 @@ export class AuthSession {
       this.requireCurrent(epoch)
       const state = this.readState()
       if (state.epoch !== epoch || state.blocked || state.pending || state.ended) {
-        this.clearSession(state.ended ? '' : interruptedMessage)
+        const hasEnded = state.epoch === epoch && state.ended === true && !state.pending
+        this.clearSession(hasEnded ? '' : interruptedMessage)
         throw new DOMException('Session recovery blocked', 'AbortError')
       }
       // Durable before dispatch: closing a tab or losing a response must never retry this cookie.
@@ -178,7 +185,11 @@ export class AuthSession {
     const epoch = crypto.randomUUID()
     // Intents use their own key. Only lock owners write the operation journal.
     // A mismatched journal/epoch blocks restoration even if this tab closes now.
-    localStorage.setItem(authEpochStorageKey, epoch)
+    try {
+      localStorage.setItem(authEpochStorageKey, epoch)
+    } catch {
+      throw new ApiClientError('Auth storage unavailable', 'coordination_unavailable')
+    }
     this.epoch = epoch
     this.update('unauthenticated', '', true)
     return epoch
@@ -222,7 +233,7 @@ export class AuthSession {
           signal: AbortSignal.timeout(15000),
         })
         this.requireCurrent(epoch!)
-        this.writeState({ epoch: epoch!, blocked: true, pending: false })
+        this.writeState({ epoch: epoch!, blocked: true, pending: false, ended: true })
         this.update('unauthenticated', 'Выход подтверждён сервером.')
       })
     } catch {
@@ -264,9 +275,17 @@ export class AuthSession {
 }
 
 export function getLoginErrorMessage(error: unknown) {
-  if (!(error instanceof ApiClientError))
-    return 'Вход недоступен в этом браузере. Проверьте поддержку Web Locks и доступ к хранилищу.'
+  if (error instanceof DOMException) {
+    if (error.name === 'TimeoutError')
+      return 'Сервер не подтвердил вход вовремя. Запрос мог быть выполнен. Войдите снова или повторите выход.'
+    if (error.name === 'AbortError') return ''
+  }
+  if (!(error instanceof ApiClientError)) return 'Не удалось подтвердить вход. Попробуйте позже.'
+  if (error.status !== undefined && error.status >= 500 && error.status < 600)
+    return 'Сервис входа временно недоступен. Попробуйте позже.'
   switch (error.code) {
+    case 'coordination_unavailable':
+      return 'Вход недоступен в этом браузере. Проверьте поддержку Web Locks и доступ к хранилищу.'
     case 'invalid_credentials':
       return 'Неверный логин или пароль.'
     case 'rate_limited': {
