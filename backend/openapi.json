@@ -203,6 +203,12 @@
         "title": "TokenResponse",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -332,6 +338,7 @@
     },
     "/api/v1/auth/logout": {
       "post": {
+        "description": "Refresh-cookie имеет приоритет. При неизвестной/отсутствующей cookie используется необязательный валидный Bearer с проверкой владельца sid. Ответ 204 удаляет cookie, но не доказывает отзыв, если пригодный идентификатор не найден.",
         "operationId": "logout_session_api_v1_auth_logout_post",
         "parameters": [
           {
@@ -424,6 +431,12 @@
             "description": "Internal Server Error"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {}
+        ],
         "summary": "Logout Session",
         "tags": [
           "auth"

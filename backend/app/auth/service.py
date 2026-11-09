@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.auth.security import DUMMY_PASSWORD_HASH, verify_password
+from app.auth.security import DUMMY_PASSWORD_HASH, validate_access_token, verify_password
 from app.core.config import Settings
 from app.models import AuthSession, RefreshToken, User
 
@@ -148,9 +148,28 @@ def rotate_refresh_token(db: Session, raw_token: str | None) -> tuple[AuthSessio
     return result
 
 
-def revoke_logout_session(db: Session, raw_token: str | None) -> None:
+def revoke_logout_session(
+    db: Session, raw_token: str | None, settings: Settings, access_token: str | None = None
+) -> None:
     with db.begin():
         locked = get_locked_refresh_session(db, raw_token)
         if locked:
             session, _token = locked
+            revoke_session(db, session, datetime.now(UTC), "logout")
+            return  # A known cookie always wins, including used/revoked refresh tokens.
+        if not access_token:
+            return
+        try:
+            claims = validate_access_token(access_token, settings)
+        except HTTPException as error:
+            if error.status_code != 401:
+                raise
+            return  # Optional, unusable credentials retain idempotent logout semantics.
+        session = db.scalar(
+            select(AuthSession)
+            .where(AuthSession.id == int(claims["sid"]), AuthSession.user_id == int(claims["sub"]))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if session is not None:
             revoke_session(db, session, datetime.now(UTC), "logout")

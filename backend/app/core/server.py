@@ -26,7 +26,17 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--reload", action="store_true")
+    parser.add_argument(
+        "--production", action="store_true", help="Force APP_ENV=production before validation"
+    )
     options = parser.parse_args()
+    if options.production:
+        # Settings treats environment names case-insensitively. Remove conflicting aliases.
+        for name in list(os.environ):
+            if name.lower() == "app_env":
+                del os.environ[name]
+        # The validated mode must also reach the application after execvp.
+        os.environ["APP_ENV"] = "production"
     settings = load_settings()
     arguments = create_server_arguments(
         settings, host=options.host, port=options.port, reload=options.reload

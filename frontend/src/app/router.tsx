@@ -1,5 +1,7 @@
 import { createBrowserRouter, Link, NavLink, Outlet } from 'react-router-dom'
 
+import { LoginPage, ProtectedRoute, SchedulePage } from '../features/auth/AuthPages'
+
 function AppLayout() {
   return (
     <div className="app-shell">
@@ -12,6 +14,7 @@ function AppLayout() {
             Главная
           </NavLink>
           <NavLink to="/about">О проекте</NavLink>
+          <NavLink to="/schedule">Кабинет</NavLink>
         </nav>
       </header>
       <main id="main-content">
@@ -53,6 +56,8 @@ export const router = createBrowserRouter([
     children: [
       { path: '/', element: <HomePage /> },
       { path: '/about', element: <AboutPage /> },
+      { path: '/login', element: <LoginPage /> },
+      { element: <ProtectedRoute />, children: [{ path: '/schedule', element: <SchedulePage /> }] },
     ],
   },
 ])

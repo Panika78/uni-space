@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import Field, StrictStr
 from sqlalchemy.orm import Session
 
@@ -11,6 +12,7 @@ from app.auth.security import create_access_token
 from app.auth.service import create_login_session, revoke_logout_session, rotate_refresh_token
 from app.core.config import Settings, get_settings
 from app.core.schemas import ApiError, RequestModel
+from app.dependencies.auth import bearer
 from app.dependencies.database import get_db_session
 
 COOKIE_NAME = "uni_space_refresh"
@@ -115,13 +117,26 @@ def refresh_session(
     return access
 
 
-@router.post("/logout", status_code=204, dependencies=[Depends(require_empty_body)])
+@router.post(
+    "/logout",
+    status_code=204,
+    dependencies=[Depends(require_empty_body)],
+    openapi_extra={"security": [{}]},
+    description=(
+        "Refresh-cookie имеет приоритет. При неизвестной/отсутствующей cookie используется "
+        "необязательный валидный Bearer с проверкой владельца sid. Ответ 204 удаляет cookie, "
+        "но не доказывает отзыв, если пригодный идентификатор не найден."
+    ),
+)
 def logout_session(
     db: Database,
     settings: AuthSettings,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     refresh_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
 ) -> Response:
-    revoke_logout_session(db, refresh_cookie)
+    revoke_logout_session(
+        db, refresh_cookie, settings, credentials.credentials if credentials else None
+    )
     response = Response(status_code=204)
     response.delete_cookie(
         COOKIE_NAME, path=COOKIE_PATH, secure=settings.cookie_secure, httponly=True, samesite="lax"
