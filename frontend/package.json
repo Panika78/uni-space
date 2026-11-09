@@ -12,10 +12,10 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"*.{js,ts,json}\"",
+    "format:check": "prettier --check .",
     "typecheck": "tsc -b --pretty false",
-    "types:generate": "uv run --locked --project ../backend python ../backend/scripts/export_openapi.py && openapi-typescript ../backend/openapi.json -o src/shared/api/schema.ts",
-    "types:check": "uv run --locked --project ../backend python ../backend/scripts/export_openapi.py --check && openapi-typescript ../backend/openapi.json -o /tmp/uni-space-openapi-types.ts && cmp src/shared/api/schema.ts /tmp/uni-space-openapi-types.ts",
+    "types:generate": "uv run --locked --python 3.12.12 --project ../backend python ../backend/scripts/export_openapi.py && openapi-typescript ../backend/openapi.json -o src/shared/api/schema.ts",
+    "types:check": "uv run --locked --python 3.12.12 --project ../backend python ../backend/scripts/export_openapi.py --check && openapi-typescript ../backend/openapi.json -o /tmp/uni-space-openapi-types.ts && cmp src/shared/api/schema.ts /tmp/uni-space-openapi-types.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

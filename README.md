@@ -46,9 +46,9 @@ npm run types:check
 Общие TypeScript-типы создаются из схем backend в OpenAPI. После изменения
 Pydantic-моделей обновите снимок OpenAPI и типы командой `npm run types:generate`
 из `frontend/`. Команда `npm run types:check` проверяет актуальность обоих
-сгенерированных файлов без их перезаписи. Обе команды запускают Python через
-`uv run --locked`, поэтому не переписывают `backend/uv.lock`. Если lock устарел,
-обновите его явной командой `uv lock`.
+сгенерированных файлов без их перезаписи. Обе команды запускают Python 3.12.12
+через `uv run --locked --python 3.12.12`, поэтому не переписывают
+`backend/uv.lock`. Если lock устарел, обновите его явной командой `uv lock`.
 
 Чтобы добавить компонент shadcn/ui, используйте CLI из `frontend/`:
 
@@ -154,14 +154,15 @@ Compose публикует PostgreSQL только на `127.0.0.1:5432`. Под
 ```bash
 docker compose up -d db
 cd backend
+uv python install 3.12.12
 uv sync --locked
 set -a
 source ../.env
 set +a
-uv run --locked alembic upgrade head
-uv run --locked python -c \
+uv run --locked --python 3.12.12 alembic upgrade head
+uv run --locked --python 3.12.12 python -c \
   'from sqlalchemy import text; from app.core.database import engine; print(engine.connect().execute(text("SELECT 1")).scalar_one())'
-uv run --locked uvicorn app.main:app --reload
+uv run --locked --python 3.12.12 uvicorn app.main:app --reload
 ```
 
 Для host `DATABASE_URL` пароль с URI-символами должен быть закодирован один раз
@@ -173,9 +174,9 @@ uv run --locked uvicorn app.main:app --reload
 
 ```bash
 cd backend
-DATABASE_URL=postgresql+psycopg://unused:unused@localhost/unused uv run --locked pytest
-uv run --locked ruff check .
-uv run --locked ruff format --check .
+DATABASE_URL=postgresql+psycopg://unused:unused@localhost/unused uv run --locked --python 3.12.12 pytest
+uv run --locked --python 3.12.12 ruff check .
+uv run --locked --python 3.12.12 ruff format --check .
 ```
 
 `DATABASE_URL` — обязательная настройка API. Если она отсутствует или
@@ -190,33 +191,38 @@ uv run --locked ruff format --check .
 данные в постоянном volume. Порт опубликован только на loopback (`55432`), он
 должен быть свободен.
 
-Из корня репозитория поднимите тестовую БД и установите зафиксированные
-зависимости:
+Каждый раз перед проверкой миграций удаляйте только выделенный тестовый Compose
+project со всеми его данными, затем создавайте новый контейнер PostgreSQL. Это
+обеспечивает пустую БД и при первом, и при повторном запуске:
 
 ```bash
+docker compose -p uni-space-test -f compose.test.yaml down --volumes --remove-orphans
 docker compose -p uni-space-test -f compose.test.yaml up -d --wait test-db
 cd backend
+uv python install 3.12.12
 uv sync --locked
 export APP_ENV=test
 export DATABASE_URL=postgresql+psycopg://uni_space_test:test-only-password@127.0.0.1:55432/uni_space_test
+uv run --locked --python 3.12.12 python -c \
+  'import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)'
 ```
 
 В `backend/` запустите backend lint/format и тесты:
 
 ```bash
 uv lock --check
-uv run --locked ruff check .
-uv run --locked ruff format --check .
-uv run --locked pytest -m "not integration"
-uv run --locked pytest -m integration
+uv run --locked --python 3.12.12 ruff check .
+uv run --locked --python 3.12.12 ruff format --check .
+uv run --locked --python 3.12.12 pytest -m "not integration"
+uv run --locked --python 3.12.12 pytest -m integration
 ```
 
 На той же тестовой PostgreSQL проверьте миграции на пустой базе и совпадение
 текущих ревизий БД с heads Alembic:
 
 ```bash
-uv run --locked alembic upgrade head
-uv run --locked python scripts/check_migrations.py
+uv run --locked --python 3.12.12 alembic upgrade head
+uv run --locked --python 3.12.12 python scripts/check_migrations.py
 ```
 
 Сейчас каталог Alembic не содержит ревизий, поэтому эти команды проверяют
@@ -248,7 +254,7 @@ job CI дополнительно запускает отмеченные `integ
 
 ```bash
 cd ..
-docker compose -p uni-space-test -f compose.test.yaml down --volumes
+docker compose -p uni-space-test -f compose.test.yaml down --volumes --remove-orphans
 ```
 
 GitHub Actions выполняет проверки отдельными jobs для pull request в `main` и

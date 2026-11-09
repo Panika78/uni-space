@@ -24,12 +24,17 @@ jobs:
       - name: Verify uv.lock matches pyproject.toml
         working-directory: backend
         run: uv lock --check
+      - name: Install pinned Python
+        run: uv python install 3.12.12
+      - name: Verify project Python version
+        working-directory: backend
+        run: uv run --locked --python 3.12.12 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)"
       - name: Ruff lint
         working-directory: backend
-        run: uv run --locked ruff check .
+        run: uv run --locked --python 3.12.12 ruff check .
       - name: Ruff format
         working-directory: backend
-        run: uv run --locked ruff format --check .
+        run: uv run --locked --python 3.12.12 ruff format --check .
 
   backend-tests:
     name: Backend tests
@@ -58,18 +63,23 @@ jobs:
       - name: Verify uv.lock matches pyproject.toml
         working-directory: backend
         run: uv lock --check
+      - name: Install pinned Python
+        run: uv python install 3.12.12
+      - name: Verify project Python version
+        working-directory: backend
+        run: uv run --locked --python 3.12.12 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)"
       - name: Run unit and HTTPX tests
         working-directory: backend
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
-        run: uv run --locked pytest -m "not integration"
+        run: uv run --locked --python 3.12.12 pytest -m "not integration"
       - name: Run PostgreSQL integration tests
         working-directory: backend
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
-        run: uv run --locked pytest -m integration
+        run: uv run --locked --python 3.12.12 pytest -m integration
 
   frontend-lint:
     name: Frontend ESLint and Prettier
@@ -173,6 +183,11 @@ jobs:
       - name: Install locked frontend dependencies
         working-directory: frontend
         run: npm ci
+      - name: Install pinned Python
+        run: uv python install 3.12.12
+      - name: Verify project Python version
+        working-directory: backend
+        run: uv run --locked --python 3.12.12 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)"
       - name: Check generated OpenAPI types without rewriting files
         working-directory: frontend
         run: npm run types:check
@@ -204,18 +219,23 @@ jobs:
       - name: Verify uv.lock matches pyproject.toml
         working-directory: backend
         run: uv lock --check
+      - name: Install pinned Python
+        run: uv python install 3.12.12
+      - name: Verify project Python version
+        working-directory: backend
+        run: uv run --locked --python 3.12.12 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)"
       - name: Apply migrations to empty PostgreSQL
         working-directory: backend
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
-        run: uv run --locked alembic upgrade head
+        run: uv run --locked --python 3.12.12 alembic upgrade head
       - name: Verify database matches current Alembic heads
         working-directory: backend
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
-        run: uv run --locked python scripts/check_migrations.py
+        run: uv run --locked --python 3.12.12 python scripts/check_migrations.py
 
   db-healthcheck:
     name: Compose PostgreSQL healthcheck regression
