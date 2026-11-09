@@ -103,13 +103,14 @@ def server_environment(options):
 
 
 @contextmanager
-def run_api_server(tmp_path, **environment):
+def run_api_server(tmp_path, *, production=False, **environment):
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
     with (tmp_path / "uvicorn.log").open("w+") as log:
         process = subprocess.Popen(
-            [sys.executable, "-m", "app.core.server", "--port", str(port)],
+            [sys.executable, "-m", "app.core.server", "--port", str(port)]
+            + (["--production"] if production else []),
             cwd=BACKEND,
             env=server_environment(environment),
             stdout=log,
@@ -223,3 +224,119 @@ def test_launcher_refuses_unsafe_proxy_configuration_before_starting_uvicorn(pro
     assert "trusted_proxy_ips" in result.stderr
     assert "Uvicorn running" not in result.stderr
     assert "test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ" not in result.stderr
+
+
+@pytest.mark.parametrize("inherited_mode", [None, "development", "test", "production"])
+def test_production_launcher_sets_mode_before_validation_and_passes_it_to_child(
+    monkeypatch, tmp_path, inherited_mode
+):
+    from app.core import server
+    from app.core.config import load_settings
+
+    environment = server_environment(
+        {
+            "JWT_SIGNING_KEY": "2ghJj3eYC65ZV4zuLr8s-91QTNpXvWbA",
+            "COOKIE_SECURE": "true",
+            "ALLOWED_ORIGINS": '["https://uni.example"]',
+        }
+    )
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    if inherited_mode is None:
+        monkeypatch.delenv("APP_ENV", raising=False)
+    else:
+        monkeypatch.setenv("APP_ENV", inherited_mode)
+    # Even an accidentally copied development .env cannot downgrade this command.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("APP_ENV=development\n")
+    monkeypatch.setattr(sys, "argv", ["server", "--production"])
+    executed = []
+
+    def capture_exec(program, arguments):
+        assert os.environ["APP_ENV"] == "production"
+        assert load_settings().app_env == "production"
+        executed.append((program, arguments))
+
+    monkeypatch.setattr(server.os, "execvp", capture_exec)
+    server.main()
+    assert len(executed) == 1
+    assert executed[0][0] == "uvicorn"
+    assert "--no-proxy-headers" in executed[0][1]
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"JWT_SIGNING_KEY": "development-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ"},
+        {"JWT_SIGNING_KEY": "test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ"},
+        {"JWT_SIGNING_KEY": "abcdefghijklmnopabcdefghijklmnop"},
+        {"COOKIE_SECURE": "false"},
+        {"ALLOWED_ORIGINS": '["http://localhost:5173"]'},
+        {"ALLOWED_ORIGINS": '["https://uni.example/path"]'},
+        {"ALLOWED_ORIGINS": '["https://*.example"]'},
+        {"PROXY_HEADERS_ENABLED": "true", "TRUSTED_PROXY_IPS": "[]"},
+        {"PROXY_HEADERS_ENABLED": "true", "TRUSTED_PROXY_IPS": '["*"]'},
+    ],
+)
+def test_production_launcher_refuses_unsafe_settings_despite_inherited_development(options):
+    environment = server_environment(
+        {
+            "APP_ENV": "development",
+            "JWT_SIGNING_KEY": "2ghJj3eYC65ZV4zuLr8s-91QTNpXvWbA",
+            "COOKIE_SECURE": "true",
+            "ALLOWED_ORIGINS": '["https://uni.example"]',
+        }
+        | options
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "app.core.server", "--production"],
+        cwd=BACKEND,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode != 0
+    assert "Invalid or missing environment settings" in result.stderr
+    assert "Uvicorn running" not in result.stderr
+    assert environment["JWT_SIGNING_KEY"] not in result.stderr
+
+
+@pytest.mark.parametrize("proxy_enabled", [False, True])
+def test_real_production_launcher_preserves_explicit_proxy_policy(tmp_path, proxy_enabled):
+    origin = "https://uni.example"
+    with run_api_server(
+        tmp_path,
+        production=True,
+        APP_ENV="development",
+        JWT_SIGNING_KEY="2ghJj3eYC65ZV4zuLr8s-91QTNpXvWbA",
+        COOKIE_SECURE="true",
+        ALLOWED_ORIGINS=json.dumps([origin]),
+        PROXY_HEADERS_ENABLED=str(proxy_enabled).lower(),
+        TRUSTED_PROXY_IPS='["127.0.0.1"]' if proxy_enabled else "[]",
+    ) as client:
+        for index in range(6):
+            response = client.post(
+                "/api/v1/auth/login",
+                json={},
+                headers={"Origin": origin, "X-Forwarded-For": f"192.0.2.{index + 1}"},
+            )
+            if index == 5 and not proxy_enabled:
+                assert_limited(response)
+            else:
+                assert response.status_code == 422
+    access_log = (tmp_path / "uvicorn.log").read_text()
+    assert ("192.0.2.1:0" in access_log) is proxy_enabled
+
+
+def test_real_development_launcher_keeps_local_example_settings_usable(tmp_path):
+    with run_api_server(
+        tmp_path,
+        APP_ENV="development",
+        JWT_SIGNING_KEY="development-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        COOKIE_SECURE="false",
+    ) as client:
+        assert (
+            client.post("/api/v1/auth/login", json={}, headers={"Origin": ORIGIN}).status_code
+            == 422
+        )

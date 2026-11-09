@@ -92,7 +92,12 @@ cp .env.example .env
 `127.0.0.1:8000`. По умолчанию используется `APP_ENV=development`, но явный
 `APP_ENV=production` передаётся приложению и включает production-валидацию.
 Файл не предоставляет TLS, reverse proxy и другие средства публичного
-production-развёртывания. Сервер запускается через `app.core.server`: forwarded-
+production-развёртывания. Для публичного запуска API предусмотрена явная команда
+`python -m app.core.server --production`: она принудительно включает production-
+валидацию до запуска Uvicorn, даже при development в окружении или `.env`.
+Это частичная защита SEC-03, не готовая инфраструктура; границы гарантии и
+обязательные действия — в [AUTH.md](docs/AUTH.md#режим-запуска-production-sec-03).
+Сервер запускается через `app.core.server`: forwarded-
 заголовки по умолчанию отключены, доверенный proxy включается только явно через
 `PROXY_HEADERS_ENABLED` и `TRUSTED_PROXY_IPS`. Это не заменяет настройку proxy и
 сетевую изоляцию backend; обязательные действия описаны в [AUTH.md](docs/AUTH.md).

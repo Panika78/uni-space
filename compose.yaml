@@ -1,3 +1,5 @@
+# Local development only; loopback ports do not provide production infrastructure.
+# Public deployment requirements and the --production launcher: docs/AUTH.md.
 services:
   db:
     image: postgres:17.6-bookworm
