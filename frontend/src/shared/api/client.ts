@@ -58,6 +58,7 @@ export type ApiRequestInit = RequestInit & { authenticated?: boolean }
 export async function apiFetch<T>(input: RequestInfo | URL, init: ApiRequestInit = {}): Promise<T> {
   const { authenticated, ...requestInit } = init
   if (!authenticated) return sendRequest<T>(input, requestInit)
+  const target = requireApiDestination(input)
   if (!beginAuthRequest) throw new Error('Auth provider is unavailable')
   const auth = beginAuthRequest()
   const signal = AbortSignal.any([
@@ -65,17 +66,18 @@ export async function apiFetch<T>(input: RequestInfo | URL, init: ApiRequestInit
     ...(init.signal ? [init.signal] : input instanceof Request ? [input.signal] : []),
   ])
   // Clone before dispatch so a consumed Request body can be replayed once.
-  const replay = input instanceof Request ? input.clone() : input
+  const replay = target instanceof Request ? target.clone() : target
   const send = (target: RequestInfo | URL, token: string) => {
+    target = requireApiDestination(target)
     const headers = new Headers(target instanceof Request ? target.headers : undefined)
     new Headers(init.headers).forEach((value, name) => headers.set(name, value))
     headers.set('Authorization', `Bearer ${token}`)
-    return sendRequest<T>(target, { ...requestInit, headers, signal })
+    return sendRequest<T>(target, { ...requestInit, headers, signal, redirect: 'error' })
   }
   try {
     let result: T
     try {
-      result = await send(input, auth.token)
+      result = await send(target, auth.token)
     } catch (error) {
       signal.throwIfAborted()
       auth.assertCurrent()
@@ -172,4 +174,26 @@ async function sendRequest<T>(input: RequestInfo | URL, init: RequestInit = {}):
     throw new ApiClientError('Запрос не выполнен', 'http_error', response.status)
   }
   return payload as T
+}
+
+function requireApiDestination(input: RequestInfo | URL): Request | string {
+  let url: URL
+  try {
+    url = new URL(input instanceof Request ? input.url : String(input), window.location.href)
+  } catch {
+    throw new ApiClientError('Недопустимый адрес API', 'invalid_api_target')
+  }
+  if (
+    !['http:', 'https:'].includes(url.protocol) ||
+    url.origin !== window.location.origin ||
+    !url.pathname.startsWith('/api/v1/') ||
+    // Reject encoded separators whose interpretation can differ at a proxy.
+    /%(2f|5c)/i.test(url.pathname) ||
+    url.username !== '' ||
+    url.password !== ''
+  ) {
+    throw new ApiClientError('Недопустимый адрес API', 'invalid_api_target')
+  }
+  // Freeze URL objects and resolve relative strings independently of document <base>.
+  return input instanceof Request ? input : url.href
 }

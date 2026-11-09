@@ -10,7 +10,9 @@ import { LoginPage, ProtectedRoute, SchedulePage } from './AuthPages'
 beforeEach(() => {
   localStorage.clear()
   vi.stubGlobal('navigator', {
-    locks: { request: (_name: string, action: () => Promise<unknown>) => action() },
+    locks: {
+      request: (_name: string, _options: LockOptions, action: () => Promise<unknown>) => action(),
+    },
   })
 })
 afterEach(() => {

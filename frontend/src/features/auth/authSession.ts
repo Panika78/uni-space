@@ -9,6 +9,8 @@ type SharedState = { epoch: string; blocked: boolean; pending: boolean; ended?: 
 export const authStorageKey = 'uni-space.auth-state'
 export const authEpochStorageKey = 'uni-space.auth-epoch'
 const emptyState: SharedState = { epoch: 'initial', blocked: false, pending: false }
+const lockWaitMessage =
+  'Операция не началась: её блокирует другая вкладка. Закройте зависшую вкладку и повторите действие.'
 const interruptedMessage =
   'Не удалось подтвердить состояние сессии. Войдите снова или повторите выход.'
 
@@ -104,7 +106,23 @@ export class AuthSession {
   private async withLock<T>(action: () => Promise<T>): Promise<T> {
     if (!navigator.locks)
       throw new ApiClientError('Web Locks unavailable', 'coordination_unavailable')
-    return navigator.locks.request('uni-space.auth', action)
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      controller.abort(new ApiClientError(lockWaitMessage, 'lock_wait_timeout'))
+    }, 10000)
+    try {
+      return await navigator.locks.request('uni-space.auth', { signal: controller.signal }, () => {
+        // The deadline belongs only to acquisition, never to the cookie operation.
+        clearTimeout(timer)
+        controller.signal.throwIfAborted()
+        return action()
+      })
+    } catch (error) {
+      if (controller.signal.aborted) throw controller.signal.reason
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   start = () => {
@@ -122,11 +140,21 @@ export class AuthSession {
       localStorage.setItem('uni-space.storage-probe', '1')
       localStorage.removeItem('uni-space.storage-probe')
       this.epoch = this.readEpoch()
+      const state = this.readState()
+      // A confirmed end needs no cookie operation, even when another tab holds the lock.
+      if (state.epoch === this.epoch && state.ended === true && !state.pending) {
+        this.clearSession()
+        return
+      }
       await this.refresh()
-    } catch {
+    } catch (error) {
+      const hasLockTimeout = error instanceof ApiClientError && error.code === 'lock_wait_timeout'
+      if (hasLockTimeout) this.synchronize()
       if (this.snapshot.status === 'initializing')
         this.clearSession(
-          'Вход недоступен. Нужен браузер с Web Locks и доступным локальным хранилищем.',
+          hasLockTimeout
+            ? lockWaitMessage
+            : 'Вход недоступен. Нужен браузер с Web Locks и доступным локальным хранилищем.',
         )
     }
   }
@@ -177,6 +205,16 @@ export class AuthSession {
         }
         throw error
       }
+    }).catch((error: unknown) => {
+      if (
+        error instanceof ApiClientError &&
+        error.code === 'lock_wait_timeout' &&
+        this.readEpoch() === epoch
+      ) {
+        // No cookie was sent and no journal entry is ours to change.
+        this.clearSession(lockWaitMessage)
+      }
+      throw error
     })
   }
 
@@ -236,11 +274,13 @@ export class AuthSession {
         this.writeState({ epoch: epoch!, blocked: true, pending: false, ended: true })
         this.update('unauthenticated', 'Выход подтверждён сервером.')
       })
-    } catch {
+    } catch (error) {
       if (epoch === undefined || this.epoch === epoch)
         this.update(
           'unauthenticated',
-          'Данные скрыты, но сервер не подтвердил выход. Повторите выход или войдите снова.',
+          error instanceof ApiClientError && error.code === 'lock_wait_timeout'
+            ? `Данные скрыты; отзыв сессии не подтверждён. ${lockWaitMessage}`
+            : 'Данные скрыты, но сервер не подтвердил выход. Повторите выход или войдите снова.',
         )
     }
   }
@@ -284,6 +324,8 @@ export function getLoginErrorMessage(error: unknown) {
   if (error.status !== undefined && error.status >= 500 && error.status < 600)
     return 'Сервис входа временно недоступен. Попробуйте позже.'
   switch (error.code) {
+    case 'lock_wait_timeout':
+      return lockWaitMessage
     case 'coordination_unavailable':
       return 'Вход недоступен в этом браузере. Проверьте поддержку Web Locks и доступ к хранилищу.'
     case 'invalid_credentials':

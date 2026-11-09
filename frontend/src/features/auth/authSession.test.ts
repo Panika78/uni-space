@@ -33,15 +33,30 @@ beforeEach(() => {
   let queue: Promise<unknown> = Promise.resolve()
   vi.stubGlobal('navigator', {
     locks: {
-      request: (_name: string, action: () => Promise<unknown>) => {
-        const result = queue.then(action)
-        queue = result.catch(() => {})
-        return result
+      request: (
+        _name: string,
+        optionsOrAction: LockOptions | (() => Promise<unknown>),
+        callback?: () => Promise<unknown>,
+      ) => {
+        const options = typeof optionsOrAction === 'function' ? {} : optionsOrAction
+        const action = typeof optionsOrAction === 'function' ? optionsOrAction : callback!
+        return new Promise((resolve, reject) => {
+          const cancel = () => reject(options.signal?.reason)
+          options.signal?.addEventListener('abort', cancel, { once: true })
+          const scheduled = queue.then(() => {
+            options.signal?.removeEventListener('abort', cancel)
+            options.signal?.throwIfAborted()
+            return action()
+          })
+          scheduled.then(resolve, reject)
+          queue = scheduled.catch(() => {})
+        })
       },
     },
   })
 })
 afterEach(() => {
+  vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
@@ -245,9 +260,9 @@ describe('authenticated HTTP retry policy', () => {
     })
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
       '/api/v1/auth/refresh',
-      '/api/v1/test-only',
+      new URL('/api/v1/test-only', window.location.href).href,
       '/api/v1/auth/refresh',
-      '/api/v1/test-only',
+      new URL('/api/v1/test-only', window.location.href).href,
     ])
     expect(new Headers(fetchMock.mock.calls[3][1].headers).get('Authorization')).toBe('Bearer new')
   })
@@ -437,7 +452,7 @@ it('replays a cloned Request body once after refresh', async () => {
     return bodies.length === 1 ? error('access_expired') : Response.json({ ok: true })
   })
   vi.stubGlobal('fetch', fetchMock)
-  const request = new Request('http://localhost/api/v1/test-only', {
+  const request = new Request(new URL('/api/v1/test-only', window.location.href), {
     method: 'POST',
     body: JSON.stringify({ fictional: true }),
   })
@@ -631,5 +646,146 @@ describe('review regressions: login failure diagnostics', () => {
     expect(session.getSnapshot().message).not.toContain('private detail')
     expect(fetchMock).not.toHaveBeenCalled()
     storage.mockRestore()
+  })
+})
+
+describe('bounded Web Lock acquisition', () => {
+  async function holdLock() {
+    const released = deferred<void>()
+    const acquired = deferred<void>()
+    const completion = navigator.locks.request('uni-space.auth', {}, () => {
+      acquired.resolve()
+      return released.promise
+    })
+    await acquired.promise
+    return { release: () => released.resolve(), completion }
+  }
+
+  it.each(['login', 'logout'] as const)(
+    'cancels waiting %s, hides old data, and never dispatches after release or reload',
+    async (operation) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(token()))
+      const { session, cache } = createSession()
+      await session.start()
+      cache.setQueryData(['private'], 'old-user')
+      const old = session.beginRequest()
+      const holder = await holdLock()
+      const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+      vi.stubGlobal('fetch', fetchMock)
+      vi.useFakeTimers()
+      const pending =
+        operation === 'logout'
+          ? session.logout()
+          : session.login({ login: 'fictional', password: 'fictional' })
+      try {
+        expect(session.getSnapshot().status).toBe('unauthenticated')
+        expect(old.signal.aborted).toBe(true)
+        expect(cache.getQueryData(['private'])).toBeUndefined()
+        await vi.advanceTimersByTimeAsync(10000)
+        expect(session.getSnapshot().busy).toBe(false)
+        expect(session.getSnapshot().message).toContain('Закройте зависшую вкладку')
+        expect(session.getSnapshot().message).not.toContain('Выход подтверждён')
+        expect(fetchMock).not.toHaveBeenCalled()
+      } finally {
+        holder.release()
+        await holder.completion
+        await pending
+      }
+      await createSession().session.start()
+      expect(fetchMock).not.toHaveBeenCalled()
+      const journal = JSON.parse(localStorage.getItem(authStorageKey)!)
+      expect(journal.pending).toBe(false)
+      expect(journal.ended).not.toBe(true)
+    },
+  )
+
+  it('finishes initial refresh acquisition without HTTP or a false unsupported-browser diagnosis', async () => {
+    const holder = await holdLock()
+    const fetchMock = vi.fn().mockResolvedValue(token())
+    vi.stubGlobal('fetch', fetchMock)
+    vi.useFakeTimers()
+    const { session } = createSession()
+    const pending = session.start()
+    try {
+      expect(session.getSnapshot().status).toBe('initializing')
+      await vi.advanceTimersByTimeAsync(10000)
+      expect(session.getSnapshot().status).toBe('unauthenticated')
+      expect(session.getSnapshot().message).toContain('Закройте зависшую вкладку')
+      expect(session.getSnapshot().message).not.toContain('Web Locks')
+      expect(localStorage.getItem(authStorageKey)).toBeNull()
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally {
+      holder.release()
+      await holder.completion
+      await pending
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+    // An explicit reload may bootstrap again: the cancelled waiter never used a cookie.
+    await createSession().session.start()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not misdiagnose a lock timeout when another auth intent changes the epoch during bootstrap', async () => {
+    const holder = await holdLock()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    vi.useFakeTimers()
+    const { session } = createSession()
+    const pending = session.start()
+    localStorage.setItem('uni-space.auth-epoch', 'new-concurrent-intent')
+    try {
+      await vi.advanceTimersByTimeAsync(10000)
+      expect(session.getSnapshot().status).toBe('unauthenticated')
+      expect(session.getSnapshot().message).not.toContain('Web Locks')
+    } finally {
+      holder.release()
+      await holder.completion
+      await pending
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('does not time out or cancel a callback after it has acquired the lock', async () => {
+    vi.useFakeTimers()
+    const response = deferred<Response>()
+    const fetchMock = vi.fn().mockReturnValue(response.promise)
+    vi.stubGlobal('fetch', fetchMock)
+    const lockRequest = vi.spyOn(navigator.locks, 'request')
+    const { session } = createSession()
+    const pending = session.start()
+    await vi.advanceTimersByTimeAsync(0)
+    const options = lockRequest.mock.calls[0][1] as LockOptions
+    expect(options.signal).toBeDefined()
+    await vi.advanceTimersByTimeAsync(10001)
+    expect(options.signal?.aborted).toBe(false)
+    expect(session.getSnapshot().status).toBe('initializing')
+    response.resolve(token())
+    await pending
+    expect(session.getSnapshot().status).toBe('authenticated')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps confirmed logout reload quiet even while another tab holds the lock', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
+    await createSession().session.logout()
+    const holder = await holdLock()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const reloaded = createSession().session
+    vi.useFakeTimers()
+    const pending = reloaded.start()
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      expect(reloaded.getSnapshot()).toEqual({
+        status: 'unauthenticated',
+        message: '',
+        busy: false,
+      })
+    } finally {
+      holder.release()
+      await holder.completion
+      await pending
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

@@ -1,4 +1,4 @@
-/* global process, console, URL, document, innerWidth, localStorage, sessionStorage, setTimeout, AbortController, performance, Navigator, Storage, DOMException */
+/* global process, console, URL, document, innerWidth, localStorage, sessionStorage, setTimeout, AbortController, performance, Navigator, Storage, DOMException, navigator */
 // Run against local Vite + the real backend using two prepared fictional accounts.
 // Playwright is supplied by the environment; no production test route is installed.
 import assert from 'node:assert/strict'
@@ -133,6 +133,25 @@ try {
   assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, refreshBefore + 1)
   check('controlled access_expired, real refresh and exactly one replay')
   await context.unroute(`**${testPath}`)
+  for (const destination of [
+    `${baseURL}/outside-api-capture`,
+    'https://external.example/api/v1/redirect-capture',
+  ]) {
+    let redirectedRequests = 0
+    await context.route(destination, (route) => {
+      redirectedRequests++
+      return route.fulfill({ json: { unexpected: true } })
+    })
+    await context.route(`**${testPath}`, (route) =>
+      route.fulfill({ status: 302, headers: { Location: destination } }),
+    )
+    assert.equal((await callProtected(page)).code, 'network_error')
+    assert.equal(redirectedRequests, 0)
+    await context.unroute(destination)
+    await context.unroute(`**${testPath}`)
+  }
+  check('authenticated redirects neither leave the API prefix nor contact another origin')
+
   await context.route(`**${testPath}`, (route) => route.abort('failed'))
   assert.equal((await callProtected(page)).code, 'network_error')
   assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, refreshBefore + 1)
@@ -240,7 +259,22 @@ try {
   assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, countAfterClose)
   fault = ''
   check('closing the lock holder after rotation leaves a durable recovery barrier')
-  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  // A closing document may run fetch-abort cleanup before destruction, marking
+  // the lost refresh response as blocked and hiding the other tabs as well.
+  const hasLogoutButton =
+    (await page.getByRole('button', { name: 'Выйти', exact: true }).count()) > 0
+  if (!hasLogoutButton) {
+    const journal = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem('uni-space.auth-state')),
+    )
+    assert.equal(journal.blocked, true)
+    assert.equal(journal.pending, true)
+    assert.notEqual(journal.ended, true)
+    await heading(page, 'Вход')
+  }
+  await page
+    .getByRole('button', { name: hasLogoutButton ? 'Выйти' : 'Повторить выход', exact: true })
+    .click()
   await Promise.all([heading(page, 'Вход'), heading(second, 'Вход')])
   await second.waitForFunction(() => document.querySelector('[role="status"]') === null)
   const refreshAfterLogout = requests.filter((path) => path.endsWith('/refresh')).length
@@ -303,6 +337,85 @@ try {
     assert.equal(requests.length, beforeRecovery)
     check(`controlled login ${scenario} has correct feedback, one POST and no automatic recovery`)
   }
+
+  // These fixtures exercise the real Web Locks manager without changing backend auth.
+  async function holdAuthLock() {
+    await second.evaluate(
+      () =>
+        new Promise((acquired) => {
+          globalThis.authTestHeldLock = navigator.locks.request('uni-space.auth', () => {
+            acquired()
+            return new Promise((release) => {
+              globalThis.authTestReleaseLock = release
+            })
+          })
+        }),
+    )
+  }
+  async function releaseAuthLock() {
+    await second.evaluate(async () => {
+      globalThis.authTestReleaseLock()
+      await globalThis.authTestHeldLock
+    })
+  }
+  const countAuth = () => requests.filter((path) => path.startsWith('/api/v1/auth/')).length
+  await context.route('**/api/v1/auth/login', (route) =>
+    route.fulfill({
+      json: { access_token: 'fictional-browser-token', token_type: 'bearer', expires_in: 600 },
+    }),
+  )
+  await page.getByLabel('Логин', { exact: true }).fill(loginA)
+  await page.getByLabel('Пароль', { exact: true }).fill(password)
+  await page.getByRole('button', { name: 'Войти', exact: true }).click()
+  await heading(page, 'Расписание')
+  await context.unroute('**/api/v1/auth/login')
+  await holdAuthLock()
+  const beforeWaitingLogout = countAuth()
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  await heading(page, 'Вход')
+  await page.getByText(/Закройте зависшую вкладку/).waitFor()
+  assert.ok((await page.getByRole('status').innerText()).includes('отзыв сессии не подтверждён'))
+  assert.equal(await page.getByRole('button', { name: 'Войти', exact: true }).isEnabled(), true)
+  assert.equal(countAuth(), beforeWaitingLogout)
+  await releaseAuthLock()
+  await page.reload()
+  await heading(page, 'Вход')
+  assert.equal(countAuth(), beforeWaitingLogout)
+  check(
+    'logout waiter times out, hides private UI, never posts after release, and stays blocked after reload',
+  )
+
+  await holdAuthLock()
+  const beforeWaitingLogin = countAuth()
+  await page.getByLabel('Логин', { exact: true }).fill(loginA)
+  await page.getByLabel('Пароль', { exact: true }).fill(password)
+  await page.getByRole('button', { name: 'Войти', exact: true }).click()
+  await page.getByText(/Закройте зависшую вкладку/).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Войти', exact: true }).isEnabled(), true)
+  await releaseAuthLock()
+  await page.reload()
+  await heading(page, 'Вход')
+  assert.equal(countAuth(), beforeWaitingLogin)
+  check('login waiter times out without a POST, stuck busy state or late dispatch')
+
+  // Reset this isolated fixture only after the real server session was logged out.
+  await context.clearCookies()
+  await page.evaluate(() => localStorage.clear())
+  await holdAuthLock()
+  const beforeWaitingRefresh = countAuth()
+  const bootstrapping = await context.newPage()
+  await bootstrapping.goto(`${baseURL}/schedule`)
+  await bootstrapping.getByText('Проверяем сессию…', { exact: true }).waitFor()
+  await bootstrapping.getByText(/Закройте зависшую вкладку/).waitFor()
+  await heading(bootstrapping, 'Вход')
+  assert.ok(!(await bootstrapping.getByRole('status').innerText()).includes('Web Locks'))
+  assert.equal(countAuth(), beforeWaitingRefresh)
+  await releaseAuthLock()
+  await bootstrapping.close()
+  assert.equal(countAuth(), beforeWaitingRefresh)
+  check(
+    'initial refresh waiter exits initializing, reports lock contention and never dispatches late',
+  )
 
   for (const unavailable of ['locks', 'storage']) {
     const unsupportedContext = await browser.newContext({ viewport: { width: 360, height: 800 } })
