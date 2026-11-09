@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from pydantic import TypeAdapter
 
+from app.auth.router import router as auth_router
 from app.core.config import get_settings
 from app.core.errors import install_exception_handlers
 from app.core.middleware import ApiHeadersMiddleware
@@ -26,6 +27,7 @@ app = FastAPI(
 )
 app.add_middleware(ApiHeadersMiddleware)
 install_exception_handlers(app)
+app.include_router(auth_router)
 
 
 def create_openapi_schema(application: FastAPI) -> dict:

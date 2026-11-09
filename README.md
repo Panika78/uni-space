@@ -15,6 +15,7 @@ TypeScript и Vite. Предметные модели и API будут доба
 - [Архитектура](docs/ARCHITECTURE.md) — стек и целевая структура.
 - [Модель данных](docs/DB.md) — сущности, связи и ограничения.
 - [API-контракт](docs/API.md) — принятый контракт MVP 1; приоритет над предварительным перечнем API в архитектуре.
+- [Серверная авторизация](docs/AUTH.md) — настройки, Origin, транзакции, rate limiting и ограничения TASK-006.
 - [AGENTS.md](AGENTS.md) — правила работы coding-агентов.
 
 Спецификации задают рабочую основу; вопросы `TBD` остаются неутверждёнными. Issues со статусом `Draft` — черновики задач. Прямое поручение пользователя реализовать конкретную задачу разрешает её выполнение в указанном объёме; окончательная приёмка выполняется отдельно.
@@ -162,7 +163,7 @@ set +a
 uv run --locked --python 3.12.12 alembic upgrade head
 uv run --locked --python 3.12.12 python -c \
   'from sqlalchemy import text; from app.core.database import engine; print(engine.connect().execute(text("SELECT 1")).scalar_one())'
-uv run --locked --python 3.12.12 uvicorn app.main:app --reload
+uv run --locked --python 3.12.12 uvicorn app.main:app --reload --no-proxy-headers
 ```
 
 Для host `DATABASE_URL` пароль с URI-символами должен быть закодирован один раз
@@ -179,9 +180,8 @@ uv run --locked --python 3.12.12 ruff check .
 uv run --locked --python 3.12.12 ruff format --check .
 ```
 
-`DATABASE_URL` — обязательная настройка API. Если она отсутствует или
-некорректна, процесс завершается с именем проблемной настройки, не выводя её
-значение.
+`DATABASE_URL` и `JWT_SIGNING_KEY` — обязательные настройки API. Если настройка отсутствует или некорректна,
+процесс завершается с её именем, не выводя значение.
 
 ## Проверки проекта
 
@@ -202,6 +202,7 @@ cd backend
 uv python install 3.12.12
 uv sync --locked
 export APP_ENV=test
+export JWT_SIGNING_KEY=test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ
 export DATABASE_URL=postgresql+psycopg://uni_space_test:test-only-password@127.0.0.1:55432/uni_space_test
 uv run --locked --python 3.12.12 python -c \
   'import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)'
@@ -225,10 +226,9 @@ uv run --locked --python 3.12.12 alembic upgrade head
 uv run --locked --python 3.12.12 python scripts/check_migrations.py
 ```
 
-Сейчас каталог Alembic не содержит ревизий, поэтому эти команды проверяют
-успешное подключение к чистой PostgreSQL и совпадение пустого графа миграций с
-пустым состоянием БД. Когда появятся миграции, те же команды применят их и
-потребуют, чтобы база достигла всех текущих heads.
+Миграции TASK-005 создают модели аккаунтов, сессий и университетских справочников.
+Проверяйте также `uv run --locked --python 3.12.12 alembic check` для совпадения
+ORM и схемы PostgreSQL.
 
 В `frontend/` установите зависимости по lock-файлу и выполните frontend-проверки:
 
