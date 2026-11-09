@@ -1,6 +1,7 @@
+import re
 from functools import lru_cache
+from ipaddress import IPv4Address, IPv6Address
 from typing import Literal
-from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -58,24 +59,28 @@ class Settings(BaseSettings):
         if not values:
             raise ValueError("must include an explicit origin")
         for value in values:
-            parsed = urlsplit(value)
-            try:
-                port = parsed.port
-            except ValueError:
-                raise ValueError("invalid origin port") from None
-            if (
-                parsed.scheme not in {"http", "https"}
-                or not parsed.hostname
-                or parsed.username
-                or parsed.password
-                or parsed.path
-                or parsed.query
-                or parsed.fragment
-                or "*" in value
-                or value != value.strip()
-                or (port is not None and not 1 <= port <= 65535)
+            match = re.fullmatch(
+                r"https?://(\[[0-9a-fA-F:.]+\]|[a-zA-Z0-9.-]+)(?::([0-9]{1,5}))?", value
+            )
+            if match is None:
+                raise ValueError("must be a serialized HTTP(S) origin without path or delimiters")
+            host, port = match.groups()
+            if port is not None and not 1 <= int(port) <= 65535:
+                raise ValueError("invalid origin port")
+            if host.startswith("["):
+                IPv6Address(host[1:-1])
+            elif all(character in "0123456789." for character in host):
+                IPv4Address(host)
+            elif (
+                len(host) > 253
+                or re.fullmatch(
+                    r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
+                    r"(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.?",
+                    host,
+                )
+                is None
             ):
-                raise ValueError("must be an exact HTTP(S) origin without path")
+                raise ValueError("invalid origin host")
         return values
 
     @model_validator(mode="after")
@@ -84,6 +89,9 @@ class Settings(BaseSettings):
             key = self.jwt_signing_key.get_secret_value().lower()
             if (
                 not self.cookie_secure
+                # Reject complete repetitions of any shorter block (including
+                # mixed-case variants). This is a pattern check, not entropy estimation.
+                or key in (key + key)[1:-1]
                 or any(
                     word in key
                     for word in (
@@ -97,6 +105,11 @@ class Settings(BaseSettings):
                         "qwerty",
                         "0123456789",
                         "abcdefghijklmnopqrstuvwxyz",
+                        "abcdefghijklmnop",
+                        "9876543210",
+                        "zyxwvutsrqponmlkjihgfedcba",
+                        "demo",
+                        "sample",
                     )
                 )
                 or any(not origin.startswith("https://") for origin in self.allowed_origins)

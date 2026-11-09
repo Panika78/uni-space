@@ -27,7 +27,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      APP_ENV: development
+      APP_ENV: ${APP_ENV:-development}
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
       JWT_ISSUER: ${JWT_ISSUER:-uni-space}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-uni-space-api}
@@ -44,7 +44,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
 volumes:
   postgres_data:

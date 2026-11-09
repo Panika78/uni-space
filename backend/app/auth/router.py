@@ -5,6 +5,7 @@ from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, 
 from pydantic import Field, StrictStr
 from sqlalchemy.orm import Session
 
+from app.auth.body_limit import AuthRoute
 from app.auth.rate_limit import LoginRateLimiter
 from app.auth.security import create_access_token
 from app.auth.service import create_login_session, revoke_logout_session, rotate_refresh_token
@@ -43,6 +44,7 @@ def require_login_attempt(request: Request) -> None:
 
 
 async def require_empty_body(request: Request) -> None:
+    # AuthRoute has already bounded and buffered the body before FastAPI parsing.
     if await request.body():
         raise HTTPException(422, "validation_error")
 
@@ -50,10 +52,12 @@ async def require_empty_body(request: Request) -> None:
 router = APIRouter(
     prefix="/api/v1/auth",
     tags=["auth"],
+    route_class=AuthRoute,
     dependencies=[Depends(require_auth_origin)],
     responses={
         401: {"model": ApiError},
         403: {"model": ApiError},
+        413: {"model": ApiError, "description": "Тело auth-запроса превышает 16384 байта"},
         422: {"model": ApiError},
         500: {"model": ApiError},
     },

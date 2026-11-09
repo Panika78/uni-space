@@ -21,6 +21,7 @@ HTTP_ERROR_CODES = {
     },
     403: {"forbidden", "origin_not_allowed"},
     404: {"not_found"},
+    413: {"request_too_large"},
     422: {"validation_error"},
     429: {"rate_limited"},
 }
@@ -28,6 +29,7 @@ DEFAULT_HTTP_ERROR_CODES = {
     401: "invalid_access",
     403: "forbidden",
     404: "not_found",
+    413: "request_too_large",
     422: "validation_error",
     429: "rate_limited",
 }

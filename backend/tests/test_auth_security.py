@@ -170,6 +170,32 @@ def test_production_accepts_private_key_and_https():
         ["https://uni.example/"],
         ["https://a:b@uni.example"],
         ["https://a:99999"],
+        ["https://uni.example?"],
+        ["https://uni.example#"],
+        ["https://uni.example:"],
+        ["https://uni.example:0"],
+        ["https://uni.example:65536"],
+        ["https://uni.example:-1"],
+        ["https://uni.example:+443"],
+        ["https://uni.example:abc"],
+        ["https://uni.example:443:"],
+        ["https://uni.example:443?"],
+        ["https://uni.example:443#"],
+        ["https://uni.example/evil"],
+        ["https://uni.example\n"],
+        ["https://uni. example"],
+        ["https://uni.example\t"],
+        ["https://uni.example\\evil"],
+        ["https://user@uni.example"],
+        ["https://[::1]:"],
+        ["https://[::1]?"],
+        ["https://[::1]#"],
+        ["https://[:::1]"],
+        ["https://::1"],
+        ["https://[fe80::1%25eth0]"],
+        ["https://-uni.example"],
+        ["https://uni..example"],
+        ["https://256.256.256.256"],
     ],
 )
 def test_origin_configuration_requires_exact_origins(origins):
@@ -239,3 +265,65 @@ def test_cookie_can_disable_secure_only_for_local_http():
     cookie = response.headers["set-cookie"]
     assert "Secure" not in cookie
     assert "HttpOnly" in cookie and "Domain=" not in cookie
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "abcdefghijklmnopabcdefghijklmnop",
+        "aB7!cD9@eF2#gH4$aB7!cD9@eF2#gH4$",
+        "2ghJj3eYC65ZV4zuLr8s-91QTNpXvWbA" * 2,
+        "abcdefghijklmnopqrstuvwxyz-ABCDEF",
+        "ZYXWVUTSRQPONMLKJIHGFEDCBA-1234567",
+        "9876543210-ABCDEFGHIJKLMNOPQRSTUV",
+        "demo-key-2ghJj3eYC65ZV4zuLr8s-91QTN",
+        "sample-key-2ghJj3eYC65ZV4zuLr8s-91QTN",
+        "test-key-2ghJj3eYC65ZV4zuLr8s-91QTN",
+        "example-key-2ghJj3eYC65ZV4zuLr8s-91QTN",
+        "short",
+        "",
+        "x" * 64,
+    ],
+)
+def test_production_rejects_predictable_signing_keys(key):
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            app_env="production",
+            database_url="postgresql+psycopg://test:test@localhost/test",
+            jwt_signing_key=key,
+            allowed_origins=["https://uni.example"],
+        )
+
+
+def test_production_accepts_cryptographically_generated_signing_key():
+    import secrets
+
+    key = secrets.token_urlsafe(48)
+    settings = Settings(
+        _env_file=None,
+        app_env="production",
+        database_url="postgresql+psycopg://test:test@localhost/test",
+        jwt_signing_key=key,
+        allowed_origins=["https://uni.example"],
+    )
+    assert settings.jwt_signing_key.get_secret_value() == key
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://localhost",
+        "http://localhost:5173",
+        "https://uni.example",
+        "https://uni.example:443",
+        "https://uni.example:65535",
+        "http://127.0.0.1:8000",
+        "http://[::1]:5173",
+        "https://[2001:db8::1]",
+        "https://[::ffff:192.0.2.1]:443",
+        "https://xn--e1afmkfd.xn--p1ai",
+    ],
+)
+def test_origin_configuration_accepts_exact_http_origins(origin):
+    assert auth_settings(allowed_origins=[origin]).allowed_origins == [origin]

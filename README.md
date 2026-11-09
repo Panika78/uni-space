@@ -80,6 +80,12 @@ cp .env.example .env
 
 ### Backend и PostgreSQL в Docker Compose
 
+Этот Compose-файл предназначен для локальной разработки; API опубликован на
+`127.0.0.1:8000`. По умолчанию используется `APP_ENV=development`, но явный
+`APP_ENV=production` передаётся приложению и включает production-валидацию.
+Файл не предоставляет TLS, reverse proxy и другие средства публичного
+production-развёртывания. Настройки безопасности описаны в [AUTH.md](docs/AUTH.md).
+
 Поднимите PostgreSQL, примените миграции и запустите API:
 
 ```bash
