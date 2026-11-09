@@ -12,7 +12,7 @@ from app.core.errors import install_exception_handlers
 from app.core.middleware import REQUEST_ID_PATTERN, ApiHeadersMiddleware
 from app.core.pagination import InvalidCursorError, paginate
 from app.core.schemas import DateTime, Id, Page, PaginationParams, RequestModel
-from app.main import app
+from app.main import app, create_openapi_schema
 
 
 class RequestBody(RequestModel):
@@ -32,6 +32,34 @@ def make_error_test_app() -> FastAPI:
     @test_app.get("/api/v1/fail")
     def fail() -> None:
         raise HTTPException(status_code=404, detail="not_found")
+
+    @test_app.get("/api/v1/unauthorized")
+    def unauthorized() -> None:
+        raise HTTPException(status_code=401, detail="invalid_credentials")
+
+    @test_app.get("/api/v1/wrong-401-code")
+    def wrong_unauthorized_code() -> None:
+        raise HTTPException(status_code=401, detail="not_found")
+
+    @test_app.get("/api/v1/forbidden")
+    def forbidden() -> None:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    @test_app.get("/api/v1/wrong-code")
+    def wrong_code() -> None:
+        raise HTTPException(status_code=404, detail="access_expired")
+
+    @test_app.get("/api/v1/explicit-500")
+    def explicit_server_error() -> None:
+        raise HTTPException(
+            status_code=500,
+            detail="private database secret",
+            headers={"Retry-After": "11"},
+        )
+
+    @test_app.get("/api/v1/explicit-422")
+    def explicit_validation_error() -> None:
+        raise HTTPException(status_code=422, detail="access_expired")
 
     @test_app.get("/api/v1/crash")
     def crash() -> None:
@@ -268,10 +296,48 @@ def test_request_ids_and_cache_headers_cover_success_and_errors() -> None:
         }
     }
 
+    unauthorized = client.get("/api/v1/unauthorized")
+    assert unauthorized.status_code == 401
+    assert unauthorized.json()["error"]["code"] == "invalid_credentials"
+
+    wrong_unauthorized_code = client.get("/api/v1/wrong-401-code")
+    assert wrong_unauthorized_code.status_code == 401
+    assert wrong_unauthorized_code.json()["error"]["code"] == "invalid_access"
+
+    forbidden = client.get("/api/v1/forbidden")
+    assert forbidden.status_code == 403
+    assert forbidden.json()["error"]["code"] == "forbidden"
+
+    wrong_code = client.get("/api/v1/wrong-code")
+    assert wrong_code.status_code == 404
+    assert wrong_code.json()["error"]["code"] == "not_found"
+
+    explicit_validation = client.get("/api/v1/explicit-422")
+    assert explicit_validation.status_code == 422
+    assert explicit_validation.json()["error"]["code"] == "validation_error"
+
     limited = client.get("/api/v1/limited")
     assert limited.status_code == 429
     assert limited.headers["retry-after"] == "30"
     assert limited.json()["error"]["code"] == "rate_limited"
+
+
+def test_explicit_http_500_is_generic_and_preserves_required_headers() -> None:
+    client = TestClient(make_error_test_app(), raise_server_exceptions=False)
+    response = client.get("/api/v1/explicit-500")
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": {
+            "code": "internal_error",
+            "message": "Внутренняя ошибка сервера",
+            "details": [],
+        }
+    }
+    assert "secret" not in response.text
+    assert response.headers["retry-after"] == "11"
+    assert response.headers.get("x-request-id")
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_validation_and_internal_errors_are_safely_normalized() -> None:
@@ -309,7 +375,22 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
     assert docs.headers.get("x-request-id")
     assert openapi.status_code == 200
     assert openapi.json()["components"]["schemas"]["ApiError"]
-    assert openapi.json()["servers"] == [{"url": "/api/v1"}]
+    assert "servers" not in openapi.json()
     assert openapi.json()["paths"] == {}
     assert client.get("/api/v1").status_code == 404
     assert client.get("/docs").status_code == 404
+
+
+def test_openapi_uses_synthetic_route_prefix_once_in_effective_url() -> None:
+    probe_app = FastAPI()
+
+    @probe_app.get("/api/v1/probe")
+    def probe() -> dict[str, bool]:
+        return {"ok": True}
+
+    schema = create_openapi_schema(probe_app)
+    server_url = schema.get("servers", [{"url": "/"}])[0]["url"]
+    effective_url = server_url.rstrip("/") + "/api/v1/probe"
+
+    assert schema["paths"].keys() == {"/api/v1/probe"}
+    assert effective_url == "/api/v1/probe"

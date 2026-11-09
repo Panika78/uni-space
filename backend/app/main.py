@@ -28,14 +28,17 @@ app.add_middleware(ApiHeadersMiddleware)
 install_exception_handlers(app)
 
 
-def custom_openapi() -> dict:
-    """Expose implemented shared schemas even before domain routes are added."""
+def create_openapi_schema(application: FastAPI) -> dict:
+    """Expose implemented shared schemas without rewriting route paths."""
     from fastapi.openapi.utils import get_openapi
 
-    if app.openapi_schema:
-        return app.openapi_schema
-    schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
-    schema["servers"] = [{"url": "/api/v1"}]
+    if application.openapi_schema:
+        return application.openapi_schema
+    schema = get_openapi(
+        title=application.title,
+        version=application.version,
+        routes=application.routes,
+    )
     schemas = schema.setdefault("components", {}).setdefault("schemas", {})
     definitions = {
         "ErrorDetail": ErrorDetail.model_json_schema(),
@@ -67,8 +70,12 @@ def custom_openapi() -> dict:
         for nested_name, nested_definition in normalized.pop("$defs", {}).items():
             schemas[nested_name] = nested_definition
         schemas[name] = normalized
-    app.openapi_schema = schema
+    application.openapi_schema = schema
     return schema
 
 
-app.openapi = custom_openapi
+def generate_app_openapi() -> dict:
+    return create_openapi_schema(app)
+
+
+app.openapi = generate_app_openapi

@@ -11,6 +11,26 @@ from app.core.pagination import InvalidCursorError
 from app.core.schemas import ApiError, ErrorBody, ErrorDetail
 
 logger = logging.getLogger(__name__)
+HTTP_ERROR_CODES = {
+    401: {
+        "invalid_credentials",
+        "access_expired",
+        "invalid_access",
+        "session_invalid",
+        "invalid_refresh",
+    },
+    403: {"forbidden", "origin_not_allowed"},
+    404: {"not_found"},
+    422: {"validation_error"},
+    429: {"rate_limited"},
+}
+DEFAULT_HTTP_ERROR_CODES = {
+    401: "invalid_access",
+    403: "forbidden",
+    404: "not_found",
+    422: "validation_error",
+    429: "rate_limited",
+}
 
 
 def _error_response(
@@ -73,33 +93,23 @@ def install_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def handle_http_exception(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
+        headers = dict(exc.headers or {})
+        if exc.status_code >= 500:
+            return _error_response(
+                exc.status_code,
+                "internal_error",
+                "Внутренняя ошибка сервера",
+                headers=headers,
+            )
+
         detail = exc.detail
-        known_codes = {
-            "invalid_credentials",
-            "access_expired",
-            "invalid_access",
-            "session_invalid",
-            "invalid_refresh",
-            "forbidden",
-            "origin_not_allowed",
-            "not_found",
-            "validation_error",
-            "rate_limited",
-        }
-        code = detail if isinstance(detail, str) and detail in known_codes else None
-        defaults = {
-            401: "invalid_access",
-            403: "forbidden",
-            404: "not_found",
-            422: "validation_error",
-            429: "rate_limited",
-        }
-        code = code or defaults.get(exc.status_code, "http_error")
+        allowed_codes = HTTP_ERROR_CODES.get(exc.status_code, set())
+        code = detail if isinstance(detail, str) and detail in allowed_codes else None
+        code = code or DEFAULT_HTTP_ERROR_CODES.get(exc.status_code, "http_error")
         try:
             message = HTTPStatus(exc.status_code).phrase
         except ValueError:
             message = "Request failed"
-        headers = dict(exc.headers or {})
         return _error_response(exc.status_code, code, message, headers=headers)
 
     @app.exception_handler(Exception)
