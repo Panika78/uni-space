@@ -273,21 +273,23 @@ project/
 - VPS/хостинг должен быть доступен жюри **из России без VPN** до даты, указанной в конкурсном задании (28 ноября 2026 года). Конкретный провайдер и домен — TBD; реальную доступность нужно проверить из российской сети.
 - Для MVP 2 PDF и вложения сохраняются в закрытом файловом хранилище; путь к файлу внутри БД — `storage_key`, не постоянная публичная ссылка. Точный провайдер хранения — TBD до MVP 2.
 
-### Переменные окружения (пример состава, **не реальные значения**)
+### Переменные окружения (пример для локальной разработки, **не production**)
 
 ```dotenv
 APP_ENV=development
-DATABASE_URL=postgresql+psycopg://USER:PASSWORD@db:5432/DB_NAME
-JWT_SIGNING_KEY=SET_A_LONG_RANDOM_SECRET
-JWT_ISSUER=digital-deanery
-JWT_AUDIENCE=digital-deanery-api
-ACCESS_TOKEN_TTL_SECONDS=600
+DATABASE_URL=postgresql+psycopg://uni_space:local-development-password@localhost:5432/uni_space
+JWT_SIGNING_KEY=development-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ
+JWT_ISSUER=uni-space
+JWT_AUDIENCE=uni-space-api
+ACCESS_TTL_SECONDS=600
 SESSION_TTL_SECONDS=604800
 COOKIE_SECURE=false
-# Для отдельного production окружения: COOKIE_SECURE=true + HTTPS
+ALLOWED_ORIGINS='["http://localhost:5173"]'
+PROXY_HEADERS_ENABLED=false
+TRUSTED_PROXY_IPS='[]'
 ```
 
-`JWT_SIGNING_KEY` в production — отдельный криптографически стойкий секрет; `COOKIE_SECURE=false` допустим **только локально**. Если появится HMAC с дополнительным серверным ключом для хеширования opaque refresh-токенов, его нужно объявить отдельно и хранить столь же строго. Пароли тестовых аккаунтов для жюри выдаются в инструкции, **не** как исходный текст в миграциях/продакшн-коде; в таблице `users` лежат только Argon2id-хеши.
+Этот пример соответствует локальному запуску backend на хосте из [README.md](../README.md) и `.env.example`; внутри Compose `DATABASE_URL` формируется из переменных PostgreSQL. Значение `JWT_SIGNING_KEY` здесь **только для разработки**. Для production нужен приватный случайный ключ, например сгенерированный командой `python -c 'import secrets; print(secrets.token_urlsafe(48))'`; требования валидации и proxy headers — в [AUTH.md](AUTH.md). `COOKIE_SECURE=false` допустим **только локально**. Если появится HMAC с дополнительным серверным ключом для хеширования opaque refresh-токенов, его нужно объявить отдельно и хранить столь же строго. Пароли тестовых аккаунтов для жюри выдаются в инструкции, **не** как исходный текст в миграциях/продакшн-коде; в таблице `users` лежат только Argon2id-хеши.
 
 ## 8. Ограничения, заглушки, осознанные упрощения
 

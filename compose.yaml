@@ -27,7 +27,16 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      APP_ENV: development
+      APP_ENV: ${APP_ENV:-development}
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?Set JWT_SIGNING_KEY in .env}
+      JWT_ISSUER: ${JWT_ISSUER:-uni-space}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-uni-space-api}
+      ACCESS_TTL_SECONDS: ${ACCESS_TTL_SECONDS:-600}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-604800}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      PROXY_HEADERS_ENABLED: ${PROXY_HEADERS_ENABLED:-false}
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-[]}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?Set ALLOWED_ORIGINS in .env}
       DATABASE_HOST: db
       DATABASE_PORT: "5432"
       DATABASE_USER: ${POSTGRES_USER:?Copy .env.example to .env and set POSTGRES_USER}
@@ -37,7 +46,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
 volumes:
   postgres_data:

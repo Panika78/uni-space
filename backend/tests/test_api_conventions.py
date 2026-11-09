@@ -761,7 +761,11 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
     assert openapi.status_code == 200
     assert openapi.json()["components"]["schemas"]["ApiError"]
     assert "servers" not in openapi.json()
-    assert openapi.json()["paths"] == {}
+    assert set(openapi.json()["paths"]) == {
+        "/api/v1/auth/login",
+        "/api/v1/auth/refresh",
+        "/api/v1/auth/logout",
+    }
     assert client.get("/api/v1").status_code == 404
     assert client.get("/docs").status_code == 404
 

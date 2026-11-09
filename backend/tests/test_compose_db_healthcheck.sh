@@ -13,6 +13,8 @@ cat > "$env_file" <<'EOF'
 POSTGRES_DB=uni_space_healthcheck_test
 POSTGRES_USER=uni_space_healthcheck_test
 POSTGRES_PASSWORD=healthcheck-test-password
+JWT_SIGNING_KEY=test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ
+ALLOWED_ORIGINS=["http://localhost:5173"]
 EOF
 
 cat > "$override_file" <<'EOF'

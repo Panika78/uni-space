@@ -245,6 +245,7 @@ type Notification = {
 | 401 | `invalid_credentials`, `access_expired`, `invalid_access`, `session_invalid`, `invalid_refresh` |
 | 403 | `forbidden`, `origin_not_allowed` |
 | 404 | `not_found` — одинаково для отсутствующей и чужой записи |
+| 413 | `request_too_large` — тело auth-запроса превышает 16384 байта |
 | 422 | `validation_error` — поля, даты, параметры, cursor |
 | 429 | `rate_limited` + `Retry-After` |
 | 500 | `internal_error`, без внутренних подробностей |
@@ -254,6 +255,7 @@ type Notification = {
 ## 6. Авторизация и клиентское поведение
 
 - Refresh cookie: `uni_space_refresh`, `HttpOnly`, `Secure` в production, `SameSite=Lax`, `Path=/api/v1/auth`, без `Domain`.
+- Login, refresh и logout ограничивают тело 16384 байтами до разбора JSON, включая потоковую передачу без `Content-Length`; превышение — `413 request_too_large`. Небольшое непустое тело refresh/logout — `422 validation_error`.
 - Auth проверяет `Origin`; ответы с токенами и персональные ответы имеют `Cache-Control: no-store`.
 - Logout без действующей cookie тоже возвращает `204`. Действующий access для выхода не требуется.
 - Access хранится только в памяти приложения. Сроки access и сессии, проверка JWT, отзыв и ротация определяются ARCHITECTURE.md и DB.md.

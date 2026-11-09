@@ -7,9 +7,10 @@
 Созданы воспроизводимые основы backend и frontend, общие API-соглашения,
 генерация OpenAPI/TypeScript-типов и CI-проверки. Backend использует FastAPI,
 синхронный SQLAlchemy 2, psycopg 3, Alembic и PostgreSQL; frontend — React,
-TypeScript и Vite. В `main` уже добавлены ORM-модели аккаунтов и университетских
-справочников и начальная миграция Alembic. Предметные API и остальные функции
-кабинета реализуются следующими задачами. Приоритет — MVP 1.
+TypeScript и Vite. Реализованы модели аккаунтов и университетских справочников,
+начальная миграция Alembic и серверная авторизация MVP 1 (login, refresh,
+logout, проверка пользователя и сессии). Остальные предметные API и функции
+кабинета добавляются поэтапно. Приоритет — MVP 1.
 
 ## Документация
 
@@ -17,6 +18,7 @@ TypeScript и Vite. В `main` уже добавлены ORM-модели акк�
 - [Архитектура](docs/ARCHITECTURE.md) — стек и целевая структура.
 - [Модель данных](docs/DB.md) — сущности, связи и ограничения.
 - [API-контракт](docs/API.md) — принятый контракт MVP 1; приоритет над предварительным перечнем API в архитектуре.
+- [Серверная авторизация](docs/AUTH.md) — настройки, Origin, транзакции, rate limiting и ограничения TASK-006.
 - [AGENTS.md](AGENTS.md) — правила работы coding-агентов.
 
 Основные спецификации приняты; явно помеченные `TBD` и предварительные решения требуют отдельного согласования. Issues со статусом `Draft` — черновики задач. Прямое поручение пользователя реализовать конкретную задачу разрешает её выполнение в указанном объёме; окончательная приёмка выполняется отдельно.
@@ -80,6 +82,15 @@ cp .env.example .env
 ```
 
 ### Backend и PostgreSQL в Docker Compose
+
+Этот Compose-файл предназначен для локальной разработки; API опубликован на
+`127.0.0.1:8000`. По умолчанию используется `APP_ENV=development`, но явный
+`APP_ENV=production` передаётся приложению и включает production-валидацию.
+Файл не предоставляет TLS, reverse proxy и другие средства публичного
+production-развёртывания. Сервер запускается через `app.core.server`: forwarded-
+заголовки по умолчанию отключены, доверенный proxy включается только явно через
+`PROXY_HEADERS_ENABLED` и `TRUSTED_PROXY_IPS`. Это не заменяет настройку proxy и
+сетевую изоляцию backend; обязательные действия описаны в [AUTH.md](docs/AUTH.md).
 
 Поднимите PostgreSQL, примените миграции и запустите API:
 
@@ -164,7 +175,7 @@ set +a
 uv run --locked --python 3.12.12 alembic upgrade head
 uv run --locked --python 3.12.12 python -c \
   'from sqlalchemy import text; from app.core.database import engine; print(engine.connect().execute(text("SELECT 1")).scalar_one())'
-uv run --locked --python 3.12.12 uvicorn app.main:app --reload
+uv run --locked --python 3.12.12 python -m app.core.server --reload
 ```
 
 Для host `DATABASE_URL` пароль с URI-символами должен быть закодирован один раз
@@ -181,9 +192,8 @@ uv run --locked --python 3.12.12 ruff check .
 uv run --locked --python 3.12.12 ruff format --check .
 ```
 
-`DATABASE_URL` — обязательная настройка API. Если она отсутствует или
-некорректна, процесс завершается с именем проблемной настройки, не выводя её
-значение.
+`DATABASE_URL` и `JWT_SIGNING_KEY` — обязательные настройки API. Если настройка отсутствует или некорректна,
+процесс завершается с её именем, не выводя значение.
 
 ## Проверки проекта
 
@@ -204,6 +214,7 @@ cd backend
 uv python install 3.12.12
 uv sync --locked
 export APP_ENV=test
+export JWT_SIGNING_KEY=test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ
 export DATABASE_URL=postgresql+psycopg://uni_space_test:test-only-password@127.0.0.1:55432/uni_space_test
 uv run --locked --python 3.12.12 python -c \
   'import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)'
@@ -227,9 +238,9 @@ uv run --locked --python 3.12.12 alembic upgrade head
 uv run --locked --python 3.12.12 python scripts/check_migrations.py
 ```
 
-В Alembic уже есть начальная ревизия схемы аккаунтов и университетских
-справочников. Эти команды применяют существующие миграции к чистой тестовой
-PostgreSQL и проверяют соответствие состояния БД текущим heads Alembic.
+Миграции TASK-005 создают модели аккаунтов, сессий и университетских справочников.
+Проверяйте также `uv run --locked --python 3.12.12 alembic check` для совпадения
+ORM и схемы PostgreSQL.
 
 В `frontend/` установите зависимости по lock-файлу и выполните frontend-проверки:
 
