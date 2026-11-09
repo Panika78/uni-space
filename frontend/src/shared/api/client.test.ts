@@ -134,3 +134,24 @@ describe('apiFetch', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
+
+it('preserves cancellation instead of turning it into a network error', async () => {
+  const abort = new DOMException('cancelled', 'AbortError')
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(abort))
+  await expect(apiFetch('/api/v1/example')).rejects.toBe(abort)
+})
+
+it('preserves abort while reading the response body', async () => {
+  const controller = new AbortController()
+  const response = {
+    status: 200,
+    json: async () => {
+      controller.abort()
+      throw controller.signal.reason
+    },
+  }
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
+  await expect(apiFetch('/api/v1/example', { signal: controller.signal })).rejects.toMatchObject({
+    name: 'AbortError',
+  })
+})
