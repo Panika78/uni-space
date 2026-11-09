@@ -12,6 +12,7 @@ def main() -> None:
         "DATABASE_URL",
         "postgresql+psycopg://openapi:placeholder@localhost/unused",
     )
+    os.environ.setdefault("JWT_SIGNING_KEY", "openapi-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ")
     sys.path.insert(0, str(backend_path))
     from app.main import app
 

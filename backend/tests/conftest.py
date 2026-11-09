@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from alembic import command
 from alembic.config import Config
+
+os.environ.setdefault("JWT_SIGNING_KEY", "test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 
 @pytest.fixture(scope="session")
