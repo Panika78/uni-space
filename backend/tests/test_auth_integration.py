@@ -397,6 +397,9 @@ def test_jwt_owner_signature_expiry_and_missing_bearer_over_http(auth):
         ("refresh", "refresh"),
         ("refresh", "logout"),
         ("logout", "refresh"),
+        ("refresh", "logout_bearer"),
+        ("logout_bearer", "refresh"),
+        ("logout_bearer", "logout_bearer"),
     ],
 )
 def test_concurrent_operations_wait_on_same_session_and_reread_state(
@@ -446,7 +449,11 @@ def test_concurrent_operations_wait_on_same_session_and_reread_state(
 
     def run(operation, label):
         request_label.set(label)
-        return getattr(client, operation)(token)
+        return (
+            client.logout(access=access)
+            if operation == "logout_bearer"
+            else getattr(client, operation)(token)
+        )
 
     event.listen(engine, "before_cursor_execute", before_query)
     event.listen(engine, "after_cursor_execute", after_query)
@@ -503,8 +510,9 @@ def test_concurrent_operations_wait_on_same_session_and_reread_state(
         assert_error(client.refresh(current), 401, "invalid_refresh")
 
 
+@pytest.mark.parametrize("operation", ["refresh", "logout_bearer"])
 def test_errors_and_logs_never_include_auth_values_even_on_internal_failure(
-    auth, caplog, monkeypatch
+    auth, caplog, monkeypatch, operation
 ):
     import logging
 
@@ -520,7 +528,7 @@ def test_errors_and_logs_never_include_auth_values_even_on_internal_failure(
 
     event.listen(engine, "before_cursor_execute", reject_query)
     try:
-        error = client.refresh(refresh)
+        error = client.refresh(refresh) if operation == "refresh" else client.logout(access=access)
         assert_error(error, 500, "internal_error")
         for secret in [PASSWORD, KEY, refresh, access, "test-only-password"]:
             assert secret not in error.text
@@ -556,6 +564,7 @@ def test_openapi_auth_contract_uses_shared_errors_and_cookie():
                 for param in operation["parameters"]
             )
     assert "429" in schema["paths"][COOKIE_PATH + "/login"]["post"]["responses"]
+    assert schema["paths"][COOKIE_PATH + "/logout"]["post"]["security"] == [{"HTTPBearer": []}, {}]
 
 
 def test_rate_limit_counts_invalid_bodies_and_skips_disallowed_origins(auth, monkeypatch):
@@ -701,3 +710,108 @@ def test_login_rechecks_user_after_waiting_for_concurrent_update(auth, mutation)
         assert not db.scalar(
             select(RefreshToken).join(AuthSession).where(AuthSession.user_id == ids[0])
         )
+
+
+@pytest.mark.parametrize("cookie", [None, "unknown-refresh-cookie", "x" * 513])
+def test_logout_falls_back_to_access_and_revokes_session_when_cookie_cannot_identify_it(
+    auth, cookie
+):
+    client, engine, _ids, _logins, _students = auth
+    _response, refresh, access = login(auth)
+    response = client.logout(cookie, access=access)
+    assert response.status_code == 204 and response.content == b""
+    assert "Max-Age=0" in response.headers["set-cookie"]
+    assert_error(client.request("GET", "/api/v1/test/user", access=access), 401, "session_invalid")
+    with Session(engine) as db:
+        row = db.scalar(
+            select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(refresh))
+        )
+        session = db.get(AuthSession, row.session_id)
+        revoked_at = session.revoked_at
+        assert revoked_at and session.revocation_reason == "logout"
+        assert all(
+            token.revoked_at
+            for token in db.scalars(
+                select(RefreshToken).where(RefreshToken.session_id == session.id)
+            )
+        )
+    assert client.logout(access=access).status_code == 204
+    with Session(engine) as db:
+        assert db.get(AuthSession, session.id).revoked_at == revoked_at
+
+
+@pytest.mark.parametrize("cookie_state", ["current", "used", "revoked"])
+def test_logout_cookie_takes_priority_over_an_independent_access_session(auth, cookie_state):
+    client = auth[0]
+    _response, cookie, access_a = login(auth)
+    _response, _cookie_b, access_b = login(auth, 1)
+    if cookie_state == "used":
+        assert client.refresh(cookie).status_code == 200
+    if cookie_state == "revoked":
+        assert client.logout(cookie).status_code == 204
+    assert client.logout(cookie, access=access_b).status_code == 204
+    assert_error(
+        client.request("GET", "/api/v1/test/user", access=access_a), 401, "session_invalid"
+    )
+    assert client.request("GET", "/api/v1/test/user", access=access_b).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "expired",
+        "signature",
+        "algorithm",
+        "missing_claim",
+        "issuer",
+        "audience",
+        "type",
+        "owner",
+        "missing_session",
+        "malformed",
+        "scheme",
+    ],
+)
+def test_logout_ignores_unusable_bearer_and_does_not_revoke_an_unrelated_session(auth, mutation):
+    client = auth[0]
+    _response, _cookie, access = login(auth)
+    payload = jwt.decode(access, KEY, algorithms=["HS256"], audience="uni-space-api")
+    key, algorithm = KEY, "HS256"
+    if mutation == "expired":
+        payload.update(exp=payload["iat"] - 1, iat=payload["iat"] - 10)
+    elif mutation == "signature":
+        key += "-incorrect"
+    elif mutation == "algorithm":
+        algorithm = "HS512"
+    elif mutation == "missing_claim":
+        del payload["sid"]
+    elif mutation == "issuer":
+        payload["iss"] = "different-issuer"
+    elif mutation == "audience":
+        payload["aud"] = "different-audience"
+    elif mutation == "type":
+        payload["token_type"] = "refresh"
+    elif mutation == "owner":
+        payload["sub"] = str(auth[2][1])
+    elif mutation == "missing_session":
+        payload["sid"] = "9223372036854775807"
+    bad_access = jwt.encode(payload, key, algorithm=algorithm)
+    if mutation == "malformed":
+        bad_access = "fictional-invalid-token"
+    response = (
+        client.logout(headers={"Authorization": "Basic " + bad_access})
+        if mutation == "scheme"
+        else client.logout(access=bad_access)
+    )
+    assert response.status_code == 204
+    assert "Max-Age=0" in response.headers["set-cookie"]
+    assert client.request("GET", "/api/v1/test/user", access=access).status_code == 200
+
+
+def test_bearer_fallback_preserves_origin_and_body_protection(auth):
+    client = auth[0]
+    _response, _cookie, access = login(auth)
+    assert_error(client.logout(access=access, origin=None), 403, "origin_not_allowed")
+    assert_error(client.logout(access=access, content=b"{}"), 422, "validation_error")
+    assert_error(client.logout(access=access, content=b"x" * 16385), 413, "request_too_large")
+    assert client.request("GET", "/api/v1/test/user", access=access).status_code == 200

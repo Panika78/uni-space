@@ -30,7 +30,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Logout Session */
+        /**
+         * Logout Session
+         * @description Refresh-cookie имеет приоритет. При неизвестной/отсутствующей cookie используется необязательный валидный Bearer с проверкой владельца sid. Ответ 204 удаляет cookie, но не доказывает отзыв, если пригодный идентификатор не найден.
+         */
         post: operations["logout_session_api_v1_auth_logout_post"];
         delete?: never;
         options?: never;

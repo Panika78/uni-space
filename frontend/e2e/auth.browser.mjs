@@ -1,4 +1,4 @@
-/* global process, console, URL, document, innerWidth, localStorage, sessionStorage, setTimeout, AbortController, performance, Navigator, Storage, DOMException, navigator */
+/* global process, console, URL, document, innerWidth, localStorage, sessionStorage, setTimeout, AbortController, performance, Navigator, Storage, DOMException, navigator, fetch */
 // Run against local Vite + the real backend using two prepared fictional accounts.
 // Playwright is supplied by the environment; no production test route is installed.
 import assert from 'node:assert/strict'
@@ -213,9 +213,20 @@ try {
   await context.unroute(`**${testPath}`)
   check('account change in another tab hides old UI and rejects delayed data')
 
+  const fallbackCookie = (await context.cookies()).find(
+    (value) => value.name === 'uni_space_refresh',
+  )
+  assert.ok(fallbackCookie)
+  await context.clearCookies()
+  const fallbackRequest = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === '/api/v1/auth/logout',
+  )
   fault = 'lose-logout'
   await page.getByRole('button', { name: 'Выйти', exact: true }).click()
   await page.getByText(/сервер не подтвердил выход/).waitFor()
+  const sentLogout = await fallbackRequest
+  assert.ok((await sentLogout.headerValue('authorization'))?.startsWith('Bearer '))
+  assert.ok(!(await sentLogout.headerValue('cookie'))?.includes('uni_space_refresh='))
   const beforeReload = requests.length
   await page.reload()
   await heading(page, 'Вход')
@@ -223,9 +234,20 @@ try {
   assert.equal(requests.slice(beforeReload).filter((path) => path.endsWith('/refresh')).length, 0)
   fault = ''
   await page.getByRole('button', { name: 'Повторить выход', exact: true }).click()
-  await page.getByText('Выход подтверждён сервером.', { exact: true }).waitFor()
+  await page.getByText('Вы вышли из приложения.', { exact: true }).waitFor()
   assert.ok(!(await page.locator('body').innerText()).includes('сервер не подтвердил выход'))
   check('lost real logout response, reload blocks restoration and explicit retry succeeds')
+  // This refresh was current and unused when the cookie was removed.
+  await context.addCookies([fallbackCookie])
+  const revokedRefresh = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/auth/refresh', { method: 'POST' })
+    return { status: response.status, code: (await response.json()).error?.code }
+  })
+  assert.deepEqual(revokedRefresh, { status: 401, code: 'invalid_refresh' })
+  await context.clearCookies()
+  check(
+    'logout without a cookie sends Bearer and revokes the real session despite its lost response',
+  )
 
   await login(page, loginA)
   await context.route(`**${testPath}`, (route) =>
@@ -376,6 +398,25 @@ try {
   await page.getByLabel('Пароль', { exact: true }).fill(password)
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
   await heading(page, 'Расписание')
+  let logoutRedirects = 0
+  const logoutTarget = 'https://external.example/api/v1/logout-capture'
+  await context.route(logoutTarget, (route) => {
+    logoutRedirects++
+    return route.fulfill({ status: 204 })
+  })
+  await context.route('**/api/v1/auth/logout', (route) =>
+    route.fulfill({ status: 307, headers: { Location: logoutTarget } }),
+  )
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  await page.getByText(/сервер не подтвердил выход/).waitFor()
+  assert.equal(logoutRedirects, 0)
+  await context.unroute('**/api/v1/auth/logout')
+  await context.unroute(logoutTarget)
+  check('logout with a captured access refuses redirects without contacting the target')
+  await page.getByLabel('Логин', { exact: true }).fill(loginA)
+  await page.getByLabel('Пароль', { exact: true }).fill(password)
+  await page.getByRole('button', { name: 'Войти', exact: true }).click()
+  await heading(page, 'Расписание')
   await context.unroute('**/api/v1/auth/login')
   await holdAuthLock()
   const beforeWaitingLogout = countAuth()
@@ -460,12 +501,11 @@ try {
   const storage = await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))
   assert.ok(!storage.includes('access_token') && !storage.includes(password))
   check('no tokens or credentials in persistent storage')
-  assert.ok(
-    upstreamStatuses
-      .filter(({ path }) => path.endsWith('/refresh'))
-      .every(({ status }, index) => (index === 0 ? status === 401 : status === 200)),
-  )
-  check('all subsequent upstream refresh responses are 200, without reuse')
+  const refreshStatuses = upstreamStatuses.filter(({ path }) => path.endsWith('/refresh'))
+  // Exactly two intended rejections: initial absence and the SEC-01 revocation proof.
+  assert.equal(refreshStatuses.filter(({ status }) => status === 401).length, 2)
+  assert.ok(refreshStatuses.every(({ status }) => status === 200 || status === 401))
+  check('upstream refresh has only the two expected rejections, without unexpected auth failures')
 } finally {
   await context.close()
   await browser.close()

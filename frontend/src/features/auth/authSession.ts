@@ -218,7 +218,7 @@ export class AuthSession {
     })
   }
 
-  private beginChange() {
+  private beginChange(expectedEpoch?: string) {
     this.clearSession()
     const epoch = crypto.randomUUID()
     // Intents use their own key. Only lock owners write the operation journal.
@@ -226,8 +226,13 @@ export class AuthSession {
     let previousEpoch: string
     try {
       previousEpoch = this.readEpoch()
+      if (expectedEpoch !== undefined && previousEpoch !== expectedEpoch) {
+        this.synchronize()
+        throw new DOMException('Authorization changed', 'AbortError')
+      }
       localStorage.setItem(authEpochStorageKey, epoch)
-    } catch {
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') throw error
       throw new ApiClientError('Auth storage unavailable', 'coordination_unavailable')
     }
     this.epoch = epoch
@@ -243,7 +248,7 @@ export class AuthSession {
       await this.withLock(async () => {
         this.requireCurrent(epoch!)
         const previousState = this.readState()
-        const hasConfirmedAbsence =
+        const canPreserveEnded =
           previousState.epoch === change.previousEpoch &&
           previousState.ended === true &&
           !previousState.pending
@@ -259,7 +264,7 @@ export class AuthSession {
         } catch (error) {
           this.requireCurrent(epoch!)
           if (
-            hasConfirmedAbsence &&
+            canPreserveEnded &&
             error instanceof ApiClientError &&
             error.status === 401 &&
             error.code === 'invalid_credentials'
@@ -284,20 +289,31 @@ export class AuthSession {
   logout = async () => {
     let epoch: string | undefined
     try {
-      epoch = this.beginChange().epoch
+      const sourceEpoch = this.epoch
+      this.synchronize()
+      if (this.epoch !== sourceEpoch) return
+      const accessToken = this.token
+      const sourceJournalEpoch = this.readState().epoch
+      epoch = this.beginChange(sourceEpoch).epoch
       await this.withLock(async () => {
         this.requireCurrent(epoch!)
+        if (this.readState().epoch !== sourceJournalEpoch)
+          throw new DOMException('Authorization changed', 'AbortError')
         this.writeState({ epoch: epoch!, blocked: true, pending: false })
         await apiFetch<void>('/api/v1/auth/logout', {
           method: 'POST',
+          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+          redirect: 'error',
           credentials: 'same-origin',
           signal: AbortSignal.timeout(15000),
         })
         this.requireCurrent(epoch!)
         this.writeState({ epoch: epoch!, blocked: true, pending: false, ended: true })
-        this.update('unauthenticated', 'Выход подтверждён сервером.')
+        this.update('unauthenticated', 'Вы вышли из приложения.')
       })
     } catch (error) {
+      if (epoch === undefined && error instanceof DOMException && error.name === 'AbortError')
+        return
       if (epoch === undefined || this.epoch === epoch)
         this.update(
           'unauthenticated',
