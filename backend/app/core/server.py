@@ -31,6 +31,10 @@ def main() -> None:
     )
     options = parser.parse_args()
     if options.production:
+        # Settings treats environment names case-insensitively. Remove conflicting aliases.
+        for name in list(os.environ):
+            if name.lower() == "app_env":
+                del os.environ[name]
         # The validated mode must also reach the application after execvp.
         os.environ["APP_ENV"] = "production"
     settings = load_settings()

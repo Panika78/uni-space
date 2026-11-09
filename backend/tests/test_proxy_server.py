@@ -227,8 +227,9 @@ def test_launcher_refuses_unsafe_proxy_configuration_before_starting_uvicorn(pro
 
 
 @pytest.mark.parametrize("inherited_mode", [None, "development", "test", "production"])
+@pytest.mark.parametrize("has_case_alias", [False, True])
 def test_production_launcher_sets_mode_before_validation_and_passes_it_to_child(
-    monkeypatch, tmp_path, inherited_mode
+    monkeypatch, tmp_path, inherited_mode, has_case_alias
 ):
     from app.core import server
     from app.core.config import load_settings
@@ -246,6 +247,9 @@ def test_production_launcher_sets_mode_before_validation_and_passes_it_to_child(
         monkeypatch.delenv("APP_ENV", raising=False)
     else:
         monkeypatch.setenv("APP_ENV", inherited_mode)
+    if has_case_alias:
+        # Settings reads environment names case-insensitively, including duplicates.
+        monkeypatch.setenv("app_env", "development")
     # Even an accidentally copied development .env cannot downgrade this command.
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text("APP_ENV=development\n")
@@ -309,6 +313,7 @@ def test_real_production_launcher_preserves_explicit_proxy_policy(tmp_path, prox
         tmp_path,
         production=True,
         APP_ENV="development",
+        app_env="development",
         JWT_SIGNING_KEY="2ghJj3eYC65ZV4zuLr8s-91QTNpXvWbA",
         COOKIE_SECURE="true",
         ALLOWED_ORIGINS=json.dumps([origin]),
