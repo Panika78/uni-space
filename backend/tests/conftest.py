@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 import pytest
@@ -7,11 +6,6 @@ from sqlalchemy.orm import Session
 
 from alembic import command
 from alembic.config import Config
-
-os.environ.setdefault(
-    "DATABASE_URL",
-    "postgresql+psycopg://uni_space:test-password@localhost:5432/uni_space_test",
-)
 
 
 @pytest.fixture(scope="session")

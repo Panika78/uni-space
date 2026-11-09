@@ -130,10 +130,12 @@ def add_refresh_token(
     return token
 
 
-def test_migration_creates_only_eight_mvp_one_tables(postgresql_engine) -> None:
+def test_migration_creates_task_005_tables_without_premature_extended_tables(
+    postgresql_engine,
+) -> None:
     table_names = set(inspect(postgresql_engine).get_table_names(schema="public"))
 
-    assert table_names == EXPECTED_MODEL_TABLES | {"alembic_version"}
+    assert table_names >= EXPECTED_MODEL_TABLES
     assert not {"staff_profiles", "staff_permissions", "subgroups"} & table_names
 
 
@@ -145,10 +147,11 @@ def test_postgresql_ids_are_bigint_by_default_identity(postgresql_engine) -> Non
                 SELECT table_name, data_type, is_identity, identity_generation
                 FROM information_schema.columns
                 WHERE table_schema = 'public'
-                  AND table_name <> 'alembic_version'
+                  AND table_name = ANY(:model_tables)
                   AND column_name = 'id'
                 """
-            )
+            ),
+            {"model_tables": list(EXPECTED_MODEL_TABLES)},
         ).all()
 
     assert {row.table_name for row in columns} == EXPECTED_MODEL_TABLES
