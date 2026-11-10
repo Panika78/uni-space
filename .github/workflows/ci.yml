@@ -298,4 +298,12 @@ jobs:
           uv run --locked --python 3.12.16 --project backend ruff format --check deploy/test_production.py
           node --check deploy/spa.browser.mjs
       - name: Test isolated HTTPS deployment and backup recovery
-        run: uv run --locked --python 3.12.16 --project backend python deploy/test_production.py
+        run: |
+          mkdir -p work
+          if ! uv run --locked --python 3.12.16 --project backend python deploy/test_production.py > work/production-test.log 2>&1; then
+            cat work/production-test.log
+            # The parent test prints assertions/commands, never child stderr or token values.
+            tail -n 25 work/production-test.log | sed 's/%/%25/g;s/\r/%0D/g;s/^/::error title=Production integration::/'
+            exit 1
+          fi
+          cat work/production-test.log
