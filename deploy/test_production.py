@@ -533,10 +533,9 @@ with SessionLocal.begin() as db:
                     client.post("/api/v1/auth/refresh", headers=origin).status_code
                     == 200
                 )
-                assert (
-                    client.post("/api/v1/auth/logout", headers=origin).status_code
-                    == 204
-                )
+                logout = client.post("/api/v1/auth/logout", headers=origin)
+                assert logout.status_code == 200
+                assert logout.json() == {"session_revoked": True}
                 assert (
                     client.post("/api/v1/auth/refresh", headers=origin).status_code
                     == 401
