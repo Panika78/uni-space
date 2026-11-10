@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,6 +6,38 @@ import { StudentLayout } from './StudentLayout'
 
 const auth = vi.hoisted(() => ({ logout: vi.fn() }))
 vi.mock('../features/auth/AuthProvider', () => ({ useAuth: () => auth }))
+
+function mockViewport(initialWidth: number) {
+  let width = initialWidth
+  const listeners = new Set<(event: MediaQueryListEvent) => void>()
+  const mediaQueryList = {
+    media: '(min-width: 721px)',
+    get matches() {
+      return width > 720
+    },
+    onchange: null,
+    addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) =>
+      listeners.add(listener),
+    removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) =>
+      listeners.delete(listener),
+    addListener: (listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
+    removeListener: (listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
+    dispatchEvent: () => true,
+  } as unknown as MediaQueryList
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn(() => mediaQueryList),
+  )
+
+  return (nextWidth: number) => {
+    const wasDesktop = width > 720
+    width = nextWidth
+    const isDesktop = width > 720
+    if (wasDesktop !== isDesktop) {
+      listeners.forEach((listener) => listener({ matches: isDesktop } as MediaQueryListEvent))
+    }
+  }
+}
 
 function renderStudentLayout(path = '/schedule') {
   return render(
@@ -21,8 +53,14 @@ function renderStudentLayout(path = '/schedule') {
   )
 }
 
-afterEach(cleanup)
-beforeEach(() => auth.logout.mockReset())
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+beforeEach(() => {
+  auth.logout.mockReset()
+  mockViewport(360)
+})
 
 describe('student dashboard navigation', () => {
   it('uses the shared supplied emblem asset in the desktop brand and mobile drawer', async () => {
@@ -76,6 +114,32 @@ describe('student dashboard navigation', () => {
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog', { name: 'Мобильная навигация' })).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
+  })
+
+  it('closes the mobile drawer on desktop resize and keeps focus on visible content', async () => {
+    const setViewport = mockViewport(360)
+    const user = userEvent.setup()
+    renderStudentLayout()
+    const trigger = screen.getByRole('button', { name: 'Открыть меню' })
+    await user.click(trigger)
+    expect(screen.getByRole('dialog', { name: 'Мобильная навигация' })).toBeInTheDocument()
+    expect(document.body.style.overflow).toBe('hidden')
+
+    setViewport(800)
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Мобильная навигация' })).not.toBeInTheDocument()
+      expect(document.body.style.overflow).toBe('')
+    })
+    expect(window.matchMedia('(min-width: 721px)').matches).toBe(true)
+    expect(screen.getByRole('main')).toHaveFocus()
+    expect(trigger).not.toHaveFocus()
+
+    setViewport(360)
+    expect(window.matchMedia('(min-width: 721px)').matches).toBe(false)
+    expect(screen.queryByRole('dialog', { name: 'Мобильная навигация' })).not.toBeInTheDocument()
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('main')).toHaveFocus()
   })
 
   it('closes the mobile drawer when the backdrop is clicked', async () => {

@@ -184,14 +184,28 @@ export function StudentLayout() {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const mainContentRef = useRef<HTMLElement>(null)
   const wasDrawerOpen = useRef(false)
   const closeDrawer = useCallback(() => setIsDrawerOpen(false), [])
+
+  useEffect(() => {
+    const desktopViewport = window.matchMedia?.('(min-width: 721px)')
+    if (!desktopViewport) return
+
+    const handleViewportChange = (event: MediaQueryListEvent) => {
+      if (event.matches) closeDrawer()
+    }
+    desktopViewport.addEventListener('change', handleViewportChange)
+    return () => desktopViewport.removeEventListener('change', handleViewportChange)
+  }, [closeDrawer])
 
   useEffect(() => {
     if (isDrawerOpen) {
       wasDrawerOpen.current = true
     } else if (wasDrawerOpen.current) {
-      menuButtonRef.current?.focus()
+      const isDesktop = window.matchMedia?.('(min-width: 721px)').matches ?? window.innerWidth > 720
+      if (isDesktop) mainContentRef.current?.focus()
+      else menuButtonRef.current?.focus()
       wasDrawerOpen.current = false
     }
   }, [isDrawerOpen])
@@ -258,7 +272,7 @@ export function StudentLayout() {
           </Link>
           <UserMenu />
         </header>
-        <main className="student-content" id="main-content" tabIndex={-1}>
+        <main className="student-content" id="main-content" ref={mainContentRef} tabIndex={-1}>
           <Outlet />
         </main>
       </div>
