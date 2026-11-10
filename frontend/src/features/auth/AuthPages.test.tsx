@@ -185,7 +185,8 @@ it('shows the shared university emblem and name above the login heading', async 
   const emblem = heading.parentElement?.querySelector('img.brand-mark')
   expect(emblem).toHaveAttribute('src', '/assets/university-emblem.png')
   expect(heading.parentElement).toHaveTextContent('РГУЧВ')
-  expect(heading.parentElement).toHaveTextContent('Российский государственный университет')
+  expect(heading.parentElement).toHaveTextContent('РГУЧВ им. А. М. Кашпировского')
+  expect(emblem?.parentElement).toHaveClass('login-brand')
   expect(emblem!.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 })
 

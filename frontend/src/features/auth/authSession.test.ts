@@ -295,6 +295,35 @@ describe('session lifecycle and coordinated cookie operations', () => {
     expect(JSON.parse(localStorage.getItem(authStorageKey)!).ended).toBe(true)
   })
 
+  it.each(['{broken-json', '{}'])(
+    'closes private data without promising a retry when logout finds a damaged journal %s',
+    async (journal) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(token('old-access')))
+      const { session, cache } = createSession()
+      await session.start()
+      cache.setQueryData(['private'], 'old-user-data')
+      const oldRequest = session.beginRequest()
+      localStorage.setItem(authStorageKey, journal)
+      const fetchMock = vi.fn()
+      vi.stubGlobal('fetch', fetchMock)
+
+      await session.logout()
+
+      expect(session.getSnapshot().status).toBe('unauthenticated')
+      expect(session.getSnapshot().message).toBe(
+        'Не удалось завершить выход. Войдите снова, чтобы продолжить.',
+      )
+      expect(session.getSnapshot().message).not.toContain('Повторим')
+      expect(cache.getQueryData(['private'])).toBeUndefined()
+      expect(oldRequest.signal.aborted).toBe(true)
+      expect(() => session.beginRequest()).toThrow()
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(localStorage.getItem(authStorageKey)).toBe(journal)
+      await createSession().session.start()
+      expect(fetchMock).not.toHaveBeenCalled()
+    },
+  )
+
   it('retries an executed logout whose response was lost idempotently', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(token()))
     const { session } = createSession()

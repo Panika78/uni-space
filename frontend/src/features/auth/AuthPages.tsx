@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { useAuth } from './AuthProvider'
 import { LoadingState, UnavailableState } from '../../shared/ui/StatusStates'
-import { UniversityBrand } from '../../shared/ui/UniversityBrand'
+import { BrandMark } from '../../shared/ui/UniversityBrand'
 
 export function ProtectedRoute() {
   const { status } = useAuth()
@@ -19,7 +19,10 @@ export function LoginPage() {
   if (status === 'authenticated') return <Navigate to="/schedule" replace />
   return (
     <section className="welcome-card login-card" aria-labelledby="login-title">
-      <UniversityBrand />
+      <div className="login-brand">
+        <BrandMark />
+        <p>РГУЧВ им. А. М. Кашпировского</p>
+      </div>
       <h1 id="login-title">Вход в систему</h1>
       <form
         onSubmit={(event) => {

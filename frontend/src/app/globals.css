@@ -532,22 +532,23 @@ a {
 .welcome-card h1 {
   margin-bottom: 20px;
 }
-.login-card .university-brand {
-  align-items: flex-start;
-  margin-bottom: 22px;
+.login-brand {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  text-align: center;
 }
-.login-card .brand-mark {
-  flex-basis: 52px;
-  width: 52px;
-  height: 52px;
+.login-brand .brand-mark {
+  width: 112px;
+  height: 112px;
 }
-.login-card .university-brand__copy strong {
+.login-brand p {
+  margin: 0;
   color: var(--accent);
-}
-.login-card .university-brand__copy small {
-  color: #51494a;
-  font-size: 11px;
-  overflow-wrap: anywhere;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.3;
 }
 .route-issue-card h1 {
   margin: 0 0 12px;

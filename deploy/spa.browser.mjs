@@ -61,6 +61,21 @@ try {
     await emblem.evaluate((image) => image.complete && image.naturalWidth > 0),
     'University emblem loads successfully',
   )
+  const emblemBox = await emblem.boundingBox()
+  const cardBox = await page.locator('.login-card').boundingBox()
+  const name = page.getByText('РГУЧВ им. А. М. Кашпировского', { exact: true })
+  const nameBox = await name.boundingBox()
+  const titleBox = await page.getByRole('heading', { name: 'Вход в систему' }).boundingBox()
+  assert.ok(emblemBox.width >= 100, 'University emblem is prominent')
+  assert.ok(Math.abs(emblemBox.x + emblemBox.width / 2 - (cardBox.x + cardBox.width / 2)) < 3)
+  assert.ok(nameBox.y >= emblemBox.y + emblemBox.height)
+  assert.ok(titleBox.y >= nameBox.y + nameBox.height)
+  assert.ok(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+    'Mobile login has no horizontal overflow',
+  )
   assert.ok(await page.getByLabel('Логин', { exact: true }).isVisible())
   assert.ok(await page.getByLabel('Пароль', { exact: true }).isVisible())
   assert.ok(await page.getByRole('button', { name: 'Войти', exact: true }).isVisible())

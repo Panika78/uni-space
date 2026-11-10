@@ -23,6 +23,7 @@ const logoutRetryMessage =
   'Не удалось завершить выход. Повторим попытку при восстановлении соединения.'
 const logoutRetryExhaustedMessage =
   'Автоматически завершить выход не удалось. Войдите снова, чтобы продолжить.'
+const logoutUnconfirmedMessage = 'Не удалось завершить выход. Войдите снова, чтобы продолжить.'
 type AuthSnapshot = {
   status: Status
   message: string
@@ -407,7 +408,9 @@ export class AuthSession {
             ? ''
             : isCoordinationUnavailable(error)
               ? compatibilityMessage
-              : logoutRetryMessage,
+              : isInvalidAuthState(error)
+                ? logoutUnconfirmedMessage
+                : logoutRetryMessage,
         )
     }
   }

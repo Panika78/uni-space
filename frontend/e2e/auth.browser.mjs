@@ -72,6 +72,7 @@ context.on('request', (request) => {
 })
 const check = (name) => console.log(`PASS ${name}`)
 const heading = (target, name) => target.getByRole('heading', { name, exact: true }).waitFor()
+const loginHeading = (target) => heading(target, 'Вход в систему')
 async function hasVisibleLogoutAction(target) {
   const trigger = target.getByRole('button', { name: 'Меню пользователя', exact: true })
   if ((await trigger.count()) === 0) return false
@@ -107,7 +108,7 @@ async function callProtected(target) {
 }
 try {
   await page.goto(`${baseURL}/schedule`)
-  await heading(page, 'Вход')
+  await loginHeading(page)
   assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, 1)
   assert.ok(!(await page.locator('body').innerText()).includes('связаться с сервером'))
@@ -116,10 +117,14 @@ try {
   await page.getByLabel('Пароль', { exact: true }).fill('incorrect-fictional-password')
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
   await page.getByText('Неверный логин или пароль.', { exact: true }).waitFor()
+  assert.equal(
+    await page.getByLabel('Пароль', { exact: true }).inputValue(),
+    'incorrect-fictional-password',
+  )
   check('real invalid_credentials feedback')
   const afterRejectedLogin = requests.length
   await page.reload()
-  await heading(page, 'Вход')
+  await loginHeading(page)
   assert.equal(await page.getByRole('status').count(), 0)
   assert.equal(requests.length, afterRejectedLogin)
   check(
@@ -244,9 +249,9 @@ try {
   const oldResponse = callProtected(second)
   await received
   await clickLogout(page)
-  await heading(page, 'Вход')
+  await loginHeading(page)
   await login(page, loginB)
-  await heading(second, 'Вход')
+  await loginHeading(second)
   releaseLate()
   assert.equal((await oldResponse).error, 'AbortError')
   await context.unroute(`**${testPath}`)
@@ -272,7 +277,7 @@ try {
     (request) => new URL(request.url()).pathname === '/api/v1/auth/logout',
   )
   await page.reload()
-  await heading(page, 'Вход')
+  await loginHeading(page)
   const retriedLogout = await automaticLogout
   assert.equal(await retriedLogout.headerValue('authorization'), undefined)
   assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
@@ -304,11 +309,11 @@ try {
   )
   fault = 'lose-refresh'
   await callProtected(page)
-  await heading(page, 'Вход')
+  await loginHeading(page)
   const lostRefreshCount = requests.filter((path) => path.endsWith('/refresh')).length
   await page.reload()
   await second.reload()
-  await Promise.all([heading(page, 'Вход'), heading(second, 'Вход')])
+  await Promise.all([loginHeading(page), loginHeading(second)])
   assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, lostRefreshCount)
   check('lost real refresh response never retries the potentially consumed cookie')
   fault = ''
@@ -334,7 +339,7 @@ try {
   await closingReload
   const countAfterClose = requests.filter((path) => path.endsWith('/refresh')).length
   await second.reload()
-  await heading(second, 'Вход')
+  await loginHeading(second)
   assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, countAfterClose)
   fault = ''
   check('closing the lock holder after rotation leaves a durable recovery barrier')
@@ -346,7 +351,7 @@ try {
   assert.equal(journal.blocked, true)
   assert.equal(journal.pending, true)
   assert.notEqual(journal.ended, true)
-  await Promise.all([heading(page, 'Вход'), heading(second, 'Вход')])
+  await Promise.all([loginHeading(page), loginHeading(second)])
   assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   const refreshAfterFailure = requests.filter((path) => path.endsWith('/refresh')).length
   await login(page, loginA)
@@ -369,6 +374,7 @@ try {
   await page.getByLabel('Пароль', { exact: true }).fill(password)
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
   await page.getByText('Слишком много попыток. Повторите через 37 сек.', { exact: true }).waitFor()
+  assert.equal(await page.getByLabel('Пароль', { exact: true }).inputValue(), password)
   check('controlled Retry-After feedback')
   await context.unroute('**/api/v1/auth/login')
   for (const scenario of ['server', 'network', 'timeout']) {
@@ -403,7 +409,7 @@ try {
     assert.equal(requests.filter((path) => path.endsWith('/login')).length, countBefore + 1)
     const beforeRecovery = requests.length
     await page.reload()
-    await heading(page, 'Вход')
+    await loginHeading(page)
     assert.equal(requests.length, beforeRecovery)
     check(`controlled login ${scenario} has correct feedback, one POST and no automatic recovery`)
   }
@@ -462,14 +468,14 @@ try {
   await holdAuthLock()
   const beforeWaitingLogout = countAuth()
   await clickLogout(page)
-  await heading(page, 'Вход')
+  await loginHeading(page)
   await page.getByText(/Не удалось завершить выход/).waitFor()
   assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   assert.equal(await page.getByRole('button', { name: 'Войти', exact: true }).isEnabled(), true)
   assert.equal(countAuth(), beforeWaitingLogout)
   await releaseAuthLock()
   await page.reload()
-  await heading(page, 'Вход')
+  await loginHeading(page)
   assert.equal(countAuth(), beforeWaitingLogout)
   check(
     'logout waiter times out, hides private UI, never posts after release, and stays blocked after reload',
@@ -484,7 +490,7 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Войти', exact: true }).isEnabled(), true)
   await releaseAuthLock()
   await page.reload()
-  await heading(page, 'Вход')
+  await loginHeading(page)
   assert.equal(countAuth(), beforeWaitingLogin)
   check('login waiter times out without a POST, stuck busy state or late dispatch')
 
@@ -496,7 +502,7 @@ try {
   const bootstrapping = await context.newPage()
   await bootstrapping.goto(`${baseURL}/schedule`)
   await bootstrapping.getByText('Проверяем сессию…', { exact: true }).waitFor()
-  await heading(bootstrapping, 'Вход')
+  await loginHeading(bootstrapping)
   assert.equal(await bootstrapping.getByRole('status').count(), 0)
   assert.equal(countAuth(), beforeWaitingRefresh)
   await releaseAuthLock()
@@ -522,13 +528,13 @@ try {
       if (new URL(request.url()).pathname.startsWith('/api/')) unsupportedRequests++
     })
     await unsupported.goto(`${baseURL}/login`)
-    await heading(unsupported, 'Вход')
+    await loginHeading(unsupported)
     await unsupported.getByLabel('Логин', { exact: true }).fill(loginA)
     await unsupported.getByLabel('Пароль', { exact: true }).fill(password)
     await unsupported.getByRole('button', { name: 'Войти', exact: true }).click()
     await unsupported
       .getByText(
-        'Вход недоступен в этом браузере. Проверьте поддержку Web Locks и доступ к хранилищу.',
+        'Для безопасного входа нужен современный браузер с поддержкой нескольких вкладок и хранилища сайта.',
         { exact: true },
       )
       .waitFor()
