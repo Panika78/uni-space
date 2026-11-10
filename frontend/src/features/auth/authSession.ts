@@ -389,6 +389,9 @@ export class AuthSession {
 function mayHaveCreatedSession(error: unknown) {
   if (error instanceof DOMException) return error.name === 'TimeoutError'
   if (error instanceof ApiClientError) {
+    // A malformed success response can arrive after the server set its refresh cookie.
+    // Keep private UI locked, but allow an explicit logout to revoke that uncertain session.
+    if (error.code === 'invalid_response') return true
     if (error.status !== undefined) return error.status >= 500 && error.status < 600
     return error.code === 'network_error'
   }

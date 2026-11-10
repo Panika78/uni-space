@@ -15,9 +15,7 @@ const navigation = [
 
 function BrandMark() {
   return (
-    <span className="brand-mark" aria-hidden="true">
-      Р
-    </span>
+    <img className="brand-mark" src="/assets/university-emblem.png" alt="" aria-hidden="true" />
   )
 }
 

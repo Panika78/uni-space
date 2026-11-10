@@ -76,17 +76,11 @@ a {
   min-width: 0;
 }
 .brand-mark {
-  display: grid;
+  display: block;
   flex: 0 0 42px;
   width: 42px;
   height: 42px;
-  place-items: center;
-  border: 1px solid rgb(229 172 85 / 65%);
-  border-radius: 50%;
-  color: var(--gold);
-  font-family: Georgia, serif;
-  font-size: 21px;
-  font-weight: 700;
+  object-fit: contain;
 }
 .university-brand__copy {
   display: grid;

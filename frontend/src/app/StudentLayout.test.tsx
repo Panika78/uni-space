@@ -25,6 +25,23 @@ afterEach(cleanup)
 beforeEach(() => auth.logout.mockReset())
 
 describe('student dashboard navigation', () => {
+  it('uses the shared supplied emblem asset in the desktop brand and mobile drawer', async () => {
+    const user = userEvent.setup()
+    renderStudentLayout()
+    expect(document.querySelectorAll('.brand-mark')).toHaveLength(1)
+    expect(document.querySelector('.brand-mark')).toHaveAttribute(
+      'src',
+      '/assets/university-emblem.png',
+    )
+    await user.click(screen.getByRole('button', { name: 'Открыть меню' }))
+    expect(document.querySelectorAll('.brand-mark')).toHaveLength(2)
+    expect(
+      Array.from(document.querySelectorAll('.brand-mark')).map((image) =>
+        image.getAttribute('src'),
+      ),
+    ).toEqual(['/assets/university-emblem.png', '/assets/university-emblem.png'])
+  })
+
   it('marks the current section and shows the unofficial prototype notice', () => {
     renderStudentLayout('/academics')
     expect(screen.getByRole('link', { name: 'Успеваемость' })).toHaveAttribute(

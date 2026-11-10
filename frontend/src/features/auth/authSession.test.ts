@@ -583,6 +583,56 @@ describe('review regressions: confirmed logout', () => {
 })
 
 describe('review regressions: login failure diagnostics', () => {
+  it.each([
+    [
+      'malformed JSON',
+      new Response('{invalid-json', {
+        status: 200,
+        headers: {
+          'Set-Cookie': 'uni_space_refresh=fictional; HttpOnly; SameSite=Strict; Path=/api/v1/auth',
+        },
+      }),
+    ],
+    [
+      'invalid token structure',
+      Response.json(
+        { access_token: '', token_type: 'bearer', expires_in: 600 },
+        {
+          status: 200,
+          headers: {
+            'Set-Cookie':
+              'uni_space_refresh=fictional; HttpOnly; SameSite=Strict; Path=/api/v1/auth',
+          },
+        },
+      ),
+    ],
+  ])('offers explicit logout after HTTP 200 with %s', async (_scenario, loginResponse) => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(loginResponse)
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { session } = createSession()
+
+    await session.login({ login: 'fictional', password: 'fictional' })
+
+    expect(session.getSnapshot().status).toBe('unauthenticated')
+    expect(session.getSnapshot().canRetryLogout).toBe(true)
+    expect(() => session.beginRequest()).toThrow()
+
+    const reloaded = createSession().session
+    await reloaded.start()
+    expect(reloaded.getSnapshot().status).toBe('unauthenticated')
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
+
+    await session.logout()
+    expect(session.getSnapshot().canRetryLogout).toBe(false)
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/v1/auth/login',
+      '/api/v1/auth/logout',
+    ])
+  })
+
   it('reports an uncertain login timeout without retrying or restoring the cookie after reload', async () => {
     const controller = new AbortController()
     const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValueOnce(controller.signal)
