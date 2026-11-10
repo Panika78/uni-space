@@ -1,63 +1,120 @@
-import { createBrowserRouter, Link, NavLink, Outlet } from 'react-router-dom'
+import { createBrowserRouter, Link, Navigate, Outlet } from 'react-router-dom'
 
 import { LoginPage, ProtectedRoute, SchedulePage } from '../features/auth/AuthPages'
+import { useAuth } from '../features/auth/AuthProvider'
+import { LoadingState } from '../shared/ui/StatusStates'
+import { StudentLayout, UnavailableSection } from './StudentLayout'
+import type { ReactNode } from 'react'
+import type { RouteObject } from 'react-router-dom'
 
-function AppLayout() {
+function PublicFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="app-shell">
-      <header className="site-header">
-        <Link className="brand" to="/" aria-label="Uni Space — главная">
-          Uni Space
+    <div className="public-shell">
+      <header className="public-header">
+        <Link to="/login" className="public-brand">
+          Uni Space <span>РГУЧВ</span>
         </Link>
-        <nav aria-label="Основная навигация">
-          <NavLink to="/" end>
-            Главная
-          </NavLink>
-          <NavLink to="/about">О проекте</NavLink>
-          <NavLink to="/schedule">Кабинет</NavLink>
-        </nav>
+        <Link to="/about" className="public-about-link">
+          О проекте
+        </Link>
       </header>
-      <main id="main-content">
-        <Outlet />
-      </main>
+      <main className="public-content">{children}</main>
+      <footer className="public-footer">Конкурсный прототип · Неофициальный сервис</footer>
     </div>
   )
 }
 
-function HomePage() {
+function PublicLayout() {
   return (
-    <section className="welcome-card" aria-labelledby="home-title">
-      <p className="eyebrow">Студенческий кабинет</p>
-      <h1 id="home-title">Добро пожаловать в Uni Space</h1>
-      <p>Ваше университетское пространство начинается здесь.</p>
-      <NavLink className="text-link" to="/about">
-        Узнать о проекте <span aria-hidden="true">→</span>
-      </NavLink>
-    </section>
+    <PublicFrame>
+      <Outlet />
+    </PublicFrame>
   )
 }
 
 function AboutPage() {
   return (
-    <section className="welcome-card" aria-labelledby="about-title">
-      <p className="eyebrow">О проекте</p>
-      <h1 id="about-title">Всё важное об учёбе — в одном месте</h1>
-      <p>Uni Space объединит расписание, успеваемость и университетские услуги.</p>
-      <NavLink className="text-link" to="/">
-        Вернуться на главную <span aria-hidden="true">→</span>
-      </NavLink>
+    <section className="welcome-card">
+      <p className="section-eyebrow">О проекте</p>
+      <h1>Uni Space</h1>
+      <p>Студенческий кабинет для расписания, успеваемости и университетских услуг.</p>
+      <p className="prototype-inline-note">Конкурсный прототип · Неофициальный сервис</p>
     </section>
   )
 }
 
-export const router = createBrowserRouter([
+function RouteIssuePage({ notFound = false }: { notFound?: boolean }) {
+  const { status } = useAuth()
+  if (status === 'initializing')
+    return <LoadingState title="Проверяем сессию…" variant="compact" className="auth-loading" />
+
+  const destination = status === 'authenticated' ? '/schedule' : '/login'
+  return (
+    <section className="welcome-card route-issue-card" aria-labelledby="route-issue-title">
+      <p className="section-eyebrow">Студенческий кабинет</p>
+      <h1 id="route-issue-title">
+        {notFound ? 'Страница не найдена' : 'Не удалось открыть страницу'}
+      </h1>
+      <p>
+        {notFound
+          ? 'Проверьте адрес или вернитесь к доступным страницам.'
+          : 'Произошла ошибка. Попробуйте перейти к доступной странице.'}
+      </p>
+      <Link className="route-recovery-link" to={destination}>
+        {status === 'authenticated' ? 'Вернуться к расписанию' : 'Перейти ко входу'}
+      </Link>
+    </section>
+  )
+}
+
+export function RouteErrorPage() {
+  return (
+    <PublicFrame>
+      <RouteIssuePage />
+    </PublicFrame>
+  )
+}
+
+function NotFoundPage() {
+  return <RouteIssuePage notFound />
+}
+
+export const appRoutes: RouteObject[] = [
   {
-    element: <AppLayout />,
+    element: <Outlet />,
+    errorElement: <RouteErrorPage />,
     children: [
-      { path: '/', element: <HomePage /> },
-      { path: '/about', element: <AboutPage /> },
-      { path: '/login', element: <LoginPage /> },
-      { element: <ProtectedRoute />, children: [{ path: '/schedule', element: <SchedulePage /> }] },
+      { path: '/', element: <Navigate to="/login" replace /> },
+      {
+        element: <PublicLayout />,
+        children: [
+          { path: '/login', element: <LoginPage /> },
+          { path: '/about', element: <AboutPage /> },
+        ],
+      },
+      {
+        element: <ProtectedRoute />,
+        children: [
+          {
+            element: <StudentLayout />,
+            children: [
+              { path: '/schedule', element: <SchedulePage /> },
+              { path: '/academics', element: <UnavailableSection title="Успеваемость" /> },
+              { path: '/services', element: <UnavailableSection title="Услуги и документы" /> },
+              { path: '/news', element: <UnavailableSection title="Новости" /> },
+              { path: '/notifications', element: <UnavailableSection title="Уведомления" /> },
+              { path: '/profile', element: <UnavailableSection title="Мой профиль" /> },
+              { path: '/settings', element: <UnavailableSection title="Настройки" /> },
+            ],
+          },
+        ],
+      },
+      {
+        element: <PublicLayout />,
+        children: [{ path: '*', element: <NotFoundPage /> }],
+      },
     ],
   },
-])
+]
+
+export const router = createBrowserRouter(appRoutes)

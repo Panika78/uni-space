@@ -31,6 +31,10 @@ class TokenResponse(RequestModel):
     expires_in: int
 
 
+class LogoutResponse(RequestModel):
+    session_revoked: bool
+
+
 def require_auth_origin(
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
@@ -96,9 +100,19 @@ def set_refresh_cookie(
     },
 )
 def login_user(
-    body: LoginRequest, response: Response, db: Database, settings: AuthSettings
+    body: LoginRequest,
+    request: Request,
+    response: Response,
+    db: Database,
+    settings: AuthSettings,
 ) -> dict:
-    session, token = create_login_session(db, body.login, body.password, settings)
+    session, token = create_login_session(
+        db,
+        body.login,
+        body.password,
+        settings,
+        previous_refresh_token=request.cookies.get(COOKIE_NAME),
+    )
     access = create_access_token(session, settings)
     set_refresh_cookie(response, token, session.expires_at, settings)
     return access
@@ -119,26 +133,26 @@ def refresh_session(
 
 @router.post(
     "/logout",
-    status_code=204,
+    response_model=LogoutResponse,
     dependencies=[Depends(require_empty_body)],
     openapi_extra={"security": [{}]},
     description=(
         "Refresh-cookie имеет приоритет. При неизвестной/отсутствующей cookie используется "
-        "необязательный валидный Bearer с проверкой владельца sid. Ответ 204 удаляет cookie, "
-        "но не доказывает отзыв, если пригодный идентификатор не найден."
+        "необязательный валидный Bearer с проверкой владельца sid. Поле session_revoked "
+        "сообщает, была ли найдена и отозвана конкретная сессия; cookie удаляется при любом ответе."
     ),
 )
 def logout_session(
     db: Database,
     settings: AuthSettings,
+    response: Response,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     refresh_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
-) -> Response:
-    revoke_logout_session(
+) -> dict:
+    session_revoked = revoke_logout_session(
         db, refresh_cookie, settings, credentials.credentials if credentials else None
     )
-    response = Response(status_code=204)
     response.delete_cookie(
         COOKIE_NAME, path=COOKIE_PATH, secure=settings.cookie_secure, httponly=True, samesite="lax"
     )
-    return response
+    return {"session_revoked": session_revoked}

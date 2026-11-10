@@ -1,29 +1,37 @@
 import { useState } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { useAuth } from './AuthProvider'
+import { LoadingState, UnavailableState } from '../../shared/ui/StatusStates'
+import { BrandMark } from '../../shared/ui/UniversityBrand'
 
 export function ProtectedRoute() {
   const { status } = useAuth()
-  if (status === 'initializing') return <p role="status">Проверяем сессию…</p>
+  if (status === 'initializing')
+    return <LoadingState title="Проверяем сессию…" variant="compact" className="auth-loading" />
   return status === 'authenticated' ? <Outlet /> : <Navigate to="/login" replace />
 }
 
 export function LoginPage() {
-  const { status, message, busy, login, logout } = useAuth()
+  const { status, message, busy, login } = useAuth()
   const [password, setPassword] = useState('')
-  if (status === 'initializing') return <p role="status">Проверяем сессию…</p>
+  if (status === 'initializing')
+    return <LoadingState title="Проверяем сессию…" variant="compact" className="auth-loading" />
   if (status === 'authenticated') return <Navigate to="/schedule" replace />
   return (
-    <section className="welcome-card">
-      <h1>Вход</h1>
-      {message && <p role="status">{message}</p>}
+    <section className="welcome-card login-card" aria-labelledby="login-title">
+      <div className="login-brand">
+        <BrandMark />
+        <p>РГУЧВ им. А. М. Кашпировского</p>
+      </div>
+      <h1 id="login-title">Вход в систему</h1>
       <form
         onSubmit={(event) => {
           event.preventDefault()
           if (busy) return
           const data = new FormData(event.currentTarget)
-          void login({ login: String(data.get('login')), password })
-          setPassword('')
+          void login({ login: String(data.get('login')), password }).then((success) => {
+            if (success) setPassword('')
+          })
         }}
       >
         <label>
@@ -43,36 +51,24 @@ export function LoginPage() {
             disabled={busy}
           />
         </label>
+        {message && <p role="status">{message}</p>}
         <button type="submit" disabled={busy}>
           {busy ? 'Подождите…' : 'Войти'}
         </button>
       </form>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
-          void logout()
-        }}
-      >
-        Повторить выход
-      </button>
     </section>
   )
 }
 
 export function SchedulePage() {
-  const { logout } = useAuth()
   return (
-    <section className="welcome-card">
-      <h1>Расписание</h1>
-      <p>Вход выполнен. Расписание появится на следующем этапе.</p>
-      <button
-        onClick={() => {
-          void logout()
-        }}
-      >
-        Выйти
-      </button>
+    <section className="section-page" aria-labelledby="schedule-title">
+      <p className="section-eyebrow">Студенческий кабинет</p>
+      <h1 id="schedule-title">Расписание</h1>
+      <UnavailableState
+        title="Расписание пока недоступно"
+        description="Содержимое расписания появится в следующих задачах."
+      />
     </section>
   )
 }

@@ -54,7 +54,28 @@ try {
     'Initial navigation has no server redirect',
   )
   await page.waitForURL(new URL('/login', origin).href)
-  await page.getByRole('heading', { name: 'Вход', exact: true }).waitFor()
+  await page.getByRole('heading', { name: 'Вход в систему', exact: true }).waitFor()
+  const emblem = page.locator('.login-card img.brand-mark')
+  assert.ok(await emblem.isVisible(), 'University emblem is visible on mobile login')
+  assert.ok(
+    await emblem.evaluate((image) => image.complete && image.naturalWidth > 0),
+    'University emblem loads successfully',
+  )
+  const emblemBox = await emblem.boundingBox()
+  const cardBox = await page.locator('.login-card').boundingBox()
+  const name = page.getByText('РГУЧВ им. А. М. Кашпировского', { exact: true })
+  const nameBox = await name.boundingBox()
+  const titleBox = await page.getByRole('heading', { name: 'Вход в систему' }).boundingBox()
+  assert.ok(emblemBox.width >= 100, 'University emblem is prominent')
+  assert.ok(Math.abs(emblemBox.x + emblemBox.width / 2 - (cardBox.x + cardBox.width / 2)) < 3)
+  assert.ok(nameBox.y >= emblemBox.y + emblemBox.height)
+  assert.ok(titleBox.y >= nameBox.y + nameBox.height)
+  assert.ok(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+    'Mobile login has no horizontal overflow',
+  )
   assert.ok(await page.getByLabel('Логин', { exact: true }).isVisible())
   assert.ok(await page.getByLabel('Пароль', { exact: true }).isVisible())
   assert.ok(await page.getByRole('button', { name: 'Войти', exact: true }).isVisible())
@@ -79,7 +100,7 @@ try {
     'Production CSS is attached to the document',
   )
   assert.equal(
-    await page.locator('.site-header').evaluate((el) => getComputedStyle(el).display),
+    await page.locator('.public-header').evaluate((el) => getComputedStyle(el).display),
     'flex',
   )
   assert.deepEqual(errors, [], 'No JavaScript exceptions or failed resource requests')

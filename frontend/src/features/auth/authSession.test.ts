@@ -15,6 +15,9 @@ function deferred<T>() {
 function token(access = 'access') {
   return Response.json({ access_token: access, token_type: 'bearer', expires_in: 600 })
 }
+function logoutResult(session_revoked = true) {
+  return Response.json({ session_revoked })
+}
 function error(code: string, status = 401) {
   return Response.json(
     { error: { code, message: 'internal details must stay hidden', details: [] } },
@@ -62,6 +65,36 @@ afterEach(() => {
 })
 
 describe('session lifecycle and coordinated cookie operations', () => {
+  it.each([
+    null,
+    '{}',
+    'null',
+    '{invalid-json',
+    '{"epoch":4,"blocked":true,"pending":false}',
+    '{"epoch":"initial","blocked":"invalid","pending":false}',
+  ])(
+    'allows explicit login after an unreadable journal %s without automatic refresh',
+    async (journal) => {
+      if (journal !== null) localStorage.setItem(authStorageKey, journal)
+      const fetchMock = vi.fn().mockResolvedValue(token('new-access'))
+      vi.stubGlobal('fetch', fetchMock)
+      const { session, cache } = createSession()
+      cache.setQueryData(['private'], 'old data')
+      if (journal !== null) {
+        await session.start()
+        expect(session.getSnapshot().status).toBe('unauthenticated')
+        expect(fetchMock).not.toHaveBeenCalled()
+        expect(cache.getQueryData(['private'])).toBeUndefined()
+      }
+      await session.login({ login: 'fictional', password: 'fictional' })
+      expect(session.getSnapshot().status).toBe('authenticated')
+      expect(session.beginRequest().token).toBe('new-access')
+      expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
+      const state = JSON.parse(localStorage.getItem(authStorageKey)!)
+      expect(state.blocked).toBe(false)
+      expect(state.pending).toBe(false)
+    },
+  )
   it.each(['invalid_refresh', 'invalid_access', 'session_invalid'])(
     'finishes initial %s without another request or network message',
     async (code) => {
@@ -69,7 +102,11 @@ describe('session lifecycle and coordinated cookie operations', () => {
       vi.stubGlobal('fetch', fetchMock)
       const { session } = createSession()
       await Promise.all([session.start(), session.start()])
-      expect(session.getSnapshot()).toEqual({ status: 'unauthenticated', message: '', busy: false })
+      expect(session.getSnapshot()).toEqual({
+        status: 'unauthenticated',
+        message: '',
+        busy: false,
+      })
       expect(fetchMock).toHaveBeenCalledTimes(1)
     },
   )
@@ -129,7 +166,11 @@ describe('session lifecycle and coordinated cookie operations', () => {
     await createSession().session.start()
     await first.refresh().catch(() => {})
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(first.getSnapshot().message).toContain('Войдите снова')
+    expect(first.getSnapshot().message).toBe('')
+    const second = createSession().session
+    await second.start()
+    expect(second.getSnapshot().status).toBe('unauthenticated')
+    expect(second.getSnapshot().message).toBe('')
   })
 
   it('does not reuse a cookie after a tab closes during rotation', async () => {
@@ -151,7 +192,7 @@ describe('session lifecycle and coordinated cookie operations', () => {
     vi.stubGlobal('fetch', fetchMock)
     const { session } = createSession()
     await session.start()
-    expect(session.getSnapshot().message).toContain('Web Locks')
+    expect(session.getSnapshot().message).toContain('современный браузер')
     expect(fetchMock).not.toHaveBeenCalled()
     vi.spyOn(Storage.prototype, 'getItem').mockImplementationOnce(() => {
       throw new Error('denied')
@@ -170,7 +211,7 @@ describe('session lifecycle and coordinated cookie operations', () => {
     const fetchMock = vi
       .fn()
       .mockReturnValueOnce(response.promise)
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(logoutResult())
     vi.stubGlobal('fetch', fetchMock)
     const request = apiFetch('/api/v1/test-only', { authenticated: true })
     const rejection = expect(request).rejects.toMatchObject({ name: 'AbortError' })
@@ -189,7 +230,7 @@ describe('session lifecycle and coordinated cookie operations', () => {
     const fetchMock = vi
       .fn()
       .mockReturnValueOnce(response.promise)
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(logoutResult())
     vi.stubGlobal('fetch', fetchMock)
     const refresh = session.refresh().catch(() => {})
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
@@ -224,24 +265,130 @@ describe('session lifecycle and coordinated cookie operations', () => {
     expect(second.getSnapshot().status).toBe('unauthenticated')
   })
 
-  it('persists unconfirmed logout and permits explicit retry without automatic refresh', async () => {
+  it('blocks recovery without retry when logout never reaches the server', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(token()))
+    const { session, cache } = createSession()
+    await session.start()
+    cache.setQueryData(['private'], 'old-user-data')
+    const oldRequest = session.beginRequest()
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('offline'))
+    vi.stubGlobal('fetch', fetchMock)
+    await session.logout()
+    expect(session.getSnapshot().message).toContain('Войдите снова')
+    expect(cache.getQueryData(['private'])).toBeUndefined()
+    expect(oldRequest.signal.aborted).toBe(true)
+    expect(JSON.parse(localStorage.getItem(authStorageKey)!)).not.toHaveProperty('logoutRetry')
+    await createSession().session.start()
+    window.dispatchEvent(new Event('online'))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/auth/logout')
+  })
+
+  it.each(['{broken-json', '{}'])(
+    'closes private data without promising a retry when logout finds a damaged journal %s',
+    async (journal) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(token('old-access')))
+      const { session, cache } = createSession()
+      await session.start()
+      cache.setQueryData(['private'], 'old-user-data')
+      const oldRequest = session.beginRequest()
+      localStorage.setItem(authStorageKey, journal)
+      const fetchMock = vi.fn()
+      vi.stubGlobal('fetch', fetchMock)
+
+      await session.logout()
+
+      expect(session.getSnapshot().status).toBe('unauthenticated')
+      expect(session.getSnapshot().message).toBe(
+        'Не удалось завершить выход. Войдите снова, чтобы продолжить.',
+      )
+      expect(session.getSnapshot().message).not.toContain('Повторим')
+      expect(cache.getQueryData(['private'])).toBeUndefined()
+      expect(oldRequest.signal.aborted).toBe(true)
+      expect(() => session.beginRequest()).toThrow()
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(localStorage.getItem(authStorageKey)).toBe(journal)
+      await createSession().session.start()
+      expect(fetchMock).not.toHaveBeenCalled()
+    },
+  )
+
+  it('does not retry an executed logout whose response was lost', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(token()))
+    const { session } = createSession()
+    await session.start()
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('response lost'))
+    vi.stubGlobal('fetch', fetchMock)
+    await session.logout()
+    await createSession().session.start()
+    window.dispatchEvent(new Event('online'))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(session.getSnapshot().status).toBe('unauthenticated')
+  })
+
+  it('leaves a failed logout blocked after rejected credentials', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(token()))
     const { session } = createSession()
     await session.start()
     const fetchMock = vi
       .fn()
-      .mockRejectedValueOnce(new TypeError('lost logout'))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce(error('invalid_credentials'))
     vi.stubGlobal('fetch', fetchMock)
     await session.logout()
-    expect(session.getSnapshot().message).toContain('сервер не подтвердил')
-    const reloaded = createSession().session
-    await reloaded.start()
-    expect(reloaded.getSnapshot().message).toContain('Не удалось подтвердить состояние сессии')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    await reloaded.logout()
+    await session.login({ login: 'different-user', password: 'wrong-password' })
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/v1/auth/logout',
+      '/api/v1/auth/login',
+    ])
+    await createSession().session.start()
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(reloaded.getSnapshot().message).toBe('Вы вышли из приложения.')
+  })
+
+  it('does not let a deferred logout revoke a concurrent successful login', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(token('previous-access')))
+    vi.stubGlobal('fetch', fetchMock)
+    const first = createSession().session
+    const secondContext = createSession()
+    const second = secondContext.session
+    await first.start()
+    await second.start()
+    secondContext.cache.setQueryData(['private'], 'previous-user-data')
+    const staleRequest = second.beginRequest()
+
+    fetchMock
+      .mockRejectedValueOnce(new TypeError('lost logout response'))
+      .mockResolvedValueOnce(token('replacement-access'))
+    await first.logout()
+    second.synchronize()
+    expect(staleRequest.signal.aborted).toBe(true)
+    expect(secondContext.cache.getQueryData(['private'])).toBeUndefined()
+
+    await second.login({ login: 'different-user', password: 'fictional' })
+    second.synchronize()
+    expect(first.getSnapshot().status).toBe('unauthenticated')
+    expect(second.getSnapshot().status).toBe('authenticated')
+    expect(second.beginRequest().token).toBe('replacement-access')
+    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+      '/api/v1/auth/refresh',
+      '/api/v1/auth/refresh',
+      '/api/v1/auth/logout',
+      '/api/v1/auth/login',
+    ])
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body).login).toBe('different-user')
+  })
+
+  it('does not dispatch a legacy retry marker on reload', async () => {
+    const epoch = 'pending-logout'
+    localStorage.setItem('uni-space.auth-epoch', epoch)
+    localStorage.setItem(
+      authStorageKey,
+      JSON.stringify({ epoch, blocked: true, pending: false, logoutRetry: { attempts: 0 } }),
+    )
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    await createSession().session.start()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 
@@ -334,7 +481,7 @@ describe('login feedback', () => {
     ['rate_limited', 'через 7 сек.', 429],
     ['request_too_large', 'Слишком большой', 413],
     ['origin_not_allowed', 'с этого адреса', 403],
-    ['internal_error', 'Сервис входа временно недоступен', 500],
+    ['internal_error', 'Попробуйте позже', 500],
   ])('maps %s without exposing server details', async (code, message, status) => {
     const fetchMock = vi
       .fn()
@@ -470,7 +617,7 @@ it('cancels an active Query and never puts late personal data back in the cache'
   vi.stubGlobal(
     'fetch',
     vi.fn().mockImplementation((path: string, init: RequestInit) => {
-      if (path.endsWith('/logout')) return Promise.resolve(new Response(null, { status: 204 }))
+      if (path.endsWith('/logout')) return Promise.resolve(logoutResult())
       requestSignal = init.signal as AbortSignal
       return response.promise
     }),
@@ -499,10 +646,7 @@ it('clears a reused QueryClient before restoring a new provider session', async 
 
 describe('review regressions: confirmed logout', () => {
   it('shows ordinary login after confirmed logout and reload without another refresh', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(token())
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    const fetchMock = vi.fn().mockResolvedValueOnce(token()).mockResolvedValueOnce(logoutResult())
     vi.stubGlobal('fetch', fetchMock)
     const { session } = createSession()
     await session.start()
@@ -510,7 +654,11 @@ describe('review regressions: confirmed logout', () => {
     expect(session.getSnapshot().message).toBe('Вы вышли из приложения.')
     const reloaded = createSession().session
     await reloaded.start()
-    expect(reloaded.getSnapshot()).toEqual({ status: 'unauthenticated', message: '', busy: false })
+    expect(reloaded.getSnapshot()).toEqual({
+      status: 'unauthenticated',
+      message: '',
+      busy: false,
+    })
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
       '/api/v1/auth/refresh',
       '/api/v1/auth/logout',
@@ -537,16 +685,20 @@ describe('review regressions: confirmed logout', () => {
     expect(second.getSnapshot().status).toBe('unauthenticated')
     expect(old.signal.aborted).toBe(true)
     expect(cache.getQueryData(['private'])).toBeUndefined()
-    response.resolve(new Response(null, { status: 204 }))
+    response.resolve(logoutResult())
     await logout
     second.synchronize()
-    expect(second.getSnapshot()).toEqual({ status: 'unauthenticated', message: '', busy: false })
+    expect(second.getSnapshot()).toEqual({
+      status: 'unauthenticated',
+      message: '',
+      busy: false,
+    })
     expect(() => old.assertCurrent()).toThrow()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('does not treat an ended journal from a previous intent as confirmation of a new logout', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(logoutResult(false)))
     const first = createSession().session
     await first.logout()
     // A second tab closes while a new logout is queued, before it owns the lock.
@@ -555,13 +707,68 @@ describe('review regressions: confirmed logout', () => {
     vi.stubGlobal('fetch', fetchMock)
     const reloaded = createSession().session
     await reloaded.start()
-    expect(reloaded.getSnapshot().message).toContain('Не удалось подтвердить состояние сессии')
+    expect(reloaded.getSnapshot().message).toBe('')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 
 describe('review regressions: login failure diagnostics', () => {
-  it('reports an uncertain login timeout without retrying or restoring the cookie after reload', async () => {
+  it.each([
+    [
+      'malformed JSON',
+      new Response('{invalid-json', {
+        status: 200,
+        headers: {
+          'Set-Cookie': 'uni_space_refresh=fictional; HttpOnly; SameSite=Strict; Path=/api/v1/auth',
+        },
+      }),
+    ],
+    [
+      'invalid token structure',
+      Response.json(
+        { access_token: '', token_type: 'bearer', expires_in: 600 },
+        {
+          status: 200,
+          headers: {
+            'Set-Cookie':
+              'uni_space_refresh=fictional; HttpOnly; SameSite=Strict; Path=/api/v1/auth',
+          },
+        },
+      ),
+    ],
+  ])(
+    'allows ordinary login after HTTP 200 with %s without restoring protected state',
+    async (_scenario, loginResponse) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(loginResponse)
+        .mockResolvedValueOnce(token('recovered-access'))
+      vi.stubGlobal('fetch', fetchMock)
+      const { session } = createSession()
+
+      await session.login({ login: 'fictional', password: 'fictional' })
+
+      expect(session.getSnapshot().status).toBe('unauthenticated')
+      expect(session.getSnapshot().message).toBe('Не удалось выполнить вход. Попробуйте ещё раз.')
+      expect(() => session.beginRequest()).toThrow()
+
+      const reloaded = createSession().session
+      await reloaded.start()
+      expect(reloaded.getSnapshot().status).toBe('unauthenticated')
+      expect(reloaded.getSnapshot().message).toBe('')
+      expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
+
+      await reloaded.login({ login: 'fictional', password: 'fictional' })
+      expect(reloaded.getSnapshot().status).toBe('authenticated')
+      expect(reloaded.beginRequest().token).toBe('recovered-access')
+      expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+        '/api/v1/auth/login',
+        '/api/v1/auth/login',
+      ])
+    },
+  )
+
+  it('keeps an uncertain login private and presents only a plain message', async () => {
     const controller = new AbortController()
     const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValueOnce(controller.signal)
     const fetchMock = vi.fn().mockImplementation(
@@ -577,15 +784,21 @@ describe('review regressions: login failure diagnostics', () => {
     controller.abort(new DOMException('private detail', 'TimeoutError'))
     await login
     expect(timeout).toHaveBeenCalledWith(15000)
-    expect(session.getSnapshot().message).toContain('Запрос мог быть выполнен')
-    expect(session.getSnapshot().message).not.toMatch(/Web Locks|private detail|Проверьте данные/)
+    expect(session.getSnapshot().message).toBe(
+      'Не удалось выполнить вход. Проверьте соединение и попробуйте ещё раз.',
+    )
+    expect(session.getSnapshot().message).not.toMatch(/Web Locks|private detail|refresh|сессия/i)
     await createSession().session.start()
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
     timeout.mockRestore()
   })
 
   it.each([
-    ['network failure', new TypeError('private detail'), 'Проверьте соединение'],
+    [
+      'network failure',
+      new TypeError('private detail'),
+      'Не удалось выполнить вход. Проверьте соединение',
+    ],
     ['ordinary cancellation', new DOMException('private detail', 'AbortError'), ''],
   ])(
     'handles %s without another login POST or a false browser diagnosis',
@@ -610,7 +823,7 @@ describe('review regressions: login failure diagnostics', () => {
       vi.stubGlobal('fetch', fetchMock)
       const { session } = createSession()
       await session.login({ login: 'fictional', password: 'fictional' })
-      expect(session.getSnapshot().message).toContain('Сервис входа временно недоступен')
+      expect(session.getSnapshot().message).toContain('Попробуйте позже')
       expect(session.getSnapshot().message).not.toMatch(
         /Проверьте данные|internal details|Web Locks/,
       )
@@ -620,7 +833,7 @@ describe('review regressions: login failure diagnostics', () => {
 
   it('does not attribute an unknown error to browser coordination', () => {
     expect(getLoginErrorMessage(new Error('private detail'))).toBe(
-      'Не удалось подтвердить вход. Попробуйте позже.',
+      'Не удалось выполнить вход. Попробуйте ещё раз.',
     )
   })
 
@@ -630,7 +843,7 @@ describe('review regressions: login failure diagnostics', () => {
     vi.stubGlobal('fetch', fetchMock)
     const { session } = createSession()
     await session.login({ login: 'fictional', password: 'fictional' })
-    expect(session.getSnapshot().message).toContain('Web Locks')
+    expect(session.getSnapshot().message).toContain('современный браузер')
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -642,7 +855,7 @@ describe('review regressions: login failure diagnostics', () => {
     vi.stubGlobal('fetch', fetchMock)
     const { session } = createSession()
     await session.login({ login: 'fictional', password: 'fictional' })
-    expect(session.getSnapshot().message).toContain('хранилищу')
+    expect(session.getSnapshot().message).toContain('современный браузер')
     expect(session.getSnapshot().message).not.toContain('private detail')
     expect(fetchMock).not.toHaveBeenCalled()
     storage.mockRestore()
@@ -683,8 +896,13 @@ describe('bounded Web Lock acquisition', () => {
         expect(cache.getQueryData(['private'])).toBeUndefined()
         await vi.advanceTimersByTimeAsync(10000)
         expect(session.getSnapshot().busy).toBe(false)
-        expect(session.getSnapshot().message).toContain('Закройте зависшую вкладку')
-        expect(session.getSnapshot().message).not.toContain('Выход подтверждён')
+        expect(session.getSnapshot().message).toMatch(
+          operation === 'logout'
+            ? /Не удалось завершить выход. Войдите снова/
+            : /Попробуйте ещё раз/,
+        )
+        expect(session.getSnapshot().message).not.toMatch(/повторим|восстановлении соединения/i)
+        expect(session.getSnapshot().message).not.toMatch(/lock|сесс|refresh|logout/i)
         expect(fetchMock).not.toHaveBeenCalled()
       } finally {
         holder.release()
@@ -710,8 +928,7 @@ describe('bounded Web Lock acquisition', () => {
       expect(session.getSnapshot().status).toBe('initializing')
       await vi.advanceTimersByTimeAsync(10000)
       expect(session.getSnapshot().status).toBe('unauthenticated')
-      expect(session.getSnapshot().message).toContain('Закройте зависшую вкладку')
-      expect(session.getSnapshot().message).not.toContain('Web Locks')
+      expect(session.getSnapshot().message).toBe('')
       expect(localStorage.getItem(authStorageKey)).toBeNull()
       expect(fetchMock).not.toHaveBeenCalled()
     } finally {
@@ -736,7 +953,7 @@ describe('bounded Web Lock acquisition', () => {
     try {
       await vi.advanceTimersByTimeAsync(10000)
       expect(session.getSnapshot().status).toBe('unauthenticated')
-      expect(session.getSnapshot().message).not.toContain('Web Locks')
+      expect(session.getSnapshot().message).toBe('')
     } finally {
       holder.release()
       await holder.completion
@@ -766,7 +983,7 @@ describe('bounded Web Lock acquisition', () => {
   })
 
   it('keeps confirmed logout reload quiet even while another tab holds the lock', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(logoutResult()))
     await createSession().session.logout()
     const holder = await holdLock()
     const fetchMock = vi.fn()
@@ -797,9 +1014,7 @@ describe('rejected login preserves only confirmed absence', () => {
       const fetchMock = vi
         .fn()
         .mockResolvedValueOnce(
-          source === 'invalid_refresh'
-            ? error('invalid_refresh')
-            : new Response(null, { status: 204 }),
+          source === 'invalid_refresh' ? error('invalid_refresh') : logoutResult(),
         )
         .mockResolvedValueOnce(error('invalid_credentials'))
       vi.stubGlobal('fetch', fetchMock)
@@ -836,7 +1051,7 @@ describe('rejected login preserves only confirmed absence', () => {
     const reloaded = createSession().session
     await reloaded.start()
     expect(reloaded.getSnapshot().status).toBe('unauthenticated')
-    expect(reloaded.getSnapshot().message).toContain('Не удалось подтвердить состояние сессии')
+    expect(reloaded.getSnapshot().message).toBe('')
     expect(JSON.parse(localStorage.getItem(authStorageKey)!).ended).not.toBe(true)
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
   })
@@ -869,7 +1084,7 @@ describe('rejected login preserves only confirmed absence', () => {
       await login
       const reloaded = createSession().session
       await reloaded.start()
-      expect(reloaded.getSnapshot().message).toContain('Не удалось подтвердить состояние сессии')
+      expect(reloaded.getSnapshot().message).toBe('')
       expect(JSON.parse(localStorage.getItem(authStorageKey)!).ended).not.toBe(true)
       expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
     },
@@ -920,7 +1135,7 @@ it('does not reuse an ended journal belonging to an older auth intent after reje
   await session.login({ login: 'fictional', password: 'incorrect' })
   const reloaded = createSession().session
   await reloaded.start()
-  expect(reloaded.getSnapshot().message).toContain('Не удалось подтвердить состояние сессии')
+  expect(reloaded.getSnapshot().message).toBe('')
   expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
 })
 
@@ -931,7 +1146,7 @@ describe('logout access fallback', () => {
     await session.start()
     cache.setQueryData(['private'], 'fictional-private-data')
     const old = session.beginRequest()
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    const fetchMock = vi.fn().mockResolvedValue(logoutResult())
     vi.stubGlobal('fetch', fetchMock)
     const logout = session.logout()
     expect(session.getSnapshot().status).toBe('unauthenticated')
@@ -994,13 +1209,37 @@ it('never posts a queued logout from the old generation after a different tab st
   expect(second.beginRequest().token).toBe('fictional-account-b')
 })
 
+it('does not dispatch an old queued logout after login repairs a damaged journal', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(token('old-access')))
+  const first = createSession().session
+  await first.start()
+  const held = deferred<void>()
+  const acquired = deferred<void>()
+  const holder = navigator.locks.request('uni-space.auth', {}, () => {
+    acquired.resolve()
+    return held.promise
+  })
+  await acquired.promise
+  const logout = first.logout()
+  localStorage.setItem(authStorageKey, '{corrupt')
+  const fetchMock = vi.fn().mockResolvedValue(token('new-access'))
+  vi.stubGlobal('fetch', fetchMock)
+  const second = createSession().session
+  const login = second.login({ login: 'fictional-second', password: 'fictional' })
+  held.resolve()
+  await Promise.all([holder, logout, login])
+  expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
+  expect(second.beginRequest().token).toBe('new-access')
+  expect(first.getSnapshot().status).toBe('unauthenticated')
+})
+
 it('keeps logout without an in-memory access token compatible and does not claim server revocation', async () => {
-  const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+  const fetchMock = vi.fn().mockResolvedValue(logoutResult(false))
   vi.stubGlobal('fetch', fetchMock)
   const { session } = createSession()
   await session.logout()
   const [, init] = fetchMock.mock.calls[0]
   expect(new Headers(init.headers).has('Authorization')).toBe(false)
   expect(init.redirect).toBe('error')
-  expect(session.getSnapshot().message).toBe('Вы вышли из приложения.')
+  expect(session.getSnapshot().message).toContain('завершить выход')
 })

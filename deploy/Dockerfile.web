@@ -3,6 +3,7 @@ FROM node:24.22.1-bookworm-slim AS build
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json frontend/index.html frontend/tsconfig*.json frontend/vite.config.ts ./
 COPY frontend/src ./src
+COPY frontend/public ./public
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
     npm install --global npm@11.19.1 && npm ci && npm run build

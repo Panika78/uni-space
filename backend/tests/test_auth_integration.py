@@ -152,6 +152,11 @@ def login(auth, index=0):
     return response, response.cookies[COOKIE_NAME], response.json()["access_token"]
 
 
+def assert_logout(response, session_revoked):
+    assert response.status_code == 200, response.text
+    assert response.json() == {"session_revoked": session_revoked}
+
+
 def assert_error(response, status, code):
     assert response.status_code == status, response.text
     assert response.json()["error"]["code"] == code
@@ -195,9 +200,96 @@ def test_login_rotation_cookie_and_logout_revoke_access(auth):
         assert child.session_id == sid and child.expires_at == expiry
         max_age = int(result.headers["set-cookie"].split("Max-Age=")[1].split(";")[0])
         assert 0 < max_age <= (expiry - datetime.now(UTC)).total_seconds()
-    assert client.logout(current).status_code == 204
+    assert_logout(client.logout(current), True)
     assert_error(client.request("GET", "/api/v1/test/user", access=access), 401, "session_invalid")
     assert_error(client.refresh(current), 401, "invalid_refresh")
+
+
+def test_successful_login_revokes_the_presented_browser_session(auth):
+    client, engine, ids, logins, _student_ids = auth
+    _response, previous_refresh, previous_access = login(auth)
+    _response, independent_refresh, independent_access = login(auth)
+
+    replacement = client.login(
+        token=previous_refresh,
+        json={"login": logins[0], "password": PASSWORD},
+    )
+
+    assert replacement.status_code == 200, replacement.text
+    replacement_refresh = replacement.cookies[COOKIE_NAME]
+    assert replacement_refresh != previous_refresh
+    assert_error(
+        client.request("GET", "/api/v1/test/user", access=previous_access),
+        401,
+        "session_invalid",
+    )
+    assert_error(client.refresh(previous_refresh), 401, "invalid_refresh")
+    assert (
+        client.request(
+            "GET", "/api/v1/test/user", access=replacement.json()["access_token"]
+        ).status_code
+        == 200
+    )
+    assert client.request("GET", "/api/v1/test/user", access=independent_access).status_code == 200
+    assert client.refresh(independent_refresh).status_code == 200
+
+    with Session(engine) as db:
+        sessions = db.scalars(
+            select(AuthSession).where(AuthSession.user_id == ids[0]).order_by(AuthSession.id)
+        ).all()
+        assert len(sessions) == 3
+        assert sessions[0].revoked_at is not None
+        assert sessions[0].revocation_reason == "login_replaced"
+        assert sessions[1].revoked_at is None
+        assert sessions[2].revoked_at is None
+
+
+def test_rejected_login_does_not_revoke_the_presented_browser_session(auth):
+    client, _engine, _ids, logins, _student_ids = auth
+    _response, refresh_token, access = login(auth)
+
+    rejected = client.login(
+        token=refresh_token,
+        json={"login": logins[0], "password": "incorrect-fictional-password"},
+    )
+
+    assert_error(rejected, 401, "invalid_credentials")
+    assert client.request("GET", "/api/v1/test/user", access=access).status_code == 200
+    assert client.refresh(refresh_token).status_code == 200
+
+
+def test_login_as_another_account_replaces_only_the_presented_cookie_session(auth):
+    client, engine, ids, logins, _student_ids = auth
+    _response, old_cookie, old_access = login(auth)
+    _response, independent_cookie, independent_access = login(auth)
+
+    rejected = client.login(
+        token=old_cookie,
+        json={"login": logins[1], "password": "incorrect-fictional-password"},
+    )
+    assert_error(rejected, 401, "invalid_credentials")
+    assert client.request("GET", "/api/v1/test/user", access=old_access).status_code == 200
+
+    replacement = client.login(
+        token=old_cookie,
+        json={"login": logins[1], "password": PASSWORD},
+    )
+    assert replacement.status_code == 200, replacement.text
+    assert_error(
+        client.request("GET", "/api/v1/test/user", access=old_access), 401, "session_invalid"
+    )
+    assert_error(client.refresh(old_cookie), 401, "invalid_refresh")
+    assert client.request("GET", "/api/v1/test/user", access=independent_access).status_code == 200
+    assert client.refresh(independent_cookie).status_code == 200
+    replacement_user = client.request(
+        "GET", "/api/v1/test/user", access=replacement.json()["access_token"]
+    )
+    assert replacement_user.status_code == 200
+    assert replacement_user.json()["id"] == str(ids[1])
+    with Session(engine) as db:
+        sessions = db.scalars(select(AuthSession).where(AuthSession.user_id == ids[0])).all()
+        assert sum(session.revocation_reason == "login_replaced" for session in sessions) == 1
+        assert sum(session.revoked_at is None for session in sessions) == 1
 
 
 def test_reuse_commits_revocation_and_keeps_other_session_independent(auth):
@@ -297,7 +389,7 @@ def test_refresh_rejects_invalid_token_and_parent(auth, condition):
 def test_logout_without_valid_cookie_is_idempotent_and_clears_cookie(auth, token):
     client = auth[0]
     response = client.logout(token)
-    assert response.status_code == 204 and response.content == b""
+    assert_logout(response, False)
     cookie = response.headers["set-cookie"]
     assert "Max-Age=0" in cookie and f"Path={COOKIE_PATH}" in cookie
     assert "HttpOnly" in cookie and "Secure" in cookie and "SameSite=lax" in cookie
@@ -493,8 +585,14 @@ def test_concurrent_operations_wait_on_same_session_and_reread_state(
                 yield db
 
         client.app.dependency_overrides[get_db_session] = get_test_session
-    assert first_response.status_code == (200 if first_operation == "refresh" else 204)
-    assert second_response.status_code == (401 if second_operation == "refresh" else 204)
+    if first_operation == "refresh":
+        assert first_response.status_code == 200
+    else:
+        assert_logout(first_response, True)
+    if second_operation == "refresh":
+        assert second_response.status_code == 401
+    else:
+        assert_logout(second_response, True)
     with Session(engine) as db:
         session = db.scalar(select(AuthSession).where(AuthSession.user_id == ids[0]))
         assert session.revoked_at
@@ -564,7 +662,12 @@ def test_openapi_auth_contract_uses_shared_errors_and_cookie():
                 for param in operation["parameters"]
             )
     assert "429" in schema["paths"][COOKIE_PATH + "/login"]["post"]["responses"]
-    assert schema["paths"][COOKIE_PATH + "/logout"]["post"]["security"] == [{"HTTPBearer": []}, {}]
+    logout_operation = schema["paths"][COOKIE_PATH + "/logout"]["post"]
+    assert logout_operation["security"] == [{"HTTPBearer": []}, {}]
+    assert logout_operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/LogoutResponse"
+    }
+    assert schema["components"]["schemas"]["LogoutResponse"]["required"] == ["session_revoked"]
 
 
 def test_rate_limit_counts_invalid_bodies_and_skips_disallowed_origins(auth, monkeypatch):
@@ -719,7 +822,7 @@ def test_logout_falls_back_to_access_and_revokes_session_when_cookie_cannot_iden
     client, engine, _ids, _logins, _students = auth
     _response, refresh, access = login(auth)
     response = client.logout(cookie, access=access)
-    assert response.status_code == 204 and response.content == b""
+    assert_logout(response, True)
     assert "Max-Age=0" in response.headers["set-cookie"]
     assert_error(client.request("GET", "/api/v1/test/user", access=access), 401, "session_invalid")
     with Session(engine) as db:
@@ -735,7 +838,7 @@ def test_logout_falls_back_to_access_and_revokes_session_when_cookie_cannot_iden
                 select(RefreshToken).where(RefreshToken.session_id == session.id)
             )
         )
-    assert client.logout(access=access).status_code == 204
+    assert_logout(client.logout(access=access), True)
     with Session(engine) as db:
         assert db.get(AuthSession, session.id).revoked_at == revoked_at
 
@@ -748,8 +851,8 @@ def test_logout_cookie_takes_priority_over_an_independent_access_session(auth, c
     if cookie_state == "used":
         assert client.refresh(cookie).status_code == 200
     if cookie_state == "revoked":
-        assert client.logout(cookie).status_code == 204
-    assert client.logout(cookie, access=access_b).status_code == 204
+        assert_logout(client.logout(cookie), True)
+    assert_logout(client.logout(cookie, access=access_b), True)
     assert_error(
         client.request("GET", "/api/v1/test/user", access=access_a), 401, "session_invalid"
     )
@@ -803,7 +906,7 @@ def test_logout_ignores_unusable_bearer_and_does_not_revoke_an_unrelated_session
         if mutation == "scheme"
         else client.logout(access=bad_access)
     )
-    assert response.status_code == 204
+    assert_logout(response, False)
     assert "Max-Age=0" in response.headers["set-cookie"]
     assert client.request("GET", "/api/v1/test/user", access=access).status_code == 200
 
