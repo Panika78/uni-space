@@ -70,8 +70,7 @@ digest, чтобы тот же тег не менял используемые �
 схема не использует `btree_gist`, `ltree`, `pgcrypto` и logical decoding plugins,
 для которых release notes описывают дополнительные действия. После обновления
 проверьте контрольные записи, связи и Alembic heads; не удаляйте volume.
-Смена major PostgreSQL сюда не входит. Разделение ролей БД остаётся в issue #32
-(SEC-02), это исправление его не реализует.
+Смена major PostgreSQL сюда не входит. Разделение ролей SEC-02 описано ниже (TASK-022, issue #32).
 
 ### Проверка CVE собранных образов
 
@@ -135,6 +134,8 @@ chmod 600 /private/uni-space/production.env
 umask 077
 python -c 'import secrets; print(secrets.token_urlsafe(48))' > /private/uni-space/jwt_signing_key
 python -c 'import secrets; print(secrets.token_urlsafe(48))' > /private/uni-space/postgres_password
+python -c 'import secrets; print(secrets.token_urlsafe(48))' > /private/uni-space/api_db_password
+python -c 'import secrets; print(secrets.token_urlsafe(48))' > /private/uni-space/migration_db_password
 export PROD_ENV_FILE=/private/uni-space/production.env
 ```
 
@@ -152,7 +153,7 @@ Backend отклоняет несовпадение `PUBLIC_ORIGIN`/`ALLOWED_ORI
 проверка Settings не доказывает энтропию. Если случайный ключ случайно содержит
 запрещённый маркер, сгенерируйте новый. Не выводите ключи в терминал/CI.
 
-Секреты передаются через Compose file secrets, доступны только API и БД.
+Секреты передаются через Compose file secrets с раздельными mounts по ролям.
 Entrypoint API читает их в окружение процесса; пароль URL-кодируется существующим
 `URL.create()`. В image layers, Compose environment values и SPA секретов нет.
 Compose secrets здесь — защищённые файлами mounts, **не шифрованное хранилище**.
@@ -167,13 +168,85 @@ read-only. В тесте генерируется самоподписанный
 использовать при публикации. После продления реального сертификата пересоздайте
 Nginx (важно при замене файла через rename), проверьте срок и цепочку снаружи.
 
+## Роли PostgreSQL и переход существующего volume (TASK-022, SEC-02)
+
+Связанные требования: REQ-NF04, REQ-NF07; issue #32.
+Кластер выделен только этому приложению. Роли PostgreSQL не связаны с `users.role`.
+
+| Подключение | Секрет / сервис | Права |
+|---|---|---|
+| `POSTGRES_USER` (прежнее имя сохраняется) | `POSTGRES_PASSWORD_FILE`, только `db` | Администратор кластера; bootstrap, backup, создание отдельной restore-БД |
+| `uni_space_migrator` | `MIGRATION_DB_PASSWORD_FILE`, только `db` и одноразовый `migrate` | LOGIN без SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS; владелец public и прикладных объектов, DDL миграций |
+| `uni_space_api` | `API_DB_PASSWORD_FILE`, только `db` и `api` | CONNECT рабочей БД, USAGE public и auth-последовательностей; SELECT users, students, auth_sessions, refresh_tokens, alembic_version; INSERT/UPDATE auth_sessions и refresh_tokens |
+
+API не получает административный или migration secret ни в окружение, ни в mounts.
+В `migrate` нет JWT-секрета приложения: константа удовлетворяет Settings только для
+запуска Alembic, HTTP/token signing этим сервисом не выполняются. Образ общий,
+секреты не встраиваются. API читает Alembic revision, но не меняет её.
+`SELECT FOR UPDATE` пользователя при login требует UPDATE хотя бы одной колонки:
+выдан только `UPDATE(id)` users; пароль, роль и активность менять нельзя.
+Это ограничение PostgreSQL: обладатель SQL credentials может менять ID, если
+ограничения целостности допускают это. Защита credentials и серверная авторизация
+остаются необходимыми. Удаление сессий/токенов API сейчас не выполняет и не разрешено.
+ALTER DEFAULT PRIVILEGES снимает права PUBLIC/API на новые таблицы и
+последовательности мигратора; migration wrapper выдаёт права только перечисленным
+выше объектам. Будущие функции API требуют явного пересмотра GRANT.
+
+`configure-postgres.sh` выполняется явно, а не через initdb.d: одинаково для
+пустого и уже заполненного volume. Команда атомарно создаёт/ограничивает роли,
+передаёт только объекты public текущей БД мигратору, обновляет права и пароли
+из файлов. Повторный запуск сохраняет данные. Не используйте имена зарезервированных
+ролей как POSTGRES_USER; неожиданные membership требуют ручного разбора и дают отказ.
+В выделенном кластере снимаются PUBLIC CONNECT/TEMP/CREATE со всех доступных БД;
+API и мигратор получают CONNECT только рабочей БД. Не применяйте этот bootstrap
+к общему кластеру сторонних приложений. Системные каталоги PostgreSQL с публичными
+метаданными остаются видимыми; секретные pg_authid и посторонние данные недоступны.
+
+Для **перехода существующей установки PR #31**:
+
+1. Зафиксируйте release/env/revision, остановите запись: `stop nginx api` через
+   production wrapper. Сделайте backup старой командой и сохраните старые образы.
+2. Сохраните прежние POSTGRES_USER, POSTGRES_DB, POSTGRES_PASSWORD_FILE,
+   PROD_PROJECT_NAME и volume. Создайте два новых случайных пароля вне git,
+   задайте API_DB_PASSWORD_FILE/MIGRATION_DB_PASSWORD_FILE в приватном env.
+   Новые пароли — минимум 32 символа, все три DB-пароля должны различаться.
+3. Получите новую версию и соберите образы. Пересоздайте только контейнер БД:
+   `bash scripts/production-compose.sh up -d --force-recreate --wait db`.
+   Это добавляет mounts новых секретов/скриптов, volume сохраняется.
+4. Выполните `bash scripts/migrate-postgres.sh`: bootstrap → Alembic как
+   мигратор → повторная настройка существующих auth-таблиц. Тот же порядок
+   используется для свежей установки. При ошибке остановитесь, API не запускайте.
+5. Пересоздайте API/Nginx, проверьте health, login/refresh/logout, контрольные
+   данные/FK и Alembic. Повторите migration wrapper и проверьте сохранность.
+
+Для независимой проверки: `bash scripts/configure-postgres.sh`, затем
+`bash scripts/production-compose.sh run --rm migrate alembic check` и
+`bash scripts/production-compose.sh exec api sh docker-entrypoint.sh python scripts/check_migrations.py`.
+Проверять роль следует SQL-запросом из engine API: `SELECT current_user, rolsuper,
+rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname=current_user`;
+ожидается uni_space_api и три false. Полный отрицательный набор выполняет тест ниже.
+Не запускайте Alembic через API, даже если повторный upgrade head без DDL успешен.
+
+Restore по-прежнему выполняет администратор; pg_restore делает SET ROLE мигратора,
+чтобы восстановленные объекты имели правильного владельца. Новая БД создаётся с
+connection limit 0; до открытия соединений снимается PUBLIC/API CONNECT. Проверяйте
+её через `migrate`/администратора. API не получает доступ ко всем restore-БД.
+Для реального переключения после проверки измените POSTGRES_DB, пересоздайте db,
+выполните migration wrapper (он переназначит CONNECT выбранной БД), затем API/Nginx.
+Рабочая исходная БД при restore не меняется. Ротация новых паролей применяется
+повторным bootstrap при остановленном API, затем пересозданием API/migrate.
+
+Откат приложения возможен только при совместимой схеме и сохранении новой
+конфигурации подключения API. Возврат прежнего Compose вернёт admin credentials
+в API и повторно откроет SEC-02; это не безопасный штатный откат.
+
 ## Первая установка, запуск и диагностика
 
 ```bash
 bash scripts/production-compose.sh config --quiet
 bash scripts/production-compose.sh build
 bash scripts/production-compose.sh up -d --wait db
-bash scripts/production-compose.sh run --rm api alembic upgrade head
+bash scripts/migrate-postgres.sh
 bash scripts/production-compose.sh up -d --wait --wait-timeout 120
 bash scripts/production-compose.sh ps
 bash scripts/production-compose.sh exec api sh docker-entrypoint.sh python scripts/check_migrations.py
@@ -216,7 +289,7 @@ install -d -m 700 /private/uni-space/backups
 bash scripts/backup-postgres.sh /private/uni-space/backups/pre-update.dump
 bash scripts/restore-postgres.sh /private/uni-space/backups/pre-update.dump restore_verification
 bash scripts/production-compose.sh exec db sh -c 'psql -U "$POSTGRES_USER" -d restore_verification -c "SELECT version_num FROM alembic_version"'
-bash scripts/production-compose.sh run --rm -e DATABASE_NAME=restore_verification api python scripts/check_migrations.py
+bash scripts/production-compose.sh run --rm -e DATABASE_NAME=restore_verification migrate python scripts/check_migrations.py
 ```
 
 `pg_dump` создаёт consistent custom-format snapshot одной БД (не роли кластера и
@@ -257,7 +330,7 @@ env-файле на имя восстановленной БД, пересозд
    согласованном registry/archive. Этот процесс не настраивает автодеплой.
 3. Для несовместимых изменений остановите `nginx api`, прекратив запись; сделайте
    backup командой выше и проверьте восстановление. Даже при совместимых миграциях
-   перед обновлением нужен backup. Выполните `run --rm api alembic upgrade head`.
+   перед обновлением нужен backup. Выполните `bash scripts/migrate-postgres.sh`.
 4. `up -d --force-recreate --wait --wait-timeout 120 api nginx`, затем health,
    HTTPS SPA/API, auth/Origin/cookie и контрольные записи. Внутренний proxy IP
    сохраняется при пересоздании Nginx. Простой при обновлении допустим.
@@ -296,7 +369,7 @@ docker build --secret id=proxy_ca,src=/etc/ssl/certs/ca-certificates.crt -f depl
 uv run --locked --python 3.12.16 --project backend python deploy/test_production.py
 ```
 
-Тест создаёт уникальный project и временные секреты/сертификат, публикует Nginx
+Тест дважды создаёт уникальный project (свежая БД и admin-owned volume PR #31) и временные секреты/сертификат, публикует Nginx
 только на случайных loopback-портах. Проверяет readiness до/после миграций,
 HTTPS со строгой проверкой тестового CA, SPA fallback/JSON 404, auth-cookie,
 Origin, схему HTTPS, два клиентских IP и лимиты при spoofing, недоверенного peer,
@@ -321,6 +394,23 @@ HTTPX строго проверяет CA, hostname `uni.test` и срок дей
 В `finally` удаляет **только собственный** тестовый project с volume.
 Не запускайте тест параллельно с другим стендом на том же proxy subnet.
 GitHub Actions выполняет этот прогон отдельным job; остальные проверки — в README.
+
+## Зафиксированные проверки TASK-022
+
+10 ноября 2026 года на изолированной PostgreSQL 17.11: 310 unit/HTTPX и
+108 integration-тестов backend прошли; двойной upgrade head, alembic check и
+проверка heads успешны. Ruff/lock/shell syntax и dev Compose healthcheck
+(верный → неверный → восстановленный пароль) прошли. Production-образы собраны
+из исходных Dockerfile с проверкой TLS. Полный production-прогон выше проверяет
+свежую БД и admin-owned volume, отрицательные права, действующий старый refresh,
+HTTPS/auth, отдельный restore и сохранность источника; итог полного прогона и
+GitHub Actions фиксируется в PR TASK-022.
+
+**НЕ ПРОВЕРЕНО:** реальные production-данные/хост, публичные DNS/TLS/firewall,
+доступность из России, реальная ротация секретов и внешнее хранение/расписание
+backup. Использованы только изолированные стенды и вымышленные данные;
+публичный deploy не выполняется. Существующие CVE/SEC-04 из PR #31 остаются
+за пределами TASK-022; новый CVE-аудит не выполнялся.
 
 ## Перед TASK-020
 

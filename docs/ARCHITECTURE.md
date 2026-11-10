@@ -334,3 +334,8 @@ TRUSTED_PROXY_IPS='[]'
 | Лимиты вложений и другие оставшиеся продуктовые TBD | Не изменять молча; согласовать по PRD и DB.md. Шкалы аттестации и запрет превышения максимума уже утверждены |
 
 **Архитектурное решение:** сохраняем `routers/`, `services/`, `models/`, `schemas/`, `dependencies/`, `core/`; **не добавляем `repositories/`**. Детали модели БД — в `DB.md`, точные API-контракты MVP 1 — в принятом `API.md` и соответствующей ему генерируемой OpenAPI-спецификации, продуктовые правила — в `PRD.md`.
+
+Production-подключения PostgreSQL разделены в TASK-022: API использует
+`uni_space_api`, Alembic — отдельный `migrate`/`uni_space_migrator`, администратор
+доступен только в контейнере БД. Права, переход volume и backup/restore описаны в
+[PRODUCTION.md](PRODUCTION.md#роли-postgresql-и-переход-существующего-volume-task-022-sec-02).
