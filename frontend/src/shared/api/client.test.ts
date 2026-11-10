@@ -75,7 +75,7 @@ describe('apiFetch', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(apiFetch<void>('/api/v1/auth/logout', { method: 'POST' })).resolves.toBeUndefined()
+    await expect(apiFetch<void>('/api/v1/test/empty', { method: 'POST' })).resolves.toBeUndefined()
   })
 
   it('normalizes API errors from the shared error format', async () => {

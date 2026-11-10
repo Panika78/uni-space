@@ -721,12 +721,9 @@ with SessionLocal.begin() as db:
                             ).status_code
                             == 200
                         )
-                        assert (
-                            previous.post(
-                                "/api/v1/auth/logout", headers=origin
-                            ).status_code
-                            == 204
-                        )
+                        logout = previous.post("/api/v1/auth/logout", headers=origin)
+                        assert logout.status_code == 200
+                        assert logout.json() == {"session_revoked": True}
                     print(
                         "PASS: pre-transition refresh token remains usable with restricted API",
                         flush=True,
@@ -1063,10 +1060,9 @@ for index in range(6):
                     restored.post("/api/v1/auth/refresh", headers=origin).status_code
                     == 200
                 )
-                assert (
-                    restored.post("/api/v1/auth/logout", headers=origin).status_code
-                    == 204
-                )
+                logout = restored.post("/api/v1/auth/logout", headers=origin)
+                assert logout.status_code == 200
+                assert logout.json() == {"session_revoked": True}
             assert sql(snapshot) == expected
             # Even when Compose/db still names the old DB, inspect the recovery API's
             # actual runtime DATABASE_NAME. Implicit switch-back must be refused too.
