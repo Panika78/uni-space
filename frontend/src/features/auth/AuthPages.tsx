@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { useAuth } from './AuthProvider'
 import { LoadingState, UnavailableState } from '../../shared/ui/StatusStates'
+import { UniversityBrand } from '../../shared/ui/UniversityBrand'
 
 export function ProtectedRoute() {
   const { status } = useAuth()
@@ -18,16 +19,16 @@ export function LoginPage() {
   if (status === 'authenticated') return <Navigate to="/schedule" replace />
   return (
     <section className="welcome-card login-card" aria-labelledby="login-title">
-      <p className="section-eyebrow">Студенческий кабинет</p>
-      <h1 id="login-title">Вход</h1>
-      {message && <p role="status">{message}</p>}
+      <UniversityBrand />
+      <h1 id="login-title">Вход в систему</h1>
       <form
         onSubmit={(event) => {
           event.preventDefault()
           if (busy) return
           const data = new FormData(event.currentTarget)
-          void login({ login: String(data.get('login')), password })
-          setPassword('')
+          void login({ login: String(data.get('login')), password }).then((success) => {
+            if (success) setPassword('')
+          })
         }}
       >
         <label>
@@ -47,6 +48,7 @@ export function LoginPage() {
             disabled={busy}
           />
         </label>
+        {message && <p role="status">{message}</p>}
         <button type="submit" disabled={busy}>
           {busy ? 'Подождите…' : 'Войти'}
         </button>

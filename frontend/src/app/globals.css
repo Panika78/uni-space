@@ -532,6 +532,23 @@ a {
 .welcome-card h1 {
   margin-bottom: 20px;
 }
+.login-card .university-brand {
+  align-items: flex-start;
+  margin-bottom: 22px;
+}
+.login-card .brand-mark {
+  flex-basis: 52px;
+  width: 52px;
+  height: 52px;
+}
+.login-card .university-brand__copy strong {
+  color: var(--accent);
+}
+.login-card .university-brand__copy small {
+  color: #51494a;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
 .route-issue-card h1 {
   margin: 0 0 12px;
   font-size: 25px;

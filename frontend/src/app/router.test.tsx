@@ -38,7 +38,7 @@ describe('route fallbacks', () => {
     expect(screen.queryByRole('navigation', { name: 'Разделы кабинета' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Расписание' })).not.toBeInTheDocument()
     await userEvent.setup().click(screen.getByRole('link', { name: 'Перейти ко входу' }))
-    expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
   })
 
   it('shows a 404 for a nested invalid path and returns an authenticated user to schedule', async () => {

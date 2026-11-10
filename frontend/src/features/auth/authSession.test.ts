@@ -65,6 +65,36 @@ afterEach(() => {
 })
 
 describe('session lifecycle and coordinated cookie operations', () => {
+  it.each([
+    null,
+    '{}',
+    'null',
+    '{invalid-json',
+    '{"epoch":4,"blocked":true,"pending":false}',
+    '{"epoch":"initial","blocked":true,"pending":false,"logoutRetry":null}',
+  ])(
+    'allows explicit login after an unreadable journal %s without automatic refresh',
+    async (journal) => {
+      if (journal !== null) localStorage.setItem(authStorageKey, journal)
+      const fetchMock = vi.fn().mockResolvedValue(token('new-access'))
+      vi.stubGlobal('fetch', fetchMock)
+      const { session, cache } = createSession()
+      cache.setQueryData(['private'], 'old data')
+      if (journal !== null) {
+        await session.start()
+        expect(session.getSnapshot().status).toBe('unauthenticated')
+        expect(fetchMock).not.toHaveBeenCalled()
+        expect(cache.getQueryData(['private'])).toBeUndefined()
+      }
+      await session.login({ login: 'fictional', password: 'fictional' })
+      expect(session.getSnapshot().status).toBe('authenticated')
+      expect(session.beginRequest().token).toBe('new-access')
+      expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
+      const state = JSON.parse(localStorage.getItem(authStorageKey)!)
+      expect(state.blocked).toBe(false)
+      expect(state.pending).toBe(false)
+    },
+  )
   it.each(['invalid_refresh', 'invalid_access', 'session_invalid'])(
     'finishes initial %s without another request or network message',
     async (code) => {
@@ -1202,6 +1232,30 @@ it('never posts a queued logout from the old generation after a different tab st
   await Promise.all([holder, logout, login])
   expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
   expect(second.beginRequest().token).toBe('fictional-account-b')
+})
+
+it('does not dispatch an old queued logout after login repairs a damaged journal', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(token('old-access')))
+  const first = createSession().session
+  await first.start()
+  const held = deferred<void>()
+  const acquired = deferred<void>()
+  const holder = navigator.locks.request('uni-space.auth', {}, () => {
+    acquired.resolve()
+    return held.promise
+  })
+  await acquired.promise
+  const logout = first.logout()
+  localStorage.setItem(authStorageKey, '{corrupt')
+  const fetchMock = vi.fn().mockResolvedValue(token('new-access'))
+  vi.stubGlobal('fetch', fetchMock)
+  const second = createSession().session
+  const login = second.login({ login: 'fictional-second', password: 'fictional' })
+  held.resolve()
+  await Promise.all([holder, logout, login])
+  expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
+  expect(second.beginRequest().token).toBe('new-access')
+  expect(first.getSnapshot().status).toBe('unauthenticated')
 })
 
 it('keeps logout without an in-memory access token compatible and does not claim server revocation', async () => {

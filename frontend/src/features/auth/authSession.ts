@@ -70,16 +70,21 @@ export class AuthSession {
     try {
       value = JSON.parse(raw) as SharedState
     } catch {
-      throw new ApiClientError('Browser auth state is unreadable', 'coordination_unavailable')
+      throw new ApiClientError('Browser auth state is unreadable', 'invalid_auth_state')
     }
     if (
+      value === null ||
+      typeof value !== 'object' ||
       typeof value.epoch !== 'string' ||
       typeof value.blocked !== 'boolean' ||
       typeof value.pending !== 'boolean' ||
       (value.logoutRetry !== undefined &&
-        (!Number.isSafeInteger(value.logoutRetry.attempts) || value.logoutRetry.attempts < 0))
+        (value.logoutRetry === null ||
+          typeof value.logoutRetry !== 'object' ||
+          !Number.isSafeInteger(value.logoutRetry.attempts) ||
+          value.logoutRetry.attempts < 0))
     )
-      throw new Error('Invalid auth coordination state')
+      throw new ApiClientError('Invalid auth coordination state', 'invalid_auth_state')
     return value
   }
 
@@ -284,17 +289,28 @@ export class AuthSession {
     let epoch: string | undefined
     let deferredLogout: SharedState['logoutRetry']
     try {
-      deferredLogout = this.readState().logoutRetry
+      try {
+        deferredLogout = this.readState().logoutRetry
+      } catch (error) {
+        if (!isInvalidAuthState(error)) throw error
+      }
       const change = this.beginChange()
       epoch = change.epoch
       await this.withLock(async () => {
         this.requireCurrent(epoch!)
-        const previousState = this.readState()
+        let previousState: SharedState
+        try {
+          previousState = this.readState()
+        } catch (error) {
+          if (!isInvalidAuthState(error)) throw error
+          previousState = emptyState
+        }
         const canPreserveEnded =
           previousState.epoch === change.previousEpoch &&
           previousState.ended === true &&
           !previousState.pending
         this.writeState({ epoch: epoch!, blocked: true, pending: false })
+        this.update('unauthenticated', '', true)
         let result: TokenResponse
         try {
           result = await apiFetch<TokenResponse>('/api/v1/auth/login', {
@@ -337,9 +353,11 @@ export class AuthSession {
         this.token = result.access_token
         this.update('authenticated')
       })
+      return true
     } catch (error) {
       if (epoch === undefined || this.epoch === epoch)
         this.update('unauthenticated', getLoginErrorMessage(error))
+      return false
     }
   }
 
@@ -508,6 +526,10 @@ export class AuthSession {
 
 function isCoordinationUnavailable(error: unknown) {
   return error instanceof ApiClientError && error.code === 'coordination_unavailable'
+}
+
+function isInvalidAuthState(error: unknown) {
+  return error instanceof ApiClientError && error.code === 'invalid_auth_state'
 }
 
 export function getLoginErrorMessage(error: unknown) {

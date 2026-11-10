@@ -62,7 +62,7 @@ it('does not show a protected page before refresh and redirects on invalid cooki
       ),
     )
   })
-  expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
   expect(screen.queryByText(/связаться с сервером/)).not.toBeInTheDocument()
 })
@@ -90,7 +90,7 @@ it('submits once, opens schedule and hides it on logout', async () => {
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await user.click(screen.getByRole('button', { name: 'Выйти' }))
-  expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
   expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
     '/api/v1/auth/refresh',
@@ -99,7 +99,7 @@ it('submits once, opens schedule and hides it on logout', async () => {
   ])
 })
 
-it('shows rate feedback and clears password without resubmission', async () => {
+it('shows rate feedback below the fields and keeps the password', async () => {
   const fetchMock = vi
     .fn()
     .mockResolvedValueOnce(
@@ -122,8 +122,71 @@ it('shows rate feedback and clears password without resubmission', async () => {
   await user.click(screen.getByRole('button', { name: 'Войти' }))
   expect(await screen.findByRole('status')).toHaveTextContent('через 42 сек.')
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
-  expect(screen.getByLabelText('Пароль')).toHaveValue('')
+  expect(screen.getByLabelText('Пароль')).toHaveValue('fictional-password')
+  expect(screen.getByRole('status').parentElement).toBe(
+    screen.getByRole('button', { name: 'Войти' }).parentElement,
+  )
+  expect(
+    screen.getByLabelText('Пароль').compareDocumentPosition(screen.getByRole('status')) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy()
   expect(fetchMock).toHaveBeenCalledTimes(2)
+})
+
+it.each([
+  [
+    'invalid credentials',
+    Response.json(
+      { error: { code: 'invalid_credentials', message: '', details: [] } },
+      { status: 401 },
+    ),
+  ],
+  ['network failure', new TypeError('offline')],
+])('keeps the password and shows %s below the fields', async (_case, result) => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json(
+        { error: { code: 'invalid_refresh', message: '', details: [] } },
+        { status: 401 },
+      ),
+    )
+  if (result instanceof Response) fetchMock.mockResolvedValueOnce(result)
+  else fetchMock.mockRejectedValueOnce(result)
+  vi.stubGlobal('fetch', fetchMock)
+  renderRoute('/login')
+  const user = userEvent.setup()
+  await user.type(await screen.findByLabelText('Логин'), 'fictional')
+  await user.type(screen.getByLabelText('Пароль'), 'fictional-password')
+  await user.click(screen.getByRole('button', { name: 'Войти' }))
+  const message = await screen.findByRole('status')
+  expect(message.closest('form')).toBeInTheDocument()
+  expect(screen.getByLabelText('Пароль')).toHaveValue('fictional-password')
+  expect(
+    screen.getByLabelText('Пароль').compareDocumentPosition(message) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy()
+})
+
+it('shows the shared university emblem and name above the login heading', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { error: { code: 'invalid_refresh', message: '', details: [] } },
+          { status: 401 },
+        ),
+      ),
+  )
+  renderRoute('/login')
+  const heading = await screen.findByRole('heading', { name: 'Вход в систему' })
+  const emblem = heading.parentElement?.querySelector('img.brand-mark')
+  expect(emblem).toHaveAttribute('src', '/assets/university-emblem.png')
+  expect(heading.parentElement).toHaveTextContent('РГУЧВ')
+  expect(heading.parentElement).toHaveTextContent('Российский государственный университет')
+  expect(emblem!.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 })
 
 it('keeps the ordinary login form after an uncertain logout and recovers on the next login', async () => {
@@ -151,7 +214,7 @@ it('keeps the ordinary login form after an uncertain logout and recovers on the 
   expect(await screen.findByRole('heading', { name: 'Расписание' })).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await user.click(screen.getByRole('button', { name: 'Выйти' }))
-  expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
   expect(screen.getByRole('status')).toHaveTextContent('восстановлении соединения')
   expect(screen.queryByRole('button', { name: /Повторить выход/ })).not.toBeInTheDocument()
   expect(screen.getByLabelText('Логин')).toBeEnabled()
@@ -171,7 +234,7 @@ it('keeps the ordinary login form after an uncertain logout and recovers on the 
 it('shows the ordinary login form without a technical message when refresh cannot be recovered', async () => {
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('private transport detail')))
   renderRoute()
-  expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
   expect(screen.getByLabelText('Логин')).toBeEnabled()
   expect(screen.getByLabelText('Пароль')).toBeEnabled()
   expect(screen.queryByRole('status')).not.toBeInTheDocument()
@@ -204,7 +267,7 @@ it('automatically retries an unconfirmed logout when the browser reports network
   await screen.findByRole('heading', { name: 'Расписание' })
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await user.click(screen.getByRole('button', { name: 'Выйти' }))
-  expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
   expect(await screen.findByRole('status')).toHaveTextContent('восстановлении соединения')
 
   await act(async () => {

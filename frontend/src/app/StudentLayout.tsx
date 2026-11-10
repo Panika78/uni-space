@@ -3,33 +3,14 @@ import type { FocusEvent } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../features/auth/AuthProvider'
 import { UnavailableState } from '../shared/ui/StatusStates'
+import { UniversityBrand } from '../shared/ui/UniversityBrand'
 
-const universityName =
-  'Российский государственный университет чародейства и волшебства имени А. М. Кашпировского'
 const navigation = [
   { to: '/schedule', label: 'Расписание', icon: '▦' },
   { to: '/academics', label: 'Успеваемость', icon: '▤' },
   { to: '/services', label: 'Услуги и документы', icon: '▧' },
   { to: '/news', label: 'Новости', icon: '▣' },
 ]
-
-function BrandMark() {
-  return (
-    <img className="brand-mark" src="/assets/university-emblem.png" alt="" aria-hidden="true" />
-  )
-}
-
-function UniversityBrand({ compact = false }: { compact?: boolean }) {
-  return (
-    <div className={`university-brand${compact ? ' university-brand--compact' : ''}`}>
-      <BrandMark />
-      <span className="university-brand__copy">
-        <strong>РГУЧВ</strong>
-        <small>{universityName}</small>
-      </span>
-    </div>
-  )
-}
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   return (
