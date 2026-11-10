@@ -6,6 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createQueryClient } from '../../app/queryClient'
 import { AuthProvider } from './AuthProvider'
 import { LoginPage, ProtectedRoute, SchedulePage } from './AuthPages'
+import { StudentLayout } from '../../app/StudentLayout'
 
 beforeEach(() => {
   localStorage.clear()
@@ -28,7 +29,9 @@ function renderRoute(path = '/schedule') {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route element={<ProtectedRoute />}>
-              <Route path="/schedule" element={<SchedulePage />} />
+              <Route element={<StudentLayout />}>
+                <Route path="/schedule" element={<SchedulePage />} />
+              </Route>
             </Route>
           </Routes>
         </MemoryRouter>
@@ -49,6 +52,7 @@ it('does not show a protected page before refresh and redirects on invalid cooki
   )
   renderRoute()
   expect(screen.getByRole('status')).toHaveTextContent('Проверяем сессию')
+  expect(screen.queryByRole('complementary', { name: 'Боковая панель' })).not.toBeInTheDocument()
   expect(screen.queryByRole('heading', { name: 'Расписание' })).not.toBeInTheDocument()
   await act(async () => {
     complete(
@@ -82,7 +86,8 @@ it('submits once, opens schedule and hides it on logout', async () => {
   await user.type(screen.getByLabelText('Пароль'), 'fictional-password')
   await user.click(screen.getByRole('button', { name: 'Войти' }))
   expect(await screen.findByRole('heading', { name: 'Расписание' })).toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'Выйти' }))
+  await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
+  await user.click(screen.getByRole('menuitem', { name: 'Выйти' }))
   expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
   expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
     '/api/v1/auth/refresh',

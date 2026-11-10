@@ -4,18 +4,29 @@ import { useAuth } from './AuthProvider'
 
 export function ProtectedRoute() {
   const { status } = useAuth()
-  if (status === 'initializing') return <p role="status">Проверяем сессию…</p>
+  if (status === 'initializing')
+    return (
+      <main className="auth-loading" role="status">
+        Проверяем сессию…
+      </main>
+    )
   return status === 'authenticated' ? <Outlet /> : <Navigate to="/login" replace />
 }
 
 export function LoginPage() {
   const { status, message, busy, login, logout } = useAuth()
   const [password, setPassword] = useState('')
-  if (status === 'initializing') return <p role="status">Проверяем сессию…</p>
+  if (status === 'initializing')
+    return (
+      <main className="auth-loading" role="status">
+        Проверяем сессию…
+      </main>
+    )
   if (status === 'authenticated') return <Navigate to="/schedule" replace />
   return (
-    <section className="welcome-card">
-      <h1>Вход</h1>
+    <section className="welcome-card login-card" aria-labelledby="login-title">
+      <p className="section-eyebrow">Студенческий кабинет</p>
+      <h1 id="login-title">Вход</h1>
       {message && <p role="status">{message}</p>}
       <form
         onSubmit={(event) => {
@@ -61,18 +72,14 @@ export function LoginPage() {
 }
 
 export function SchedulePage() {
-  const { logout } = useAuth()
   return (
-    <section className="welcome-card">
-      <h1>Расписание</h1>
-      <p>Вход выполнен. Расписание появится на следующем этапе.</p>
-      <button
-        onClick={() => {
-          void logout()
-        }}
-      >
-        Выйти
-      </button>
+    <section className="section-page" aria-labelledby="schedule-title">
+      <p className="section-eyebrow">Студенческий кабинет</p>
+      <h1 id="schedule-title">Расписание</h1>
+      <div className="schedule-placeholder" role="status">
+        <p className="schedule-placeholder__label">Текущий день</p>
+        <p>Расписание появится в следующей задаче.</p>
+      </div>
     </section>
   )
 }

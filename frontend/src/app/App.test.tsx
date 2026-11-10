@@ -1,24 +1,23 @@
 import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
-import { App } from './App'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { describe, expect, it, vi } from 'vitest'
 
-describe('application navigation', () => {
-  it('renders the home route and navigates without reloading the document', async () => {
-    const user = userEvent.setup()
-    render(<App />)
+vi.mock('../features/auth/AuthProvider', () => ({ useAuth: () => ({ logout: vi.fn() }) }))
+import { StudentLayout } from './StudentLayout'
 
-    expect(
-      screen.getByRole('heading', { name: 'Добро пожаловать в Uni Space' }),
-    ).toBeInTheDocument()
-    const document = window.document
-    await user.click(screen.getByRole('link', { name: 'О проекте' }))
-
-    expect(
-      screen.getByRole('heading', {
-        name: 'Всё важное об учёбе — в одном месте',
-      }),
-    ).toBeInTheDocument()
-    expect(window.document).toBe(document)
+describe('public and student layouts', () => {
+  it('renders the student shell without a separate dashboard home', () => {
+    render(
+      <MemoryRouter initialEntries={['/schedule']}>
+        <Routes>
+          <Route element={<StudentLayout />}>
+            <Route path="/schedule" element={<h1>Расписание</h1>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('heading', { name: 'Расписание' })).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Разделы кабинета' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Главная' })).not.toBeInTheDocument()
   })
 })

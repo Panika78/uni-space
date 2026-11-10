@@ -1,63 +1,62 @@
-import { createBrowserRouter, Link, NavLink, Outlet } from 'react-router-dom'
+import { createBrowserRouter, Link, Navigate, Outlet } from 'react-router-dom'
 
 import { LoginPage, ProtectedRoute, SchedulePage } from '../features/auth/AuthPages'
+import { StudentLayout, UnavailableSection } from './StudentLayout'
 
-function AppLayout() {
+function PublicLayout() {
   return (
-    <div className="app-shell">
-      <header className="site-header">
-        <Link className="brand" to="/" aria-label="Uni Space — главная">
-          Uni Space
+    <div className="public-shell">
+      <header className="public-header">
+        <Link to="/login" className="public-brand">
+          Uni Space <span>РГУЧВ</span>
         </Link>
-        <nav aria-label="Основная навигация">
-          <NavLink to="/" end>
-            Главная
-          </NavLink>
-          <NavLink to="/about">О проекте</NavLink>
-          <NavLink to="/schedule">Кабинет</NavLink>
-        </nav>
+        <Link to="/about" className="public-about-link">
+          О проекте
+        </Link>
       </header>
-      <main id="main-content">
+      <main className="public-content">
         <Outlet />
       </main>
+      <footer className="public-footer">Конкурсный прототип · Неофициальный сервис</footer>
     </div>
-  )
-}
-
-function HomePage() {
-  return (
-    <section className="welcome-card" aria-labelledby="home-title">
-      <p className="eyebrow">Студенческий кабинет</p>
-      <h1 id="home-title">Добро пожаловать в Uni Space</h1>
-      <p>Ваше университетское пространство начинается здесь.</p>
-      <NavLink className="text-link" to="/about">
-        Узнать о проекте <span aria-hidden="true">→</span>
-      </NavLink>
-    </section>
   )
 }
 
 function AboutPage() {
   return (
-    <section className="welcome-card" aria-labelledby="about-title">
-      <p className="eyebrow">О проекте</p>
-      <h1 id="about-title">Всё важное об учёбе — в одном месте</h1>
-      <p>Uni Space объединит расписание, успеваемость и университетские услуги.</p>
-      <NavLink className="text-link" to="/">
-        Вернуться на главную <span aria-hidden="true">→</span>
-      </NavLink>
+    <section className="welcome-card">
+      <p className="section-eyebrow">О проекте</p>
+      <h1>Uni Space</h1>
+      <p>Студенческий кабинет для расписания, успеваемости и университетских услуг.</p>
+      <p className="prototype-inline-note">Конкурсный прототип · Неофициальный сервис</p>
     </section>
   )
 }
 
 export const router = createBrowserRouter([
+  { path: '/', element: <Navigate to="/login" replace /> },
   {
-    element: <AppLayout />,
+    element: <PublicLayout />,
     children: [
-      { path: '/', element: <HomePage /> },
-      { path: '/about', element: <AboutPage /> },
       { path: '/login', element: <LoginPage /> },
-      { element: <ProtectedRoute />, children: [{ path: '/schedule', element: <SchedulePage /> }] },
+      { path: '/about', element: <AboutPage /> },
+    ],
+  },
+  {
+    element: <ProtectedRoute />,
+    children: [
+      {
+        element: <StudentLayout />,
+        children: [
+          { path: '/schedule', element: <SchedulePage /> },
+          { path: '/academics', element: <UnavailableSection title="Успеваемость" /> },
+          { path: '/services', element: <UnavailableSection title="Услуги и документы" /> },
+          { path: '/news', element: <UnavailableSection title="Новости" /> },
+          { path: '/notifications', element: <UnavailableSection title="Уведомления" /> },
+          { path: '/profile', element: <UnavailableSection title="Мой профиль" /> },
+          { path: '/settings', element: <UnavailableSection title="Настройки" /> },
+        ],
+      },
     ],
   },
 ])
