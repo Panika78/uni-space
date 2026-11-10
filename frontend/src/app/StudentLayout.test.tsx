@@ -40,17 +40,14 @@ describe('student dashboard navigation', () => {
     renderStudentLayout()
     const trigger = screen.getByRole('button', { name: 'Открыть меню' })
     await user.click(trigger)
-    expect(screen.getByRole('complementary', { name: 'Мобильная навигация' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Мобильная навигация' })).toBeInTheDocument()
     expect(
-      within(screen.getByRole('complementary', { name: 'Мобильная навигация' })).getByRole(
-        'button',
-        { name: 'Закрыть меню' },
-      ),
+      within(screen.getByRole('dialog', { name: 'Мобильная навигация' })).getByRole('button', {
+        name: 'Закрыть меню',
+      }),
     ).toHaveFocus()
     await user.keyboard('{Escape}')
-    expect(
-      screen.queryByRole('complementary', { name: 'Мобильная навигация' }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Мобильная навигация' })).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
   })
 
@@ -58,13 +55,11 @@ describe('student dashboard navigation', () => {
     const user = userEvent.setup()
     renderStudentLayout()
     await user.click(screen.getByRole('button', { name: 'Открыть меню' }))
-    const drawer = screen.getByRole('complementary', { name: 'Мобильная навигация' })
+    const drawer = screen.getByRole('dialog', { name: 'Мобильная навигация' })
     await user.click(
       within(drawer.parentElement!).getAllByRole('button', { name: 'Закрыть меню' })[0],
     )
-    expect(
-      screen.queryByRole('complementary', { name: 'Мобильная навигация' }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Мобильная навигация' })).not.toBeInTheDocument()
   })
 
   it('collapses the desktop sidebar to icon navigation', async () => {
@@ -82,11 +77,9 @@ describe('student dashboard navigation', () => {
     const user = userEvent.setup()
     renderStudentLayout()
     await user.click(screen.getByRole('button', { name: 'Открыть меню' }))
-    const drawer = screen.getByRole('complementary', { name: 'Мобильная навигация' })
+    const drawer = screen.getByRole('dialog', { name: 'Мобильная навигация' })
     await user.click(within(drawer).getByRole('link', { name: 'Успеваемость' }))
-    expect(
-      screen.queryByRole('complementary', { name: 'Мобильная навигация' }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Мобильная навигация' })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Успеваемость' })).toBeInTheDocument()
   })
 

@@ -6,9 +6,9 @@ export function ProtectedRoute() {
   const { status } = useAuth()
   if (status === 'initializing')
     return (
-      <main className="auth-loading" role="status">
+      <section className="auth-loading" role="status">
         Проверяем сессию…
-      </main>
+      </section>
     )
   return status === 'authenticated' ? <Outlet /> : <Navigate to="/login" replace />
 }
@@ -18,9 +18,9 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   if (status === 'initializing')
     return (
-      <main className="auth-loading" role="status">
+      <section className="auth-loading" role="status">
         Проверяем сессию…
-      </main>
+      </section>
     )
   if (status === 'authenticated') return <Navigate to="/schedule" replace />
   return (

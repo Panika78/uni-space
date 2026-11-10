@@ -152,7 +152,12 @@ function MobileDrawer({ onClose }: { onClose: () => void }) {
   return (
     <div className="mobile-drawer-layer">
       <button className="drawer-backdrop" aria-label="Закрыть меню" onClick={onClose} />
-      <aside className="mobile-drawer" aria-label="Мобильная навигация">
+      <aside
+        className="mobile-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Мобильная навигация"
+      >
         <div className="mobile-drawer__top">
           <UniversityBrand />
           <button
@@ -179,10 +184,16 @@ export function StudentLayout() {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const wasDrawerOpen = useRef(false)
   const closeDrawer = useCallback(() => setIsDrawerOpen(false), [])
 
   useEffect(() => {
-    if (!isDrawerOpen) menuButtonRef.current?.focus()
+    if (isDrawerOpen) {
+      wasDrawerOpen.current = true
+    } else if (wasDrawerOpen.current) {
+      menuButtonRef.current?.focus()
+      wasDrawerOpen.current = false
+    }
   }, [isDrawerOpen])
 
   return (
