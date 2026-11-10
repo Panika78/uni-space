@@ -48,6 +48,9 @@ FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace
 WHERE n.nspname='public' AND t.typtype='e' \gexec
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC, uni_space_api;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, uni_space_api;
+-- No application routines are required by the current API. Include existing
+-- functions/procedures, especially SECURITY DEFINER routines, in the deny policy.
+REVOKE ALL ON ALL ROUTINES IN SCHEMA public FROM PUBLIC, uni_space_api;
 SELECT format('GRANT SELECT ON public.%I TO uni_space_api', tablename)
 FROM pg_tables WHERE schemaname='public' AND tablename IN
     ('users','auth_sessions','refresh_tokens','students','alembic_version') \gexec
@@ -55,10 +58,20 @@ SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
               pg_get_serial_sequence(format('public.%I', tablename), 'id'))
 FROM pg_tables WHERE schemaname='public' AND tablename IN
     ('auth_sessions','refresh_tokens') \gexec
+-- Schema REVOKE cannot undo a global default GRANT: reset both levels.
+-- Functions have PUBLIC EXECUTE even without an explicit default ACL row.
+ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator
+    REVOKE ALL ON TABLES FROM PUBLIC, uni_space_api;
+ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator
+    REVOKE ALL ON SEQUENCES FROM PUBLIC, uni_space_api;
+ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator
+    REVOKE ALL ON FUNCTIONS FROM PUBLIC, uni_space_api;
 ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator IN SCHEMA public
     REVOKE ALL ON TABLES FROM PUBLIC, uni_space_api;
 ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator IN SCHEMA public
     REVOKE ALL ON SEQUENCES FROM PUBLIC, uni_space_api;
+ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator IN SCHEMA public
+    REVOKE ALL ON FUNCTIONS FROM PUBLIC, uni_space_api;
 -- The only current API writes are session/token creation, rotation and revocation.
 SELECT format('GRANT INSERT, UPDATE ON public.%I TO uni_space_api', tablename)
 FROM pg_tables WHERE schemaname='public' AND tablename IN ('auth_sessions','refresh_tokens') \gexec
