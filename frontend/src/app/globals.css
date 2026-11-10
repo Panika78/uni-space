@@ -724,3 +724,40 @@ a {
     font-weight: 600;
   }
 }
+
+.logout-dialog {
+  margin: auto;
+  inset: 0;
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  width: min(24rem, calc(100vw - 2rem));
+  padding: 1.5rem;
+  border: 1px solid #e5ddd1;
+  border-radius: 1rem;
+  background: #fff;
+  color: #292524;
+  box-shadow: 0 1rem 3rem #0003;
+}
+.logout-dialog::backdrop {
+  background: #0007;
+}
+.logout-dialog h2 {
+  margin: 0 0 1.5rem;
+  font-size: 1.25rem;
+}
+.logout-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+.logout-dialog__actions button {
+  min-height: 44px;
+  padding: 0.5rem 1rem;
+  border: 1px solid #e5ddd1;
+  border-radius: 0.5rem;
+  background: #f6f0e6;
+}
+.logout-dialog__actions button:last-child {
+  background: #801b32;
+  color: #fff;
+}

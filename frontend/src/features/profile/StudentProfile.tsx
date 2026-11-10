@@ -1,7 +1,7 @@
-import { createContext, useContext } from 'react'
+import { createContext, useContext, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Outlet } from 'react-router-dom'
-import { useAuth } from '../auth/AuthProvider'
+import { LogoutConfirmation } from '../auth/LogoutConfirmation'
 import { ApiClientError, apiFetch } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
@@ -26,7 +26,8 @@ export function getStudentInitials(fullName?: string) {
 }
 
 export function StudentAccess() {
-  const { logout } = useAuth()
+  const [isLogoutOpen, setIsLogoutOpen] = useState(false)
+  const logoutTriggerRef = useRef<HTMLButtonElement>(null)
   const query = useQuery({
     queryKey: ['student-profile'],
     queryFn: ({ signal }) => apiFetch<Profile>('/api/v1/users/me', { authenticated: true, signal }),
@@ -52,12 +53,13 @@ export function StudentAccess() {
               }
         }
       >
-        <button
-          type="button"
-          onClick={() => {
-            if (window.confirm('Выйти из аккаунта?')) void logout()
-          }}
-        >
+        {isLogoutOpen && (
+          <LogoutConfirmation
+            onClose={() => setIsLogoutOpen(false)}
+            onReturnFocus={() => logoutTriggerRef.current?.focus()}
+          />
+        )}
+        <button ref={logoutTriggerRef} type="button" onClick={() => setIsLogoutOpen(true)}>
           Выйти
         </button>
       </ErrorState>

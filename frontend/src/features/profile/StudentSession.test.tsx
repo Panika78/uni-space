@@ -129,6 +129,18 @@ it.each(['logout', 'session-change'])(
     if (mode === 'logout') {
       await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
       await user.click(screen.getByRole('button', { name: 'Выйти' }))
+      expect(vi.mocked(fetch).mock.calls.some(([path]) => String(path).endsWith('/logout'))).toBe(
+        false,
+      )
+      await user.click(screen.getByRole('button', { name: 'Отмена' }))
+      expect(screen.getByRole('article')).toHaveTextContent('Анна Альфа')
+      expect(screen.getByRole('button', { name: 'Меню пользователя' })).toHaveFocus()
+      expect(vi.mocked(fetch).mock.calls.some(([path]) => String(path).endsWith('/logout'))).toBe(
+        false,
+      )
+      await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
+      await user.click(screen.getByRole('button', { name: 'Выйти' }))
+      await user.click(screen.getByRole('button', { name: 'Выйти' }))
     } else {
       act(() => {
         localStorage.setItem(authEpochStorageKey, 'other-tab-session-change')

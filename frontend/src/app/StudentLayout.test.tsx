@@ -186,6 +186,12 @@ describe('student dashboard navigation', () => {
     expect(within(panel).getByRole('link', { name: /Мой профиль/ })).toBeInTheDocument()
     expect(within(panel).getByRole('link', { name: /Настройки/ })).toBeInTheDocument()
     await user.click(within(panel).getByRole('button', { name: 'Выйти' }))
+    expect(auth.logout).not.toHaveBeenCalled()
+    await user.click(
+      within(screen.getByRole('dialog', { name: 'Выйти из аккаунта?' })).getByRole('button', {
+        name: 'Выйти',
+      }),
+    )
     expect(auth.logout).toHaveBeenCalledOnce()
   })
 

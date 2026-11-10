@@ -90,6 +90,7 @@ it('submits once, opens schedule and hides it on logout', async () => {
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await user.click(screen.getByRole('button', { name: 'Выйти' }))
+  await user.click(screen.getByRole('button', { name: 'Выйти' }))
   expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
   expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
@@ -148,6 +149,7 @@ it('offers logout retry only while the auth journal records an unconfirmed sessi
   await user.click(screen.getByRole('button', { name: 'Войти' }))
   expect(await screen.findByRole('heading', { name: 'Расписание' })).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
+  await user.click(screen.getByRole('button', { name: 'Выйти' }))
   await user.click(screen.getByRole('button', { name: 'Выйти' }))
   const retry = await screen.findByRole('button', { name: 'Повторить выход' })
   expect(screen.getByRole('status')).toHaveTextContent('сервер не подтвердил выход')

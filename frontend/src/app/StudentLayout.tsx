@@ -2,7 +2,7 @@ import { getStudentInitials, useStudentProfile } from '../features/profile/Stude
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FocusEvent } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
-import { useAuth } from '../features/auth/AuthProvider'
+import { LogoutConfirmation } from '../features/auth/LogoutConfirmation'
 import { UnavailableState } from '../shared/ui/StatusStates'
 
 const universityName =
@@ -56,7 +56,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
 
 function UserMenu() {
   const profile = useStudentProfile()
-  const { logout } = useAuth()
+  const [isLogoutOpen, setIsLogoutOpen] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -88,6 +88,12 @@ function UserMenu() {
 
   return (
     <div className="user-menu" ref={containerRef} onBlur={handleBlur}>
+      {isLogoutOpen && (
+        <LogoutConfirmation
+          onClose={() => setIsLogoutOpen(false)}
+          onReturnFocus={() => triggerRef.current?.focus()}
+        />
+      )}
       <button
         ref={triggerRef}
         className="avatar-button"
@@ -109,7 +115,7 @@ function UserMenu() {
           <button
             onClick={() => {
               setIsOpen(false)
-              void logout()
+              setIsLogoutOpen(true)
             }}
           >
             Выйти
