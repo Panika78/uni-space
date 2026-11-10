@@ -507,3 +507,8 @@ access log Uvicorn включает query string и здесь не исполь
 query string. В development/test прежнее журналирование сохранено. Подробности,
 границы гарантии и проверка вымышленного query-маркера — в
 [PRODUCTION.md](PRODUCTION.md#первая-установка-запуск-и-диагностика).
+
+Production-подключения PostgreSQL разделены в TASK-022: API использует
+`uni_space_api`, Alembic — отдельный `migrate`/`uni_space_migrator`, администратор
+доступен только в контейнере БД. Права, переход volume и backup/restore описаны в
+[PRODUCTION.md](PRODUCTION.md#роли-postgresql-и-переход-существующего-volume-task-022-sec-02).
