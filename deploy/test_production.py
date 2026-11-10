@@ -1007,10 +1007,19 @@ for index in range(6):
 'users', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM users t),
 'sessions', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM auth_sessions t),
 'refresh', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM refresh_tokens t),
-'revisions', (SELECT jsonb_agg(to_jsonb(t)) FROM alembic_version t));"""
+'revisions', (SELECT jsonb_agg(to_jsonb(t)) FROM alembic_version t),
+'academic_terms', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM academic_terms t),
+'disciplines', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM disciplines t),
+'course_offerings', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM course_offerings t),
+'course_groups', (SELECT jsonb_agg(to_jsonb(t) ORDER BY course_offering_id,group_id) FROM course_groups t),
+'buildings', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM buildings t),
+'rooms', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM rooms t),
+'lessons', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM lessons t),
+'lesson_groups', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM lesson_groups t),
+'lesson_rooms', (SELECT jsonb_agg(to_jsonb(t) ORDER BY lesson_id,room_id) FROM lesson_rooms t));"""
             expected = sql(snapshot)
             assert sql(
-                "SELECT count(*) FROM users u JOIN auth_sessions s ON s.user_id=u.id JOIN refresh_tokens r ON r.session_id=s.id;"
+                "SELECT count(*) FROM users u JOIN auth_sessions s ON s.user_id=u.id JOIN refresh_tokens r ON r.session_id=s.id WHERE u.login IN ('deployment-check','legacy-fixture');"
             ) == ("4" if legacy else "2")
             backup = temp / "backup.dump"
             run(["bash", "scripts/backup-postgres.sh", str(backup)], env=env)
@@ -1141,6 +1150,26 @@ for index in range(6):
                 logout = restored.post("/api/v1/auth/logout", headers=origin)
                 assert logout.status_code == 200
                 assert logout.json() == {"session_revoked": True}
+                restored_login = restored.post(
+                    "/api/v1/auth/login",
+                    headers=origin,
+                    json={"login": "schedule-fixture-1", "password": password},
+                )
+                assert restored_login.status_code == 200
+                restored_schedule = restored.get(
+                    "/api/v1/schedule",
+                    params={"date_from": "2026-11-10", "date_to": "2026-11-10"},
+                    headers={
+                        "Authorization": "Bearer "
+                        + restored_login.json()["access_token"]
+                    },
+                )
+                assert restored_schedule.status_code == 200
+                assert restored_schedule.json()["items"] == items
+                print(
+                    "PASS: restored schedule data and restricted API permissions survive recovery",
+                    flush=True,
+                )
             assert sql(snapshot) == expected
             # Even when Compose/db still names the old DB, inspect the recovery API's
             # actual runtime DATABASE_NAME. Implicit switch-back must be refused too.
