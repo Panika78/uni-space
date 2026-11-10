@@ -38,6 +38,81 @@ DB healthcheck выполняет аутентифицированный `SELECT
 контейнерном loopback:8080. Docker healthchecks показывают состояние, но сами
 по себе не перезапускают unhealthy-процесс и не заменяют внешний мониторинг.
 
+## Базовые образы и security updates (SEC-01, PR #31)
+
+Проверено 10 ноября 2026 года по официальным источникам:
+
+| Компонент | Выбранный образ | Основание |
+|---|---|---|
+| Python | `python:3.12.16-slim-bookworm` | [Security release 3.12.16 от 25 октября](https://www.python.org/downloads/release/python-31216/); остаёмся в 3.12 |
+| PostgreSQL | `postgres:17.11-bookworm` | [Release notes 17.11](https://www.postgresql.org/docs/17/release-17-11.html) и [поддерживаемые версии](https://www.postgresql.org/support/versioning/); остаёмся в major 17 |
+| Nginx | `nginx:1.30.6-alpine` | [Stable download](https://nginx.org/en/download.html), [security advisories](https://nginx.org/en/security_advisories.html), [CHANGES-1.30](https://nginx.org/en/CHANGES-1.30); 1.28 — legacy, исправления текущих advisories есть в stable 1.30.6 |
+
+Теги проверены в Docker registry; интеграционный тест проверяет версии
+фактически запущенных бинарников Python/PostgreSQL/Nginx. Dockerfile и Compose закрепляют manifest
+digest, чтобы тот же тег не менял используемые байты незаметно. При security update
+нужно явно обновить версию **и digest**, повторить сборку и интеграционный прогон.
+Для Python 3.12.16 используется patch-update uv 0.13.7: uv 0.13.5 ещё не содержит
+метаданных этого Python. Lock зависимостей приложения не меняется.
+
+Обновление PostgreSQL 17.6 → 17.11 не требует `pg_upgrade`/смены формата volume:
+это minor update внутри 17. Перед ним всё равно остановите запись, сделайте backup,
+прочитайте release notes 17.7–17.11 и проверьте используемые расширения. Текущая
+схема не использует `btree_gist`, `ltree`, `pgcrypto` и logical decoding plugins,
+для которых release notes описывают дополнительные действия. После обновления
+проверьте контрольные записи, связи и Alembic heads; не удаляйте volume.
+Смена major PostgreSQL сюда не входит. Разделение ролей БД остаётся в issue #32
+(SEC-02), это исправление его не реализует.
+
+### Проверка CVE собранных образов
+
+10 ноября 2026 года выполнен разовый аудит **готовых** API и web images Trivy
+0.76.2 (официальный release archive с проверенным SHA-256). PostgreSQL проверен
+по закреплённому registry digest, платформа `linux/amd64`. Использована база
+Trivy DB schema 2, `UpdatedAt=2026-11-10T01:02:55Z`; фильтр HIGH/CRITICAL,
+без `ignore-unfixed` и без ignore-файлов. Это проверка images, а не Dockerfile
+или дерева исходников. Числа — записи package/CVE, не уникальные CVE:
+
+| Image | HIGH | CRITICAL |
+|---|---:|---:|
+| API (`010ac0eb5b47`) | 48 | 4 |
+| SPA/Nginx (`8d48876b4dcf`) | 0 | 0 |
+| PostgreSQL 17.11 (закреплённый digest) | 75 | 4 |
+
+У API 42 записи относятся к системным пакетам Bookworm и 10 — к существующему
+lock Python-зависимостей. В частности, scanner сообщает CRITICAL
+`CVE-2026-102268` для PyJWT 2.10.1 (fixed 2.14.0) и `CVE-2026-63374` для
+AnyIO 4.9.0 (fixed 4.14.2), HIGH для Starlette 0.46.2 (fixed до 1.3.1 в зависимости
+от CVE). В системных пакетах есть записи без доступного Debian fixed version,
+включая `fix_deferred`/`will_not_fix`. У PostgreSQL также есть находки в системных
+пакетах и Go stdlib вспомогательного бинарника. **Применимость/эксплуатируемость
+этих находок в Uni Space НЕ ПРОВЕРЕНА.** Они не исключались и не объявляются
+устранёнными обновлением Python/PostgreSQL/Nginx.
+
+Поэтому автоматический CVE gate с маскирующим baseline/исключениями в этот PR
+не добавлен. Выбрана простая политика: при обновлении/release сканировать реальные
+images, разбирать HIGH/CRITICAL до публикации; инфраструктурную ошибку scanner
+не считать успешным аудитом. Обновление FastAPI/Starlette/PyJWT/AnyIO и оценка
+системных CVE требуют отдельной работы с зависимостями и проверками авторизации;
+этот PR не меняет lock или модель авторизации ради зелёного отчёта scanner.
+Нулевые HIGH/CRITICAL у web не доказывают отсутствие других классов проблем.
+
+Пример повторения после установки Trivy 0.76.2 из официального
+[release](https://github.com/aquasecurity/trivy/releases/tag/v0.76.2) и проверки
+release checksums; замените `YOUR_RELEASE_TAG` на собранный release:
+
+```bash
+mkdir -p work/image-audit
+trivy image --cache-dir work/image-audit/cache --platform linux/amd64 --db-repository ghcr.io/aquasecurity/trivy-db:2 --scanners vuln --severity HIGH,CRITICAL --format json --output work/image-audit/api.json uni-space-api:YOUR_RELEASE_TAG
+trivy image --cache-dir work/image-audit/cache --platform linux/amd64 --db-repository ghcr.io/aquasecurity/trivy-db:2 --scanners vuln --severity HIGH,CRITICAL --format json --output work/image-audit/web.json uni-space-web:YOUR_RELEASE_TAG
+trivy image --cache-dir work/image-audit/cache --platform linux/amd64 --db-repository ghcr.io/aquasecurity/trivy-db:2 --scanners vuln --severity HIGH,CRITICAL --format json --output work/image-audit/postgres.json registry-1.docker.io/library/postgres@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
+```
+
+Сохраняйте версию scanner, `metadata.json` базы, image IDs/digests, платформу
+и JSON отчёты. База меняется: повторный аудит может дать другие результаты;
+успешный exit code scanner без CVE gate означает завершение сканирования,
+а не отсутствие CVE. Успех функционального CI тоже не является CVE-аудитом.
+
 ## Подготовка внешней конфигурации
 
 Требуются версии инструментов из README, Compose >= 2.24.4 (`!override` нужен
@@ -101,8 +176,21 @@ TLS verification оставьте включённой. Сама production-ко
 При unhealthy API проверьте миграции и доступ к DB; при 502 — API/DNS в сети proxy.
 Origin должен включать схему и порт (если нестандартный), без пути; refresh/logout
 из CLI также требуют Origin. Проверяйте HTTPS cookie, ошибки Origin и rate limiter
-снаружи. Nginx не пишет query/body/cookie/Authorization в access log; backend не
-логирует секреты. Ограничьте доступ и срок хранения логов; настройте ротацию Docker
+снаружи. В production launcher явно передаёт `--no-access-log` Uvicorn
+(SEC-03, PR #31), включая защиту от внешнего `UVICORN_ACCESS_LOG=true`.
+Единственный access log ведёт Nginx: IP, метод, `$uri` **без query string**, статус.
+Он задан в публичных `server`-блоках: второй `access_log` на уровне `http`
+добавлял бы безопасный журнал рядом со штатным `main`, а не заменял его.
+Локальный healthcheck server не ведёт access log.
+Uvicorn startup/error logging и существующие безопасные сообщения API с типом
+исключения и request ID сохраняются; development/test access logs не меняются.
+Не передавайте секреты в URL даже при таком журналировании: они могут попасть
+в историю браузера, внешние proxy или другие системы. Гарантия удаления query
+относится к access logs; инфраструктурные error logs могут содержать URI. Регрессионный прогон
+отправляет вымышленный query-маркер настоящему API через HTTPS и HTTP redirect, проверяет его
+отсутствие в API/Nginx logs при наличии безопасной строки Nginx. Unit/HTTPX-тест
+на реальном процессе Uvicorn дополнительно вызывает ошибку соединения с тестовой
+БД и подтверждает, что ошибка с request ID продолжает логироваться. Ограничьте доступ и срок хранения логов; настройте ротацию Docker
 логов на хосте. Не публикуйте полные дампы диагностики/окружения.
 
 ## Backup и безопасное отдельное восстановление
@@ -189,7 +277,7 @@ Playwright 1.57.0 не поддерживает Ubuntu 26.04 из `ubuntu-latest
 ```bash
 docker build --secret id=proxy_ca,src=/etc/ssl/certs/ca-certificates.crt -f backend/Dockerfile -t uni-space-api:task019 .
 docker build --secret id=proxy_ca,src=/etc/ssl/certs/ca-certificates.crt -f deploy/Dockerfile.web -t uni-space-web:task019 .
-uv run --locked --python 3.12.12 --project backend python deploy/test_production.py
+uv run --locked --python 3.12.16 --project backend python deploy/test_production.py
 ```
 
 Тест создаёт уникальный project и временные секреты/сертификат, публикует Nginx

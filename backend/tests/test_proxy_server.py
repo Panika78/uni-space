@@ -96,6 +96,7 @@ def server_environment(options):
         # These Uvicorn environment defaults must never bypass the launcher policy.
         FORWARDED_ALLOW_IPS="*",
         UVICORN_PROXY_HEADERS="true",
+        UVICORN_ACCESS_LOG="true",
     )
     environment.update(options)
     environment["PATH"] = str(Path(sys.executable).parent) + os.pathsep + environment["PATH"]
@@ -331,7 +332,8 @@ def test_real_production_launcher_preserves_explicit_proxy_policy(tmp_path, prox
             else:
                 assert response.status_code == 422
     access_log = (tmp_path / "uvicorn.log").read_text()
-    assert ("192.0.2.1:0" in access_log) is proxy_enabled
+    assert "POST /api/v1/auth/login" not in access_log
+    assert "Uvicorn running" in access_log
 
 
 def test_real_development_launcher_keeps_local_example_settings_usable(tmp_path):
@@ -359,3 +361,32 @@ def test_production_rejects_proxy_trust_outside_private_networks(proxy):
             proxy_headers_enabled=True,
             trusted_proxy_ips=[proxy],
         )
+
+
+@pytest.mark.parametrize("mode", ["development", "test", "production"])
+def test_real_launcher_omits_query_only_in_production_and_preserves_error_logs(tmp_path, mode):
+    marker = "fictional-query-marker-sec03"
+    origin = "https://uni.example"
+    with run_api_server(
+        tmp_path,
+        production=mode == "production",
+        APP_ENV="development" if mode == "production" else mode,
+        JWT_SIGNING_KEY="2ghJj3eYC65ZV4zuLr8s-91QTNpXvWbA",
+        COOKIE_SECURE="true",
+        ALLOWED_ORIGINS=json.dumps([origin]),
+        # A refused local connection triggers the existing sanitized error handler.
+        DATABASE_URL="postgresql+psycopg://unused:unused@127.0.0.1:1/unused?connect_timeout=1",
+    ) as client:
+        assert client.get("/api/openapi.json", params={"probe": marker}).status_code == 200
+        response = client.post(
+            "/api/v1/auth/login",
+            params={"probe": marker},
+            headers={"Origin": origin, "X-Request-ID": "sec03-error-diagnostic"},
+            json={"login": "fictional-sec03-user", "password": "fictional-sec03-password"},
+        )
+        assert response.status_code == 500
+        assert response.json()["error"]["code"] == "internal_error"
+    logs = (tmp_path / "uvicorn.log").read_text()
+    assert (marker in logs) is (mode != "production")
+    assert "Uvicorn running" in logs
+    assert "Unhandled API exception type=OperationalError request_id=sec03-error-diagnostic" in logs

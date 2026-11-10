@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from ipaddress import ip_network
 
 import httpx
 
@@ -194,6 +195,21 @@ def main():
             dc("run", "--rm", "-T", "api", "alembic", "upgrade", "head")
             dc("up", "-d", "--wait", "--wait-timeout", "120")
             dc("exec", "-T", "nginx", "nginx", "-t")
+            # SEC-01: test the running binaries, not only image tags in YAML.
+            dc(
+                "exec",
+                "-T",
+                "api",
+                "python",
+                "-c",
+                "import sys; assert sys.version_info[:3] == (3, 12, 16)",
+            )
+            assert "17.11" in dc("exec", "-T", "db", "postgres", "--version").stdout
+            assert "nginx/1.30.6" in dc("exec", "-T", "nginx", "nginx", "-v").stderr
+            print(
+                "PASS: running Python 3.12.16, PostgreSQL 17.11, Nginx 1.30.6",
+                flush=True,
+            )
             print("PASS: topology, startup, HTTP/DB/schema readiness", flush=True)
             browser_env = env | {
                 "PRODUCTION_TEST_URL": f"https://127.0.0.1:{https_port}",
@@ -248,6 +264,47 @@ with SessionLocal.begin() as db:
                     == "Uni Space API"
                 )
                 assert client.get("/assets/missing.js").status_code == 404
+                # SEC-03: a fictional query must reach the real API but neither log.
+                query_marker = "fictional-sec03-query-marker"
+                access_line = "GET /api/openapi.json 200"
+                before_logs = dc("logs", "nginx").stdout
+                before = before_logs.count(access_line)
+                redirect_line = "GET /schedule 308"
+                before_redirect = before_logs.count(redirect_line)
+                assert (
+                    client.get(
+                        "/api/openapi.json", params={"probe": query_marker}
+                    ).status_code
+                    == 200
+                )
+                assert (
+                    httpx.get(
+                        f"http://127.0.0.1:{http_port}/schedule",
+                        params={"probe": query_marker},
+                        headers={"Host": "uni.test"},
+                        trust_env=False,
+                    ).status_code
+                    == 308
+                )
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    nginx_logs = dc("logs", "nginx").stdout
+                    if (
+                        nginx_logs.count(access_line) > before
+                        and nginx_logs.count(redirect_line) > before_redirect
+                    ):
+                        break
+                    time.sleep(0.05)
+                assert nginx_logs.count(access_line) > before
+                assert nginx_logs.count(redirect_line) > before_redirect
+                api_logs = dc("logs", "api").stdout
+                assert "Uvicorn running" in api_logs
+                assert query_marker not in api_logs and query_marker not in nginx_logs
+                assert "GET /api/openapi.json?" not in api_logs
+                print(
+                    "PASS: production query marker absent from API/nginx logs; diagnostics remain",
+                    flush=True,
+                )
                 for path in ("/api", "/api/no-such-route"):
                     missing = client.get(path)
                     assert missing.status_code == 404
@@ -317,36 +374,39 @@ for index in range(6):
     r.read()
     c.close()
 """
+            edge = json.loads(
+                run(["docker", "network", "inspect", f"{project}_edge"]).stdout
+            )[0]
+            subnet = ip_network(edge["IPAM"]["Config"][0]["Subnet"])
+            started = time.monotonic()
             for number in (1, 2):
                 name = f"{project}-client-{number}"
+                # Distinct real peer IPs, without retaining two idle image copies.
+                peer = str(subnet.network_address + 10 + number)
                 run(
                     [
                         "docker",
                         "run",
-                        "-d",
+                        "--rm",
+                        "-i",
                         "--name",
                         name,
                         "--network",
                         f"{project}_edge",
+                        "--ip",
+                        peer,
                         "--entrypoint",
-                        "sleep",
+                        "python",
                         "uni-space-api:task019",
-                        "180",
-                    ]
-                )
-                run(
-                    ["docker", "exec", "-i", name, "python", "-c", client_code],
+                        "-c",
+                        client_code,
+                    ],
                     input=(temp / "tls.pem").read_text(),
                 )
-                info = json.loads(run(["docker", "inspect", name]).stdout)[0]
-                peer = info["NetworkSettings"]["Networks"][f"{project}_edge"][
-                    "IPAddress"
-                ]
-                assert (
-                    f'{peer}:0 - "POST /api/v1/auth/login' in dc("logs", "api").stdout
-                )
-            for number in (1, 2):
-                run(["docker", "rm", "-f", f"{project}-client-{number}"])
+                assert f"{peer} POST /api/v1/auth/login" in dc("logs", "nginx").stdout
+            assert time.monotonic() - started < 60, (
+                "Compare client limits within one rate-limit window"
+            )
             rogue_code = """
 import http.client
 c = http.client.HTTPConnection("api", 8000, timeout=5)
@@ -378,7 +438,7 @@ for index in range(6):
                     rogue_code,
                 ]
             )
-            assert "203.0.113.1:0 - " not in dc("logs", "api").stdout
+            assert "POST /api/v1/auth/login" not in dc("logs", "api").stdout
             print(
                 "PASS: actual client IP, independent limits, spoofing and untrusted peer",
                 flush=True,

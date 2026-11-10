@@ -61,7 +61,7 @@ python -m app.core.server --production
 ```
 
 При запуске через uv перед ней остаётся обычный префикс
-`uv run --locked --python 3.12.12`. Контейнерный entrypoint также допускает эту
+`uv run --locked --python 3.12.16`. Контейнерный entrypoint также допускает эту
 команду вместо локального CMD; адрес/порт выбираются под фактическую внутреннюю
 сеть reverse proxy. Это команда запуска API, **не готовый production-деплой**.
 
@@ -182,7 +182,7 @@ Uvicorn**. При выключенной обработке forwarded-загол
 запроса или завершения процесса.
 
 Приложение не разбирает `X-Forwarded-For` самостоятельно. Запускайте сервер через
-`uv run --locked --python 3.12.12 python -m app.core.server` (для разработки
+`uv run --locked --python 3.12.16 python -m app.core.server` (для разработки
 допустим `--reload`). Docker использует тот же launcher. Он читает существующий
 Settings и передаёт Uvicorn явные параметры:
 
@@ -245,8 +245,8 @@ Uvicorn и HTTP-запросы от доверенного/недоверенн�
 
 ## Проверки
 
-Используются обычные команды проекта: `uv run --locked --python 3.12.12 pytest
--m "not integration"` и `uv run --locked --python 3.12.12 pytest -m integration`.
+Используются обычные команды проекта: `uv run --locked --python 3.12.16 pytest
+-m "not integration"` и `uv run --locked --python 3.12.16 pytest -m integration`.
 Интеграционные тесты требуют изолированную PostgreSQL из `compose.test.yaml`,
 проверяют имя БД/роли, применяют миграции и очищают собственные вымышленные данные.
 
@@ -493,3 +493,13 @@ redirect проверяют, что authenticated Fetch не обращаетс�
 Bearer fallback. Старые cookie-only клиенты совместимы с новым backend. OpenAPI
 описывает Bearer как необязательный (security HTTPBearer или анонимный запрос);
 ответ 204 по-прежнему не содержит тела или признака результата отзыва.
+
+
+### Журналы production (SEC-03 из PR #31)
+
+В production `app.core.server` добавляет явный `--no-access-log`: стандартный
+access log Uvicorn включает query string и здесь не используется. Это не меняет
+`uvicorn.error` и безопасные сообщения об ошибках API; доступы пишет Nginx без
+query string. В development/test прежнее журналирование сохранено. Подробности,
+границы гарантии и проверка вымышленного query-маркера — в
+[PRODUCTION.md](PRODUCTION.md#первая-установка-запуск-и-диагностика).

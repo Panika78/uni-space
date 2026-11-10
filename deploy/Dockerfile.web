@@ -7,6 +7,6 @@ RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
     npm install --global npm@11.19.1 && npm ci && npm run build
 
-FROM nginx:1.28.0-alpine
+FROM nginx:1.30.6-alpine@sha256:583b7f2fce1cdb8da5ad5c39ebd3c33b98b87d493190e548bdee1fa8c619c311
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY deploy/nginx.conf.template /etc/nginx/templates/default.conf.template

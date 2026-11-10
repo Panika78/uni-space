@@ -56,8 +56,8 @@ npm run types:check
 Общие TypeScript-типы создаются из схем backend в OpenAPI. После изменения
 Pydantic-моделей обновите снимок OpenAPI и типы командой `npm run types:generate`
 из `frontend/`. Команда `npm run types:check` проверяет актуальность обоих
-сгенерированных файлов без их перезаписи. Обе команды запускают Python 3.12.12
-через `uv run --locked --python 3.12.12`, поэтому не переписывают
+сгенерированных файлов без их перезаписи. Обе команды запускают Python 3.12.16
+через `uv run --locked --python 3.12.16`, поэтому не переписывают
 `backend/uv.lock`. Если lock устарел, обновите его явной командой `uv lock`.
 
 Чтобы добавить компонент shadcn/ui, используйте CLI из `frontend/`:
@@ -73,9 +73,11 @@ npx shadcn@latest add button
 
 - Docker 29.9.2 или совместимый;
 - Docker Compose 2.40.3 или совместимый;
-- для запуска без Docker: Python 3.12.12 и uv 0.13.5.
+- для запуска без Docker: Python 3.12.16 и uv 0.13.7.
 
-В контейнерах зафиксированы Python 3.12.12 и PostgreSQL 17.6. Точные версии
+В контейнерах зафиксированы Python 3.12.16, PostgreSQL 17.11 и Nginx 1.30.6
+с manifest digests. Обоснование security updates и источники — в
+[PRODUCTION.md](docs/PRODUCTION.md#базовые-образы-и-security-updates-sec-01-pr-31). Точные версии
 Python-зависимостей записаны в `backend/uv.lock`.
 
 ## Production-конфигурация
@@ -103,7 +105,7 @@ bash scripts/production-compose.sh up -d --wait --wait-timeout 120
 docker build -f backend/Dockerfile -t uni-space-api:task019 .
 docker build -f deploy/Dockerfile.web -t uni-space-web:task019 .
 # Сначала установите Playwright/Chromium по docs/PRODUCTION.md.
-uv run --locked --python 3.12.12 --project backend python deploy/test_production.py
+uv run --locked --python 3.12.16 --project backend python deploy/test_production.py
 ```
 
 Он использует уникальный тестовый project/volume, проверяет реальный HTTPS,
@@ -212,15 +214,15 @@ Compose публикует PostgreSQL только на `127.0.0.1:5432`. Под
 ```bash
 docker compose up -d db
 cd backend
-uv python install 3.12.12
+uv python install 3.12.16
 uv sync --locked
 set -a
 source ../.env
 set +a
-uv run --locked --python 3.12.12 alembic upgrade head
-uv run --locked --python 3.12.12 python -c \
+uv run --locked --python 3.12.16 alembic upgrade head
+uv run --locked --python 3.12.16 python -c \
   'from sqlalchemy import text; from app.core.database import engine; print(engine.connect().execute(text("SELECT 1")).scalar_one())'
-uv run --locked --python 3.12.12 python -m app.core.server --reload
+uv run --locked --python 3.12.16 python -m app.core.server --reload
 ```
 
 Для host `DATABASE_URL` пароль с URI-символами должен быть закодирован один раз
@@ -232,9 +234,9 @@ uv run --locked --python 3.12.12 python -m app.core.server --reload
 
 ```bash
 cd backend
-DATABASE_URL=postgresql+psycopg://unused:unused@localhost/unused uv run --locked --python 3.12.12 pytest
-uv run --locked --python 3.12.12 ruff check .
-uv run --locked --python 3.12.12 ruff format --check .
+DATABASE_URL=postgresql+psycopg://unused:unused@localhost/unused uv run --locked --python 3.12.16 pytest
+uv run --locked --python 3.12.16 ruff check .
+uv run --locked --python 3.12.16 ruff format --check .
 ```
 
 `DATABASE_URL` и `JWT_SIGNING_KEY` — обязательные настройки API. Если настройка отсутствует или некорректна,
@@ -243,7 +245,7 @@ uv run --locked --python 3.12.12 ruff format --check .
 ## Проверки проекта
 
 Для локальных тестов и проверки миграций используется отдельный PostgreSQL
-17.6 в Compose-файле `compose.test.yaml`. Он имеет отдельную базу и тестовые
+17.11 в Compose-файле `compose.test.yaml`. Он имеет отдельную базу и тестовые
 учётные данные, не читает `.env`, не подключается к рабочему `db` и не хранит
 данные в постоянном volume. Порт опубликован только на loopback (`55432`), он
 должен быть свободен.
@@ -256,35 +258,35 @@ project со всеми его данными, затем создавайте �
 docker compose -p uni-space-test -f compose.test.yaml down --volumes --remove-orphans
 docker compose -p uni-space-test -f compose.test.yaml up -d --wait test-db
 cd backend
-uv python install 3.12.12
+uv python install 3.12.16
 uv sync --locked
 export APP_ENV=test
 export JWT_SIGNING_KEY=test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ
 export DATABASE_URL=postgresql+psycopg://uni_space_test:test-only-password@127.0.0.1:55432/uni_space_test
-uv run --locked --python 3.12.12 python -c \
-  'import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)'
+uv run --locked --python 3.12.16 python -c \
+  'import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 16)'
 ```
 
 В `backend/` запустите backend lint/format и тесты:
 
 ```bash
 uv lock --check
-uv run --locked --python 3.12.12 ruff check .
-uv run --locked --python 3.12.12 ruff format --check .
-uv run --locked --python 3.12.12 pytest -m "not integration"
-uv run --locked --python 3.12.12 pytest -m integration
+uv run --locked --python 3.12.16 ruff check .
+uv run --locked --python 3.12.16 ruff format --check .
+uv run --locked --python 3.12.16 pytest -m "not integration"
+uv run --locked --python 3.12.16 pytest -m integration
 ```
 
 На той же тестовой PostgreSQL проверьте миграции на пустой базе и совпадение
 текущих ревизий БД с heads Alembic:
 
 ```bash
-uv run --locked --python 3.12.12 alembic upgrade head
-uv run --locked --python 3.12.12 python scripts/check_migrations.py
+uv run --locked --python 3.12.16 alembic upgrade head
+uv run --locked --python 3.12.16 python scripts/check_migrations.py
 ```
 
 Миграции TASK-005 создают модели аккаунтов, сессий и университетских справочников.
-Проверяйте также `uv run --locked --python 3.12.12 alembic check` для совпадения
+Проверяйте также `uv run --locked --python 3.12.16 alembic check` для совпадения
 ORM и схемы PostgreSQL.
 
 В `frontend/` установите зависимости по lock-файлу и выполните frontend-проверки:

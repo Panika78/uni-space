@@ -1,16 +1,19 @@
 # Do not log request bodies, cookies, Authorization or query strings.
 log_format safe '$remote_addr $request_method $uri $status';
-access_log /var/log/nginx/access.log safe;
 server_tokens off;
 
 server {
     listen 80 default_server;
     server_name ${SERVER_NAME};
+    # Override the stock http-level main log; do not add a second global log.
+    access_log /var/log/nginx/access.log safe;
     return 308 https://${SERVER_NAME}$request_uri;
 }
 server {
     listen 443 ssl default_server;
     server_name ${SERVER_NAME};
+    # Override the stock http-level main log; do not add a second global log.
+    access_log /var/log/nginx/access.log safe;
     ssl_certificate /etc/nginx/tls/fullchain.pem;
     ssl_certificate_key /etc/nginx/tls/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -45,8 +48,8 @@ server {
 # Container-local healthcheck only; proves proxy -> API, not just nginx -t.
 server {
     listen 127.0.0.1:8080;
+    access_log off;
     location = /ready {
         proxy_pass http://api:8000/api/openapi.json;
-        access_log off;
     }
 }

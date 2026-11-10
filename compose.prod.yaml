@@ -2,7 +2,7 @@
 name: uni-space-prod
 services:
   db:
-    image: postgres:17.6-bookworm
+    image: postgres:17.11-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
