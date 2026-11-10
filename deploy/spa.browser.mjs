@@ -54,7 +54,13 @@ try {
     'Initial navigation has no server redirect',
   )
   await page.waitForURL(new URL('/login', origin).href)
-  await page.getByRole('heading', { name: 'Вход', exact: true }).waitFor()
+  await page.getByRole('heading', { name: 'Вход в систему', exact: true }).waitFor()
+  const emblem = page.locator('.login-card img.brand-mark')
+  assert.ok(await emblem.isVisible(), 'University emblem is visible on mobile login')
+  assert.ok(
+    await emblem.evaluate((image) => image.complete && image.naturalWidth > 0),
+    'University emblem loads successfully',
+  )
   assert.ok(await page.getByLabel('Логин', { exact: true }).isVisible())
   assert.ok(await page.getByLabel('Пароль', { exact: true }).isVisible())
   assert.ok(await page.getByRole('button', { name: 'Войти', exact: true }).isVisible())
