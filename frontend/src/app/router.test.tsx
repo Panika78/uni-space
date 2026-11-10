@@ -2,6 +2,8 @@ import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { createQueryClient } from './queryClient'
 import { appRoutes } from './router'
 import type { RouteObject } from 'react-router-dom'
 
@@ -26,7 +28,11 @@ afterEach(() => {
 
 function renderRouter(path: string) {
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] })
-  render(<RouterProvider router={router} />)
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
 }
 
 describe('route fallbacks', () => {
@@ -79,7 +85,11 @@ describe('route fallbacks', () => {
         },
       ]
       const router = createMemoryRouter(failingRoutes, { initialEntries: ['/broken'] })
-      render(<RouterProvider router={router} />)
+      render(
+        <QueryClientProvider client={createQueryClient()}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>,
+      )
       expect(
         await screen.findByRole('heading', { name: 'Не удалось открыть страницу' }),
       ).toBeInTheDocument()

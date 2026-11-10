@@ -177,7 +177,19 @@ Nginx (важно при замене файла через rename), прове�
 |---|---|---|
 | `POSTGRES_USER` (прежнее имя сохраняется) | `POSTGRES_PASSWORD_FILE`, только `db` | Администратор кластера; bootstrap, backup, создание отдельной restore-БД |
 | `uni_space_migrator` | `MIGRATION_DB_PASSWORD_FILE`, только `db` и одноразовый `migrate` | LOGIN без SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS; владелец public и прикладных объектов, DDL миграций |
-| `uni_space_api` | `API_DB_PASSWORD_FILE`, только `db` и `api` | CONNECT рабочей БД, USAGE public и auth-последовательностей; SELECT users, students, auth_sessions, refresh_tokens, alembic_version; INSERT/UPDATE auth_sessions и refresh_tokens |
+| `uni_space_api` | `API_DB_PASSWORD_FILE`, только `db` и `api` | CONNECT рабочей БД, USAGE public и auth-последовательностей; SELECT users, students, auth_sessions, refresh_tokens, alembic_version и таблиц чтения расписания (ниже); INSERT/UPDATE auth_sessions и refresh_tokens |
+
+После TASK-010 явно добавлены только `SELECT` на `study_groups`, `teachers`,
+`disciplines`, `course_offerings`, `buildings`, `rooms`, `lessons`, `lesson_groups`,
+`lesson_rooms`. `academic_terms`/`course_groups` создаются миграцией как основа
+учебной модели, но текущий API их не читает и прав на них не получает. Не выдаются
+права записи или USAGE на последовательности расписания. Список разрешений в
+`deploy/postgres/privileges.sql` применяется существующим migration wrapper до и
+после Alembic, без широких default GRANT. Изолированный production-тест создаёт
+вымышленные учебные фикстуры мигратором, повторяет ACL и выполняет настоящий
+`GET /api/v1/schedule` через HTTPS под `uni_space_api`, включая общую пару,
+несколько аудиторий, цепочку переносов и изоляцию группы. Отдельно проверяет отказ
+записи в расписание, использования его последовательностей и чтения лишних таблиц.
 
 API не получает административный или migration secret ни в окружение, ни в mounts.
 В `migrate` нет JWT-секрета приложения: константа удовлетворяет Settings только для

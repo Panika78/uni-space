@@ -1,0 +1,160 @@
+.schedule-toolbar,
+.schedule-modes,
+.schedule-period {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.schedule-toolbar {
+  flex-wrap: wrap;
+  margin: 1.25rem 0;
+}
+.schedule-page button,
+.schedule-date input {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.8rem;
+  background: var(--surface, #fff);
+  color: inherit;
+  cursor: pointer;
+}
+.schedule-page button[aria-pressed='true'] {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.schedule-page button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.schedule-date {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.schedule-period {
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+.schedule-period p {
+  text-align: center;
+  margin: 0;
+}
+.schedule-period small,
+.lesson-card__time small {
+  display: block;
+  font-size: 0.75rem;
+  margin-top: 0.3rem;
+}
+.schedule-days {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+}
+.schedule-days button {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.2rem;
+}
+.schedule-days span {
+  display: block;
+  font-size: 0.8rem;
+}
+.schedule-day {
+  display: none;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+.schedule-page--week .schedule-day,
+.schedule-day.is-selected {
+  display: grid;
+}
+.schedule-day h2 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 0.8rem 0;
+}
+.schedule-day__lessons {
+  min-width: 0;
+}
+.lesson-card {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 1rem;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  margin-bottom: 0.5rem;
+  overflow-wrap: anywhere;
+}
+.lesson-card__time {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.lesson-card h3 {
+  font-size: 1rem;
+  margin: 0 0 0.4rem;
+}
+.lesson-card p,
+.lesson-card ul {
+  margin: 0.2rem 0;
+  font-size: 0.85rem;
+}
+.lesson-card ul {
+  padding-left: 1.2rem;
+}
+.lesson-card--cancelled,
+.lesson-card--moved {
+  background: #f1f3f5;
+  color: #536171;
+  padding-block: 0.65rem;
+}
+.lesson-card--cancelled h3,
+.lesson-card--cancelled time,
+.lesson-card--moved time {
+  text-decoration: line-through;
+}
+.lesson-card__status {
+  font-weight: 600;
+}
+.schedule-empty {
+  margin: 0.8rem 0;
+  color: #536171;
+  font-size: 0.9rem;
+}
+@media (min-width: 769px) {
+  .schedule-page--week .schedule-days {
+    display: none;
+  }
+}
+@media (max-width: 768px) {
+  .schedule-modes,
+  .schedule-day-arrows {
+    display: none;
+  }
+  .schedule-day,
+  .schedule-page--week .schedule-day {
+    display: none;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
+  }
+  .schedule-day.is-selected,
+  .schedule-page--week .schedule-day.is-selected {
+    display: grid;
+  }
+  .lesson-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+    padding: 0.8rem;
+  }
+  .schedule-period {
+    gap: 0.35rem;
+    font-size: 0.8rem;
+  }
+  .schedule-period button {
+    flex-shrink: 0;
+  }
+}

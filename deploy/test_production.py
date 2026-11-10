@@ -467,6 +467,10 @@ for statement in (
     "SELECT * FROM public.future_fixture", "SELECT * FROM public.org_units",
     "SELECT * FROM public.existing_acl_fixture",
     "SELECT public.existing_function_fixture()", "SELECT public.future_function_fixture()",
+    "INSERT INTO disciplines (name) VALUES ('forbidden')",
+    "UPDATE lessons SET status='cancelled'", "DELETE FROM lesson_groups",
+    "SELECT * FROM academic_terms", "SELECT * FROM course_groups",
+    "SELECT nextval('public.lessons_id_seq')",
     "SELECT nextval('public.users_id_seq')",
     "SELECT setval('public.auth_sessions_id_seq', 9999)",
 ):
@@ -565,6 +569,18 @@ with SessionLocal.begin() as db:
 """,
                 input=password,
             )
+            dc(
+                "run",
+                "--rm",
+                "-T",
+                "migrate",
+                "python",
+                "-c",
+                (ROOT / "deploy/schedule_fixtures.py").read_text(),
+                input=password,
+            )
+            # ACL reapplication must retain schedule reads and all existing auth permissions.
+            run(["bash", "scripts/configure-postgres.sh"], env=env)
             with httpx.Client(
                 base_url=public_origin,
                 verify=context,
@@ -728,6 +744,68 @@ with SessionLocal.begin() as db:
                         "PASS: pre-transition refresh token remains usable with restricted API",
                         flush=True,
                     )
+                student_login = client.post(
+                    "/api/v1/auth/login",
+                    headers=origin,
+                    json={"login": "schedule-fixture-1", "password": password},
+                )
+                assert student_login.status_code == 200
+                schedule_headers = {
+                    "Authorization": "Bearer " + student_login.json()["access_token"]
+                }
+                schedule = client.get(
+                    "/api/v1/schedule",
+                    params={"date_from": "2026-11-10", "date_to": "2026-11-10"},
+                    headers=schedule_headers,
+                )
+                assert schedule.status_code == 200, schedule.text
+                assert schedule.headers["cache-control"] == "no-store"
+                items = schedule.json()["items"]
+                assert len(items) == 5 and len({item["id"] for item in items}) == 5
+                shared = next(item for item in items if len(item["rooms"]) == 2)
+                assert len(shared["groups"]) == 2
+                assert any(item["latest_lesson"] for item in items)
+                assert not any(
+                    item["course_offering"]["discipline"]["name"]
+                    == "Только вторая группа"
+                    for item in items
+                )
+                print(
+                    "PASS: real GET /schedule under uni_space_api after repeated ACL; rooms, groups, moves, isolation",
+                    flush=True,
+                )
+                moved = next(item for item in items if item["status"] == "moved")
+                assert moved["latest_lesson"]["starts_at"].startswith("2026-12-20")
+                second_login = client.post(
+                    "/api/v1/auth/login",
+                    headers=origin,
+                    json={"login": "schedule-fixture-2", "password": password},
+                )
+                assert second_login.status_code == 200
+                second_schedule = client.get(
+                    "/api/v1/schedule",
+                    params={"date_from": "2026-11-10", "date_to": "2026-11-10"},
+                    headers={
+                        "Authorization": "Bearer " + second_login.json()["access_token"]
+                    },
+                )
+                assert second_schedule.status_code == 200
+                second_items = second_schedule.json()["items"]
+                assert len(second_items) == 2
+                assert any(
+                    item["course_offering"]["discipline"]["name"]
+                    == "Только вторая группа"
+                    for item in second_items
+                )
+                assert not any(
+                    item["course_offering"]["discipline"]["name"]
+                    == "Только первая группа"
+                    for item in second_items
+                )
+                print(
+                    "PASS: second student's real schedule remains isolated under restricted role",
+                    flush=True,
+                )
                 login = client.post(
                     "/api/v1/auth/login",
                     headers=origin,
