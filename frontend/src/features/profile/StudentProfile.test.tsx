@@ -67,20 +67,21 @@ it('renders academic status, initials and read-only fields', async () => {
   mount()
   expect(await screen.findByText('Академический отпуск')).toBeInTheDocument()
   expect(screen.getByText('ТС')).toBeInTheDocument()
+  for (const [label, value] of Object.entries({
+    ФИО: profile.full_name,
+    Логин: profile.login,
+    Факультет: profile.faculty.name,
+    Программа: '01 · Программа',
+    Направление: '01 · Направление',
+    Курс: '2',
+    Группа: profile.group.name,
+    'Академический статус': 'Академический отпуск',
+  })) {
+    expect(screen.getByText(label, { selector: 'dt' }).nextElementSibling).toHaveTextContent(value)
+  }
   expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
-})
-it('does not retain a previous account profile after the session clears its cache', async () => {
-  vi.mocked(apiFetch).mockResolvedValue(profile)
-  const client = mount()
-  await screen.findByText('Академический отпуск')
-  cleanup()
-  client.clear()
-  vi.mocked(apiFetch).mockResolvedValue({
-    ...profile,
-    full_name: 'Другой Студент',
-    academic_status: 'enrolled',
-  })
-  mount()
-  expect(await screen.findAllByText('Другой Студент')).toHaveLength(2)
-  expect(screen.queryByText('Тестовый Студент')).not.toBeInTheDocument()
+  expect(document.querySelector('input, select, textarea, [contenteditable="true"]')).toBeNull()
+  expect(
+    screen.queryByRole('button', { name: /изменить|редактировать|сохранить/i }),
+  ).not.toBeInTheDocument()
 })

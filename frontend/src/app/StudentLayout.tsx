@@ -1,3 +1,4 @@
+import { getStudentInitials, useStudentProfile } from '../features/profile/StudentProfile'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FocusEvent } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
@@ -54,6 +55,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 function UserMenu() {
+  const profile = useStudentProfile()
   const { logout } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -94,12 +96,12 @@ function UserMenu() {
         aria-controls="user-menu-panel"
         onClick={() => setIsOpen((open) => !open)}
       >
-        <span aria-hidden="true">С</span>
+        <span aria-hidden="true">{getStudentInitials(profile?.full_name)}</span>
       </button>
       {isOpen && (
         <div className="user-menu__panel" id="user-menu-panel">
           <Link to="/profile" onClick={() => setIsOpen(false)}>
-            Мой профиль <span>Скоро</span>
+            Мой профиль
           </Link>
           <Link to="/settings" onClick={() => setIsOpen(false)}>
             Настройки <span>Скоро</span>

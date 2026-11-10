@@ -1,6 +1,7 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -40,20 +41,25 @@ class StudentProfile(RequestModel):
 
 @router.get("/me", response_model=StudentProfile)
 def get_student_profile(
+    request: Request,
     student: Annotated[Student, Depends(get_current_student)],
     db: Annotated[Session, Depends(get_db_session)],
 ) -> StudentProfile:
+    if request.query_params:
+        raise RequestValidationError(
+            [{"type": "extra_forbidden", "loc": ("query", name)} for name in request.query_params]
+        )
     row = db.execute(
         select(User, StudyGroup, Program, OrgUnit)
         .select_from(Student)
         .join(User, User.id == Student.user_id)
         .join(StudyGroup, StudyGroup.id == Student.group_id)
         .join(Program, Program.id == StudyGroup.program_id)
-        .join(OrgUnit, OrgUnit.id == Program.faculty_id)
+        .join(OrgUnit, (OrgUnit.id == Program.faculty_id) & (OrgUnit.type == "faculty"))
         .where(Student.id == student.id)
     ).one_or_none()
     if row is None:
-        raise HTTPException(403, "forbidden")
+        raise HTTPException(500, "internal_error")
     user, group, program, faculty = row
     return StudentProfile(
         id=str(user.id),

@@ -9,6 +9,22 @@ import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 type Profile = components['schemas']['StudentProfile']
 const ProfileContext = createContext<Profile | null>(null)
 
+export function useStudentProfile() {
+  return useContext(ProfileContext)
+}
+
+export function getStudentInitials(fullName?: string) {
+  return (
+    fullName
+      ?.trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0].toLocaleUpperCase('ru'))
+      .join('') || '—'
+  )
+}
+
 export function StudentAccess() {
   const { logout } = useAuth()
   const query = useQuery({
@@ -61,14 +77,9 @@ const statuses = {
   graduated: 'Выпускник',
 }
 export function StudentProfilePage() {
-  const profile = useContext(ProfileContext)
+  const profile = useStudentProfile()
   if (!profile) return null
-  const initials = profile.full_name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
+  const initials = getStudentInitials(profile.full_name)
   return (
     <article className="section-page profile-page">
       <h1>Мой профиль</h1>
