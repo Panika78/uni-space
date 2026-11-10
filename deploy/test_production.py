@@ -9,7 +9,6 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from ipaddress import ip_network
 
 import httpx
 
@@ -374,33 +373,28 @@ for index in range(6):
     r.read()
     c.close()
 """
-            edge = json.loads(
-                run(["docker", "network", "inspect", f"{project}_edge"]).stdout
-            )[0]
-            subnet = ip_network(edge["IPAM"]["Config"][0]["Subnet"])
             started = time.monotonic()
+            peers = []
             for number in (1, 2):
                 name = f"{project}-client-{number}"
-                # Distinct real peer IPs, without retaining two idle image copies.
-                peer = str(subnet.network_address + 10 + number)
-                result = run(
+                # Keep the first peer alive so Docker cannot reuse its dynamic IP.
+                run(
                     [
                         "docker",
                         "run",
-                        "--rm",
-                        "-i",
+                        "-d",
                         "--name",
                         name,
                         "--network",
                         f"{project}_edge",
-                        "--ip",
-                        peer,
                         "--entrypoint",
-                        "python",
+                        "sleep",
                         "uni-space-api:task019",
-                        "-c",
-                        client_code,
-                    ],
+                        "180",
+                    ]
+                )
+                result = run(
+                    ["docker", "exec", "-i", name, "python", "-c", client_code],
                     input=(temp / "tls.pem").read_text(),
                     success=False,
                 )
@@ -408,10 +402,18 @@ for index in range(6):
                 assert result.returncode == 0, (
                     f"Anonymous peer check failed: {result.stderr[-4000:]}"
                 )
+                info = json.loads(run(["docker", "inspect", name]).stdout)[0]
+                peer = info["NetworkSettings"]["Networks"][f"{project}_edge"][
+                    "IPAddress"
+                ]
+                peers.append(peer)
                 assert f"{peer} POST /api/v1/auth/login" in dc("logs", "nginx").stdout
+            assert len(set(peers)) == 2
             assert time.monotonic() - started < 60, (
                 "Compare client limits within one rate-limit window"
             )
+            for number in (1, 2):
+                run(["docker", "rm", "-f", f"{project}-client-{number}"])
             rogue_code = """
 import http.client
 c = http.client.HTTPConnection("api", 8000, timeout=5)
