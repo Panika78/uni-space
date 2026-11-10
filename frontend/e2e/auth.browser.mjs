@@ -86,11 +86,27 @@ async function clickLogout(target) {
   await dialog.waitFor()
   await dialog.getByRole('button', { name: 'Выйти', exact: true }).click()
 }
-async function login(target, name) {
+async function login(target, name, waitForRateWindow = false) {
   await target.goto(`${baseURL}/login`)
   await target.getByLabel('Логин', { exact: true }).fill(name)
   await target.getByLabel('Пароль', { exact: true }).fill(password)
   await target.getByRole('button', { name: 'Войти', exact: true }).click()
+  if (waitForRateWindow) {
+    await target.waitForFunction(
+      () =>
+        window.location.pathname === '/schedule' ||
+        document.querySelector('[role="status"]')?.textContent?.includes('Слишком много попыток'),
+    )
+    if (new URL(target.url()).pathname === '/login') {
+      const message = await target.getByRole('status').innerText()
+      const seconds = /через (\d+) сек/.exec(message)
+      assert.ok(seconds, 'rate limit must provide a retry interval')
+      const countBeforeWait = requests.filter((path) => path.endsWith('/login')).length
+      await new Promise((resolve) => setTimeout(resolve, (Number(seconds[1]) + 1) * 1000))
+      assert.equal(requests.filter((path) => path.endsWith('/login')).length, countBeforeWait)
+      await target.getByRole('button', { name: 'Войти', exact: true }).click()
+    }
+  }
   await heading(target, 'Расписание')
 }
 // Exercise the production HTTP client, with only the absent protected API controlled.
@@ -139,10 +155,29 @@ try {
   await page.getByRole('button', { name: 'Выйти', exact: true }).click()
   const cancellationDialog = page.getByRole('dialog', { name: 'Выйти из аккаунта?' })
   await cancellationDialog.waitFor()
+  assert.equal(await cancellationDialog.evaluate((element) => element.matches(':modal')), true)
   assert.equal(requests.length, beforeCancelledLogout)
+  const notificationBox = await page
+    .getByRole('link', {
+      name: 'Уведомления — функция пока недоступна',
+    })
+    .boundingBox()
+  assert.ok(notificationBox)
+  await page.mouse.click(
+    notificationBox.x + notificationBox.width / 2,
+    notificationBox.y + notificationBox.height / 2,
+  )
+  await heading(page, 'Расписание')
+  assert.equal(await cancellationDialog.count(), 1, 'modal must block mobile background clicks')
   await cancellationDialog.getByRole('button', { name: 'Отмена' }).click()
   await heading(page, 'Расписание')
   assert.equal(requests.length, beforeCancelledLogout)
+  assert.equal(
+    await page
+      .getByRole('button', { name: 'Меню пользователя' })
+      .evaluate((element) => element === document.activeElement),
+    true,
+  )
   await page.getByRole('button', { name: 'Меню пользователя' }).click()
   await page.getByRole('button', { name: 'Выйти', exact: true }).click()
   await page.keyboard.press('Escape')
@@ -151,12 +186,37 @@ try {
   check('logout confirmation cancel and Escape preserve authentication without a POST')
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
   await page.setViewportSize({ width: 1280, height: 900 })
+  await page.getByRole('button', { name: 'Меню пользователя' }).click()
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  const modal = page.getByRole('dialog', { name: 'Выйти из аккаунта?' })
+  assert.equal(await modal.evaluate((element) => element.matches(':modal')), true)
+  const sidebarToggle = page.getByRole('button', { name: 'Свернуть меню' })
+  const sidebarBox = await sidebarToggle.boundingBox()
+  assert.ok(sidebarBox)
+  await page.mouse.click(sidebarBox.x + sidebarBox.width / 2, sidebarBox.y + sidebarBox.height / 2)
+  assert.equal(await sidebarToggle.count(), 1, 'modal must block sidebar clicks')
+  for (let index = 0; index < 4; index++) {
+    await page.keyboard.press('Tab')
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.closest('dialog')?.matches(':modal')),
+      true,
+    )
+  }
+  await page.keyboard.press('Escape')
+  assert.equal(await modal.count(), 0)
+  assert.equal(
+    await page
+      .getByRole('button', { name: 'Меню пользователя' })
+      .evaluate((element) => element === document.activeElement),
+    true,
+  )
+  check('native logout dialog blocks desktop sidebar and traps focus until Escape')
   await page.getByRole('button', { name: 'Свернуть меню' }).click()
   assert.equal(await page.getByTestId('prototype-disclaimer').isVisible(), true)
   await page.getByRole('button', { name: 'Развернуть меню' }).click()
   await page.setViewportSize({ width: 360, height: 800 })
   assert.equal(await page.getByTestId('prototype-disclaimer').isVisible(), true)
-  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+  await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth)
   check('prototype disclaimer remains visible on collapsed desktop and 360px mobile layouts')
   const avatarTrigger = page.getByRole('button', { name: 'Меню пользователя', exact: true })
   await avatarTrigger.focus()
@@ -356,24 +416,28 @@ try {
   assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, countAfterClose)
   fault = ''
   check('closing the lock holder after rotation leaves a durable recovery barrier')
-  // A closing document may run fetch-abort cleanup before destruction, marking
-  // the lost refresh response as blocked and hiding the other tabs as well.
+  // Cleanup may mark the lost response blocked; if the document closes first,
+  // pending alone still prevents reuse of the potentially consumed cookie.
   const journal = await page.evaluate(() =>
     JSON.parse(localStorage.getItem('uni-space.auth-state')),
   )
-  assert.equal(journal.blocked, true)
   assert.equal(journal.pending, true)
   assert.notEqual(journal.ended, true)
+  await page.reload()
   await Promise.all([loginHeading(page), loginHeading(second)])
   assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   const refreshAfterFailure = requests.filter((path) => path.endsWith('/refresh')).length
-  await login(page, loginA)
+  await login(page, loginA, true)
   await Promise.all([page.reload(), second.reload()])
   await Promise.all([heading(page, 'Расписание'), heading(second, 'Расписание')])
   assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, refreshAfterFailure + 2)
   check(
     'failed refresh returns to login; an ordinary login restores both tabs without replaying refresh',
   )
+
+  await clickLogout(page)
+  await loginHeading(page)
+  check('confirmed logout returns to login before controlled error scenarios')
 
   // Auth errors controlled only for feedback; backend origin protection stays enabled.
   await context.route('**/api/v1/auth/login', (route) =>

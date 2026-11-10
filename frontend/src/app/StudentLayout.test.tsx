@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -187,6 +187,8 @@ describe('student dashboard navigation', () => {
     expect(within(panel).getByRole('link', { name: /Настройки/ })).toBeInTheDocument()
     await user.click(within(panel).getByRole('button', { name: 'Выйти' }))
     const dialog = screen.getByRole('dialog', { name: 'Выйти из аккаунта?' })
+    expect(dialog).toHaveAttribute('open')
+    expect(dialog.tagName).toBe('DIALOG')
     expect(auth.logout).not.toHaveBeenCalled()
     expect(within(dialog).getByRole('button', { name: 'Отмена' })).toHaveFocus()
     await user.tab({ shift: true })
@@ -198,7 +200,10 @@ describe('student dashboard navigation', () => {
     expect(trigger).toHaveFocus()
     await user.click(trigger)
     await user.click(screen.getByRole('button', { name: 'Выйти' }))
-    await user.keyboard('{Escape}')
+    fireEvent(
+      screen.getByRole('dialog', { name: 'Выйти из аккаунта?' }),
+      new Event('cancel', { cancelable: true }),
+    )
     expect(auth.logout).not.toHaveBeenCalled()
     expect(trigger).toHaveFocus()
     await user.click(trigger)

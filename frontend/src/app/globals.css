@@ -299,21 +299,18 @@ a {
   color: var(--muted);
   font-size: 10px;
 }
-.logout-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  background: rgb(36 26 28 / 45%);
-}
 .logout-dialog {
-  width: min(100%, 360px);
+  width: min(calc(100% - 32px), 360px);
+  max-height: calc(100% - 32px);
+  margin: auto;
   padding: 24px;
+  border: 0;
   border-radius: 12px;
   background: #fff;
   box-shadow: 0 18px 48px rgb(36 26 28 / 22%);
+}
+.logout-dialog::backdrop {
+  background: rgb(36 26 28 / 45%);
 }
 .logout-dialog h2 {
   margin: 0 0 24px;

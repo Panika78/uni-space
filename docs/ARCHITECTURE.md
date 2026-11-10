@@ -200,7 +200,7 @@ project/
 |---|---|---|
 | `POST` | `/api/v1/auth/login` | Проверка логина и пароля; выдача access JWT и refresh cookie |
 | `POST` | `/api/v1/auth/refresh` | Ротация refresh-токена; новый access JWT и cookie |
-| `POST` | `/api/v1/auth/logout` | Отзыв текущей сессии, очистка cookie |
+| `POST` | `/api/v1/auth/logout` | `200 {session_revoked: boolean}`, отзыв идентифицированной сессии и очистка cookie |
 | `GET` | `/api/v1/users/me` | Профиль текущего пользователя |
 | `GET` | `/api/v1/schedule` | Расписание по датам |
 | `GET` | `/api/v1/academics` | Дисциплины и результаты текущего студента |

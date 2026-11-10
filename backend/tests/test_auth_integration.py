@@ -258,6 +258,40 @@ def test_rejected_login_does_not_revoke_the_presented_browser_session(auth):
     assert client.refresh(refresh_token).status_code == 200
 
 
+def test_login_as_another_account_replaces_only_the_presented_cookie_session(auth):
+    client, engine, ids, logins, _student_ids = auth
+    _response, old_cookie, old_access = login(auth)
+    _response, independent_cookie, independent_access = login(auth)
+
+    rejected = client.login(
+        token=old_cookie,
+        json={"login": logins[1], "password": "incorrect-fictional-password"},
+    )
+    assert_error(rejected, 401, "invalid_credentials")
+    assert client.request("GET", "/api/v1/test/user", access=old_access).status_code == 200
+
+    replacement = client.login(
+        token=old_cookie,
+        json={"login": logins[1], "password": PASSWORD},
+    )
+    assert replacement.status_code == 200, replacement.text
+    assert_error(
+        client.request("GET", "/api/v1/test/user", access=old_access), 401, "session_invalid"
+    )
+    assert_error(client.refresh(old_cookie), 401, "invalid_refresh")
+    assert client.request("GET", "/api/v1/test/user", access=independent_access).status_code == 200
+    assert client.refresh(independent_cookie).status_code == 200
+    replacement_user = client.request(
+        "GET", "/api/v1/test/user", access=replacement.json()["access_token"]
+    )
+    assert replacement_user.status_code == 200
+    assert replacement_user.json()["id"] == str(ids[1])
+    with Session(engine) as db:
+        sessions = db.scalars(select(AuthSession).where(AuthSession.user_id == ids[0])).all()
+        assert sum(session.revocation_reason == "login_replaced" for session in sessions) == 1
+        assert sum(session.revoked_at is None for session in sessions) == 1
+
+
 def test_reuse_commits_revocation_and_keeps_other_session_independent(auth):
     client, engine, _ids, _logins, _student_ids = auth
     _response, old, access = login(auth)
@@ -628,7 +662,12 @@ def test_openapi_auth_contract_uses_shared_errors_and_cookie():
                 for param in operation["parameters"]
             )
     assert "429" in schema["paths"][COOKIE_PATH + "/login"]["post"]["responses"]
-    assert schema["paths"][COOKIE_PATH + "/logout"]["post"]["security"] == [{"HTTPBearer": []}, {}]
+    logout_operation = schema["paths"][COOKIE_PATH + "/logout"]["post"]
+    assert logout_operation["security"] == [{"HTTPBearer": []}, {}]
+    assert logout_operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/LogoutResponse"
+    }
+    assert schema["components"]["schemas"]["LogoutResponse"]["required"] == ["session_revoked"]
 
 
 def test_rate_limit_counts_invalid_bodies_and_skips_disallowed_origins(auth, monkeypatch):

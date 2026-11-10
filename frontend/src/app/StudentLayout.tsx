@@ -41,14 +41,22 @@ function UserMenu() {
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const cancelRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
   const confirmingRef = useRef(false)
 
   useEffect(() => {
-    if (confirmLogout) cancelRef.current?.focus()
+    if (!confirmLogout) return
+    const dialog = dialogRef.current
+    dialog?.showModal()
+    cancelRef.current?.focus()
+    return () => {
+      if (dialog?.open) dialog.close()
+    }
   }, [confirmLogout])
 
   const closeConfirmation = () => {
     if (confirmingRef.current) return
+    dialogRef.current?.close()
     setConfirmLogout(false)
     triggerRef.current?.focus()
   }
@@ -109,56 +117,54 @@ function UserMenu() {
         </div>
       )}
       {confirmLogout && (
-        <div
-          className="logout-overlay"
-          onPointerDown={(event) => {
-            if (event.target === event.currentTarget) closeConfirmation()
+        <dialog
+          ref={dialogRef}
+          className="logout-dialog"
+          aria-labelledby="logout-dialog-title"
+          onCancel={(event) => {
+            event.preventDefault()
+            closeConfirmation()
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Tab') return
+            const first = cancelRef.current
+            const last =
+              dialogRef.current?.querySelector<HTMLButtonElement>('.logout-dialog__confirm')
+            if (
+              event.shiftKey &&
+              (document.activeElement === first || document.activeElement === event.currentTarget)
+            ) {
+              event.preventDefault()
+              last?.focus()
+            } else if (
+              !event.shiftKey &&
+              (document.activeElement === last || document.activeElement === event.currentTarget)
+            ) {
+              event.preventDefault()
+              first?.focus()
+            }
           }}
         >
-          <div
-            className="logout-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="logout-dialog-title"
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault()
-                closeConfirmation()
-              }
-              if (event.key === 'Tab') {
-                const first = cancelRef.current
-                const last =
-                  event.currentTarget.querySelector<HTMLButtonElement>('.logout-dialog__confirm')
-                if (event.shiftKey && document.activeElement === first) {
-                  event.preventDefault()
-                  last?.focus()
-                } else if (!event.shiftKey && document.activeElement === last) {
-                  event.preventDefault()
-                  first?.focus()
-                }
-              }
-            }}
-          >
-            <h2 id="logout-dialog-title">Выйти из аккаунта?</h2>
-            <div className="logout-dialog__actions">
-              <button ref={cancelRef} type="button" onClick={closeConfirmation}>
-                Отмена
-              </button>
-              <button
-                className="logout-dialog__confirm"
-                type="button"
-                onClick={() => {
-                  if (confirmingRef.current) return
-                  confirmingRef.current = true
-                  void logout()
-                  setConfirmLogout(false)
-                }}
-              >
-                Выйти
-              </button>
-            </div>
+          <h2 id="logout-dialog-title">Выйти из аккаунта?</h2>
+          <div className="logout-dialog__actions">
+            <button ref={cancelRef} type="button" onClick={closeConfirmation}>
+              Отмена
+            </button>
+            <button
+              className="logout-dialog__confirm"
+              type="button"
+              onClick={() => {
+                if (confirmingRef.current) return
+                confirmingRef.current = true
+                dialogRef.current?.close()
+                setConfirmLogout(false)
+                void logout()
+              }}
+            >
+              Выйти
+            </button>
           </div>
-        </div>
+        </dialog>
       )}
     </div>
   )
