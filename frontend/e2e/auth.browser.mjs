@@ -268,15 +268,21 @@ try {
   assert.ok((await sentLogout.headerValue('authorization'))?.startsWith('Bearer '))
   assert.ok(!(await sentLogout.headerValue('cookie'))?.includes('uni_space_refresh='))
   const beforeReload = requests.length
+  const automaticLogout = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === '/api/v1/auth/logout',
+  )
   await page.reload()
   await heading(page, 'Вход')
-  assert.equal(await page.getByRole('status').count(), 0)
+  const retriedLogout = await automaticLogout
+  assert.equal(await retriedLogout.headerValue('authorization'), undefined)
   assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   assert.equal(requests.slice(beforeReload).filter((path) => path.endsWith('/refresh')).length, 0)
   fault = ''
   await login(page, loginA)
   assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
-  check('lost real logout response returns to ordinary login and successful login restores access')
+  check(
+    'lost logout response is retried on reload without refresh, then ordinary login restores access',
+  )
   const replacementCookie = (await context.cookies()).find(
     (value) => value.name === 'uni_space_refresh',
   )

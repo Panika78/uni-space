@@ -19,11 +19,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.addEventListener('storage', handleStorage)
     window.addEventListener('pageshow', session.synchronize)
     window.addEventListener('focus', session.synchronize)
+    window.addEventListener('online', session.resumePendingLogout)
     void session.start()
     return () => {
       window.removeEventListener('storage', handleStorage)
       window.removeEventListener('pageshow', session.synchronize)
       window.removeEventListener('focus', session.synchronize)
+      window.removeEventListener('online', session.resumePendingLogout)
     }
   }, [session])
   return <AuthContext.Provider value={session}>{children}</AuthContext.Provider>

@@ -31,6 +31,10 @@ class TokenResponse(RequestModel):
     expires_in: int
 
 
+class LogoutResponse(RequestModel):
+    session_revoked: bool
+
+
 def require_auth_origin(
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
@@ -129,26 +133,26 @@ def refresh_session(
 
 @router.post(
     "/logout",
-    status_code=204,
+    response_model=LogoutResponse,
     dependencies=[Depends(require_empty_body)],
     openapi_extra={"security": [{}]},
     description=(
         "Refresh-cookie имеет приоритет. При неизвестной/отсутствующей cookie используется "
-        "необязательный валидный Bearer с проверкой владельца sid. Ответ 204 удаляет cookie, "
-        "но не доказывает отзыв, если пригодный идентификатор не найден."
+        "необязательный валидный Bearer с проверкой владельца sid. Поле session_revoked "
+        "сообщает, была ли найдена и отозвана конкретная сессия; cookie удаляется при любом ответе."
     ),
 )
 def logout_session(
     db: Database,
     settings: AuthSettings,
+    response: Response,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     refresh_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
-) -> Response:
-    revoke_logout_session(
+) -> dict:
+    session_revoked = revoke_logout_session(
         db, refresh_cookie, settings, credentials.credentials if credentials else None
     )
-    response = Response(status_code=204)
     response.delete_cookie(
         COOKIE_NAME, path=COOKIE_PATH, secure=settings.cookie_secure, httponly=True, samesite="lax"
     )
-    return response
+    return {"session_revoked": session_revoked}

@@ -4,17 +4,30 @@ import type { components } from '../../shared/api/schema'
 
 type LoginRequest = components['schemas']['LoginRequest']
 type TokenResponse = components['schemas']['TokenResponse']
+type LogoutResponse = components['schemas']['LogoutResponse']
 type Status = 'initializing' | 'authenticated' | 'unauthenticated'
-type SharedState = { epoch: string; blocked: boolean; pending: boolean; ended?: boolean }
+type SharedState = {
+  epoch: string
+  blocked: boolean
+  pending: boolean
+  ended?: boolean
+  logoutRetry?: { attempts: number }
+}
 export const authStorageKey = 'uni-space.auth-state'
 export const authEpochStorageKey = 'uni-space.auth-epoch'
 const emptyState: SharedState = { epoch: 'initial', blocked: false, pending: false }
+const maxAutomaticLogoutRetries = 3
+const compatibilityMessage =
+  'Для безопасного входа нужен современный браузер с поддержкой нескольких вкладок и хранилища сайта.'
+const logoutRetryMessage =
+  'Не удалось завершить выход. Повторим попытку при восстановлении соединения.'
+const logoutRetryExhaustedMessage =
+  'Автоматически завершить выход не удалось. Войдите снова, чтобы продолжить.'
 type AuthSnapshot = {
   status: Status
   message: string
   busy: boolean
 }
-const logoutErrorMessage = 'Не удалось завершить выход. Войдите снова, чтобы продолжить.'
 
 export class AuthSession {
   private token: string | undefined
@@ -22,6 +35,7 @@ export class AuthSession {
   private listeners = new Set<() => void>()
   private refreshPromise: Promise<void> | undefined
   private startPromise: Promise<void> | undefined
+  private logoutRetryPromise: Promise<void> | undefined
   private epoch = 'initial'
   private snapshot: AuthSnapshot = {
     status: 'initializing',
@@ -45,24 +59,44 @@ export class AuthSession {
   }
 
   private readState(): SharedState {
-    const raw = localStorage.getItem(authStorageKey)
+    let raw: string | null
+    try {
+      raw = localStorage.getItem(authStorageKey)
+    } catch {
+      throw new ApiClientError('Browser storage is unavailable', 'coordination_unavailable')
+    }
     if (!raw) return emptyState
-    const value = JSON.parse(raw) as SharedState
+    let value: SharedState
+    try {
+      value = JSON.parse(raw) as SharedState
+    } catch {
+      throw new ApiClientError('Browser auth state is unreadable', 'coordination_unavailable')
+    }
     if (
       typeof value.epoch !== 'string' ||
       typeof value.blocked !== 'boolean' ||
-      typeof value.pending !== 'boolean'
+      typeof value.pending !== 'boolean' ||
+      (value.logoutRetry !== undefined &&
+        (!Number.isSafeInteger(value.logoutRetry.attempts) || value.logoutRetry.attempts < 0))
     )
       throw new Error('Invalid auth coordination state')
     return value
   }
 
   private readEpoch() {
-    return localStorage.getItem(authEpochStorageKey) ?? 'initial'
+    try {
+      return localStorage.getItem(authEpochStorageKey) ?? 'initial'
+    } catch {
+      throw new ApiClientError('Browser storage is unavailable', 'coordination_unavailable')
+    }
   }
 
   private writeState(state: SharedState) {
-    localStorage.setItem(authStorageKey, JSON.stringify(state))
+    try {
+      localStorage.setItem(authStorageKey, JSON.stringify(state))
+    } catch {
+      throw new ApiClientError('Browser storage is unavailable', 'coordination_unavailable')
+    }
   }
 
   private clearSession(message = '') {
@@ -89,7 +123,7 @@ export class AuthSession {
         this.clearSession()
       }
     } catch {
-      this.clearSession()
+      this.clearSession(compatibilityMessage)
     }
   }
 
@@ -133,12 +167,26 @@ export class AuthSession {
     void this.queryClient.cancelQueries()
     this.queryClient.clear()
     try {
-      if (!navigator.locks) throw new Error('Web Locks unavailable')
+      if (!navigator.locks)
+        throw new ApiClientError('Browser coordination is unavailable', 'coordination_unavailable')
       // Probe a separate key: initialization must not overwrite an active rotation marker.
-      localStorage.setItem('uni-space.storage-probe', '1')
-      localStorage.removeItem('uni-space.storage-probe')
+      try {
+        localStorage.setItem('uni-space.storage-probe', '1')
+        localStorage.removeItem('uni-space.storage-probe')
+      } catch {
+        throw new ApiClientError('Browser storage is unavailable', 'coordination_unavailable')
+      }
       this.epoch = this.readEpoch()
       const state = this.readState()
+      if (state.epoch === this.epoch && state.blocked && !state.pending && state.logoutRetry) {
+        this.clearSession(
+          state.logoutRetry.attempts >= maxAutomaticLogoutRetries
+            ? logoutRetryExhaustedMessage
+            : logoutRetryMessage,
+        )
+        await this.resumePendingLogout()
+        return
+      }
       // A confirmed end needs no cookie operation, even when another tab holds the lock.
       if (state.epoch === this.epoch && state.ended === true && !state.pending) {
         this.clearSession()
@@ -147,7 +195,8 @@ export class AuthSession {
       await this.refresh()
     } catch (error) {
       if (error instanceof ApiClientError && error.code === 'lock_wait_timeout') this.synchronize()
-      if (this.snapshot.status === 'initializing') this.clearSession()
+      if (this.snapshot.status === 'initializing')
+        this.clearSession(isCoordinationUnavailable(error) ? compatibilityMessage : '')
     }
   }
 
@@ -233,7 +282,9 @@ export class AuthSession {
 
   login = async (body: LoginRequest) => {
     let epoch: string | undefined
+    let deferredLogout: SharedState['logoutRetry']
     try {
+      deferredLogout = this.readState().logoutRetry
       const change = this.beginChange()
       epoch = change.epoch
       await this.withLock(async () => {
@@ -263,6 +314,21 @@ export class AuthSession {
             // A definitive rejection cannot create a session; uncertainty still stays blocked.
             this.writeState({ epoch: epoch!, blocked: true, pending: false, ended: true })
           }
+          if (
+            deferredLogout &&
+            error instanceof ApiClientError &&
+            error.status === 401 &&
+            error.code === 'invalid_credentials' &&
+            this.readEpoch() === epoch
+          ) {
+            // A rejected credential check cannot create/replace the browser cookie.
+            this.writeState({
+              epoch: epoch!,
+              blocked: true,
+              pending: false,
+              logoutRetry: deferredLogout,
+            })
+          }
           throw error
         }
         this.requireCurrent(epoch!)
@@ -290,8 +356,15 @@ export class AuthSession {
         this.requireCurrent(epoch!)
         if (this.readState().epoch !== sourceJournalEpoch)
           throw new DOMException('Authorization changed', 'AbortError')
-        this.writeState({ epoch: epoch!, blocked: true, pending: false })
-        await apiFetch<void>('/api/v1/auth/logout', {
+        // Persist the exact logout generation before dispatch. A later login changes
+        // auth-epoch, so recovery will never act on that newer cookie.
+        this.writeState({
+          epoch: epoch!,
+          blocked: true,
+          pending: false,
+          logoutRetry: { attempts: 0 },
+        })
+        const result = await apiFetch<LogoutResponse>('/api/v1/auth/logout', {
           method: 'POST',
           headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
           redirect: 'error',
@@ -299,6 +372,10 @@ export class AuthSession {
           signal: AbortSignal.timeout(15000),
         })
         this.requireCurrent(epoch!)
+        if (!result.session_revoked) {
+          this.update('unauthenticated', logoutRetryMessage)
+          return
+        }
         this.writeState({ epoch: epoch!, blocked: true, pending: false, ended: true })
         this.update('unauthenticated', 'Вы вышли из приложения.')
       })
@@ -308,8 +385,95 @@ export class AuthSession {
       if (epoch === undefined || this.epoch === epoch)
         this.update(
           'unauthenticated',
-          error instanceof DOMException && error.name === 'AbortError' ? '' : logoutErrorMessage,
+          error instanceof DOMException && error.name === 'AbortError'
+            ? ''
+            : isCoordinationUnavailable(error)
+              ? compatibilityMessage
+              : logoutRetryMessage,
         )
+    }
+  }
+
+  resumePendingLogout = (): Promise<void> => {
+    this.logoutRetryPromise ??= this.retryPendingLogout().finally(() => {
+      this.logoutRetryPromise = undefined
+    })
+    return this.logoutRetryPromise
+  }
+
+  private async retryPendingLogout() {
+    if (navigator.onLine === false) return
+    let epoch: string
+    try {
+      epoch = this.readEpoch()
+      const state = this.readState()
+      if (
+        state.epoch !== epoch ||
+        !state.blocked ||
+        state.pending ||
+        !state.logoutRetry ||
+        state.logoutRetry.attempts >= maxAutomaticLogoutRetries
+      )
+        return
+    } catch {
+      this.clearSession(compatibilityMessage)
+      return
+    }
+
+    try {
+      await this.withLock(async () => {
+        this.requireCurrent(epoch)
+        const current = this.readState()
+        const retry = current.logoutRetry
+        if (
+          current.epoch !== epoch ||
+          !current.blocked ||
+          current.pending ||
+          !retry ||
+          retry.attempts >= maxAutomaticLogoutRetries
+        )
+          return
+
+        // Claim before sending so sibling tabs and a closing document cannot
+        // create an unbounded retry loop. The fixed shared cap bounds all tabs.
+        this.writeState({
+          ...current,
+          logoutRetry: { attempts: retry.attempts + 1 },
+        })
+        const result = await apiFetch<LogoutResponse>('/api/v1/auth/logout', {
+          method: 'POST',
+          redirect: 'error',
+          credentials: 'same-origin',
+          signal: AbortSignal.timeout(15000),
+        })
+        this.requireCurrent(epoch)
+        if (!result.session_revoked) {
+          const state = this.readState()
+          this.clearSession(
+            state.logoutRetry && state.logoutRetry.attempts >= maxAutomaticLogoutRetries
+              ? logoutRetryExhaustedMessage
+              : logoutRetryMessage,
+          )
+          return
+        }
+        this.writeState({ epoch, blocked: true, pending: false, ended: true })
+        this.update('unauthenticated')
+      })
+    } catch (error) {
+      try {
+        if (this.readEpoch() === epoch) {
+          const state = this.readState()
+          this.clearSession(
+            state.logoutRetry && state.logoutRetry.attempts >= maxAutomaticLogoutRetries
+              ? logoutRetryExhaustedMessage
+              : isCoordinationUnavailable(error)
+                ? compatibilityMessage
+                : logoutRetryMessage,
+          )
+        }
+      } catch {
+        this.clearSession(compatibilityMessage)
+      }
     }
   }
 
@@ -342,6 +506,10 @@ export class AuthSession {
   }
 }
 
+function isCoordinationUnavailable(error: unknown) {
+  return error instanceof ApiClientError && error.code === 'coordination_unavailable'
+}
+
 export function getLoginErrorMessage(error: unknown) {
   if (error instanceof DOMException) {
     if (error.name === 'TimeoutError')
@@ -353,8 +521,9 @@ export function getLoginErrorMessage(error: unknown) {
     return 'Не удалось выполнить вход. Попробуйте позже.'
   switch (error.code) {
     case 'lock_wait_timeout':
-    case 'coordination_unavailable':
       return 'Не удалось выполнить вход. Попробуйте ещё раз.'
+    case 'coordination_unavailable':
+      return compatibilityMessage
     case 'invalid_credentials':
       return 'Неверный логин или пароль.'
     case 'rate_limited': {

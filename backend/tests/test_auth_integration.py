@@ -152,6 +152,11 @@ def login(auth, index=0):
     return response, response.cookies[COOKIE_NAME], response.json()["access_token"]
 
 
+def assert_logout(response, session_revoked):
+    assert response.status_code == 200, response.text
+    assert response.json() == {"session_revoked": session_revoked}
+
+
 def assert_error(response, status, code):
     assert response.status_code == status, response.text
     assert response.json()["error"]["code"] == code
@@ -195,7 +200,7 @@ def test_login_rotation_cookie_and_logout_revoke_access(auth):
         assert child.session_id == sid and child.expires_at == expiry
         max_age = int(result.headers["set-cookie"].split("Max-Age=")[1].split(";")[0])
         assert 0 < max_age <= (expiry - datetime.now(UTC)).total_seconds()
-    assert client.logout(current).status_code == 204
+    assert_logout(client.logout(current), True)
     assert_error(client.request("GET", "/api/v1/test/user", access=access), 401, "session_invalid")
     assert_error(client.refresh(current), 401, "invalid_refresh")
 
@@ -350,7 +355,7 @@ def test_refresh_rejects_invalid_token_and_parent(auth, condition):
 def test_logout_without_valid_cookie_is_idempotent_and_clears_cookie(auth, token):
     client = auth[0]
     response = client.logout(token)
-    assert response.status_code == 204 and response.content == b""
+    assert_logout(response, False)
     cookie = response.headers["set-cookie"]
     assert "Max-Age=0" in cookie and f"Path={COOKIE_PATH}" in cookie
     assert "HttpOnly" in cookie and "Secure" in cookie and "SameSite=lax" in cookie
@@ -546,8 +551,14 @@ def test_concurrent_operations_wait_on_same_session_and_reread_state(
                 yield db
 
         client.app.dependency_overrides[get_db_session] = get_test_session
-    assert first_response.status_code == (200 if first_operation == "refresh" else 204)
-    assert second_response.status_code == (401 if second_operation == "refresh" else 204)
+    if first_operation == "refresh":
+        assert first_response.status_code == 200
+    else:
+        assert_logout(first_response, True)
+    if second_operation == "refresh":
+        assert second_response.status_code == 401
+    else:
+        assert_logout(second_response, True)
     with Session(engine) as db:
         session = db.scalar(select(AuthSession).where(AuthSession.user_id == ids[0]))
         assert session.revoked_at
@@ -772,7 +783,7 @@ def test_logout_falls_back_to_access_and_revokes_session_when_cookie_cannot_iden
     client, engine, _ids, _logins, _students = auth
     _response, refresh, access = login(auth)
     response = client.logout(cookie, access=access)
-    assert response.status_code == 204 and response.content == b""
+    assert_logout(response, True)
     assert "Max-Age=0" in response.headers["set-cookie"]
     assert_error(client.request("GET", "/api/v1/test/user", access=access), 401, "session_invalid")
     with Session(engine) as db:
@@ -788,7 +799,7 @@ def test_logout_falls_back_to_access_and_revokes_session_when_cookie_cannot_iden
                 select(RefreshToken).where(RefreshToken.session_id == session.id)
             )
         )
-    assert client.logout(access=access).status_code == 204
+    assert_logout(client.logout(access=access), True)
     with Session(engine) as db:
         assert db.get(AuthSession, session.id).revoked_at == revoked_at
 
@@ -801,8 +812,8 @@ def test_logout_cookie_takes_priority_over_an_independent_access_session(auth, c
     if cookie_state == "used":
         assert client.refresh(cookie).status_code == 200
     if cookie_state == "revoked":
-        assert client.logout(cookie).status_code == 204
-    assert client.logout(cookie, access=access_b).status_code == 204
+        assert_logout(client.logout(cookie), True)
+    assert_logout(client.logout(cookie, access=access_b), True)
     assert_error(
         client.request("GET", "/api/v1/test/user", access=access_a), 401, "session_invalid"
     )
@@ -856,7 +867,7 @@ def test_logout_ignores_unusable_bearer_and_does_not_revoke_an_unrelated_session
         if mutation == "scheme"
         else client.logout(access=bad_access)
     )
-    assert response.status_code == 204
+    assert_logout(response, False)
     assert "Max-Age=0" in response.headers["set-cookie"]
     assert client.request("GET", "/api/v1/test/user", access=access).status_code == 200
 
