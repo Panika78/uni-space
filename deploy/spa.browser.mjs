@@ -79,7 +79,7 @@ try {
     'Production CSS is attached to the document',
   )
   assert.equal(
-    await page.locator('.site-header').evaluate((el) => getComputedStyle(el).display),
+    await page.locator('.public-header').evaluate((el) => getComputedStyle(el).display),
     'flex',
   )
   assert.deepEqual(errors, [], 'No JavaScript exceptions or failed resource requests')
