@@ -67,6 +67,9 @@ def auth(postgresql_engine, monkeypatch):
     test_app.add_middleware(ApiHeadersMiddleware)
     install_exception_handlers(test_app)
     test_app.include_router(router)
+    from app.students import router as students_router
+
+    test_app.include_router(students_router)
     settings = Settings(
         _env_file=None,
         app_env="test",
@@ -546,7 +549,7 @@ def test_openapi_auth_contract_uses_shared_errors_and_cookie():
     from app.main import app
 
     schema = app.openapi()
-    assert "/api/v1/users/me" not in schema["paths"]
+    assert "/api/v1/users/me" in schema["paths"]
     for path in ["login", "refresh", "logout"]:
         operation = schema["paths"][COOKIE_PATH + "/" + path]["post"]
         for status in ["401", "403", "422", "500"]:
@@ -815,3 +818,73 @@ def test_bearer_fallback_preserves_origin_and_body_protection(auth):
     assert_error(client.logout(access=access, content=b"{}"), 422, "validation_error")
     assert_error(client.logout(access=access, content=b"x" * 16385), 413, "request_too_large")
     assert client.request("GET", "/api/v1/test/user", access=access).status_code == 200
+
+
+def test_student_profiles_are_isolated_and_follow_academic_links(auth):
+    client, engine, ids, logins, student_ids = auth
+    with Session(engine) as db, db.begin():
+        faculty = OrgUnit(name="Other Fictional Faculty", type="faculty")
+        db.add(faculty)
+        db.flush()
+        program = Program(
+            code="02",
+            name="Other Program",
+            direction_code="02.02.02",
+            direction_name="Other Direction",
+            faculty_id=faculty.id,
+        )
+        db.add(program)
+        db.flush()
+        group = StudyGroup(name="Other Group", program_id=program.id, course_number=3)
+        db.add(group)
+        db.flush()
+        student = db.get(Student, student_ids[1])
+        old_group = student.group_id
+        student.group_id = group.id
+        student.academic_status = "academic_leave"
+        db.get(User, ids[1]).full_name = "Other Fictional Student"
+        extra_ids = faculty.id, program.id, group.id
+    try:
+        for index in range(2):
+            _, _, access = login(auth, index)
+            response = client.request(
+                "GET", f"/api/v1/users/me?student_id={student_ids[1 - index]}", access=access
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert set(data) == {
+                "id",
+                "student_id",
+                "login",
+                "full_name",
+                "faculty",
+                "program",
+                "direction",
+                "group",
+                "course_number",
+                "academic_status",
+            }
+            assert data["id"] == str(ids[index])
+            assert data["student_id"] == str(student_ids[index])
+            assert data["login"] == logins[index]
+            assert data["full_name"] == (
+                "Other Fictional Student" if index else "Fictional Student"
+            )
+            assert data["group"]["name"] == ("Other Group" if index else "Fictional Group")
+            assert data["program"]["name"] == ("Other Program" if index else "Fictional Program")
+            assert data["faculty"]["name"] == (
+                "Other Fictional Faculty" if index else "Fictional Faculty"
+            )
+            assert data["course_number"] == (3 if index else 1)
+            assert data["academic_status"] == ("academic_leave" if index else "enrolled")
+        assert client.request("GET", "/api/v1/users/me").status_code == 401
+        assert client.request("GET", "/api/v1/users/me", access="invalid").status_code == 401
+        with Session(engine) as db, db.begin():
+            db.get(User, ids[1]).role = "teacher"
+        assert client.request("GET", "/api/v1/users/me", access=access).status_code == 403
+    finally:
+        with Session(engine) as db, db.begin():
+            db.get(Student, student_ids[1]).group_id = old_group
+            db.execute(delete(StudyGroup).where(StudyGroup.id == extra_ids[2]))
+            db.execute(delete(Program).where(Program.id == extra_ids[1]))
+            db.execute(delete(OrgUnit).where(OrgUnit.id == extra_ids[0]))

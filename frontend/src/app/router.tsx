@@ -1,3 +1,4 @@
+import { StudentAccess, StudentProfilePage } from '../features/profile/StudentProfile'
 import { createBrowserRouter, Link, Navigate, Outlet } from 'react-router-dom'
 
 import { LoginPage, ProtectedRoute, SchedulePage } from '../features/auth/AuthPages'
@@ -96,15 +97,20 @@ export const appRoutes: RouteObject[] = [
         element: <ProtectedRoute />,
         children: [
           {
-            element: <StudentLayout />,
+            element: <StudentAccess />,
             children: [
-              { path: '/schedule', element: <SchedulePage /> },
-              { path: '/academics', element: <UnavailableSection title="Успеваемость" /> },
-              { path: '/services', element: <UnavailableSection title="Услуги и документы" /> },
-              { path: '/news', element: <UnavailableSection title="Новости" /> },
-              { path: '/notifications', element: <UnavailableSection title="Уведомления" /> },
-              { path: '/profile', element: <UnavailableSection title="Мой профиль" /> },
-              { path: '/settings', element: <UnavailableSection title="Настройки" /> },
+              {
+                element: <StudentLayout />,
+                children: [
+                  { path: '/schedule', element: <SchedulePage /> },
+                  { path: '/academics', element: <UnavailableSection title="Успеваемость" /> },
+                  { path: '/services', element: <UnavailableSection title="Услуги и документы" /> },
+                  { path: '/news', element: <UnavailableSection title="Новости" /> },
+                  { path: '/notifications', element: <UnavailableSection title="Уведомления" /> },
+                  { path: '/profile', element: <StudentProfilePage /> },
+                  { path: '/settings', element: <UnavailableSection title="Настройки" /> },
+                ],
+              },
             ],
           },
         ],

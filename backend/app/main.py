@@ -15,6 +15,7 @@ from app.core.schemas import (
     PaginationParams,
     Ref,
 )
+from app.students import router as students_router
 
 settings = get_settings()
 
@@ -28,6 +29,7 @@ app = FastAPI(
 app.add_middleware(ApiHeadersMiddleware)
 install_exception_handlers(app)
 app.include_router(auth_router)
+app.include_router(students_router)
 
 
 def create_openapi_schema(application: FastAPI) -> dict:
