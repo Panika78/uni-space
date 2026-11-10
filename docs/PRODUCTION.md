@@ -177,7 +177,7 @@ Nginx (важно при замене файла через rename), прове�
 |---|---|---|
 | `POSTGRES_USER` (прежнее имя сохраняется) | `POSTGRES_PASSWORD_FILE`, только `db` | Администратор кластера; bootstrap, backup, создание отдельной restore-БД |
 | `uni_space_migrator` | `MIGRATION_DB_PASSWORD_FILE`, только `db` и одноразовый `migrate` | LOGIN без SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS; владелец public и прикладных объектов, DDL миграций |
-| `uni_space_api` | `API_DB_PASSWORD_FILE`, только `db` и `api` | CONNECT рабочей БД, USAGE public и auth-последовательностей; SELECT users, students, auth_sessions, refresh_tokens, alembic_version; INSERT/UPDATE auth_sessions и refresh_tokens |
+| `uni_space_api` | `API_DB_PASSWORD_FILE`, только `db` и `api` | CONNECT рабочей БД, USAGE public и auth-последовательностей; SELECT users, students, auth_sessions, refresh_tokens, alembic_version, notifications; INSERT/UPDATE auth_sessions и refresh_tokens |
 
 API не получает административный или migration secret ни в окружение, ни в mounts.
 В `migrate` нет JWT-секрета приложения: константа удовлетворяет Settings только для

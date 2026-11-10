@@ -47,6 +47,7 @@ function renderStudentLayout(path = '/schedule') {
           <Route path="/schedule" element={<h1>Расписание</h1>} />
           <Route path="/academics" element={<h1>Успеваемость</h1>} />
           <Route path="/profile" element={<h1>Мой профиль</h1>} />
+          <Route path="/notifications" element={null} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -244,13 +245,15 @@ describe('student dashboard navigation', () => {
     expect(screen.queryByRole('link', { name: /Мой профиль/ })).not.toBeInTheDocument()
   })
 
-  it('links notifications to the explicit unavailable page', () => {
+  it('opens and closes the notification drawer and restores focus to the bell', async () => {
     renderStudentLayout()
-    expect(
-      screen.getByRole('link', { name: 'Уведомления — функция пока недоступна' }),
-    ).toHaveAttribute('href', '/notifications')
-    expect(
-      screen.getByRole('link', { name: 'Уведомления — функция пока недоступна' }),
-    ).toHaveAccessibleName('Уведомления — функция пока недоступна')
+    const trigger = screen.getByRole('button', { name: 'Уведомления' })
+    fireEvent.click(trigger)
+    expect(await screen.findByRole('dialog', { name: 'Уведомления' })).toBeInTheDocument()
+    expect(document.body.style.overflow).toBe('hidden')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Уведомления' })).toBeNull())
+    await waitFor(() => expect(trigger).toHaveFocus())
+    expect(document.body.style.overflow).toBe('')
   })
 })

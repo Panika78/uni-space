@@ -102,7 +102,7 @@ export const appRoutes: RouteObject[] = [
               { path: '/academics', element: <UnavailableSection title="Успеваемость" /> },
               { path: '/services', element: <UnavailableSection title="Услуги и документы" /> },
               { path: '/news', element: <UnavailableSection title="Новости" /> },
-              { path: '/notifications', element: <UnavailableSection title="Уведомления" /> },
+              { path: '/notifications', element: null },
               { path: '/profile', element: <UnavailableSection title="Мой профиль" /> },
               { path: '/settings', element: <UnavailableSection title="Настройки" /> },
             ],
