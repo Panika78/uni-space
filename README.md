@@ -86,7 +86,9 @@ Python-зависимостей записаны в `backend/uv.lock`.
 Подготовлен отдельный `compose.prod.yaml`: Nginx с HTTPS отдаёт сборку SPA и
 проксирует API; FastAPI и PostgreSQL доступны только во внутренних сетях.
 Используются существующий launcher `--production`, внешние файлы секретов,
-постоянный volume и readiness по HTTP/БД/Alembic. Dev Compose остаётся отдельным.
+постоянный volume и readiness по HTTP/БД/Alembic. TASK-022 разделяет администратора,
+владельца миграций и ограниченную роль API; их пароли и mounts раздельны.
+Dev Compose остаётся отдельным.
 
 Полные инструкции запуска, диагностики, обновления/отката, backup и отдельного
 восстановления — в [PRODUCTION.md](docs/PRODUCTION.md). Из корня проекта:
@@ -95,7 +97,7 @@ Python-зависимостей записаны в `backend/uv.lock`.
 export PROD_ENV_FILE=/absolute/private/path/production.env
 bash scripts/production-compose.sh build
 bash scripts/production-compose.sh up -d --wait db
-bash scripts/production-compose.sh run --rm api alembic upgrade head
+bash scripts/migrate-postgres.sh
 bash scripts/production-compose.sh up -d --wait --wait-timeout 120
 ```
 
