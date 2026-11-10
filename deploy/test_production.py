@@ -454,6 +454,12 @@ assert not Path('/run/secrets/migration_db_password').exists()
 with engine.connect() as c:
     row=c.execute(text("SELECT current_user, rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls FROM pg_roles WHERE rolname=current_user")).one()
     assert tuple(row)==('uni_space_api',False,False,False,False,False)
+    assert c.execute(text("SELECT has_table_privilege(current_user,'service_types','SELECT')")).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'applications','SELECT')")).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'applications','INSERT')")).scalar_one()
+    assert c.execute(text("SELECT has_sequence_privilege(current_user,'applications_id_seq','USAGE')")).scalar_one()
+    assert not c.execute(text("SELECT has_table_privilege(current_user,'applications','UPDATE')")).scalar_one()
+    assert not c.execute(text("SELECT has_table_privilege(current_user,'applications','DELETE')")).scalar_one()
     print('PASS: API role flags false; isolated secrets')
 for statement in (
     "CREATE ROLE forbidden_role", "CREATE DATABASE forbidden_database",

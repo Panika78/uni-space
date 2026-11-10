@@ -4,6 +4,7 @@ import { LoginPage, ProtectedRoute, SchedulePage } from '../features/auth/AuthPa
 import { useAuth } from '../features/auth/AuthProvider'
 import { LoadingState } from '../shared/ui/StatusStates'
 import { StudentLayout, UnavailableSection } from './StudentLayout'
+import { ApplicationFormPage, ServicesPage } from '../features/services/ServicesPages'
 import type { ReactNode } from 'react'
 import type { RouteObject } from 'react-router-dom'
 
@@ -100,7 +101,8 @@ export const appRoutes: RouteObject[] = [
             children: [
               { path: '/schedule', element: <SchedulePage /> },
               { path: '/academics', element: <UnavailableSection title="Успеваемость" /> },
-              { path: '/services', element: <UnavailableSection title="Услуги и документы" /> },
+              { path: '/services', element: <ServicesPage /> },
+              { path: '/services/:serviceCode', element: <ApplicationFormPage /> },
               { path: '/news', element: <UnavailableSection title="Новости" /> },
               { path: '/notifications', element: <UnavailableSection title="Уведомления" /> },
               { path: '/profile', element: <UnavailableSection title="Мой профиль" /> },
