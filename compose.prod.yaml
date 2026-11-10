@@ -35,7 +35,8 @@ services:
       APP_ENV: production
       JWT_SIGNING_KEY_FILE: /run/secrets/jwt_signing_key
       COOKIE_SECURE: 'true'
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?Set the exact HTTPS origin JSON array}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set the canonical public HTTPS origin}
+      ALLOWED_ORIGINS: '["${PUBLIC_ORIGIN:?Set the canonical public HTTPS origin}"]'
       PROXY_HEADERS_ENABLED: 'true'
       TRUSTED_PROXY_IPS: '["${NGINX_PROXY_IP:-172.30.19.2}"]'
       DATABASE_HOST: db
@@ -61,8 +62,8 @@ services:
       dockerfile: deploy/Dockerfile.web
     restart: unless-stopped
     environment:
-      SERVER_NAME: ${SERVER_NAME:?Set the site hostname}
-      NGINX_ENVSUBST_FILTER: ^SERVER_NAME$
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set the canonical public HTTPS origin}
+      NGINX_ENVSUBST_FILTER: ^PUBLIC_(AUTHORITY|HOSTNAME)$
     ports:
       - '${HTTP_BIND:-0.0.0.0}:80:80'
       - '${HTTPS_BIND:-0.0.0.0}:443:443'

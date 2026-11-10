@@ -1,19 +1,31 @@
 # Do not log request bodies, cookies, Authorization or query strings.
 log_format safe '$remote_addr $request_method $uri $status';
 server_tokens off;
+# String keys in map are case-insensitive. HTTPS requires the canonical authority;
+# HTTP may arrive on another port, but must still name the same hostname.
+map $http_host $trusted_https_host {
+    default 0;
+    "${PUBLIC_AUTHORITY}" 1;
+}
+map $host $trusted_http_host {
+    default 0;
+    "${PUBLIC_HOSTNAME}" 1;
+}
 
 server {
     listen 80 default_server;
-    server_name ${SERVER_NAME};
+    server_name ${PUBLIC_HOSTNAME};
     # Override the stock http-level main log; do not add a second global log.
     access_log /var/log/nginx/access.log safe;
-    return 308 https://${SERVER_NAME}$request_uri;
+    if ($trusted_http_host = 0) { return 421; }
+    return 308 https://${PUBLIC_AUTHORITY}$request_uri;
 }
 server {
     listen 443 ssl default_server;
-    server_name ${SERVER_NAME};
+    server_name ${PUBLIC_HOSTNAME};
     # Override the stock http-level main log; do not add a second global log.
     access_log /var/log/nginx/access.log safe;
+    if ($trusted_https_host = 0) { return 421; }
     ssl_certificate /etc/nginx/tls/fullchain.pem;
     ssl_certificate_key /etc/nginx/tls/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -26,7 +38,7 @@ server {
     location ~ ^/api(?:/|$) {
         proxy_pass http://api:8000;
         proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
+        proxy_set_header Host "${PUBLIC_AUTHORITY}";
         proxy_set_header X-Forwarded-Proto https;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Real-IP $remote_addr;
@@ -51,5 +63,6 @@ server {
     access_log off;
     location = /ready {
         proxy_pass http://api:8000/api/openapi.json;
+        proxy_set_header Host "${PUBLIC_AUTHORITY}";
     }
 }

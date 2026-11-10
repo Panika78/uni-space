@@ -2,6 +2,7 @@ import re
 from functools import lru_cache
 from ipaddress import IPv4Address, IPv6Address, collapse_addresses, ip_network
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import (
     Field,
@@ -43,6 +44,7 @@ class Settings(BaseSettings):
     access_ttl_seconds: int = Field(default=600, ge=1, le=3600)
     session_ttl_seconds: int = Field(default=604800, ge=1, le=2592000)
     cookie_secure: bool = True
+    public_origin: str | None = None
     allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
     proxy_headers_enabled: bool = False
@@ -126,6 +128,19 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_production_auth(self) -> "Settings":
         if self.app_env == "production":
+            if self.public_origin is not None:
+                self.validate_origins([self.public_origin])
+                url = urlsplit(self.public_origin)
+                hostname = url.hostname or ""
+                if ":" in hostname:
+                    hostname = f"[{IPv6Address(hostname).compressed}]"
+                authority = hostname
+                if url.port is not None and url.port != 443:
+                    authority += f":{url.port}"
+                if self.public_origin != f"https://{authority}":
+                    raise ValueError("PUBLIC_ORIGIN must be a canonical HTTPS origin")
+                if self.allowed_origins != [self.public_origin]:
+                    raise ValueError("ALLOWED_ORIGINS must match PUBLIC_ORIGIN exactly")
             private_ranges = [
                 ip_network(value)
                 for value in (
@@ -139,6 +154,8 @@ class Settings(BaseSettings):
             ]
             for value in self.trusted_proxy_ips:
                 network = ip_network(value)
+                if network.num_addresses != 1:
+                    raise ValueError("production proxy trust requires individual IP addresses")
                 if not any(
                     network.version == private.version and network.subnet_of(private)
                     for private in private_ranges

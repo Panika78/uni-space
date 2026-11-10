@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const origin = new URL(process.env.PRODUCTION_TEST_URL)
 assert.equal(origin.protocol, 'https:')
-assert.equal(origin.hostname, '127.0.0.1', 'Use only the isolated loopback test stack')
+assert.equal(origin.hostname, 'uni.test', 'Use only the isolated test hostname')
 const certificate = new X509Certificate(readFileSync(process.env.PRODUCTION_TEST_CERT_FILE))
 const fingerprint = createHash('sha256')
   .update(certificate.publicKey.export({ type: 'spki', format: 'der' }))
@@ -16,7 +16,12 @@ const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || undefined,
   headless: true,
   // Trust only this generated test certificate's public key, never all HTTPS errors.
-  args: ['--no-sandbox', `--ignore-certificate-errors-spki-list=${fingerprint}`],
+  args: [
+    '--no-sandbox',
+    '--host-resolver-rules=MAP uni.test 127.0.0.1',
+    '--no-proxy-server',
+    `--ignore-certificate-errors-spki-list=${fingerprint}`,
+  ],
 })
 try {
   const context = await browser.newContext({ viewport: { width: 360, height: 800 } })

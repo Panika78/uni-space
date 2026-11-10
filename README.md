@@ -99,7 +99,10 @@ bash scripts/production-compose.sh up -d --wait --wait-timeout 120
 ```
 
 Сначала создайте внешний env-файл по `deploy/production.env.example`, случайные
-секреты и TLS-файлы по инструкции. Проверочный стенд с тестовым сертификатом:
+секреты и TLS-файлы по инструкции. Единственный публичный адрес задаётся через
+`PUBLIC_ORIGIN=https://<hostname>` (нестандартный порт указывается явно); Compose
+согласует его с API Origin и Nginx Host. Недоверенный Host и широкие доверенные
+proxy-сети отклоняются. Проверочный стенд с тестовым сертификатом:
 
 ```bash
 docker build -f backend/Dockerfile -t uni-space-api:task019 .
@@ -108,7 +111,8 @@ docker build -f deploy/Dockerfile.web -t uni-space-web:task019 .
 uv run --locked --python 3.12.16 --project backend python deploy/test_production.py
 ```
 
-Он использует уникальный тестовый project/volume, проверяет реальный HTTPS,
+Он использует уникальный тестовый project/volume, проверяет реальный HTTPS
+с hostname/SNI `uni.test`, отказ на чужом/просроченном сертификате и Host,
 SPA/API и реальный браузерный переход `/schedule` → `/login` с загрузкой JS/CSS,
 auth/Origin/cookie, proxy/IP spoofing, отказы небезопасного запуска и
 backup/restore в отдельную БД; затем удаляет только свои тестовые данные.

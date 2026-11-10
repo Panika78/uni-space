@@ -9,6 +9,8 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from contextlib import contextmanager
+from unittest.mock import patch
 
 import httpx
 
@@ -38,6 +40,129 @@ def free_port():
         return probe.getsockname()[1]
 
 
+@contextmanager
+def resolve_test_hostname():
+    """Route only test DNS to loopback; preserve URL, Host, SNI and TLS verification."""
+    original = socket.getaddrinfo
+
+    def resolve(host, port, *args, **kwargs):
+        if host in ("uni.test", b"uni.test"):
+            host = "127.0.0.1"
+        return original(host, port, *args, **kwargs)
+
+    with patch("socket.getaddrinfo", side_effect=resolve):
+        yield
+
+
+def create_tls_certificates(temp):
+    """One trusted CA and valid/wrong-name/expired leaves, using existing OpenSSL."""
+    run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "2",
+            "-subj",
+            "/CN=Uni Test CA",
+            "-addext",
+            "basicConstraints=critical,CA:TRUE",
+            "-addext",
+            "keyUsage=critical,keyCertSign,cRLSign",
+            "-keyout",
+            str(temp / "ca.key"),
+            "-out",
+            str(temp / "ca.pem"),
+        ]
+    )
+    run(
+        [
+            "openssl",
+            "req",
+            "-new",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-subj",
+            "/CN=uni.test",
+            "-keyout",
+            str(temp / "tls.key"),
+            "-out",
+            str(temp / "tls.csr"),
+        ]
+    )
+    (temp / "index").write_text("")
+    (temp / "serial").write_text("01\n")
+    (temp / "ca.cnf").write_text(f"""[ca]
+default_ca = fixture
+[fixture]
+database = {temp}/index
+serial = {temp}/serial
+new_certs_dir = {temp}
+certificate = {temp}/ca.pem
+private_key = {temp}/ca.key
+default_md = sha256
+default_days = 1
+unique_subject = no
+policy = names
+[names]
+commonName = supplied
+""")
+    for name, hostname in (
+        ("valid", "uni.test"),
+        ("wrong", "other.test"),
+        ("expired", "uni.test"),
+    ):
+        (temp / "leaf.cnf").write_text(f"""[server]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = DNS:{hostname}
+""")
+        args = [
+            "openssl",
+            "ca",
+            "-batch",
+            "-notext",
+            "-config",
+            str(temp / "ca.cnf"),
+            "-extfile",
+            str(temp / "leaf.cnf"),
+            "-extensions",
+            "server",
+            "-in",
+            str(temp / "tls.csr"),
+            "-out",
+            str(temp / f"{name}.pem"),
+        ]
+        if name == "expired":
+            args += ["-startdate", "20200101000000Z", "-enddate", "20200102000000Z"]
+        run(args)
+    (temp / "tls.pem").write_bytes((temp / "valid.pem").read_bytes())
+
+
+def assert_tls_verification_error(url, context, expected_code):
+    try:
+        with httpx.Client(verify=context, trust_env=False, timeout=5) as client:
+            client.get(url + "/api/openapi.json")
+    except httpx.ConnectError as error:
+        cause = error
+        seen = set()
+        while cause is not None and id(cause) not in seen:
+            seen.add(id(cause))
+            if isinstance(cause, ssl.SSLCertVerificationError):
+                assert cause.verify_code == expected_code, str(cause)
+                return
+            cause = cause.__cause__ or cause.__context__
+        raise AssertionError(
+            "Expected an actual certificate verification failure"
+        ) from error
+    raise AssertionError("Invalid TLS certificate was accepted")
+
+
 def main():
     project = f"uni-space-production-test-{secrets.token_hex(4)}"
     (ROOT / "work").mkdir(exist_ok=True)
@@ -50,34 +175,17 @@ def main():
                 secrets.token_urlsafe(48) + ("@:/?#$&" if name == "password" else "")
             )
             (temp / name).chmod(0o600)
-        run(
-            [
-                "openssl",
-                "req",
-                "-x509",
-                "-newkey",
-                "rsa:2048",
-                "-nodes",
-                "-days",
-                "1",
-                "-subj",
-                "/CN=uni.test",
-                "-addext",
-                "subjectAltName=DNS:uni.test,DNS:nginx,IP:127.0.0.1",
-                "-keyout",
-                str(temp / "tls.key"),
-                "-out",
-                str(temp / "tls.pem"),
-            ]
-        )
+        create_tls_certificates(temp)
         http_port, https_port = free_port(), free_port()
+        public_origin = f"https://uni.test:{https_port}"
+        authority = f"uni.test:{https_port}"
+        http_origin = f"http://uni.test:{http_port}"
         env_file = temp / "production.env"
         env_file.write_text(
             "\n".join(
                 [
                     "RELEASE_TAG=task019",
-                    "SERVER_NAME=uni.test",
-                    f"ALLOWED_ORIGINS='{json.dumps(['https://uni.test', f'https://127.0.0.1:{https_port}'])}'",
+                    f"PUBLIC_ORIGIN={public_origin}",
                     "POSTGRES_DB=deployment_check",
                     "POSTGRES_USER=deployment_check",
                     f"JWT_SIGNING_KEY_FILE={temp / 'jwt'}",
@@ -91,6 +199,9 @@ def main():
         override = temp / "ports.yaml"
         override.write_text(f"""services:
   nginx:
+    networks:
+      edge:
+        aliases: [uni.test]
     ports: !override
       - "127.0.0.1:{http_port}:80"
       - "127.0.0.1:{https_port}:443"
@@ -101,6 +212,7 @@ def main():
             "RELEASE_TAG",
             "SERVER_NAME",
             "ALLOWED_ORIGINS",
+            "PUBLIC_ORIGIN",
             "POSTGRES_DB",
             "POSTGRES_USER",
             "JWT_SIGNING_KEY_FILE",
@@ -210,8 +322,41 @@ def main():
                 flush=True,
             )
             print("PASS: topology, startup, HTTP/DB/schema readiness", flush=True)
+
+            # F-04: a real DNS URL determines both TLS verification hostname and SNI.
+            context = ssl.create_default_context(cafile=str(temp / "ca.pem"))
+            sni = []
+
+            def trace(event, info):
+                if event == "connection.start_tls.started":
+                    sni.append(info["server_hostname"])
+
+            with httpx.Client(verify=context, trust_env=False, timeout=5) as probe:
+                assert (
+                    probe.get(
+                        public_origin + "/api/openapi.json", extensions={"trace": trace}
+                    ).status_code
+                    == 200
+                )
+            assert sni and all(name == "uni.test" for name in sni), sni
+            # The same certificate intentionally has no IP SAN.
+            assert_tls_verification_error(
+                f"https://127.0.0.1:{https_port}", context, 64
+            )
+            for cert, code in (("wrong", 62), ("expired", 10)):
+                (temp / "tls.pem").write_bytes((temp / f"{cert}.pem").read_bytes())
+                dc("rm", "-s", "-f", "nginx")
+                dc("up", "-d", "--wait", "--wait-timeout", "120", "nginx")
+                assert_tls_verification_error(public_origin, context, code)
+            (temp / "tls.pem").write_bytes((temp / "valid.pem").read_bytes())
+            dc("rm", "-s", "-f", "nginx")
+            dc("up", "-d", "--wait", "--wait-timeout", "120", "nginx")
+            print(
+                "PASS: TLS uni.test URL/SNI; wrong hostname, IP SAN and expired certificate rejected",
+                flush=True,
+            )
             browser_env = env | {
-                "PRODUCTION_TEST_URL": f"https://127.0.0.1:{https_port}",
+                "PRODUCTION_TEST_URL": public_origin,
                 "PRODUCTION_TEST_CERT_FILE": str(temp / "tls.pem"),
             }
             result = run(["node", "deploy/spa.browser.mjs"], env=browser_env)
@@ -236,21 +381,73 @@ with SessionLocal.begin() as db:
 """,
                 input=password,
             )
-            context = ssl.create_default_context(cafile=str(temp / "tls.pem"))
             with httpx.Client(
-                base_url=f"https://127.0.0.1:{https_port}",
+                base_url=public_origin,
                 verify=context,
                 trust_env=False,
-                headers={"Host": "uni.test"},
                 timeout=10,
             ) as client:
                 redirect = httpx.get(
-                    f"http://127.0.0.1:{http_port}/schedule?day=1",
-                    headers={"Host": "attacker.invalid"},
+                    http_origin + "/schedule?day=1",
                     trust_env=False,
                 )
                 assert redirect.status_code == 308
-                assert redirect.headers["location"] == "https://uni.test/schedule?day=1"
+                assert redirect.headers["location"] == public_origin + "/schedule?day=1"
+                # F-01: hostile Host cannot reach Starlette's absolute redirect.
+                for host in (
+                    "attacker.invalid",
+                    "uni.test.attacker.invalid",
+                    "127.0.0.1",
+                    "uni.test:1",
+                ):
+                    rejected = client.get("/api/docs/", headers={"Host": host})
+                    assert rejected.status_code == 421
+                    assert "location" not in rejected.headers
+                    rejected = httpx.get(
+                        http_origin + "/api/docs/",
+                        headers={"Host": host},
+                        trust_env=False,
+                    )
+                    if host != "uni.test:1":
+                        assert rejected.status_code == 421
+                        assert "location" not in rejected.headers
+                    else:
+                        assert rejected.status_code == 308
+                        assert (
+                            rejected.headers["location"] == public_origin + "/api/docs/"
+                        )
+                # Use a raw TLS request: HTTPX correctly refuses duplicate Host locally.
+                for host_lines in (
+                    "Host: ",
+                    f"Host: {authority}\r\nHost: attacker.invalid",
+                ):
+                    with socket.create_connection(
+                        ("uni.test", https_port), timeout=5
+                    ) as tcp:
+                        with context.wrap_socket(
+                            tcp, server_hostname="uni.test"
+                        ) as tls:
+                            tls.sendall(
+                                (
+                                    "GET /api/docs/ HTTP/1.1\r\n"
+                                    + host_lines
+                                    + "\r\nConnection: close\r\n\r\n"
+                                ).encode()
+                            )
+                            assert (
+                                tls.recv(4096).split(b"\r\n", 1)[0]
+                                == b"HTTP/1.1 400 Bad Request"
+                            )
+                assert (
+                    client.get(
+                        "/api/docs/", headers={"Host": authority.upper()}
+                    ).headers["location"]
+                    == public_origin + "/api/docs"
+                )
+                print(
+                    "PASS: untrusted Host rejected; upstream redirects use canonical authority",
+                    flush=True,
+                )
                 page = client.get("/")
                 assert page.status_code == 200 and '<div id="root">' in page.text
                 assert page.headers["strict-transport-security"] == "max-age=31536000"
@@ -278,9 +475,8 @@ with SessionLocal.begin() as db:
                 )
                 assert (
                     httpx.get(
-                        f"http://127.0.0.1:{http_port}/schedule",
+                        http_origin + "/schedule",
                         params={"probe": query_marker},
-                        headers={"Host": "uni.test"},
                         trust_env=False,
                     ).status_code
                     == 308
@@ -310,18 +506,18 @@ with SessionLocal.begin() as db:
                     assert "application/json" in missing.headers["content-type"]
                 scheme = client.get("/api/docs/", headers={"X-Forwarded-Proto": "http"})
                 assert scheme.status_code == 307
-                assert scheme.headers["location"] == "https://uni.test/api/docs"
+                assert scheme.headers["location"] == public_origin + "/api/docs"
                 for headers in (
                     {},
-                    {"Origin": "http://uni.test"},
+                    {"Origin": http_origin},
                     {"Origin": "https://evil.test"},
                     {"Origin": "null"},
-                    [("Origin", "https://uni.test"), ("Origin", "https://uni.test")],
+                    [("Origin", public_origin), ("Origin", public_origin)],
                 ):
                     denied = client.post("/api/v1/auth/refresh", headers=headers)
                     assert denied.status_code == 403
                     assert denied.json()["error"]["code"] == "origin_not_allowed"
-                origin = {"Origin": "https://uni.test"}
+                origin = {"Origin": public_origin}
                 login = client.post(
                     "/api/v1/auth/login",
                     headers=origin,
@@ -354,6 +550,9 @@ with SessionLocal.begin() as db:
             client_code = """
 import http.client, ssl, sys
 context = ssl.create_default_context(cadata=sys.stdin.read())
+from urllib.parse import urlsplit
+origin = sys.argv[1]
+authority = urlsplit(origin).netloc
 import socket
 for service in ("api", "db"):
     try:
@@ -363,9 +562,9 @@ for service in ("api", "db"):
     else:
         raise AssertionError("internal service visible on edge network")
 for index in range(6):
-    c = http.client.HTTPSConnection("nginx", context=context, timeout=5)
+    c = http.client.HTTPSConnection("uni.test", context=context, timeout=5)
     c.request("POST", "/api/v1/auth/login", body="{}", headers={
-        "Origin": "https://uni.test", "Content-Type": "application/json",
+        "Origin": origin, "Content-Type": "application/json", "Host": authority,
         "X-Forwarded-For": f"198.51.100.{index + 1}", "X-Real-IP": "203.0.113.1",
         "X-Forwarded-Proto": "http", "Forwarded": "for=203.0.113.2;proto=http"})
     r = c.getresponse()
@@ -394,8 +593,17 @@ for index in range(6):
                     ]
                 )
                 result = run(
-                    ["docker", "exec", "-i", name, "python", "-c", client_code],
-                    input=(temp / "tls.pem").read_text(),
+                    [
+                        "docker",
+                        "exec",
+                        "-i",
+                        name,
+                        "python",
+                        "-c",
+                        client_code,
+                        public_origin,
+                    ],
+                    input=(temp / "ca.pem").read_text(),
                     success=False,
                 )
                 # This anonymous client sends only {}, never credentials or tokens.
@@ -415,7 +623,8 @@ for index in range(6):
             for number in (1, 2):
                 run(["docker", "rm", "-f", f"{project}-client-{number}"])
             rogue_code = """
-import http.client
+import http.client, sys
+origin = sys.argv[1]
 c = http.client.HTTPConnection("api", 8000, timeout=5)
 c.request("GET", "/api/docs/", headers={"X-Forwarded-Proto": "https"})
 r = c.getresponse()
@@ -425,7 +634,7 @@ c.close()
 for index in range(6):
     c = http.client.HTTPConnection("api", 8000, timeout=5)
     c.request("POST", "/api/v1/auth/login", body="{}", headers={
-        "Origin": "https://uni.test", "Content-Type": "application/json",
+        "Origin": origin, "Content-Type": "application/json",
         "X-Forwarded-For": f"203.0.113.{index + 1}", "X-Forwarded-Proto": "https"})
     r = c.getresponse()
     assert r.status == (422 if index < 5 else 429), r.status
@@ -443,6 +652,7 @@ for index in range(6):
                     "uni-space-api:task019",
                     "-c",
                     rogue_code,
+                    public_origin,
                 ]
             )
             assert "POST /api/v1/auth/login" not in dc("logs", "api").stdout
@@ -457,6 +667,11 @@ for index in range(6):
                 'TRUSTED_PROXY_IPS=["*"]',
                 "TRUSTED_PROXY_IPS=[]",
                 'TRUSTED_PROXY_IPS=["8.8.8.0/24"]',
+                'TRUSTED_PROXY_IPS=["10.0.0.0/8"]',
+                'TRUSTED_PROXY_IPS=["172.30.19.0/24"]',
+                'ALLOWED_ORIGINS=["https://other.test"]',
+                "PUBLIC_ORIGIN=https://other.test",
+                "PUBLIC_ORIGIN=https://uni.test:443",
                 "PROXY_HEADERS_ENABLED=false",
             ):
                 result = dc(
@@ -613,4 +828,5 @@ for index in range(6):
 
 
 if __name__ == "__main__":
-    main()
+    with resolve_test_hostname():
+        main()
