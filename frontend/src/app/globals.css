@@ -538,6 +538,33 @@ a {
 .welcome-card h1 {
   margin-bottom: 20px;
 }
+.route-issue-card h1 {
+  margin: 0 0 12px;
+  font-size: 25px;
+  line-height: 1.25;
+}
+.route-issue-card > p:not(.section-eyebrow) {
+  margin: 0 0 18px;
+  color: #51494a;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.route-recovery-link {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 15px;
+  border-radius: 7px;
+  color: #fff;
+  background: var(--accent);
+  font-size: 14px;
+  font-weight: 650;
+  text-decoration: none;
+}
+.route-recovery-link:hover {
+  background: #5f1929;
+}
 .welcome-card form {
   display: grid;
   gap: 16px;

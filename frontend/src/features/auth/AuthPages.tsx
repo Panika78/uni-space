@@ -11,7 +11,7 @@ export function ProtectedRoute() {
 }
 
 export function LoginPage() {
-  const { status, message, busy, login, logout } = useAuth()
+  const { status, message, busy, canRetryLogout, login, logout } = useAuth()
   const [password, setPassword] = useState('')
   if (status === 'initializing')
     return <LoadingState title="Проверяем сессию…" variant="compact" className="auth-loading" />
@@ -51,15 +51,17 @@ export function LoginPage() {
           {busy ? 'Подождите…' : 'Войти'}
         </button>
       </form>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
-          void logout()
-        }}
-      >
-        Повторить выход
-      </button>
+      {canRetryLogout && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            void logout()
+          }}
+        >
+          Повторить выход
+        </button>
+      )}
     </section>
   )
 }

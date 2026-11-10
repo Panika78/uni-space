@@ -9,6 +9,12 @@ type SharedState = { epoch: string; blocked: boolean; pending: boolean; ended?: 
 export const authStorageKey = 'uni-space.auth-state'
 export const authEpochStorageKey = 'uni-space.auth-epoch'
 const emptyState: SharedState = { epoch: 'initial', blocked: false, pending: false }
+type AuthSnapshot = {
+  status: Status
+  message: string
+  busy: boolean
+  canRetryLogout: boolean
+}
 const lockWaitMessage =
   'Операция не началась: её блокирует другая вкладка. Закройте зависшую вкладку и повторите действие.'
 const interruptedMessage =
@@ -21,10 +27,11 @@ export class AuthSession {
   private refreshPromise: Promise<void> | undefined
   private startPromise: Promise<void> | undefined
   private epoch = 'initial'
-  private snapshot: { status: Status; message: string; busy: boolean } = {
+  private snapshot: AuthSnapshot = {
     status: 'initializing',
     message: '',
     busy: false,
+    canRetryLogout: false,
   }
 
   constructor(private queryClient: QueryClient) {}
@@ -37,8 +44,8 @@ export class AuthSession {
     }
   }
 
-  private update(status: Status, message = '', busy = false) {
-    this.snapshot = { status, message, busy }
+  private update(status: Status, message = '', busy = false, canRetryLogout = false) {
+    this.snapshot = { status, message, busy, canRetryLogout }
     this.listeners.forEach((listener) => listener())
   }
 
@@ -63,22 +70,29 @@ export class AuthSession {
     localStorage.setItem(authStorageKey, JSON.stringify(state))
   }
 
-  private clearSession(message = '') {
+  private clearSession(message = '', canRetryLogout = false) {
     this.token = undefined
     this.generation.abort()
     this.generation = new AbortController()
     void this.queryClient.cancelQueries()
     this.queryClient.clear()
-    this.update('unauthenticated', message)
+    this.update('unauthenticated', message, false, canRetryLogout)
   }
 
   synchronize = () => {
     try {
+      const hasJournal = localStorage.getItem(authStorageKey) !== null
       const state = this.readState()
       const epoch = this.readEpoch()
       const hasEnded = state.epoch === epoch && state.ended === true && !state.pending
+      const canRetryLogout =
+        !hasEnded &&
+        (state.epoch !== epoch || state.blocked || state.pending || state.ended === true)
       if (
         epoch !== this.epoch ||
+        (this.snapshot.status === 'unauthenticated' &&
+          this.snapshot.canRetryLogout !== canRetryLogout &&
+          (canRetryLogout || hasJournal)) ||
         (hasEnded &&
           (this.snapshot.status !== 'unauthenticated' || this.snapshot.message !== '')) ||
         ((state.blocked || state.ended) && this.snapshot.status === 'authenticated')
@@ -87,9 +101,10 @@ export class AuthSession {
         this.clearSession(
           hasEnded
             ? ''
-            : state.blocked
+            : state.blocked || state.pending
               ? interruptedMessage
               : 'Авторизация изменена в другой вкладке. Войдите снова или обновите страницу.',
+          canRetryLogout,
         )
       }
     } catch {
@@ -149,12 +164,13 @@ export class AuthSession {
       await this.refresh()
     } catch (error) {
       const hasLockTimeout = error instanceof ApiClientError && error.code === 'lock_wait_timeout'
-      if (hasLockTimeout) this.synchronize()
+      if (hasLockTimeout && this.snapshot.status !== 'unauthenticated') this.synchronize()
       if (this.snapshot.status === 'initializing')
         this.clearSession(
           hasLockTimeout
             ? lockWaitMessage
             : 'Вход недоступен. Нужен браузер с Web Locks и доступным локальным хранилищем.',
+          hasLockTimeout,
         )
     }
   }
@@ -173,7 +189,7 @@ export class AuthSession {
       const state = this.readState()
       if (state.epoch !== epoch || state.blocked || state.pending || state.ended) {
         const hasEnded = state.epoch === epoch && state.ended === true && !state.pending
-        this.clearSession(hasEnded ? '' : interruptedMessage)
+        this.clearSession(hasEnded ? '' : interruptedMessage, !hasEnded)
         throw new DOMException('Session recovery blocked', 'AbortError')
       }
       // Durable before dispatch: closing a tab or losing a response must never retry this cookie.
@@ -201,7 +217,7 @@ export class AuthSession {
             blocked: !isUnauthenticated,
             ended: isUnauthenticated,
           })
-          this.clearSession(isUnauthenticated ? '' : interruptedMessage)
+          this.clearSession(isUnauthenticated ? '' : interruptedMessage, !isUnauthenticated)
         }
         throw error
       }
@@ -212,7 +228,7 @@ export class AuthSession {
         this.readEpoch() === epoch
       ) {
         // No cookie was sent and no journal entry is ours to change.
-        this.clearSession(lockWaitMessage)
+        this.clearSession(lockWaitMessage, true)
       }
       throw error
     })
@@ -242,7 +258,17 @@ export class AuthSession {
 
   login = async (body: LoginRequest) => {
     let epoch: string | undefined
+    let hadUnresolvedSession = false
     try {
+      try {
+        const previousState = this.readState()
+        hadUnresolvedSession =
+          previousState.epoch === this.readEpoch() &&
+          (previousState.blocked || previousState.pending) &&
+          previousState.ended !== true
+      } catch {
+        // Storage failures are reported by beginChange; they do not imply a remote session.
+      }
       const change = this.beginChange()
       epoch = change.epoch
       await this.withLock(async () => {
@@ -282,7 +308,12 @@ export class AuthSession {
       })
     } catch (error) {
       if (epoch === undefined || this.epoch === epoch)
-        this.update('unauthenticated', getLoginErrorMessage(error))
+        this.update(
+          'unauthenticated',
+          getLoginErrorMessage(error),
+          false,
+          hadUnresolvedSession || mayHaveCreatedSession(error),
+        )
     }
   }
 
@@ -320,6 +351,8 @@ export class AuthSession {
           error instanceof ApiClientError && error.code === 'lock_wait_timeout'
             ? `Данные скрыты; отзыв сессии не подтверждён. ${lockWaitMessage}`
             : 'Данные скрыты, но сервер не подтвердил выход. Повторите выход или войдите снова.',
+          false,
+          epoch !== undefined && !(error instanceof DOMException && error.name === 'AbortError'),
         )
     }
   }
@@ -351,6 +384,15 @@ export class AuthSession {
       },
     }
   }
+}
+
+function mayHaveCreatedSession(error: unknown) {
+  if (error instanceof DOMException) return error.name === 'TimeoutError'
+  if (error instanceof ApiClientError) {
+    if (error.status !== undefined) return error.status >= 500 && error.status < 600
+    return error.code === 'network_error'
+  }
+  return true
 }
 
 export function getLoginErrorMessage(error: unknown) {

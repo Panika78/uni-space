@@ -108,6 +108,7 @@ async function callProtected(target) {
 try {
   await page.goto(`${baseURL}/schedule`)
   await heading(page, 'Вход')
+  assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, 1)
   assert.ok(!(await page.locator('body').innerText()).includes('связаться с сервером'))
   check('initial invalid_refresh redirects without a loop')
@@ -262,6 +263,10 @@ try {
   fault = 'lose-logout'
   await clickLogout(page)
   await page.getByText(/сервер не подтвердил выход/).waitFor()
+  assert.equal(
+    await page.getByRole('button', { name: 'Повторить выход', exact: true }).isVisible(),
+    true,
+  )
   const sentLogout = await fallbackRequest
   assert.ok((await sentLogout.headerValue('authorization'))?.startsWith('Bearer '))
   assert.ok(!(await sentLogout.headerValue('cookie'))?.includes('uni_space_refresh='))
@@ -269,10 +274,15 @@ try {
   await page.reload()
   await heading(page, 'Вход')
   await page.getByText(/Не удалось подтвердить состояние сессии/).waitFor()
+  assert.equal(
+    await page.getByRole('button', { name: 'Повторить выход', exact: true }).isVisible(),
+    true,
+  )
   assert.equal(requests.slice(beforeReload).filter((path) => path.endsWith('/refresh')).length, 0)
   fault = ''
   await page.getByRole('button', { name: 'Повторить выход', exact: true }).click()
   await page.getByText('Вы вышли из приложения.', { exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   assert.ok(!(await page.locator('body').innerText()).includes('сервер не подтвердил выход'))
   check('lost real logout response, reload blocks restoration and explicit retry succeeds')
   // This refresh was current and unused when the cookie was removed.

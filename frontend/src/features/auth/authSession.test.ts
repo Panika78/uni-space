@@ -69,7 +69,12 @@ describe('session lifecycle and coordinated cookie operations', () => {
       vi.stubGlobal('fetch', fetchMock)
       const { session } = createSession()
       await Promise.all([session.start(), session.start()])
-      expect(session.getSnapshot()).toEqual({ status: 'unauthenticated', message: '', busy: false })
+      expect(session.getSnapshot()).toEqual({
+        status: 'unauthenticated',
+        message: '',
+        busy: false,
+        canRetryLogout: false,
+      })
       expect(fetchMock).toHaveBeenCalledTimes(1)
     },
   )
@@ -130,6 +135,10 @@ describe('session lifecycle and coordinated cookie operations', () => {
     await first.refresh().catch(() => {})
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(first.getSnapshot().message).toContain('Войдите снова')
+    expect(first.getSnapshot().canRetryLogout).toBe(true)
+    const second = createSession().session
+    await second.start()
+    expect(second.getSnapshot().canRetryLogout).toBe(true)
   })
 
   it('does not reuse a cookie after a tab closes during rotation', async () => {
@@ -235,13 +244,16 @@ describe('session lifecycle and coordinated cookie operations', () => {
     vi.stubGlobal('fetch', fetchMock)
     await session.logout()
     expect(session.getSnapshot().message).toContain('сервер не подтвердил')
+    expect(session.getSnapshot().canRetryLogout).toBe(true)
     const reloaded = createSession().session
     await reloaded.start()
     expect(reloaded.getSnapshot().message).toContain('Не удалось подтвердить состояние сессии')
+    expect(reloaded.getSnapshot().canRetryLogout).toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     await reloaded.logout()
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(reloaded.getSnapshot().message).toBe('Вы вышли из приложения.')
+    expect(reloaded.getSnapshot().canRetryLogout).toBe(false)
   })
 })
 
@@ -510,7 +522,12 @@ describe('review regressions: confirmed logout', () => {
     expect(session.getSnapshot().message).toBe('Вы вышли из приложения.')
     const reloaded = createSession().session
     await reloaded.start()
-    expect(reloaded.getSnapshot()).toEqual({ status: 'unauthenticated', message: '', busy: false })
+    expect(reloaded.getSnapshot()).toEqual({
+      status: 'unauthenticated',
+      message: '',
+      busy: false,
+      canRetryLogout: false,
+    })
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
       '/api/v1/auth/refresh',
       '/api/v1/auth/logout',
@@ -540,7 +557,12 @@ describe('review regressions: confirmed logout', () => {
     response.resolve(new Response(null, { status: 204 }))
     await logout
     second.synchronize()
-    expect(second.getSnapshot()).toEqual({ status: 'unauthenticated', message: '', busy: false })
+    expect(second.getSnapshot()).toEqual({
+      status: 'unauthenticated',
+      message: '',
+      busy: false,
+      canRetryLogout: false,
+    })
     expect(() => old.assertCurrent()).toThrow()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
@@ -579,6 +601,7 @@ describe('review regressions: login failure diagnostics', () => {
     expect(timeout).toHaveBeenCalledWith(15000)
     expect(session.getSnapshot().message).toContain('Запрос мог быть выполнен')
     expect(session.getSnapshot().message).not.toMatch(/Web Locks|private detail|Проверьте данные/)
+    expect(session.getSnapshot().canRetryLogout).toBe(true)
     await createSession().session.start()
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/auth/login'])
     timeout.mockRestore()
@@ -780,6 +803,7 @@ describe('bounded Web Lock acquisition', () => {
         status: 'unauthenticated',
         message: '',
         busy: false,
+        canRetryLogout: false,
       })
     } finally {
       holder.release()
@@ -814,6 +838,7 @@ describe('rejected login preserves only confirmed absence', () => {
         status: 'unauthenticated',
         message: '',
         busy: false,
+        canRetryLogout: false,
       })
       expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
         source === 'invalid_refresh' ? '/api/v1/auth/refresh' : '/api/v1/auth/logout',
