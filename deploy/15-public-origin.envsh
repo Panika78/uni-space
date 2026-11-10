@@ -1,0 +1,16 @@
+#!/bin/sh
+# Sourced by the official nginx entrypoint before envsubst. API readiness validates
+# the canonical PUBLIC_ORIGIN; only safe authority characters enter the template.
+case "${PUBLIC_ORIGIN:-}" in
+    https://*) PUBLIC_AUTHORITY=${PUBLIC_ORIGIN#https://} ;;
+    *) echo 'PUBLIC_ORIGIN must use HTTPS' >&2; exit 1 ;;
+esac
+if [ -z "$PUBLIC_AUTHORITY" ] || [ -n "$(printf '%s' "$PUBLIC_AUTHORITY" | LC_ALL=C tr -d 'a-z0-9.:[]-')" ]; then
+    echo 'Invalid PUBLIC_ORIGIN authority' >&2
+    exit 1
+fi
+case "$PUBLIC_AUTHORITY" in
+    \[*\]*) PUBLIC_HOSTNAME="${PUBLIC_AUTHORITY%%]*}]" ;;
+    *) PUBLIC_HOSTNAME=${PUBLIC_AUTHORITY%%:*} ;;
+esac
+export PUBLIC_AUTHORITY PUBLIC_HOSTNAME

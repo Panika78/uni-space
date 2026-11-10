@@ -1,6 +1,16 @@
 #!/bin/sh
 set -eu
 
+# Compose secrets stay out of image layers and container configuration values.
+if [ -n "${JWT_SIGNING_KEY_FILE:-}" ]; then
+    JWT_SIGNING_KEY=$(cat "$JWT_SIGNING_KEY_FILE")
+    export JWT_SIGNING_KEY
+fi
+if [ -n "${DATABASE_PASSWORD_FILE:-}" ]; then
+    DATABASE_PASSWORD=$(cat "$DATABASE_PASSWORD_FILE")
+    export DATABASE_PASSWORD
+fi
+
 if [ -n "${DATABASE_URL:-}" ]; then
     exec "$@"
 fi

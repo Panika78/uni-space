@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-FROM ghcr.io/astral-sh/uv:0.13.5 AS uv
-FROM python:3.12.12-slim-bookworm
+FROM ghcr.io/astral-sh/uv:0.13.7 AS uv
+FROM python:3.12.16-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -20,6 +20,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY backend/app ./app
 COPY backend/alembic ./alembic
 COPY backend/alembic.ini ./
+COPY backend/scripts/check_migrations.py backend/scripts/check_readiness.py ./scripts/
 COPY backend/docker-entrypoint.sh ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=secret,id=proxy_ca \

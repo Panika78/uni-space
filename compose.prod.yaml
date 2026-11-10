@@ -1,0 +1,112 @@
+# Standalone production configuration. Do not combine with compose.yaml.
+name: uni-space-prod
+services:
+  db:
+    image: postgres:17.11-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [database]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          PGPASSWORD="$$(cat /run/secrets/postgres_password)"
+          psql --host="$${HOSTNAME}" --username="$${POSTGRES_USER}"
+          --dbname="$${POSTGRES_DB}" --no-password --tuples-only
+          --command="SELECT 1" >/dev/null 2>&1
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    image: uni-space-api:${RELEASE_TAG:?Set an immutable RELEASE_TAG}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command: [python, -m, app.core.server, --production, --host, 0.0.0.0, --port, '8000']
+    environment:
+      APP_ENV: production
+      JWT_SIGNING_KEY_FILE: /run/secrets/jwt_signing_key
+      COOKIE_SECURE: 'true'
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set the canonical public HTTPS origin}
+      ALLOWED_ORIGINS: '["${PUBLIC_ORIGIN:?Set the canonical public HTTPS origin}"]'
+      PROXY_HEADERS_ENABLED: 'true'
+      TRUSTED_PROXY_IPS: '["${NGINX_PROXY_IP:-172.30.19.2}"]'
+      DATABASE_HOST: db
+      DATABASE_PORT: '5432'
+      DATABASE_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+      DATABASE_NAME: ${POSTGRES_DB:?Set POSTGRES_DB}
+    secrets: [jwt_signing_key, postgres_password]
+    networks: [proxy, database]
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, sh, /app/docker-entrypoint.sh, python, scripts/check_readiness.py]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  nginx:
+    image: uni-space-web:${RELEASE_TAG:?Set an immutable RELEASE_TAG}
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+    restart: unless-stopped
+    environment:
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set the canonical public HTTPS origin}
+      NGINX_ENVSUBST_FILTER: ^PUBLIC_(AUTHORITY|HOSTNAME)$
+    ports:
+      - '${HTTP_BIND:-0.0.0.0}:80:80'
+      - '${HTTPS_BIND:-0.0.0.0}:443:443'
+    volumes:
+      - type: bind
+        source: ${TLS_CERT_FILE:?Set TLS_CERT_FILE}
+        target: /etc/nginx/tls/fullchain.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TLS_KEY_FILE:?Set TLS_KEY_FILE}
+        target: /etc/nginx/tls/privkey.pem
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      edge:
+      proxy:
+        ipv4_address: ${NGINX_PROXY_IP:-172.30.19.2}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD-SHELL, 'wget -Y off -q -O /dev/null http://127.0.0.1:8080/ready']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+secrets:
+  jwt_signing_key:
+    file: ${JWT_SIGNING_KEY_FILE:?Set JWT_SIGNING_KEY_FILE}
+  postgres_password:
+    file: ${POSTGRES_PASSWORD_FILE:?Set POSTGRES_PASSWORD_FILE}
+volumes:
+  postgres_data:
+networks:
+  edge:
+  proxy:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${PROXY_SUBNET:-172.30.19.0/24}
+          ip_range: ${PROXY_DYNAMIC_RANGE:-172.30.19.128/25}
+  database:
+    internal: true

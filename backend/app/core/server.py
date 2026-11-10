@@ -10,6 +10,10 @@ def create_server_arguments(
     settings: Settings, *, host: str, port: int, reload: bool = False
 ) -> list[str]:
     arguments = ["uvicorn", "app.main:app", "--host", host, "--port", str(port)]
+    if settings.app_env == "production":
+        # Nginx owns sanitized access logs. Uvicorn's default formatter includes queries.
+        # An explicit CLI switch also overrides UVICORN_ACCESS_LOG from the environment.
+        arguments.append("--no-access-log")
     if settings.proxy_headers_enabled:
         arguments.extend(
             ["--proxy-headers", "--forwarded-allow-ips", ",".join(settings.trusted_proxy_ips)]

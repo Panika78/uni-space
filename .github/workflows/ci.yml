@@ -21,30 +21,30 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          version: 0.13.5
+          version: 0.13.7
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
       - name: Verify uv.lock matches pyproject.toml
         working-directory: backend
         run: uv lock --check
       - name: Install pinned Python
-        run: uv python install 3.12.12
+        run: uv python install 3.12.16
       - name: Verify project Python version
         working-directory: backend
-        run: uv run --locked --python 3.12.12 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)"
+        run: uv run --locked --python 3.12.16 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 16)"
       - name: Ruff lint
         working-directory: backend
-        run: uv run --locked --python 3.12.12 ruff check .
+        run: uv run --locked --python 3.12.16 ruff check .
       - name: Ruff format
         working-directory: backend
-        run: uv run --locked --python 3.12.12 ruff format --check .
+        run: uv run --locked --python 3.12.16 ruff format --check .
 
   backend-tests:
     name: Backend tests
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17.6-bookworm
+        image: postgres:17.11-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
         env:
           POSTGRES_DB: uni_space_test
           POSTGRES_USER: uni_space_test
@@ -60,29 +60,29 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          version: 0.13.5
+          version: 0.13.7
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
       - name: Verify uv.lock matches pyproject.toml
         working-directory: backend
         run: uv lock --check
       - name: Install pinned Python
-        run: uv python install 3.12.12
+        run: uv python install 3.12.16
       - name: Verify project Python version
         working-directory: backend
-        run: uv run --locked --python 3.12.12 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)"
+        run: uv run --locked --python 3.12.16 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 16)"
       - name: Run unit and HTTPX tests
         working-directory: backend
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
-        run: uv run --locked --python 3.12.12 pytest -m "not integration"
+        run: uv run --locked --python 3.12.16 pytest -m "not integration"
       - name: Run PostgreSQL integration tests
         working-directory: backend
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
-        run: uv run --locked --python 3.12.12 pytest -m integration
+        run: uv run --locked --python 3.12.16 pytest -m integration
 
   frontend-lint:
     name: Frontend ESLint and Prettier
@@ -104,7 +104,9 @@ jobs:
         run: npm run lint
       - name: Prettier
         working-directory: frontend
-        run: npm run format:check
+        run: |
+          npm run format:check
+          npx prettier --config .prettierrc.json --check ../deploy/spa.browser.mjs
 
   frontend-typecheck:
     name: Frontend TypeScript
@@ -170,7 +172,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          version: 0.13.5
+          version: 0.13.7
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
       - name: Verify uv.lock matches pyproject.toml
@@ -187,10 +189,10 @@ jobs:
         working-directory: frontend
         run: npm ci
       - name: Install pinned Python
-        run: uv python install 3.12.12
+        run: uv python install 3.12.16
       - name: Verify project Python version
         working-directory: backend
-        run: uv run --locked --python 3.12.12 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)"
+        run: uv run --locked --python 3.12.16 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 16)"
       - name: Check generated OpenAPI types without rewriting files
         working-directory: frontend
         run: npm run types:check
@@ -200,7 +202,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17.6-bookworm
+        image: postgres:17.11-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
         env:
           POSTGRES_DB: uni_space_test
           POSTGRES_USER: uni_space_test
@@ -216,41 +218,41 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          version: 0.13.5
+          version: 0.13.7
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
       - name: Verify uv.lock matches pyproject.toml
         working-directory: backend
         run: uv lock --check
       - name: Install pinned Python
-        run: uv python install 3.12.12
+        run: uv python install 3.12.16
       - name: Verify project Python version
         working-directory: backend
-        run: uv run --locked --python 3.12.12 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 12)"
+        run: uv run --locked --python 3.12.16 python -c "import sys; print(sys.version); assert sys.version_info[:3] == (3, 12, 16)"
       - name: Apply migrations to empty PostgreSQL
         working-directory: backend
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
-        run: uv run --locked --python 3.12.12 alembic upgrade head
+        run: uv run --locked --python 3.12.16 alembic upgrade head
       - name: Verify repeated migration upgrade
         working-directory: backend
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
-        run: uv run --locked --python 3.12.12 alembic upgrade head
+        run: uv run --locked --python 3.12.16 alembic upgrade head
       - name: Check ORM metadata against PostgreSQL schema
         working-directory: backend
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
-        run: uv run --locked --python 3.12.12 alembic check
+        run: uv run --locked --python 3.12.16 alembic check
       - name: Verify database matches current Alembic heads
         working-directory: backend
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
-        run: uv run --locked --python 3.12.12 python scripts/check_migrations.py
+        run: uv run --locked --python 3.12.16 python scripts/check_migrations.py
 
   db-healthcheck:
     name: Compose PostgreSQL healthcheck regression
@@ -259,3 +261,50 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run isolated Compose healthcheck regression
         run: bash backend/tests/test_compose_db_healthcheck.sh
+
+  production-deployment:
+    name: Production Compose HTTPS and recovery
+    # Playwright 1.57 supports Ubuntu 24.04; ubuntu-latest may select 26.04.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.13.7
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+      - name: Install isolated browser test tooling
+        run: |
+          mkdir -p work/browser-tooling
+          if ! (
+            npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0 &&
+            node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell
+          ) > work/browser-install.log 2>&1; then
+            cat work/browser-install.log
+            tail -n 20 work/browser-install.log | sed 's/%/%25/g;s/\r/%0D/g;s/^/::error title=Browser tooling::/'
+            exit 1
+          fi
+          echo "PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
+      - name: Build production API and SPA images
+        run: |
+          docker build -f backend/Dockerfile -t uni-space-api:task019 .
+          docker build -f deploy/Dockerfile.web -t uni-space-web:task019 .
+      - name: Check deployment test formatting
+        run: |
+          uv run --locked --python 3.12.16 --project backend ruff check deploy/test_production.py
+          uv run --locked --python 3.12.16 --project backend ruff format --check deploy/test_production.py
+          node --check deploy/spa.browser.mjs
+      - name: Test isolated HTTPS deployment and backup recovery
+        run: |
+          mkdir -p work
+          if ! uv run --locked --python 3.12.16 --project backend python deploy/test_production.py > work/production-test.log 2>&1; then
+            cat work/production-test.log
+            # The parent test prints assertions/commands, never child stderr or token values.
+            # One annotation avoids GitHub's per-step limit on individual errors.
+            python3 -c 'from pathlib import Path; text="\n".join(Path("work/production-test.log").read_text().splitlines()[-25:]); print("::error title=Production integration::"+text.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))'
+            exit 1
+          fi
+          cat work/production-test.log
