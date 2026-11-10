@@ -336,6 +336,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           version: 0.13.7
+          enable-cache: false
       - uses: actions/setup-node@v4
         with:
           node-version: 24.22.1
@@ -354,8 +355,11 @@ jobs:
           node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell
       - name: Run real schedule browser scenarios
         run: |
-          (cd backend && uv run --locked --python 3.12.16 uvicorn app.main:app --host 127.0.0.1 --port 8000) > work/api.log 2>&1 &
-          npm run dev --prefix frontend > work/vite.log 2>&1 &
+          (cd backend && exec .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000) > work/api.log 2>&1 &
+          api_pid=$!
+          (cd frontend && exec node node_modules/vite/bin/vite.js --host 0.0.0.0) > work/vite.log 2>&1 &
+          vite_pid=$!
+          trap 'kill "$api_pid" "$vite_pid" 2>/dev/null || true; wait "$api_pid" "$vite_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 60); do
             if curl -fsS http://localhost:8000/api/openapi.json >/dev/null && curl -fsS http://localhost:5173 >/dev/null; then break; fi
             sleep 1
