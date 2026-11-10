@@ -383,7 +383,7 @@ for index in range(6):
                 name = f"{project}-client-{number}"
                 # Distinct real peer IPs, without retaining two idle image copies.
                 peer = str(subnet.network_address + 10 + number)
-                run(
+                result = run(
                     [
                         "docker",
                         "run",
@@ -402,6 +402,11 @@ for index in range(6):
                         client_code,
                     ],
                     input=(temp / "tls.pem").read_text(),
+                    success=False,
+                )
+                # This anonymous client sends only {}, never credentials or tokens.
+                assert result.returncode == 0, (
+                    f"Anonymous peer check failed: {result.stderr[-4000:]}"
                 )
                 assert f"{peer} POST /api/v1/auth/login" in dc("logs", "nginx").stdout
             assert time.monotonic() - started < 60, (
