@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { FocusEvent } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../features/auth/AuthProvider'
+import { UnavailableState } from '../shared/ui/StatusStates'
 
 const universityName =
   'Российский государственный университет чародейства и волшебства имени А. М. Кашпировского'
@@ -78,28 +80,33 @@ function UserMenu() {
     }
   }, [isOpen])
 
+  const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
+    const nextTarget = event.relatedTarget
+    if (nextTarget instanceof Node && containerRef.current?.contains(nextTarget)) return
+    setIsOpen(false)
+  }
+
   return (
-    <div className="user-menu" ref={containerRef}>
+    <div className="user-menu" ref={containerRef} onBlur={handleBlur}>
       <button
         ref={triggerRef}
         className="avatar-button"
         aria-label="Меню пользователя"
-        aria-haspopup="menu"
         aria-expanded={isOpen}
+        aria-controls="user-menu-panel"
         onClick={() => setIsOpen((open) => !open)}
       >
         <span aria-hidden="true">С</span>
       </button>
       {isOpen && (
-        <div className="user-menu__panel" role="menu" aria-label="Меню пользователя">
-          <Link role="menuitem" to="/profile" onClick={() => setIsOpen(false)}>
+        <div className="user-menu__panel" id="user-menu-panel">
+          <Link to="/profile" onClick={() => setIsOpen(false)}>
             Мой профиль <span>Скоро</span>
           </Link>
-          <Link role="menuitem" to="/settings" onClick={() => setIsOpen(false)}>
+          <Link to="/settings" onClick={() => setIsOpen(false)}>
             Настройки <span>Скоро</span>
           </Link>
           <button
-            role="menuitem"
             onClick={() => {
               setIsOpen(false)
               void logout()
@@ -170,11 +177,6 @@ function MobileDrawer({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <Navigation onNavigate={onClose} />
-        <p className="prototype-note">
-          Конкурсный прототип
-          <br />
-          Неофициальный сервис
-        </p>
       </aside>
     </div>
   )
@@ -203,11 +205,6 @@ export function StudentLayout() {
           <UniversityBrand compact={isCollapsed} />
         </Link>
         <Navigation />
-        <p className="prototype-note">
-          Конкурсный прототип
-          <br />
-          Неофициальный сервис
-        </p>
         <button
           className="sidebar-collapse"
           onClick={() => setIsCollapsed((collapsed) => !collapsed)}
@@ -231,22 +228,41 @@ export function StudentLayout() {
             <span aria-hidden="true">☰</span>
           </button>
           <span className="topbar-spacer" />
-          <button
-            className="icon-button notification-button"
-            aria-label="Уведомления: функция скоро появится"
-            disabled
+          <span className="topbar-prototype-note" data-testid="prototype-disclaimer">
+            Конкурсный прототип
+            <br />
+            Неофициальный сервис
+          </span>
+          <Link
+            className="notification-link"
+            to="/notifications"
+            aria-label="Уведомления — функция пока недоступна"
+            title="Уведомления — функция пока недоступна"
           >
-            <span aria-hidden="true">♧</span>
-            <span className="notification-label">Уведомления скоро появятся</span>
-          </button>
+            <svg
+              aria-hidden="true"
+              className="notification-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              focusable="false"
+            >
+              <path
+                d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span className="notification-label" aria-hidden="true">
+              Уведомления
+            </span>
+          </Link>
           <UserMenu />
         </header>
         <main className="student-content" id="main-content" tabIndex={-1}>
           <Outlet />
         </main>
-        <footer className="student-mobile-footer">
-          Конкурсный прототип · Неофициальный сервис
-        </footer>
       </div>
       {isDrawerOpen && <MobileDrawer onClose={closeDrawer} />}
     </div>
@@ -258,13 +274,10 @@ export function UnavailableSection({ title }: { title: string }) {
     <section className="section-page" aria-labelledby="section-title">
       <p className="section-eyebrow">Студенческий кабинет</p>
       <h1 id="section-title">{title}</h1>
-      <div className="empty-state" role="status">
-        <span className="empty-state__icon" aria-hidden="true">
-          ○
-        </span>
-        <p>Этот раздел появится в следующих задачах.</p>
-        <small>Сейчас здесь нет доступного содержимого.</small>
-      </div>
+      <UnavailableState
+        title="Функция пока недоступна"
+        description="Содержимое этого раздела появится в следующих задачах."
+      />
     </section>
   )
 }

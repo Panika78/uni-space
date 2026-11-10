@@ -87,7 +87,7 @@ it('submits once, opens schedule and hides it on logout', async () => {
   await user.click(screen.getByRole('button', { name: 'Войти' }))
   expect(await screen.findByRole('heading', { name: 'Расписание' })).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
-  await user.click(screen.getByRole('menuitem', { name: 'Выйти' }))
+  await user.click(screen.getByRole('button', { name: 'Выйти' }))
   expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
   expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
     '/api/v1/auth/refresh',

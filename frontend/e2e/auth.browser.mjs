@@ -72,6 +72,16 @@ context.on('request', (request) => {
 })
 const check = (name) => console.log(`PASS ${name}`)
 const heading = (target, name) => target.getByRole('heading', { name, exact: true }).waitFor()
+async function hasVisibleLogoutAction(target) {
+  const trigger = target.getByRole('button', { name: 'Меню пользователя', exact: true })
+  if ((await trigger.count()) === 0) return false
+  if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click()
+  return (await target.getByRole('button', { name: 'Выйти', exact: true }).count()) > 0
+}
+async function clickLogout(target) {
+  assert.equal(await hasVisibleLogoutAction(target), true, 'Avatar disclosure should expose logout')
+  await target.getByRole('button', { name: 'Выйти', exact: true }).click()
+}
 async function login(target, name) {
   await target.goto(`${baseURL}/login`)
   await target.getByLabel('Логин', { exact: true }).fill(name)
@@ -116,6 +126,34 @@ try {
   )
   await login(page, loginA)
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.getByRole('button', { name: 'Свернуть меню' }).click()
+  assert.equal(await page.getByTestId('prototype-disclaimer').isVisible(), true)
+  await page.getByRole('button', { name: 'Развернуть меню' }).click()
+  await page.setViewportSize({ width: 360, height: 800 })
+  assert.equal(await page.getByTestId('prototype-disclaimer').isVisible(), true)
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+  check('prototype disclaimer remains visible on collapsed desktop and 360px mobile layouts')
+  const avatarTrigger = page.getByRole('button', { name: 'Меню пользователя', exact: true })
+  await avatarTrigger.focus()
+  await page.keyboard.press('Enter')
+  assert.equal(await avatarTrigger.getAttribute('aria-expanded'), 'true')
+  await page.keyboard.press('Tab')
+  assert.match(await page.evaluate(() => document.activeElement?.textContent || ''), /Мой профиль/)
+  await page.keyboard.press('Escape')
+  assert.equal(await avatarTrigger.getAttribute('aria-expanded'), 'false')
+  assert.equal(await avatarTrigger.evaluate((element) => element === document.activeElement), true)
+  check('avatar disclosure supports native keyboard focus and Escape restoration')
+  const notificationLink = page.getByRole('link', {
+    name: 'Уведомления — функция пока недоступна',
+  })
+  await notificationLink.focus()
+  await page.keyboard.press('Enter')
+  await heading(page, 'Уведомления')
+  await page.getByText('Функция пока недоступна', { exact: true }).waitFor()
+  await page.goBack()
+  await heading(page, 'Расписание')
+  check('notification link is keyboard accessible and routes to its unavailable page')
   const cookie = (await context.cookies()).find((value) => value.name === 'uni_space_refresh')
   assert.ok(cookie?.httpOnly && cookie.path === '/api/v1/auth' && cookie.sameSite === 'Lax')
   await page.reload()
@@ -204,7 +242,7 @@ try {
   })
   const oldResponse = callProtected(second)
   await received
-  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  await clickLogout(page)
   await heading(page, 'Вход')
   await login(page, loginB)
   await heading(second, 'Вход')
@@ -222,7 +260,7 @@ try {
     (request) => new URL(request.url()).pathname === '/api/v1/auth/logout',
   )
   fault = 'lose-logout'
-  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  await clickLogout(page)
   await page.getByText(/сервер не подтвердил выход/).waitFor()
   const sentLogout = await fallbackRequest
   assert.ok((await sentLogout.headerValue('authorization'))?.startsWith('Bearer '))
@@ -291,8 +329,7 @@ try {
   check('closing the lock holder after rotation leaves a durable recovery barrier')
   // A closing document may run fetch-abort cleanup before destruction, marking
   // the lost refresh response as blocked and hiding the other tabs as well.
-  const hasLogoutButton =
-    (await page.getByRole('button', { name: 'Выйти', exact: true }).count()) > 0
+  const hasLogoutButton = await hasVisibleLogoutAction(page)
   if (!hasLogoutButton) {
     const journal = await page.evaluate(() =>
       JSON.parse(localStorage.getItem('uni-space.auth-state')),
@@ -302,9 +339,8 @@ try {
     assert.notEqual(journal.ended, true)
     await heading(page, 'Вход')
   }
-  await page
-    .getByRole('button', { name: hasLogoutButton ? 'Выйти' : 'Повторить выход', exact: true })
-    .click()
+  if (hasLogoutButton) await clickLogout(page)
+  else await page.getByRole('button', { name: 'Повторить выход', exact: true }).click()
   await Promise.all([heading(page, 'Вход'), heading(second, 'Вход')])
   await second.waitForFunction(() => document.querySelector('[role="status"]') === null)
   const refreshAfterLogout = requests.filter((path) => path.endsWith('/refresh')).length
@@ -407,7 +443,7 @@ try {
   await context.route('**/api/v1/auth/logout', (route) =>
     route.fulfill({ status: 307, headers: { Location: logoutTarget } }),
   )
-  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  await clickLogout(page)
   await page.getByText(/сервер не подтвердил выход/).waitFor()
   assert.equal(logoutRedirects, 0)
   await context.unroute('**/api/v1/auth/logout')
@@ -420,7 +456,7 @@ try {
   await context.unroute('**/api/v1/auth/login')
   await holdAuthLock()
   const beforeWaitingLogout = countAuth()
-  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  await clickLogout(page)
   await heading(page, 'Вход')
   await page.getByText(/Закройте зависшую вкладку/).waitFor()
   assert.ok((await page.getByRole('status').innerText()).includes('отзыв сессии не подтверждён'))

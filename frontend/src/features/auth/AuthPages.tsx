@@ -1,15 +1,12 @@
 import { useState } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { useAuth } from './AuthProvider'
+import { LoadingState, UnavailableState } from '../../shared/ui/StatusStates'
 
 export function ProtectedRoute() {
   const { status } = useAuth()
   if (status === 'initializing')
-    return (
-      <section className="auth-loading" role="status">
-        Проверяем сессию…
-      </section>
-    )
+    return <LoadingState title="Проверяем сессию…" variant="compact" className="auth-loading" />
   return status === 'authenticated' ? <Outlet /> : <Navigate to="/login" replace />
 }
 
@@ -17,11 +14,7 @@ export function LoginPage() {
   const { status, message, busy, login, logout } = useAuth()
   const [password, setPassword] = useState('')
   if (status === 'initializing')
-    return (
-      <section className="auth-loading" role="status">
-        Проверяем сессию…
-      </section>
-    )
+    return <LoadingState title="Проверяем сессию…" variant="compact" className="auth-loading" />
   if (status === 'authenticated') return <Navigate to="/schedule" replace />
   return (
     <section className="welcome-card login-card" aria-labelledby="login-title">
@@ -76,10 +69,10 @@ export function SchedulePage() {
     <section className="section-page" aria-labelledby="schedule-title">
       <p className="section-eyebrow">Студенческий кабинет</p>
       <h1 id="schedule-title">Расписание</h1>
-      <div className="schedule-placeholder" role="status">
-        <p className="schedule-placeholder__label">Текущий день</p>
-        <p>Расписание появится в следующей задаче.</p>
-      </div>
+      <UnavailableState
+        title="Расписание пока недоступно"
+        description="Содержимое расписания появится в следующих задачах."
+      />
     </section>
   )
 }

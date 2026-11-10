@@ -35,6 +35,16 @@ describe('student dashboard navigation', () => {
     expect(screen.getByRole('heading', { name: 'Успеваемость' })).toBeInTheDocument()
   })
 
+  it('keeps the unofficial prototype notice visible when the desktop sidebar is collapsed', async () => {
+    const user = userEvent.setup()
+    renderStudentLayout()
+    await user.click(screen.getByRole('button', { name: 'Свернуть меню' }))
+    const notice = screen.getByTestId('prototype-disclaimer')
+    expect(notice).toHaveTextContent('Конкурсный прототип')
+    expect(notice).toHaveTextContent('Неофициальный сервис')
+    expect(notice.closest('.desktop-sidebar')).toBeNull()
+  })
+
   it('opens the mobile drawer and closes it on Escape, restoring focus', async () => {
     const user = userEvent.setup()
     renderStudentLayout()
@@ -83,22 +93,56 @@ describe('student dashboard navigation', () => {
     expect(screen.getByRole('heading', { name: 'Успеваемость' })).toBeInTheDocument()
   })
 
-  it('opens the avatar menu and calls the existing logout action', async () => {
+  it('uses a native disclosure for the avatar actions and calls the existing logout action', async () => {
     const user = userEvent.setup()
     renderStudentLayout()
-    await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
-    const menu = screen.getByRole('menu', { name: 'Меню пользователя' })
-    expect(within(menu).getByRole('menuitem', { name: /Мой профиль/ })).toBeInTheDocument()
-    expect(within(menu).getByRole('menuitem', { name: /Настройки/ })).toBeInTheDocument()
-    await user.click(within(menu).getByRole('menuitem', { name: 'Выйти' }))
+    const trigger = screen.getByRole('button', { name: 'Меню пользователя' })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('button', { name: 'Выйти' })).not.toBeInTheDocument()
+    await user.click(trigger)
+    const panel = screen.getByRole('link', { name: /Мой профиль/ }).parentElement!
+    expect(within(panel).queryByRole('menu')).not.toBeInTheDocument()
+    expect(within(panel).getByRole('link', { name: /Мой профиль/ })).toBeInTheDocument()
+    expect(within(panel).getByRole('link', { name: /Настройки/ })).toBeInTheDocument()
+    await user.click(within(panel).getByRole('button', { name: 'Выйти' }))
     expect(auth.logout).toHaveBeenCalledOnce()
   })
 
-  it('closes the avatar menu on outside click', async () => {
+  it('supports native focus order, closes on Escape and restores focus to the avatar trigger', async () => {
+    const user = userEvent.setup()
+    renderStudentLayout()
+    const trigger = screen.getByRole('button', { name: 'Меню пользователя' })
+    await user.click(trigger)
+    await user.tab()
+    expect(screen.getByRole('link', { name: /Мой профиль/ })).toHaveFocus()
+    await user.tab()
+    expect(screen.getByRole('link', { name: /Настройки/ })).toHaveFocus()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('link', { name: /Мой профиль/ })).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
+  it('closes the avatar disclosure on outside click and when focus leaves it', async () => {
     const user = userEvent.setup()
     renderStudentLayout()
     await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
     await user.click(screen.getByRole('heading', { name: 'Расписание' }))
-    expect(screen.queryByRole('menu', { name: 'Меню пользователя' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /Мой профиль/ })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
+    await user.tab()
+    await user.tab()
+    await user.tab()
+    await user.tab()
+    expect(screen.queryByRole('link', { name: /Мой профиль/ })).not.toBeInTheDocument()
+  })
+
+  it('links notifications to the explicit unavailable page', () => {
+    renderStudentLayout()
+    expect(
+      screen.getByRole('link', { name: 'Уведомления — функция пока недоступна' }),
+    ).toHaveAttribute('href', '/notifications')
+    expect(
+      screen.getByRole('link', { name: 'Уведомления — функция пока недоступна' }),
+    ).toHaveAccessibleName('Уведомления — функция пока недоступна')
   })
 })
