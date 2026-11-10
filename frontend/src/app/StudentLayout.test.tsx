@@ -186,6 +186,28 @@ describe('student dashboard navigation', () => {
     expect(within(panel).getByRole('link', { name: /Мой профиль/ })).toBeInTheDocument()
     expect(within(panel).getByRole('link', { name: /Настройки/ })).toBeInTheDocument()
     await user.click(within(panel).getByRole('button', { name: 'Выйти' }))
+    const dialog = screen.getByRole('dialog', { name: 'Выйти из аккаунта?' })
+    expect(auth.logout).not.toHaveBeenCalled()
+    expect(within(dialog).getByRole('button', { name: 'Отмена' })).toHaveFocus()
+    await user.tab({ shift: true })
+    expect(within(dialog).getByRole('button', { name: 'Выйти' })).toHaveFocus()
+    await user.tab()
+    expect(within(dialog).getByRole('button', { name: 'Отмена' })).toHaveFocus()
+    await user.click(within(dialog).getByRole('button', { name: 'Отмена' }))
+    expect(auth.logout).not.toHaveBeenCalled()
+    expect(trigger).toHaveFocus()
+    await user.click(trigger)
+    await user.click(screen.getByRole('button', { name: 'Выйти' }))
+    await user.keyboard('{Escape}')
+    expect(auth.logout).not.toHaveBeenCalled()
+    expect(trigger).toHaveFocus()
+    await user.click(trigger)
+    await user.click(screen.getByRole('button', { name: 'Выйти' }))
+    await user.click(
+      within(screen.getByRole('dialog', { name: 'Выйти из аккаунта?' })).getByRole('button', {
+        name: 'Выйти',
+      }),
+    )
     expect(auth.logout).toHaveBeenCalledOnce()
   })
 

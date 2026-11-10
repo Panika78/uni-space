@@ -37,8 +37,21 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
 function UserMenu() {
   const { logout } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
+  const [confirmLogout, setConfirmLogout] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  const confirmingRef = useRef(false)
+
+  useEffect(() => {
+    if (confirmLogout) cancelRef.current?.focus()
+  }, [confirmLogout])
+
+  const closeConfirmation = () => {
+    if (confirmingRef.current) return
+    setConfirmLogout(false)
+    triggerRef.current?.focus()
+  }
 
   useEffect(() => {
     if (!isOpen) return
@@ -88,11 +101,63 @@ function UserMenu() {
           <button
             onClick={() => {
               setIsOpen(false)
-              void logout()
+              setConfirmLogout(true)
             }}
           >
             Выйти
           </button>
+        </div>
+      )}
+      {confirmLogout && (
+        <div
+          className="logout-overlay"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) closeConfirmation()
+          }}
+        >
+          <div
+            className="logout-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="logout-dialog-title"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                closeConfirmation()
+              }
+              if (event.key === 'Tab') {
+                const first = cancelRef.current
+                const last =
+                  event.currentTarget.querySelector<HTMLButtonElement>('.logout-dialog__confirm')
+                if (event.shiftKey && document.activeElement === first) {
+                  event.preventDefault()
+                  last?.focus()
+                } else if (!event.shiftKey && document.activeElement === last) {
+                  event.preventDefault()
+                  first?.focus()
+                }
+              }
+            }}
+          >
+            <h2 id="logout-dialog-title">Выйти из аккаунта?</h2>
+            <div className="logout-dialog__actions">
+              <button ref={cancelRef} type="button" onClick={closeConfirmation}>
+                Отмена
+              </button>
+              <button
+                className="logout-dialog__confirm"
+                type="button"
+                onClick={() => {
+                  if (confirmingRef.current) return
+                  confirmingRef.current = true
+                  void logout()
+                  setConfirmLogout(false)
+                }}
+              >
+                Выйти
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

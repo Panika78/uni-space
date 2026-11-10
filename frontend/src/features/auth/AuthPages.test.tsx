@@ -90,6 +90,11 @@ it('submits once, opens schedule and hides it on logout', async () => {
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await user.click(screen.getByRole('button', { name: 'Выйти' }))
+  await user.click(
+    screen
+      .getByRole('dialog', { name: 'Выйти из аккаунта?' })
+      .querySelector<HTMLButtonElement>('.logout-dialog__confirm')!,
+  )
   expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
   expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
@@ -215,8 +220,13 @@ it('keeps the ordinary login form after an uncertain logout and recovers on the 
   expect(await screen.findByRole('heading', { name: 'Расписание' })).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await user.click(screen.getByRole('button', { name: 'Выйти' }))
+  await user.click(
+    screen
+      .getByRole('dialog', { name: 'Выйти из аккаунта?' })
+      .querySelector<HTMLButtonElement>('.logout-dialog__confirm')!,
+  )
   expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
-  expect(screen.getByRole('status')).toHaveTextContent('восстановлении соединения')
+  expect(screen.getByRole('status')).toHaveTextContent('Войдите снова')
   expect(screen.queryByRole('button', { name: /Повторить выход/ })).not.toBeInTheDocument()
   expect(screen.getByLabelText('Логин')).toBeEnabled()
   await user.type(screen.getByLabelText('Логин'), 'fictional')
@@ -245,7 +255,7 @@ it('shows the ordinary login form without a technical message when refresh canno
   expect(screen.queryByRole('button', { name: /Повторить выход/ })).not.toBeInTheDocument()
 })
 
-it('automatically retries an unconfirmed logout when the browser reports network recovery', async () => {
+it('does not retry an unconfirmed logout when the browser reports network recovery', async () => {
   const fetchMock = vi
     .fn()
     .mockResolvedValueOnce(
@@ -268,19 +278,23 @@ it('automatically retries an unconfirmed logout when the browser reports network
   await screen.findByRole('heading', { name: 'Расписание' })
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await user.click(screen.getByRole('button', { name: 'Выйти' }))
+  await user.click(
+    screen
+      .getByRole('dialog', { name: 'Выйти из аккаунта?' })
+      .querySelector<HTMLButtonElement>('.logout-dialog__confirm')!,
+  )
   expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
-  expect(await screen.findByRole('status')).toHaveTextContent('восстановлении соединения')
+  expect(await screen.findByRole('status')).toHaveTextContent('Войдите снова')
 
   await act(async () => {
     window.dispatchEvent(new Event('online'))
   })
 
-  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4))
+  expect(fetchMock).toHaveBeenCalledTimes(3)
   expect(screen.getByLabelText('Логин')).toBeEnabled()
   expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
     '/api/v1/auth/refresh',
     '/api/v1/auth/login',
-    '/api/v1/auth/logout',
     '/api/v1/auth/logout',
   ])
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()

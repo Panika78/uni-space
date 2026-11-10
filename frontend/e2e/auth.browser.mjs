@@ -1,4 +1,4 @@
-/* global process, console, URL, document, innerWidth, localStorage, sessionStorage, setTimeout, AbortController, performance, Navigator, Storage, DOMException, navigator, fetch */
+/* global process, console, URL, document, innerWidth, localStorage, sessionStorage, setTimeout, AbortController, performance, Navigator, Storage, DOMException, navigator, fetch, window, Event */
 // Run against local Vite + the real backend using two prepared fictional accounts.
 // Playwright is supplied by the environment; no production test route is installed.
 import assert from 'node:assert/strict'
@@ -82,6 +82,9 @@ async function hasVisibleLogoutAction(target) {
 async function clickLogout(target) {
   assert.equal(await hasVisibleLogoutAction(target), true, 'Avatar disclosure should expose logout')
   await target.getByRole('button', { name: 'Выйти', exact: true }).click()
+  const dialog = target.getByRole('dialog', { name: 'Выйти из аккаунта?' })
+  await dialog.waitFor()
+  await dialog.getByRole('button', { name: 'Выйти', exact: true }).click()
 }
 async function login(target, name) {
   await target.goto(`${baseURL}/login`)
@@ -131,6 +134,21 @@ try {
     'confirmed absence followed by rejected login stays quiet after reload without refresh or login retry',
   )
   await login(page, loginA)
+  const beforeCancelledLogout = requests.length
+  await page.getByRole('button', { name: 'Меню пользователя' }).click()
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  const cancellationDialog = page.getByRole('dialog', { name: 'Выйти из аккаунта?' })
+  await cancellationDialog.waitFor()
+  assert.equal(requests.length, beforeCancelledLogout)
+  await cancellationDialog.getByRole('button', { name: 'Отмена' }).click()
+  await heading(page, 'Расписание')
+  assert.equal(requests.length, beforeCancelledLogout)
+  await page.getByRole('button', { name: 'Меню пользователя' }).click()
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  await page.keyboard.press('Escape')
+  await heading(page, 'Расписание')
+  assert.equal(requests.length, beforeCancelledLogout)
+  check('logout confirmation cancel and Escape preserve authentication without a POST')
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.getByRole('button', { name: 'Свернуть меню' }).click()
@@ -273,21 +291,16 @@ try {
   assert.ok((await sentLogout.headerValue('authorization'))?.startsWith('Bearer '))
   assert.ok(!(await sentLogout.headerValue('cookie'))?.includes('uni_space_refresh='))
   const beforeReload = requests.length
-  const automaticLogout = page.waitForRequest(
-    (request) => new URL(request.url()).pathname === '/api/v1/auth/logout',
-  )
   await page.reload()
   await loginHeading(page)
-  const retriedLogout = await automaticLogout
-  assert.equal(await retriedLogout.headerValue('authorization'), undefined)
-  assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
+  await page.evaluate(() => window.dispatchEvent(new Event('online')))
+  assert.equal(requests.slice(beforeReload).filter((path) => path.endsWith('/logout')).length, 0)
   assert.equal(requests.slice(beforeReload).filter((path) => path.endsWith('/refresh')).length, 0)
+  assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   fault = ''
   await login(page, loginA)
   assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
-  check(
-    'lost logout response is retried on reload without refresh, then ordinary login restores access',
-  )
+  check('lost logout response is not retried on reload or online; ordinary login restores access')
   const replacementCookie = (await context.cookies()).find(
     (value) => value.name === 'uni_space_refresh',
   )

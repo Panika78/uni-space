@@ -299,6 +299,44 @@ a {
   color: var(--muted);
   font-size: 10px;
 }
+.logout-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(36 26 28 / 45%);
+}
+.logout-dialog {
+  width: min(100%, 360px);
+  padding: 24px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 18px 48px rgb(36 26 28 / 22%);
+}
+.logout-dialog h2 {
+  margin: 0 0 24px;
+  font-size: 18px;
+}
+.logout-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.logout-dialog__actions button {
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  cursor: pointer;
+}
+.logout-dialog__actions .logout-dialog__confirm {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
 .student-content {
   width: min(100%, 1440px);
   min-height: calc(100vh - 64px);

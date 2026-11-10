@@ -71,7 +71,7 @@ describe('session lifecycle and coordinated cookie operations', () => {
     'null',
     '{invalid-json',
     '{"epoch":4,"blocked":true,"pending":false}',
-    '{"epoch":"initial","blocked":true,"pending":false,"logoutRetry":null}',
+    '{"epoch":"initial","blocked":"invalid","pending":false}',
   ])(
     'allows explicit login after an unreadable journal %s without automatic refresh',
     async (journal) => {
@@ -265,34 +265,23 @@ describe('session lifecycle and coordinated cookie operations', () => {
     expect(second.getSnapshot().status).toBe('unauthenticated')
   })
 
-  it('retries a logout that did not reach the server when the site is opened again', async () => {
+  it('blocks recovery without retry when logout never reaches the server', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(token()))
-    const { session } = createSession()
+    const { session, cache } = createSession()
     await session.start()
-    let serverRevoked = false
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(async () => {
-        throw new TypeError('request never reached the server')
-      })
-      .mockImplementationOnce(async () => {
-        serverRevoked = true
-        return logoutResult()
-      })
+    cache.setQueryData(['private'], 'old-user-data')
+    const oldRequest = session.beginRequest()
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('offline'))
     vi.stubGlobal('fetch', fetchMock)
     await session.logout()
-    expect(session.getSnapshot().message).toContain('восстановлении соединения')
-    expect(JSON.parse(localStorage.getItem(authStorageKey)!).logoutRetry).toEqual({ attempts: 0 })
-    const reloaded = createSession().session
-    await reloaded.start()
-    expect(serverRevoked).toBe(true)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
-      '/api/v1/auth/logout',
-      '/api/v1/auth/logout',
-    ])
-    expect(reloaded.getSnapshot().status).toBe('unauthenticated')
-    expect(JSON.parse(localStorage.getItem(authStorageKey)!).ended).toBe(true)
+    expect(session.getSnapshot().message).toContain('Войдите снова')
+    expect(cache.getQueryData(['private'])).toBeUndefined()
+    expect(oldRequest.signal.aborted).toBe(true)
+    expect(JSON.parse(localStorage.getItem(authStorageKey)!)).not.toHaveProperty('logoutRetry')
+    await createSession().session.start()
+    window.dispatchEvent(new Event('online'))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/auth/logout')
   })
 
   it.each(['{broken-json', '{}'])(
@@ -324,69 +313,36 @@ describe('session lifecycle and coordinated cookie operations', () => {
     },
   )
 
-  it('retries an executed logout whose response was lost idempotently', async () => {
+  it('does not retry an executed logout whose response was lost', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(token()))
     const { session } = createSession()
     await session.start()
-    let serverRevocations = 0
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(async () => {
-        serverRevocations++
-        throw new TypeError('response lost after logout executed')
-      })
-      .mockResolvedValueOnce(logoutResult())
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('response lost'))
     vi.stubGlobal('fetch', fetchMock)
     await session.logout()
     await createSession().session.start()
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(serverRevocations).toBe(1)
-    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
-      '/api/v1/auth/logout',
-      '/api/v1/auth/logout',
-    ])
+    window.dispatchEvent(new Event('online'))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(session.getSnapshot().status).toBe('unauthenticated')
   })
 
-  it('retries logout on network recovery without making another refresh request', async () => {
+  it('leaves a failed logout blocked after rejected credentials', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(token()))
-    const { session } = createSession()
-    await session.start()
-    const fetchMock = vi
-      .fn()
-      .mockRejectedValueOnce(new TypeError('offline'))
-      .mockResolvedValueOnce(logoutResult())
-    vi.stubGlobal('fetch', fetchMock)
-    await session.logout()
-    await session.resumePendingLogout()
-    expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
-      '/api/v1/auth/logout',
-      '/api/v1/auth/logout',
-    ])
-    expect(session.getSnapshot().message).toBe('')
-  })
-
-  it('preserves deferred logout when a different user enters invalid credentials', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(token('old-access')))
     const { session } = createSession()
     await session.start()
     const fetchMock = vi
       .fn()
       .mockRejectedValueOnce(new TypeError('offline'))
       .mockResolvedValueOnce(error('invalid_credentials'))
-      .mockResolvedValueOnce(logoutResult())
     vi.stubGlobal('fetch', fetchMock)
     await session.logout()
     await session.login({ login: 'different-user', password: 'wrong-password' })
-    expect(JSON.parse(localStorage.getItem(authStorageKey)!).logoutRetry).toEqual({ attempts: 0 })
-
-    await session.resumePendingLogout()
-
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
       '/api/v1/auth/logout',
       '/api/v1/auth/login',
-      '/api/v1/auth/logout',
     ])
-    expect(session.getSnapshot().status).toBe('unauthenticated')
+    await createSession().session.start()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('does not let a deferred logout revoke a concurrent successful login', async () => {
@@ -409,7 +365,6 @@ describe('session lifecycle and coordinated cookie operations', () => {
     expect(secondContext.cache.getQueryData(['private'])).toBeUndefined()
 
     await second.login({ login: 'different-user', password: 'fictional' })
-    await first.resumePendingLogout()
     second.synchronize()
     expect(first.getSnapshot().status).toBe('unauthenticated')
     expect(second.getSnapshot().status).toBe('authenticated')
@@ -423,27 +378,17 @@ describe('session lifecycle and coordinated cookie operations', () => {
     expect(JSON.parse(fetchMock.mock.calls[3][1].body).login).toBe('different-user')
   })
 
-  it('limits automatic retries across reloads and never retries refresh', async () => {
+  it('does not dispatch a legacy retry marker on reload', async () => {
     const epoch = 'pending-logout'
     localStorage.setItem('uni-space.auth-epoch', epoch)
     localStorage.setItem(
       authStorageKey,
-      JSON.stringify({
-        epoch,
-        blocked: true,
-        pending: false,
-        logoutRetry: { attempts: 0 },
-      }),
+      JSON.stringify({ epoch, blocked: true, pending: false, logoutRetry: { attempts: 0 } }),
     )
-    const fetchMock = vi.fn().mockRejectedValue(new TypeError('offline'))
+    const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const session = createSession().session
-      await session.start()
-    }
-    expect(fetchMock).toHaveBeenCalledTimes(3)
-    expect(fetchMock.mock.calls.every(([path]) => path === '/api/v1/auth/logout')).toBe(true)
-    expect(JSON.parse(localStorage.getItem(authStorageKey)!).logoutRetry.attempts).toBe(3)
+    await createSession().session.start()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 
@@ -953,9 +898,10 @@ describe('bounded Web Lock acquisition', () => {
         expect(session.getSnapshot().busy).toBe(false)
         expect(session.getSnapshot().message).toMatch(
           operation === 'logout'
-            ? /завершить выход|восстановлении соединения/
+            ? /Не удалось завершить выход. Войдите снова/
             : /Попробуйте ещё раз/,
         )
+        expect(session.getSnapshot().message).not.toMatch(/повторим|восстановлении соединения/i)
         expect(session.getSnapshot().message).not.toMatch(/lock|сесс|refresh|logout/i)
         expect(fetchMock).not.toHaveBeenCalled()
       } finally {

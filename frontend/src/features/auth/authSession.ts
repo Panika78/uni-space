@@ -11,18 +11,12 @@ type SharedState = {
   blocked: boolean
   pending: boolean
   ended?: boolean
-  logoutRetry?: { attempts: number }
 }
 export const authStorageKey = 'uni-space.auth-state'
 export const authEpochStorageKey = 'uni-space.auth-epoch'
 const emptyState: SharedState = { epoch: 'initial', blocked: false, pending: false }
-const maxAutomaticLogoutRetries = 3
 const compatibilityMessage =
   'Для безопасного входа нужен современный браузер с поддержкой нескольких вкладок и хранилища сайта.'
-const logoutRetryMessage =
-  'Не удалось завершить выход. Повторим попытку при восстановлении соединения.'
-const logoutRetryExhaustedMessage =
-  'Автоматически завершить выход не удалось. Войдите снова, чтобы продолжить.'
 const logoutUnconfirmedMessage = 'Не удалось завершить выход. Войдите снова, чтобы продолжить.'
 type AuthSnapshot = {
   status: Status
@@ -36,7 +30,6 @@ export class AuthSession {
   private listeners = new Set<() => void>()
   private refreshPromise: Promise<void> | undefined
   private startPromise: Promise<void> | undefined
-  private logoutRetryPromise: Promise<void> | undefined
   private epoch = 'initial'
   private snapshot: AuthSnapshot = {
     status: 'initializing',
@@ -78,12 +71,7 @@ export class AuthSession {
       typeof value !== 'object' ||
       typeof value.epoch !== 'string' ||
       typeof value.blocked !== 'boolean' ||
-      typeof value.pending !== 'boolean' ||
-      (value.logoutRetry !== undefined &&
-        (value.logoutRetry === null ||
-          typeof value.logoutRetry !== 'object' ||
-          !Number.isSafeInteger(value.logoutRetry.attempts) ||
-          value.logoutRetry.attempts < 0))
+      typeof value.pending !== 'boolean'
     )
       throw new ApiClientError('Invalid auth coordination state', 'invalid_auth_state')
     return value
@@ -184,17 +172,8 @@ export class AuthSession {
       }
       this.epoch = this.readEpoch()
       const state = this.readState()
-      if (state.epoch === this.epoch && state.blocked && !state.pending && state.logoutRetry) {
-        this.clearSession(
-          state.logoutRetry.attempts >= maxAutomaticLogoutRetries
-            ? logoutRetryExhaustedMessage
-            : logoutRetryMessage,
-        )
-        await this.resumePendingLogout()
-        return
-      }
-      // A confirmed end needs no cookie operation, even when another tab holds the lock.
-      if (state.epoch === this.epoch && state.ended === true && !state.pending) {
+      // A blocked logout or confirmed end never restores the old cookie on reload.
+      if (state.epoch === this.epoch && (state.blocked || state.ended) && !state.pending) {
         this.clearSession()
         return
       }
@@ -288,13 +267,7 @@ export class AuthSession {
 
   login = async (body: LoginRequest) => {
     let epoch: string | undefined
-    let deferredLogout: SharedState['logoutRetry']
     try {
-      try {
-        deferredLogout = this.readState().logoutRetry
-      } catch (error) {
-        if (!isInvalidAuthState(error)) throw error
-      }
       const change = this.beginChange()
       epoch = change.epoch
       await this.withLock(async () => {
@@ -331,21 +304,6 @@ export class AuthSession {
             // A definitive rejection cannot create a session; uncertainty still stays blocked.
             this.writeState({ epoch: epoch!, blocked: true, pending: false, ended: true })
           }
-          if (
-            deferredLogout &&
-            error instanceof ApiClientError &&
-            error.status === 401 &&
-            error.code === 'invalid_credentials' &&
-            this.readEpoch() === epoch
-          ) {
-            // A rejected credential check cannot create/replace the browser cookie.
-            this.writeState({
-              epoch: epoch!,
-              blocked: true,
-              pending: false,
-              logoutRetry: deferredLogout,
-            })
-          }
           throw error
         }
         this.requireCurrent(epoch!)
@@ -375,14 +333,8 @@ export class AuthSession {
         this.requireCurrent(epoch!)
         if (this.readState().epoch !== sourceJournalEpoch)
           throw new DOMException('Authorization changed', 'AbortError')
-        // Persist the exact logout generation before dispatch. A later login changes
-        // auth-epoch, so recovery will never act on that newer cookie.
-        this.writeState({
-          epoch: epoch!,
-          blocked: true,
-          pending: false,
-          logoutRetry: { attempts: 0 },
-        })
+        // Block cookie restoration before dispatch, including lost responses.
+        this.writeState({ epoch: epoch!, blocked: true, pending: false })
         const result = await apiFetch<LogoutResponse>('/api/v1/auth/logout', {
           method: 'POST',
           headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
@@ -392,7 +344,7 @@ export class AuthSession {
         })
         this.requireCurrent(epoch!)
         if (!result.session_revoked) {
-          this.update('unauthenticated', logoutRetryMessage)
+          this.update('unauthenticated', logoutUnconfirmedMessage)
           return
         }
         this.writeState({ epoch: epoch!, blocked: true, pending: false, ended: true })
@@ -408,93 +360,8 @@ export class AuthSession {
             ? ''
             : isCoordinationUnavailable(error)
               ? compatibilityMessage
-              : isInvalidAuthState(error)
-                ? logoutUnconfirmedMessage
-                : logoutRetryMessage,
+              : logoutUnconfirmedMessage,
         )
-    }
-  }
-
-  resumePendingLogout = (): Promise<void> => {
-    this.logoutRetryPromise ??= this.retryPendingLogout().finally(() => {
-      this.logoutRetryPromise = undefined
-    })
-    return this.logoutRetryPromise
-  }
-
-  private async retryPendingLogout() {
-    if (navigator.onLine === false) return
-    let epoch: string
-    try {
-      epoch = this.readEpoch()
-      const state = this.readState()
-      if (
-        state.epoch !== epoch ||
-        !state.blocked ||
-        state.pending ||
-        !state.logoutRetry ||
-        state.logoutRetry.attempts >= maxAutomaticLogoutRetries
-      )
-        return
-    } catch {
-      this.clearSession(compatibilityMessage)
-      return
-    }
-
-    try {
-      await this.withLock(async () => {
-        this.requireCurrent(epoch)
-        const current = this.readState()
-        const retry = current.logoutRetry
-        if (
-          current.epoch !== epoch ||
-          !current.blocked ||
-          current.pending ||
-          !retry ||
-          retry.attempts >= maxAutomaticLogoutRetries
-        )
-          return
-
-        // Claim before sending so sibling tabs and a closing document cannot
-        // create an unbounded retry loop. The fixed shared cap bounds all tabs.
-        this.writeState({
-          ...current,
-          logoutRetry: { attempts: retry.attempts + 1 },
-        })
-        const result = await apiFetch<LogoutResponse>('/api/v1/auth/logout', {
-          method: 'POST',
-          redirect: 'error',
-          credentials: 'same-origin',
-          signal: AbortSignal.timeout(15000),
-        })
-        this.requireCurrent(epoch)
-        if (!result.session_revoked) {
-          const state = this.readState()
-          this.clearSession(
-            state.logoutRetry && state.logoutRetry.attempts >= maxAutomaticLogoutRetries
-              ? logoutRetryExhaustedMessage
-              : logoutRetryMessage,
-          )
-          return
-        }
-        this.writeState({ epoch, blocked: true, pending: false, ended: true })
-        this.update('unauthenticated')
-      })
-    } catch (error) {
-      try {
-        if (this.readEpoch() === epoch) {
-          const state = this.readState()
-          this.clearSession(
-            state.logoutRetry && state.logoutRetry.attempts >= maxAutomaticLogoutRetries
-              ? logoutRetryExhaustedMessage
-              : isCoordinationUnavailable(error)
-                ? compatibilityMessage
-                : logoutRetryMessage,
-          )
-        }
-      } catch {
-        this.clearSession(compatibilityMessage)
-      }
     }
   }
 
