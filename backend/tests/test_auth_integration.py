@@ -200,6 +200,59 @@ def test_login_rotation_cookie_and_logout_revoke_access(auth):
     assert_error(client.refresh(current), 401, "invalid_refresh")
 
 
+def test_successful_login_revokes_the_presented_browser_session(auth):
+    client, engine, ids, logins, _student_ids = auth
+    _response, previous_refresh, previous_access = login(auth)
+    _response, independent_refresh, independent_access = login(auth)
+
+    replacement = client.login(
+        token=previous_refresh,
+        json={"login": logins[0], "password": PASSWORD},
+    )
+
+    assert replacement.status_code == 200, replacement.text
+    replacement_refresh = replacement.cookies[COOKIE_NAME]
+    assert replacement_refresh != previous_refresh
+    assert_error(
+        client.request("GET", "/api/v1/test/user", access=previous_access),
+        401,
+        "session_invalid",
+    )
+    assert_error(client.refresh(previous_refresh), 401, "invalid_refresh")
+    assert (
+        client.request(
+            "GET", "/api/v1/test/user", access=replacement.json()["access_token"]
+        ).status_code
+        == 200
+    )
+    assert client.request("GET", "/api/v1/test/user", access=independent_access).status_code == 200
+    assert client.refresh(independent_refresh).status_code == 200
+
+    with Session(engine) as db:
+        sessions = db.scalars(
+            select(AuthSession).where(AuthSession.user_id == ids[0]).order_by(AuthSession.id)
+        ).all()
+        assert len(sessions) == 3
+        assert sessions[0].revoked_at is not None
+        assert sessions[0].revocation_reason == "login_replaced"
+        assert sessions[1].revoked_at is None
+        assert sessions[2].revoked_at is None
+
+
+def test_rejected_login_does_not_revoke_the_presented_browser_session(auth):
+    client, _engine, _ids, logins, _student_ids = auth
+    _response, refresh_token, access = login(auth)
+
+    rejected = client.login(
+        token=refresh_token,
+        json={"login": logins[0], "password": "incorrect-fictional-password"},
+    )
+
+    assert_error(rejected, 401, "invalid_credentials")
+    assert client.request("GET", "/api/v1/test/user", access=access).status_code == 200
+    assert client.refresh(refresh_token).status_code == 200
+
+
 def test_reuse_commits_revocation_and_keeps_other_session_independent(auth):
     client, engine, _ids, _logins, _student_ids = auth
     _response, old, access = login(auth)

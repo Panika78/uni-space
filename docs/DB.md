@@ -91,7 +91,7 @@
 | `auth_sessions` | `expires_at` | `TIMESTAMPTZ`, NOT NULL | **Абсолютный** срок действия сессии |
 | `auth_sessions` | `last_used_at` | `TIMESTAMPTZ NULL` | Последний успешный refresh; не обновляется на каждом чтении расписания |
 | `auth_sessions` | `revoked_at` | `TIMESTAMPTZ NULL` | Момент отзыва сессии |
-| `auth_sessions` | `revocation_reason` | `TEXT NULL` либо ограниченный код | Причина отзыва: `logout`, `reuse_detected`, `user_blocked`, `admin_revoked` и др. |
+| `auth_sessions` | `revocation_reason` | `TEXT NULL` либо ограниченный код | Причина отзыва: `logout`, `login_replaced`, `reuse_detected`, `user_blocked`, `admin_revoked` и др. |
 | `refresh_tokens` | `id` | PK | Идентификатор записи токена |
 | `refresh_tokens` | `session_id` | FK → `auth_sessions.id`, NOT NULL | Сессия/семейство токенов |
 | `refresh_tokens` | `token_hash` | `BYTEA` (SHA-256), NOT NULL, UNIQUE | Хеш криптографически случайного токена; не исходное значение |

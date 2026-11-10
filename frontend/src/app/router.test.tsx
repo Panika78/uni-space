@@ -9,7 +9,6 @@ const auth = vi.hoisted(() => ({
   status: 'unauthenticated' as 'initializing' | 'authenticated' | 'unauthenticated',
   message: '',
   busy: false,
-  canRetryLogout: false,
   login: vi.fn(),
   logout: vi.fn(),
 }))
@@ -21,7 +20,6 @@ afterEach(() => {
   auth.status = 'unauthenticated'
   auth.message = ''
   auth.busy = false
-  auth.canRetryLogout = false
   auth.login.mockReset()
   auth.logout.mockReset()
 })

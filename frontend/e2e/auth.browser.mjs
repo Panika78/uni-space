@@ -262,29 +262,25 @@ try {
   )
   fault = 'lose-logout'
   await clickLogout(page)
-  await page.getByText(/сервер не подтвердил выход/).waitFor()
-  assert.equal(
-    await page.getByRole('button', { name: 'Повторить выход', exact: true }).isVisible(),
-    true,
-  )
+  await page.getByText(/Не удалось завершить выход/).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   const sentLogout = await fallbackRequest
   assert.ok((await sentLogout.headerValue('authorization'))?.startsWith('Bearer '))
   assert.ok(!(await sentLogout.headerValue('cookie'))?.includes('uni_space_refresh='))
   const beforeReload = requests.length
   await page.reload()
   await heading(page, 'Вход')
-  await page.getByText(/Не удалось подтвердить состояние сессии/).waitFor()
-  assert.equal(
-    await page.getByRole('button', { name: 'Повторить выход', exact: true }).isVisible(),
-    true,
-  )
+  assert.equal(await page.getByRole('status').count(), 0)
+  assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   assert.equal(requests.slice(beforeReload).filter((path) => path.endsWith('/refresh')).length, 0)
   fault = ''
-  await page.getByRole('button', { name: 'Повторить выход', exact: true }).click()
-  await page.getByText('Вы вышли из приложения.', { exact: true }).waitFor()
+  await login(page, loginA)
   assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
-  assert.ok(!(await page.locator('body').innerText()).includes('сервер не подтвердил выход'))
-  check('lost real logout response, reload blocks restoration and explicit retry succeeds')
+  check('lost real logout response returns to ordinary login and successful login restores access')
+  const replacementCookie = (await context.cookies()).find(
+    (value) => value.name === 'uni_space_refresh',
+  )
+  assert.ok(replacementCookie)
   // This refresh was current and unused when the cookie was removed.
   await context.addCookies([fallbackCookie])
   const revokedRefresh = await page.evaluate(async () => {
@@ -292,12 +288,11 @@ try {
     return { status: response.status, code: (await response.json()).error?.code }
   })
   assert.deepEqual(revokedRefresh, { status: 401, code: 'invalid_refresh' })
-  await context.clearCookies()
+  await context.addCookies([replacementCookie])
   check(
     'logout without a cookie sends Bearer and revokes the real session despite its lost response',
   )
 
-  await login(page, loginA)
   await context.route(`**${testPath}`, (route) =>
     route.fulfill({ status: 401, json: apiError('access_expired') }),
   )
@@ -339,28 +334,21 @@ try {
   check('closing the lock holder after rotation leaves a durable recovery barrier')
   // A closing document may run fetch-abort cleanup before destruction, marking
   // the lost refresh response as blocked and hiding the other tabs as well.
-  const hasLogoutButton = await hasVisibleLogoutAction(page)
-  if (!hasLogoutButton) {
-    const journal = await page.evaluate(() =>
-      JSON.parse(localStorage.getItem('uni-space.auth-state')),
-    )
-    assert.equal(journal.blocked, true)
-    assert.equal(journal.pending, true)
-    assert.notEqual(journal.ended, true)
-    await heading(page, 'Вход')
-  }
-  if (hasLogoutButton) await clickLogout(page)
-  else await page.getByRole('button', { name: 'Повторить выход', exact: true }).click()
+  const journal = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('uni-space.auth-state')),
+  )
+  assert.equal(journal.blocked, true)
+  assert.equal(journal.pending, true)
+  assert.notEqual(journal.ended, true)
   await Promise.all([heading(page, 'Вход'), heading(second, 'Вход')])
-  await second.waitForFunction(() => document.querySelector('[role="status"]') === null)
-  const refreshAfterLogout = requests.filter((path) => path.endsWith('/refresh')).length
+  assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
+  const refreshAfterFailure = requests.filter((path) => path.endsWith('/refresh')).length
+  await login(page, loginA)
   await Promise.all([page.reload(), second.reload()])
-  await Promise.all([heading(page, 'Вход'), heading(second, 'Вход')])
-  assert.equal(await page.getByRole('status').count(), 0)
-  assert.equal(await second.getByRole('status').count(), 0)
-  assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, refreshAfterLogout)
+  await Promise.all([heading(page, 'Расписание'), heading(second, 'Расписание')])
+  assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, refreshAfterFailure + 2)
   check(
-    'confirmed logout synchronizes both tabs and reload shows login without warnings or refresh',
+    'failed refresh returns to login; an ordinary login restores both tabs without replaying refresh',
   )
 
   // Auth errors controlled only for feedback; backend origin protection stays enabled.
@@ -397,10 +385,10 @@ try {
     await page.getByRole('button', { name: 'Войти', exact: true }).click()
     const expected =
       scenario === 'server'
-        ? 'Сервис входа временно недоступен'
+        ? 'Не удалось выполнить вход'
         : scenario === 'network'
           ? 'Проверьте соединение'
-          : 'Запрос мог быть выполнен'
+          : 'Проверьте соединение'
     await page.getByText(new RegExp(expected)).waitFor()
     const message = await page.getByRole('status').innerText()
     assert.ok(!/Web Locks|internal server detail|Проверьте данные/.test(message))
@@ -454,7 +442,8 @@ try {
     route.fulfill({ status: 307, headers: { Location: logoutTarget } }),
   )
   await clickLogout(page)
-  await page.getByText(/сервер не подтвердил выход/).waitFor()
+  await page.getByText(/Не удалось завершить выход/).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   assert.equal(logoutRedirects, 0)
   await context.unroute('**/api/v1/auth/logout')
   await context.unroute(logoutTarget)
@@ -468,8 +457,8 @@ try {
   const beforeWaitingLogout = countAuth()
   await clickLogout(page)
   await heading(page, 'Вход')
-  await page.getByText(/Закройте зависшую вкладку/).waitFor()
-  assert.ok((await page.getByRole('status').innerText()).includes('отзыв сессии не подтверждён'))
+  await page.getByText(/Не удалось завершить выход/).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   assert.equal(await page.getByRole('button', { name: 'Войти', exact: true }).isEnabled(), true)
   assert.equal(countAuth(), beforeWaitingLogout)
   await releaseAuthLock()
@@ -485,7 +474,7 @@ try {
   await page.getByLabel('Логин', { exact: true }).fill(loginA)
   await page.getByLabel('Пароль', { exact: true }).fill(password)
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
-  await page.getByText(/Закройте зависшую вкладку/).waitFor()
+  await page.getByText(/Попробуйте ещё раз/).waitFor()
   assert.equal(await page.getByRole('button', { name: 'Войти', exact: true }).isEnabled(), true)
   await releaseAuthLock()
   await page.reload()
@@ -501,16 +490,13 @@ try {
   const bootstrapping = await context.newPage()
   await bootstrapping.goto(`${baseURL}/schedule`)
   await bootstrapping.getByText('Проверяем сессию…', { exact: true }).waitFor()
-  await bootstrapping.getByText(/Закройте зависшую вкладку/).waitFor()
   await heading(bootstrapping, 'Вход')
-  assert.ok(!(await bootstrapping.getByRole('status').innerText()).includes('Web Locks'))
+  assert.equal(await bootstrapping.getByRole('status').count(), 0)
   assert.equal(countAuth(), beforeWaitingRefresh)
   await releaseAuthLock()
   await bootstrapping.close()
   assert.equal(countAuth(), beforeWaitingRefresh)
-  check(
-    'initial refresh waiter exits initializing, reports lock contention and never dispatches late',
-  )
+  check('initial refresh waiter exits initializing to ordinary login and never dispatches late')
 
   for (const unavailable of ['locks', 'storage']) {
     const unsupportedContext = await browser.newContext({ viewport: { width: 360, height: 800 } })

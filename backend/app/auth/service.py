@@ -32,7 +32,11 @@ def create_refresh_token(
 
 
 def create_login_session(
-    db: Session, login: str, password: str, settings: Settings
+    db: Session,
+    login: str,
+    password: str,
+    settings: Settings,
+    previous_refresh_token: str | None = None,
 ) -> tuple[AuthSession, str]:
     with db.begin():
         # Read scalar values: an ORM refresh under the later lock must not mutate
@@ -56,6 +60,12 @@ def create_login_session(
         if user is None or not user.is_active or user.password_hash != snapshot.password_hash:
             raise HTTPException(401, "invalid_credentials")
         now = datetime.now(UTC)
+        # A valid login replaces only the browser session identified by its cookie.
+        # Invalid credentials never revoke an existing session.
+        previous = get_locked_refresh_session(db, previous_refresh_token)
+        if previous:
+            previous_session, _previous_token = previous
+            revoke_session(db, previous_session, now, "login_replaced")
         session = AuthSession(
             user_id=user.id,
             created_at=now,

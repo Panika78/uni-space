@@ -96,9 +96,19 @@ def set_refresh_cookie(
     },
 )
 def login_user(
-    body: LoginRequest, response: Response, db: Database, settings: AuthSettings
+    body: LoginRequest,
+    request: Request,
+    response: Response,
+    db: Database,
+    settings: AuthSettings,
 ) -> dict:
-    session, token = create_login_session(db, body.login, body.password, settings)
+    session, token = create_login_session(
+        db,
+        body.login,
+        body.password,
+        settings,
+        previous_refresh_token=request.cookies.get(COOKIE_NAME),
+    )
     access = create_access_token(session, settings)
     set_refresh_cookie(response, token, session.expires_at, settings)
     return access

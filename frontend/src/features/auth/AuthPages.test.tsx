@@ -126,7 +126,7 @@ it('shows rate feedback and clears password without resubmission', async () => {
   expect(fetchMock).toHaveBeenCalledTimes(2)
 })
 
-it('offers logout retry only while the auth journal records an unconfirmed session end', async () => {
+it('keeps the ordinary login form after an uncertain logout and recovers on the next login', async () => {
   const fetchMock = vi
     .fn()
     .mockResolvedValueOnce(
@@ -139,7 +139,9 @@ it('offers logout retry only while the auth journal records an unconfirmed sessi
       Response.json({ access_token: 'test-access', token_type: 'bearer', expires_in: 600 }),
     )
     .mockRejectedValueOnce(new TypeError('connection lost'))
-    .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    .mockResolvedValueOnce(
+      Response.json({ access_token: 'replacement-access', token_type: 'bearer', expires_in: 600 }),
+    )
   vi.stubGlobal('fetch', fetchMock)
   renderRoute('/login')
   const user = userEvent.setup()
@@ -149,15 +151,32 @@ it('offers logout retry only while the auth journal records an unconfirmed sessi
   expect(await screen.findByRole('heading', { name: 'Расписание' })).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await user.click(screen.getByRole('button', { name: 'Выйти' }))
-  const retry = await screen.findByRole('button', { name: 'Повторить выход' })
-  expect(screen.getByRole('status')).toHaveTextContent('сервер не подтвердил выход')
-  await user.click(retry)
-  expect(await screen.findByText('Вы вышли из приложения.')).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent('Войдите снова')
+  expect(screen.queryByRole('button', { name: /Повторить выход/ })).not.toBeInTheDocument()
+  expect(screen.getByLabelText('Логин')).toBeEnabled()
+  await user.type(screen.getByLabelText('Логин'), 'fictional')
+  await user.type(screen.getByLabelText('Пароль'), 'fictional-password')
+  await user.click(screen.getByRole('button', { name: 'Войти' }))
+  expect(await screen.findByRole('heading', { name: 'Расписание' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
   expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
     '/api/v1/auth/refresh',
     '/api/v1/auth/login',
     '/api/v1/auth/logout',
-    '/api/v1/auth/logout',
+    '/api/v1/auth/login',
   ])
+})
+
+it('shows the ordinary login form without a technical message when refresh cannot be recovered', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('private transport detail')))
+  renderRoute()
+  expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
+  expect(screen.getByLabelText('Логин')).toBeEnabled()
+  expect(screen.getByLabelText('Пароль')).toBeEnabled()
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  expect(
+    screen.queryByText(/refresh|сессии|выход|Web Locks|private transport/i),
+  ).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /Повторить выход/ })).not.toBeInTheDocument()
 })

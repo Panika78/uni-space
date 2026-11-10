@@ -13,12 +13,8 @@ type AuthSnapshot = {
   status: Status
   message: string
   busy: boolean
-  canRetryLogout: boolean
 }
-const lockWaitMessage =
-  'Операция не началась: её блокирует другая вкладка. Закройте зависшую вкладку и повторите действие.'
-const interruptedMessage =
-  'Не удалось подтвердить состояние сессии. Войдите снова или повторите выход.'
+const logoutErrorMessage = 'Не удалось завершить выход. Войдите снова, чтобы продолжить.'
 
 export class AuthSession {
   private token: string | undefined
@@ -31,7 +27,6 @@ export class AuthSession {
     status: 'initializing',
     message: '',
     busy: false,
-    canRetryLogout: false,
   }
 
   constructor(private queryClient: QueryClient) {}
@@ -44,8 +39,8 @@ export class AuthSession {
     }
   }
 
-  private update(status: Status, message = '', busy = false, canRetryLogout = false) {
-    this.snapshot = { status, message, busy, canRetryLogout }
+  private update(status: Status, message = '', busy = false) {
+    this.snapshot = { status, message, busy }
     this.listeners.forEach((listener) => listener())
   }
 
@@ -70,45 +65,31 @@ export class AuthSession {
     localStorage.setItem(authStorageKey, JSON.stringify(state))
   }
 
-  private clearSession(message = '', canRetryLogout = false) {
+  private clearSession(message = '') {
     this.token = undefined
     this.generation.abort()
     this.generation = new AbortController()
     void this.queryClient.cancelQueries()
     this.queryClient.clear()
-    this.update('unauthenticated', message, false, canRetryLogout)
+    this.update('unauthenticated', message)
   }
 
   synchronize = () => {
     try {
-      const hasJournal = localStorage.getItem(authStorageKey) !== null
       const state = this.readState()
       const epoch = this.readEpoch()
       const hasEnded = state.epoch === epoch && state.ended === true && !state.pending
-      const canRetryLogout =
-        !hasEnded &&
-        (state.epoch !== epoch || state.blocked || state.pending || state.ended === true)
       if (
         epoch !== this.epoch ||
-        (this.snapshot.status === 'unauthenticated' &&
-          this.snapshot.canRetryLogout !== canRetryLogout &&
-          (canRetryLogout || hasJournal)) ||
         (hasEnded &&
           (this.snapshot.status !== 'unauthenticated' || this.snapshot.message !== '')) ||
         ((state.blocked || state.ended) && this.snapshot.status === 'authenticated')
       ) {
         this.epoch = epoch
-        this.clearSession(
-          hasEnded
-            ? ''
-            : state.blocked || state.pending
-              ? interruptedMessage
-              : 'Авторизация изменена в другой вкладке. Войдите снова или обновите страницу.',
-          canRetryLogout,
-        )
+        this.clearSession()
       }
     } catch {
-      this.clearSession('Для входа разрешите локальное хранилище браузера.')
+      this.clearSession()
     }
   }
 
@@ -123,7 +104,9 @@ export class AuthSession {
       throw new ApiClientError('Web Locks unavailable', 'coordination_unavailable')
     const controller = new AbortController()
     const timer = setTimeout(() => {
-      controller.abort(new ApiClientError(lockWaitMessage, 'lock_wait_timeout'))
+      controller.abort(
+        new ApiClientError('Authentication lock wait timed out', 'lock_wait_timeout'),
+      )
     }, 10000)
     try {
       return await navigator.locks.request('uni-space.auth', { signal: controller.signal }, () => {
@@ -163,15 +146,8 @@ export class AuthSession {
       }
       await this.refresh()
     } catch (error) {
-      const hasLockTimeout = error instanceof ApiClientError && error.code === 'lock_wait_timeout'
-      if (hasLockTimeout && this.snapshot.status !== 'unauthenticated') this.synchronize()
-      if (this.snapshot.status === 'initializing')
-        this.clearSession(
-          hasLockTimeout
-            ? lockWaitMessage
-            : 'Вход недоступен. Нужен браузер с Web Locks и доступным локальным хранилищем.',
-          hasLockTimeout,
-        )
+      if (error instanceof ApiClientError && error.code === 'lock_wait_timeout') this.synchronize()
+      if (this.snapshot.status === 'initializing') this.clearSession()
     }
   }
 
@@ -188,8 +164,7 @@ export class AuthSession {
       this.requireCurrent(epoch)
       const state = this.readState()
       if (state.epoch !== epoch || state.blocked || state.pending || state.ended) {
-        const hasEnded = state.epoch === epoch && state.ended === true && !state.pending
-        this.clearSession(hasEnded ? '' : interruptedMessage, !hasEnded)
+        this.clearSession()
         throw new DOMException('Session recovery blocked', 'AbortError')
       }
       // Durable before dispatch: closing a tab or losing a response must never retry this cookie.
@@ -217,7 +192,7 @@ export class AuthSession {
             blocked: !isUnauthenticated,
             ended: isUnauthenticated,
           })
-          this.clearSession(isUnauthenticated ? '' : interruptedMessage, !isUnauthenticated)
+          this.clearSession()
         }
         throw error
       }
@@ -228,7 +203,7 @@ export class AuthSession {
         this.readEpoch() === epoch
       ) {
         // No cookie was sent and no journal entry is ours to change.
-        this.clearSession(lockWaitMessage, true)
+        this.clearSession()
       }
       throw error
     })
@@ -258,17 +233,7 @@ export class AuthSession {
 
   login = async (body: LoginRequest) => {
     let epoch: string | undefined
-    let hadUnresolvedSession = false
     try {
-      try {
-        const previousState = this.readState()
-        hadUnresolvedSession =
-          previousState.epoch === this.readEpoch() &&
-          (previousState.blocked || previousState.pending) &&
-          previousState.ended !== true
-      } catch {
-        // Storage failures are reported by beginChange; they do not imply a remote session.
-      }
       const change = this.beginChange()
       epoch = change.epoch
       await this.withLock(async () => {
@@ -308,12 +273,7 @@ export class AuthSession {
       })
     } catch (error) {
       if (epoch === undefined || this.epoch === epoch)
-        this.update(
-          'unauthenticated',
-          getLoginErrorMessage(error),
-          false,
-          hadUnresolvedSession || mayHaveCreatedSession(error),
-        )
+        this.update('unauthenticated', getLoginErrorMessage(error))
     }
   }
 
@@ -348,11 +308,7 @@ export class AuthSession {
       if (epoch === undefined || this.epoch === epoch)
         this.update(
           'unauthenticated',
-          error instanceof ApiClientError && error.code === 'lock_wait_timeout'
-            ? `Данные скрыты; отзыв сессии не подтверждён. ${lockWaitMessage}`
-            : 'Данные скрыты, но сервер не подтвердил выход. Повторите выход или войдите снова.',
-          false,
-          epoch !== undefined && !(error instanceof DOMException && error.name === 'AbortError'),
+          error instanceof DOMException && error.name === 'AbortError' ? '' : logoutErrorMessage,
         )
     }
   }
@@ -386,32 +342,19 @@ export class AuthSession {
   }
 }
 
-function mayHaveCreatedSession(error: unknown) {
-  if (error instanceof DOMException) return error.name === 'TimeoutError'
-  if (error instanceof ApiClientError) {
-    // A malformed success response can arrive after the server set its refresh cookie.
-    // Keep private UI locked, but allow an explicit logout to revoke that uncertain session.
-    if (error.code === 'invalid_response') return true
-    if (error.status !== undefined) return error.status >= 500 && error.status < 600
-    return error.code === 'network_error'
-  }
-  return true
-}
-
 export function getLoginErrorMessage(error: unknown) {
   if (error instanceof DOMException) {
     if (error.name === 'TimeoutError')
-      return 'Сервер не подтвердил вход вовремя. Запрос мог быть выполнен. Войдите снова или повторите выход.'
+      return 'Не удалось выполнить вход. Проверьте соединение и попробуйте ещё раз.'
     if (error.name === 'AbortError') return ''
   }
-  if (!(error instanceof ApiClientError)) return 'Не удалось подтвердить вход. Попробуйте позже.'
+  if (!(error instanceof ApiClientError)) return 'Не удалось выполнить вход. Попробуйте ещё раз.'
   if (error.status !== undefined && error.status >= 500 && error.status < 600)
-    return 'Сервис входа временно недоступен. Попробуйте позже.'
+    return 'Не удалось выполнить вход. Попробуйте позже.'
   switch (error.code) {
     case 'lock_wait_timeout':
-      return lockWaitMessage
     case 'coordination_unavailable':
-      return 'Вход недоступен в этом браузере. Проверьте поддержку Web Locks и доступ к хранилищу.'
+      return 'Не удалось выполнить вход. Попробуйте ещё раз.'
     case 'invalid_credentials':
       return 'Неверный логин или пароль.'
     case 'rate_limited': {
@@ -431,9 +374,9 @@ export function getLoginErrorMessage(error: unknown) {
     case 'origin_not_allowed':
       return 'Вход с этого адреса недоступен. Обратитесь к администратору.'
     case 'network_error':
-      return 'Не удалось подтвердить вход. Проверьте соединение и войдите снова.'
+      return 'Не удалось выполнить вход. Проверьте соединение и попробуйте ещё раз.'
     default:
-      return 'Не удалось войти. Проверьте данные и повторите попытку.'
+      return 'Не удалось выполнить вход. Попробуйте ещё раз.'
   }
 }
 
