@@ -34,6 +34,34 @@ const trimPythonWhitespace = (text: string) => {
   return characters.slice(start, end).join('')
 }
 
+function isApplicationResponse(value: unknown, placeOfSubmission: string): value is Application {
+  if (typeof value !== 'object' || value === null) return false
+  const application = value as Record<string, unknown>
+  const service = application.service
+  const formData = application.form_data
+  const isId = (id: unknown) => typeof id === 'string' && /^[1-9][0-9]*$/.test(id)
+  const isDateTime = (dateTime: unknown) =>
+    typeof dateTime === 'string' && !Number.isNaN(Date.parse(dateTime))
+
+  if (typeof service !== 'object' || service === null) return false
+  if (typeof formData !== 'object' || formData === null) return false
+  const serviceResponse = service as Record<string, unknown>
+  const formDataResponse = formData as Record<string, unknown>
+
+  return (
+    isId(application.id) &&
+    isId(serviceResponse.id) &&
+    serviceResponse.code === 'study_certificate' &&
+    typeof serviceResponse.title === 'string' &&
+    formDataResponse.place_of_submission === placeOfSubmission &&
+    application.review_status === 'submitted' &&
+    application.document_status === 'pending' &&
+    application.feedback === null &&
+    isDateTime(application.created_at) &&
+    isDateTime(application.updated_at)
+  )
+}
+
 export function ServicesPage() {
   const [services, setServices] = useState<Service[] | null>(null)
   const [error, setError] = useState(false)
@@ -54,8 +82,7 @@ export function ServicesPage() {
     }
   }, [])
   return (
-    <section className="section-page service-page">
-      <p className="section-eyebrow">Студенческий кабинет</p>
+    <section className="section-page service-page service-catalog-page">
       <h1>Услуги и документы</h1>
       <p>Выберите доступную услугу.</p>
       {error ? (
@@ -68,16 +95,49 @@ export function ServicesPage() {
       ) : services.length === 0 ? (
         <p>Сейчас нет доступных услуг.</p>
       ) : (
-        <div className="service-card">
-          <div>
-            <span aria-hidden="true">▤</span>
-            <h2>{services[0].title}</h2>
+        <article className="service-card" aria-labelledby="study-certificate-title">
+          <div className="service-card__icon-box" aria-hidden="true">
+            <svg viewBox="0 0 64 64" fill="none">
+              <path
+                d="M19 8.5h18l14 14V54a3.5 3.5 0 0 1-3.5 3.5h-28A3.5 3.5 0 0 1 16 54V12a3.5 3.5 0 0 1 3-3.5Z"
+                stroke="currentColor"
+                strokeWidth="3.5"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M37 9v14h14M24 36h18M24 45h18"
+                stroke="currentColor"
+                strokeWidth="3.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+          <span className="service-card__divider" aria-hidden="true" />
+          <div className="service-card__content">
+            <h2 id="study-certificate-title">{services[0].title}</h2>
             <p>Подайте заявление на получение справки об обучении.</p>
+            <ul className="service-card__badges" aria-label="Характеристики услуги">
+              <li>
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <rect x="2.5" y="3.5" width="15" height="11" rx="1.5" />
+                  <path d="M1.5 17h17M7 14.5l-.7 2.5m6.7-2.5.7 2.5" />
+                </svg>
+                Онлайн
+              </li>
+              <li>
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M6 2.5h6l5 5v9A1.5 1.5 0 0 1 15.5 18h-9A1.5 1.5 0 0 1 5 16.5v-12A2 2 0 0 1 6 2.5Z" />
+                  <path d="M12 2.5v5h5M8 12h5m-5 3h5" />
+                </svg>
+                Документ
+              </li>
+            </ul>
           </div>
           <Link className="service-action" to={`/services/${services[0].code}`}>
             Подать заявление
           </Link>
-        </div>
+        </article>
       )}
     </section>
   )
@@ -150,7 +210,7 @@ export function ApplicationFormPage() {
     inFlight.current = true
     setPending(true)
     try {
-      const result = await apiFetch<Application>('/api/v1/applications', {
+      const result = await apiFetch<unknown>('/api/v1/applications', {
         method: 'POST',
         authenticated: true,
         signal: AbortSignal.timeout(30_000),
@@ -159,6 +219,13 @@ export function ApplicationFormPage() {
           form_data: { place_of_submission: normalized },
         } satisfies CreateApplicationRequest),
       })
+      if (!isApplicationResponse(result, normalized)) {
+        throw new ApiClientError(
+          'Сервер вернул некорректное подтверждение',
+          'invalid_response',
+          201,
+        )
+      }
       setApplication(result)
     } catch (cause) {
       const fieldError =
@@ -179,7 +246,10 @@ export function ApplicationFormPage() {
         return
       }
       const uncertain =
-        !(cause instanceof ApiClientError) || cause.status === undefined || cause.status >= 500
+        !(cause instanceof ApiClientError) ||
+        cause.code === 'invalid_response' ||
+        cause.status === undefined ||
+        cause.status >= 500
       if (uncertain) setUncertain(true)
       setError(
         uncertain

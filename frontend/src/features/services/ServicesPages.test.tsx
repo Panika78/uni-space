@@ -45,6 +45,10 @@ it('loads the real service catalog and offers the separate application form', as
   )
   render(<RouterProvider router={router} />)
   expect(await screen.findByRole('heading', { name: 'Справка об обучении' })).toBeInTheDocument()
+  expect(screen.getByRole('article', { name: 'Справка об обучении' })).toBeInTheDocument()
+  expect(screen.getByText('Онлайн')).toBeInTheDocument()
+  expect(screen.getByText('Документ')).toBeInTheDocument()
+  expect(screen.queryByText(/\d+\s*[–-]\s*\d+\s*дня/)).not.toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'Подать заявление' })).toHaveAttribute(
     'href',
     '/services/study_certificate',
@@ -105,6 +109,42 @@ it('does not automatically retry an application when the response is lost', asyn
   })
   fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
   expect(await screen.findByText(/заявление могло сохраниться/i)).toBeInTheDocument()
+  expect(apiFetch).toHaveBeenCalledTimes(1)
+})
+
+it('treats an invalid 201 response as an unknown result without retrying', async () => {
+  apiFetch.mockRejectedValueOnce(
+    new ApiClientError('Сервер вернул ответ в неизвестном формате', 'invalid_response', 201),
+  )
+  const router = createMemoryRouter(
+    [{ path: '/services/:serviceCode', element: <ApplicationFormPage /> }],
+    { initialEntries: ['/services/study_certificate'] },
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.change(screen.getByLabelText(/Место предоставления/), {
+    target: { value: 'Деканат' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(/заявление могло сохраниться/i)
+  expect(screen.queryByText(/Номер заявления:/)).not.toBeInTheDocument()
+  expect(apiFetch).toHaveBeenCalledTimes(1)
+})
+
+it('does not show a confirmation for a malformed successful response', async () => {
+  apiFetch.mockResolvedValueOnce({ id: 'not-an-application-id' })
+  const router = createMemoryRouter(
+    [{ path: '/services/:serviceCode', element: <ApplicationFormPage /> }],
+    { initialEntries: ['/services/study_certificate'] },
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.change(screen.getByLabelText(/Место предоставления/), {
+    target: { value: 'Деканат' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(/заявление могло сохраниться/i)
+  expect(screen.queryByText(/Номер заявления:/)).not.toBeInTheDocument()
   expect(apiFetch).toHaveBeenCalledTimes(1)
 })
 
