@@ -756,6 +756,109 @@ with SessionLocal.begin() as db:
                     client.post("/api/v1/auth/refresh", headers=origin).status_code
                     == 401
                 )
+            if not legacy:
+                # Persist a real student application, then restart both containers while
+                # retaining Compose volumes and compare the complete row in PostgreSQL.
+                student_login = f"persistence-{secrets.token_hex(8)}"
+                student_password = secrets.token_urlsafe(24)
+                dc(
+                    "run",
+                    "--rm",
+                    "-T",
+                    "migrate",
+                    "python",
+                    "-c",
+                    """
+import sys
+from argon2 import PasswordHasher
+from app.core.database import SessionLocal
+from app.models import OrgUnit, Program, Student, StudyGroup, User
+login, password = sys.stdin.read().splitlines()
+with SessionLocal.begin() as db:
+    faculty = OrgUnit(name=login, type="faculty")
+    db.add(faculty)
+    db.flush()
+    program = Program(code=login, name=login, direction_code=login,
+                      direction_name=login, faculty_id=faculty.id)
+    db.add(program)
+    db.flush()
+    group = StudyGroup(name=login, program_id=program.id, course_number=1)
+    user = User(login=login, full_name=login, role="student", is_active=True,
+                password_hash=PasswordHasher().hash(password))
+    db.add_all([group, user])
+    db.flush()
+    db.add(Student(user_id=user.id, group_id=group.id, academic_status="enrolled"))
+""",
+                    input=f"{student_login}\n{student_password}",
+                )
+                with httpx.Client(
+                    base_url=public_origin, verify=context, trust_env=False, timeout=10
+                ) as student_client:
+                    student_auth = student_client.post(
+                        "/api/v1/auth/login",
+                        headers=origin,
+                        json={"login": student_login, "password": student_password},
+                    )
+                    assert student_auth.status_code == 200
+                    student_headers = {
+                        **origin,
+                        "Authorization": f"Bearer {student_auth.json()['access_token']}",
+                    }
+                    assert (
+                        student_client.get(
+                            "/api/v1/services", headers=student_headers
+                        ).status_code
+                        == 200
+                    )
+                    submitted = student_client.post(
+                        "/api/v1/applications",
+                        headers=student_headers,
+                        json={
+                            "service_code": "study_certificate",
+                            "form_data": {
+                                "place_of_submission": "Restart persistence — 東京"
+                            },
+                        },
+                    )
+                    assert submitted.status_code == 201
+                    application_id = int(submitted.json()["id"])
+                persisted_before = sql(
+                    f"SELECT to_jsonb(a) FROM applications a WHERE id={application_id}"
+                )
+                assert persisted_before
+                dc("restart", "api")
+                dc("up", "-d", "--wait", "--wait-timeout", "120", "api")
+                dc("restart", "db")
+                dc("up", "-d", "--wait", "--wait-timeout", "120")
+                persisted_after = sql(
+                    f"SELECT to_jsonb(a) FROM applications a WHERE id={application_id}"
+                )
+                assert persisted_after == persisted_before
+                with httpx.Client(
+                    base_url=public_origin, verify=context, trust_env=False, timeout=10
+                ) as after_restart:
+                    assert (
+                        after_restart.get(
+                            "/api/v1/services", headers=student_headers
+                        ).status_code
+                        == 200
+                    )
+                print(
+                    "PASS: PostgreSQL application row unchanged after API and DB restart with persistent volume",
+                    flush=True,
+                )
+                sql(
+                    f"""DELETE FROM applications WHERE id={application_id};
+DELETE FROM refresh_tokens WHERE session_id IN (
+    SELECT id FROM auth_sessions WHERE user_id=(SELECT id FROM users WHERE login='{student_login}')
+);
+DELETE FROM auth_sessions WHERE user_id=(SELECT id FROM users WHERE login='{student_login}');
+DELETE FROM students WHERE user_id=(SELECT id FROM users WHERE login='{student_login}');
+DELETE FROM users WHERE login='{student_login}';
+DELETE FROM study_groups WHERE name='{student_login}';
+DELETE FROM programs WHERE code='{student_login}';
+DELETE FROM org_units WHERE name='{student_login}';"""
+                )
             print(
                 "PASS: verified TLS, SPA/API, scheme, Origin, auth and cookie",
                 flush=True,

@@ -5,6 +5,8 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const baseURL = process.env.SERVICES_TEST_URL || 'http://localhost:5173'
 const login = process.env.SERVICES_TEST_LOGIN
 const password = process.env.SERVICES_TEST_PASSWORD
+const loginB = process.env.SERVICES_TEST_LOGIN_B
+const passwordB = process.env.SERVICES_TEST_PASSWORD_B || password
 assert.ok(login && password, 'Provide a fictional SERVICES_TEST_LOGIN and SERVICES_TEST_PASSWORD')
 
 const browser = await chromium.launch({
@@ -92,6 +94,110 @@ try {
   assert.equal(saved.form_data.place_of_submission, 'Канцелярия\nкорпус № 2 — 東京')
   assert.equal(postResponses.length, 1, 'The form dispatches a single POST')
   console.log('PASS: desktop catalog, form validation, navigation warning and real PostgreSQL save')
+
+  if (loginB) {
+    const savedId = String(saved.id)
+    const firstStudentData = saved.form_data.place_of_submission
+    await page.getByRole('button', { name: 'Меню пользователя' }).click()
+    await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+    await page
+      .getByRole('dialog', { name: 'Выйти из аккаунта?' })
+      .getByRole('button', { name: 'Выйти', exact: true })
+      .click()
+    await page.waitForURL(`${baseURL}/login`)
+    await page.getByLabel('Логин').fill(loginB)
+    await page.getByLabel('Пароль').fill(passwordB)
+    await page.getByRole('button', { name: 'Войти' }).click()
+    await page.waitForURL(`${baseURL}/schedule`)
+    await page.goto(`${baseURL}/services/study_certificate`)
+    const fieldB = page.getByLabel(/Место предоставления/)
+    await fieldB.waitFor()
+    assert.equal(await fieldB.inputValue(), '')
+    assert.equal(await page.getByText(`№ ${savedId}`, { exact: false }).count(), 0)
+    assert.equal(await page.getByText(firstStudentData, { exact: true }).count(), 0)
+
+    // Hold the real server response after it has committed, then switch accounts.
+    await page.getByRole('button', { name: 'Меню пользователя' }).click()
+    await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+    await page
+      .getByRole('dialog', { name: 'Выйти из аккаунта?' })
+      .getByRole('button', { name: 'Выйти', exact: true })
+      .click()
+    await page.waitForURL(`${baseURL}/login`)
+    await page.getByLabel('Логин').fill(login)
+    await page.getByLabel('Пароль').fill(password)
+    await page.getByRole('button', { name: 'Войти' }).click()
+    await page.waitForURL(`${baseURL}/schedule`)
+    await page.goto(`${baseURL}/services/study_certificate`)
+    const fieldA = page.getByLabel(/Место предоставления/)
+    await fieldA.fill('Delayed response private A')
+    let notifySaved
+    const upstreamSaved = new Promise((resolve) => {
+      notifySaved = resolve
+    })
+    let releaseResponse
+    const responseGate = new Promise((resolve) => {
+      releaseResponse = resolve
+    })
+    await page.route('**/api/v1/applications', async (route) => {
+      const upstream = await route.fetch()
+      notifySaved(upstream)
+      await responseGate
+      try {
+        await route.fulfill({ response: upstream })
+      } catch {
+        // Logout aborts the browser request; the upstream POST has already committed.
+      }
+    })
+    await page.getByRole('button', { name: 'Отправить заявление' }).click()
+    const delayed = await upstreamSaved
+    assert.equal(delayed.status(), 201)
+    const delayedBody = await delayed.json()
+    await page.getByRole('button', { name: 'Меню пользователя' }).click()
+    await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+    await page
+      .getByRole('dialog', { name: 'Потерять введённые данные и выйти?' })
+      .getByRole('button', { name: 'Выйти без сохранения' })
+      .click()
+    await page.waitForURL(`${baseURL}/login`)
+    await page.getByLabel('Логин').fill(loginB)
+    await page.getByLabel('Пароль').fill(passwordB)
+    await page.getByRole('button', { name: 'Войти' }).click()
+    await page.waitForURL(`${baseURL}/schedule`)
+    await page.goto(`${baseURL}/services/study_certificate`)
+    const latestField = page.getByLabel(/Место предоставления/)
+    await latestField.waitFor()
+    releaseResponse()
+    await page.waitForTimeout(100)
+    assert.equal(await latestField.inputValue(), '')
+    assert.equal(await page.getByText(`№ ${delayedBody.id}`, { exact: false }).count(), 0)
+    assert.equal(await page.getByText('Delayed response private A', { exact: true }).count(), 0)
+    await page.unroute('**/api/v1/applications')
+    await page.getByRole('button', { name: 'Меню пользователя' }).click()
+    await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+    await page
+      .getByRole('dialog', { name: 'Выйти из аккаунта?' })
+      .getByRole('button', { name: 'Выйти', exact: true })
+      .click()
+    await page.waitForURL(`${baseURL}/login`)
+    await page.getByLabel('Логин').fill(login)
+    await page.getByLabel('Пароль').fill(password)
+    await page.getByRole('button', { name: 'Войти' }).click()
+    await page.waitForURL(`${baseURL}/schedule`)
+    await page.goto(`${baseURL}/services/study_certificate`)
+    await page.getByLabel(/Место предоставления/).fill('Restore remaining service checks')
+    const restoreWaiter = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/v1/applications',
+    )
+    await page.getByRole('button', { name: 'Отправить заявление' }).click()
+    assert.equal((await restoreWaiter).status(), 201)
+    postResponses.splice(1)
+    console.log(
+      'PASS: student switch clears prior confirmation; delayed A POST response cannot affect B',
+    )
+  }
 
   await page.getByRole('button', { name: 'Вернуться к каталогу' }).click()
   await page.getByRole('link', { name: 'Подать заявление' }).click()

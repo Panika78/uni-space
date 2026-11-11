@@ -7,7 +7,195 @@ from sqlalchemy.orm import Session
 
 from app.dependencies.auth import get_current_student
 from app.dependencies.database import get_db_session
-from app.models import Application, OrgUnit, Program, ServiceType, Student, StudyGroup, User
+from app.models import (
+    Application,
+    AuthSession,
+    OrgUnit,
+    Program,
+    RefreshToken,
+    ServiceType,
+    Student,
+    StudyGroup,
+    User,
+)
+
+
+@pytest.mark.integration
+def test_application_http_routes_use_real_bearer_authentication(postgresql_engine):
+    """Exercise login, Bearer validation, role checks, and ownership without auth overrides."""
+    from app.auth.security import PASSWORD_HASHER
+    from app.main import app
+
+    suffix = uuid4().hex
+    password = "Task013-real-auth-test-password"
+    session = Session(postgresql_engine, expire_on_commit=False)
+    faculty = OrgUnit(name=f"Auth faculty {suffix}", type="faculty")
+    session.add(faculty)
+    session.flush()
+    program = Program(
+        code=suffix,
+        name=suffix,
+        direction_code=suffix,
+        direction_name=suffix,
+        faculty_id=faculty.id,
+    )
+    session.add(program)
+    session.flush()
+    group = StudyGroup(name=suffix, program_id=program.id, course_number=1)
+    students = [
+        User(
+            login=f"task013-{suffix}-{index}",
+            password_hash=PASSWORD_HASHER.hash(password),
+            full_name=f"Task 013 Student {index}",
+            role="student",
+            is_active=True,
+        )
+        for index in range(2)
+    ]
+    teacher = User(
+        login=f"task013-teacher-{suffix}",
+        password_hash=PASSWORD_HASHER.hash(password),
+        full_name="Task 013 Teacher",
+        role="teacher",
+        is_active=True,
+    )
+    session.add_all([group, *students, teacher])
+    session.flush()
+    student_rows = [
+        Student(user_id=user.id, group_id=group.id, academic_status="enrolled") for user in students
+    ]
+    session.add_all(student_rows)
+    session.commit()
+
+    origin = {"Origin": "http://localhost:5173"}
+    created_ids = []
+    try:
+        with TestClient(app) as anonymous:
+            for path, method, payload in (
+                ("/api/v1/services", "get", None),
+                (
+                    "/api/v1/applications",
+                    "post",
+                    {
+                        "service_code": "study_certificate",
+                        "form_data": {"place_of_submission": "X"},
+                    },
+                ),
+            ):
+                assert (
+                    getattr(anonymous, method)(
+                        path, **({"json": payload} if payload else {})
+                    ).status_code
+                    == 401
+                )
+                assert (
+                    getattr(anonymous, method)(
+                        path,
+                        headers={"Authorization": "Bearer invalid"},
+                        **({"json": payload} if payload else {}),
+                    ).status_code
+                    == 401
+                )
+
+        for user in students:
+            with TestClient(app) as client:
+                login = client.post(
+                    "/api/v1/auth/login",
+                    headers=origin,
+                    json={"login": user.login, "password": password},
+                )
+                assert login.status_code == 200
+                token = login.json()["access_token"]
+                response = client.post(
+                    "/api/v1/applications",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={
+                        "service_code": "study_certificate",
+                        "form_data": {"place_of_submission": f"Заявление {user.login} — 東京"},
+                    },
+                )
+                assert response.status_code == 201
+                created_ids.append(int(response.json()["id"]))
+                assert (
+                    response.headers["location"] == f"/api/v1/applications/{response.json()['id']}"
+                )
+
+                for payload in (
+                    {
+                        "service_code": "study_certificate",
+                        "form_data": {"place_of_submission": "X"},
+                        "student_id": str(student_rows[0].id),
+                        "review_status": "approved",
+                        "document_status": "ready",
+                        "feedback": "forged",
+                        "version": 99,
+                        "created_at": "2020-01-01T00:00:00Z",
+                        "updated_at": "2020-01-01T00:00:00Z",
+                        "assigned_org_unit_id": 1,
+                        "reviewer_user_id": 1,
+                    },
+                ):
+                    rejected = client.post(
+                        "/api/v1/applications",
+                        headers={"Authorization": f"Bearer {token}"},
+                        json=payload,
+                    )
+                    assert rejected.status_code == 422
+
+        with TestClient(app) as teacher_client:
+            teacher_login = teacher_client.post(
+                "/api/v1/auth/login",
+                headers=origin,
+                json={"login": teacher.login, "password": password},
+            )
+            assert teacher_login.status_code == 200
+            teacher_headers = {"Authorization": f"Bearer {teacher_login.json()['access_token']}"}
+            assert (
+                teacher_client.get("/api/v1/services", headers=teacher_headers).status_code == 403
+            )
+            assert (
+                teacher_client.post(
+                    "/api/v1/applications",
+                    headers=teacher_headers,
+                    json={
+                        "service_code": "study_certificate",
+                        "form_data": {"place_of_submission": "X"},
+                    },
+                ).status_code
+                == 403
+            )
+
+        session.expire_all()
+        rows = [session.get(Application, app_id) for app_id in created_ids]
+        assert [row.student_id for row in rows] == [student_rows[0].id, student_rows[1].id]
+        assert [row.form_data["place_of_submission"] for row in rows] == [
+            f"Заявление {students[index].login} — 東京" for index in range(2)
+        ]
+    finally:
+        if created_ids:
+            session.query(Application).filter(Application.id.in_(created_ids)).delete(
+                synchronize_session=False
+            )
+        user_ids = [user.id for user in students] + [teacher.id]
+        session.execute(
+            delete(RefreshToken).where(
+                RefreshToken.session_id.in_(
+                    select(AuthSession.id).where(AuthSession.user_id.in_(user_ids))
+                )
+            )
+        )
+        session.execute(delete(AuthSession).where(AuthSession.user_id.in_(user_ids)))
+        session.query(Student).filter(Student.user_id.in_([user.id for user in students])).delete(
+            synchronize_session=False
+        )
+        session.query(User).filter(
+            User.id.in_([user.id for user in students] + [teacher.id])
+        ).delete(synchronize_session=False)
+        session.query(StudyGroup).filter_by(id=group.id).delete(synchronize_session=False)
+        session.query(Program).filter_by(id=program.id).delete(synchronize_session=False)
+        session.query(OrgUnit).filter_by(id=faculty.id).delete(synchronize_session=False)
+        session.commit()
+        session.close()
 
 
 def test_form_data_trims_text_and_rejects_blank_or_oversized_values():
