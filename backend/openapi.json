@@ -14,6 +14,91 @@
         "title": "ApiError",
         "type": "object"
       },
+      "ApplicationFormData": {
+        "additionalProperties": false,
+        "properties": {
+          "place_of_submission": {
+            "title": "Place Of Submission",
+            "type": "string"
+          }
+        },
+        "required": [
+          "place_of_submission"
+        ],
+        "title": "ApplicationFormData",
+        "type": "object"
+      },
+      "ApplicationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "document_status": {
+            "enum": [
+              "not_required",
+              "pending",
+              "ready",
+              "failed"
+            ],
+            "title": "Document Status",
+            "type": "string"
+          },
+          "feedback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback"
+          },
+          "form_data": {
+            "$ref": "#/components/schemas/ApplicationFormData"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "review_status": {
+            "enum": [
+              "submitted",
+              "in_review",
+              "needs_correction",
+              "resubmitted",
+              "approved",
+              "rejected"
+            ],
+            "title": "Review Status",
+            "type": "string"
+          },
+          "service": {
+            "$ref": "#/components/schemas/Service"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "service",
+          "form_data",
+          "review_status",
+          "document_status",
+          "feedback",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ApplicationResponse",
+        "type": "object"
+      },
       "CourseOfferingRef": {
         "additionalProperties": false,
         "properties": {
@@ -31,6 +116,25 @@
           "discipline"
         ],
         "title": "CourseOfferingRef",
+        "type": "object"
+      },
+      "CreateApplicationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "form_data": {
+            "$ref": "#/components/schemas/ApplicationFormData"
+          },
+          "service_code": {
+            "const": "study_certificate",
+            "title": "Service Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service_code",
+          "form_data"
+        ],
+        "title": "CreateApplicationRequest",
         "type": "object"
       },
       "Date": {
@@ -452,6 +556,48 @@
         "title": "ScheduleResponse",
         "type": "object"
       },
+      "Service": {
+        "properties": {
+          "code": {
+            "const": "study_certificate",
+            "title": "Code",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "title"
+        ],
+        "title": "Service",
+        "type": "object"
+      },
+      "ServiceList": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Service"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ServiceList",
+        "type": "object"
+      },
       "StudentProfile": {
         "additionalProperties": false,
         "properties": {
@@ -554,6 +700,80 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/applications": {
+      "post": {
+        "operationId": "submit_application_api_v1_applications_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApplicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Application",
+        "tags": [
+          "services",
+          "applications"
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "operationId": "login_user_api_v1_auth_login_post",
@@ -969,6 +1189,53 @@
         "summary": "Get Student Schedule",
         "tags": [
           "schedule"
+        ]
+      }
+    },
+    "/api/v1/services": {
+      "get": {
+        "operationId": "list_services_api_v1_services_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Services",
+        "tags": [
+          "services",
+          "applications"
         ]
       }
     },

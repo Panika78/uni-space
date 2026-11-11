@@ -11,6 +11,8 @@ EXPECTED_TABLES = {
     "study_groups",
     "students",
     "teachers",
+    "service_types",
+    "applications",
 }
 
 

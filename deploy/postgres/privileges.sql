@@ -55,7 +55,8 @@ SELECT format('GRANT SELECT ON public.%I TO uni_space_api', tablename)
 FROM pg_tables WHERE schemaname='public' AND tablename IN
     ('users','auth_sessions','refresh_tokens','students','alembic_version',
      'study_groups','programs','org_units','teachers','disciplines','course_offerings',
-     'buildings','rooms','lessons','lesson_groups','lesson_rooms') \gexec
+     'buildings','rooms','lessons','lesson_groups','lesson_rooms',
+     'service_types','applications') \gexec
 SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
               pg_get_serial_sequence(format('public.%I', tablename), 'id'))
 FROM pg_tables WHERE schemaname='public' AND tablename IN
@@ -77,6 +78,12 @@ ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator IN SCHEMA public
 -- The only current API writes are session/token creation, rotation and revocation.
 SELECT format('GRANT INSERT, UPDATE ON public.%I TO uni_space_api', tablename)
 FROM pg_tables WHERE schemaname='public' AND tablename IN ('auth_sessions','refresh_tokens') \gexec
+SELECT format('GRANT INSERT ON public.%I TO uni_space_api', tablename)
+FROM pg_tables WHERE schemaname='public' AND tablename='applications' \gexec
+SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
+              pg_get_serial_sequence('public.applications', 'id'))
+WHERE to_regclass('public.applications') IS NOT NULL
+  AND pg_get_serial_sequence('public.applications', 'id') IS NOT NULL \gexec
 -- SELECT FOR UPDATE in login requires UPDATE on at least one user column.
 -- Grant only the immutable-by-API identifier, not password/role/active fields.
 SELECT 'GRANT UPDATE (id) ON public.users TO uni_space_api'

@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/v1/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Application */
+        post: operations["submit_application_api_v1_applications_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -75,6 +92,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/services": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Services */
+        get: operations["list_services_api_v1_services_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/me": {
         parameters: {
             query?: never;
@@ -100,11 +134,54 @@ export interface components {
         ApiError: {
             error: components["schemas"]["ErrorBody"];
         };
+        /** ApplicationFormData */
+        ApplicationFormData: {
+            /** Place Of Submission */
+            place_of_submission: string;
+        };
+        /** ApplicationResponse */
+        ApplicationResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Document Status
+             * @enum {string}
+             */
+            document_status: "not_required" | "pending" | "ready" | "failed";
+            /** Feedback */
+            feedback: string | null;
+            form_data: components["schemas"]["ApplicationFormData"];
+            /** Id */
+            id: string;
+            /**
+             * Review Status
+             * @enum {string}
+             */
+            review_status: "submitted" | "in_review" | "needs_correction" | "resubmitted" | "approved" | "rejected";
+            service: components["schemas"]["Service"];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /** CourseOfferingRef */
         CourseOfferingRef: {
             discipline: components["schemas"]["Ref"];
             /** Id */
             id: string;
+        };
+        /** CreateApplicationRequest */
+        CreateApplicationRequest: {
+            form_data: components["schemas"]["ApplicationFormData"];
+            /**
+             * Service Code
+             * @constant
+             */
+            service_code: "study_certificate";
         };
         /** Format: date */
         Date: string;
@@ -265,6 +342,23 @@ export interface components {
              */
             timezone: "Europe/Moscow";
         };
+        /** Service */
+        Service: {
+            /**
+             * Code
+             * @constant
+             */
+            code: "study_certificate";
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+        };
+        /** ServiceList */
+        ServiceList: {
+            /** Items */
+            items: components["schemas"]["Service"][];
+        };
         /** StudentProfile */
         StudentProfile: {
             /**
@@ -308,6 +402,58 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    submit_application_api_v1_applications_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateApplicationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     login_user_api_v1_auth_login_post: {
         parameters: {
             query?: never;
@@ -571,6 +717,44 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_services_api_v1_services_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceList"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

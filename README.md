@@ -16,7 +16,7 @@ logout, проверка пользователя и сессии). Frontend п�
 все аудитории и базовые статусы изменений. Реализован read-only профиль `/profile`
 и API `GET /api/v1/users/me` с серверными академическими связями. Доступ к кабинету
 проверяет `StudentAccess` через этот API, профиль доступен из общего `ProfileContext`.
-Остальные разделы добавляются поэтапно. Приоритет — MVP 1.
+Каталог услуг `/services` и форма подачи заявления реализуют TASK-013. Остальные разделы добавляются поэтапно. Приоритет — MVP 1.
 
 ## Расписание студента (TASK-010)
 
@@ -56,6 +56,46 @@ SCHEDULE_TEST_PASSWORD=fictional-schedule-password node frontend/e2e/schedule.br
 двух аккаунтов. Он выполняет пять login; повторять полный прогон следует в новом
 окне rate limiter. Скриншоты сохраняются в `work/`. CI выполняет этот тест отдельно;
 production-интеграция проверяет настоящий API под `uni_space_api` после повторного ACL.
+
+## Каталог услуг и заявления (TASK-013)
+
+Каталог `GET /api/v1/services` и отправка `POST /api/v1/applications` используют
+серверную авторизацию студента. Форма справки об обучении сохраняет результат в
+PostgreSQL; при неопределённом исходе отправка автоматически не повторяется.
+Production API получает только SELECT для каталога и SELECT/INSERT для заявлений
+с необходимой sequence usage.
+
+Браузерный сценарий услуг использует отдельную тестовую PostgreSQL и двух
+вымышленных студентов. Команды настройки и запуска приведены в разделе «Проверки
+проекта» ниже; CI исполняет `frontend/e2e/services.browser.mjs` отдельной job.
+
+После миграций на изолированной тестовой БД создайте фиктивные аккаунты и
+запустите backend с `APP_ENV=test`, тестовыми `DATABASE_URL`/`JWT_SIGNING_KEY`,
+`COOKIE_SECURE=false` и `ALLOWED_ORIGINS=["http://localhost:5173"]`:
+
+```bash
+uv run --locked --python 3.12.16 --project backend python backend/scripts/seed_services_browser_test_students.py > /tmp/services-e2e.env
+mkdir -p work/browser-tooling
+npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
+node work/browser-tooling/node_modules/playwright/cli.js install chromium
+(cd backend && uv run --locked --python 3.12.16 uvicorn app.main:app --host 127.0.0.1 --port 8000)
+```
+
+В другом терминале запустите Vite (`cd frontend && npm run dev -- --host
+127.0.0.1`), затем выполните browser E2E с seeded credentials:
+
+```bash
+set -a
+. /tmp/services-e2e.env
+set +a
+export PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_modules/playwright/index.mjs"
+export SERVICES_TEST_URL=http://localhost:5173
+node frontend/e2e/services.browser.mjs
+```
+
+Сценарий требует второго тестового студента и проверяет смену аккаунта без
+пропуска; GitHub Actions выполняет его отдельной job с одноразовой PostgreSQL,
+реальными API/UI процессами и двумя вымышленными аккаунтами.
 
 ## Документация
 

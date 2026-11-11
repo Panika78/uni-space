@@ -1,4 +1,5 @@
 from app.models.accounts import AuthSession, RefreshToken, User
+from app.models.applications import Application, ServiceType
 from app.models.base import Base
 from app.models.schedule import (
     AcademicTerm,
@@ -24,11 +25,13 @@ __all__ = [
     "LessonGroup",
     "LessonRoom",
     "AuthSession",
+    "Application",
     "Base",
     "OrgUnit",
     "Program",
     "RefreshToken",
     "Student",
+    "ServiceType",
     "StudyGroup",
     "Teacher",
     "User",
