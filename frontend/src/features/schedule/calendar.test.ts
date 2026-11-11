@@ -54,6 +54,28 @@ describe('Moscow calendar independent of browser timezone', () => {
       listDayLessons([createLesson({ starts_at: '2026-11-11T21:00:00Z' })], '2026-11-11'),
     ).toEqual([])
   })
+  it.each([
+    ['12:00', '2026-11-10T09:00:00Z', '2026-11-10T10:00:00Z', ['2026-11-10']],
+    ['22:59', '2026-11-10T19:59:00Z', '2026-11-10T20:59:00Z', ['2026-11-10']],
+    ['23:00', '2026-11-10T20:00:00Z', '2026-11-10T21:00:00Z', ['2026-11-10']],
+    ['23:30', '2026-11-10T20:30:00Z', '2026-11-10T21:30:00Z', ['2026-11-10', '2026-11-11']],
+    ['00:01', '2026-11-10T21:01:00Z', '2026-11-10T22:01:00Z', ['2026-11-11']],
+  ])(
+    'handles Moscow start time %s without timezone assumptions',
+    (_time, starts_at, ends_at, dates) => {
+      const lesson = createLesson({ starts_at, ends_at })
+      for (const date of ['2026-11-10', '2026-11-11'])
+        expect(listDayLessons([lesson], date)).toEqual(dates.includes(date) ? [lesson] : [])
+    },
+  )
+  it('excludes a lesson that ends exactly at Moscow midnight from the next day', () => {
+    const lesson = createLesson({
+      starts_at: '2026-11-10T20:00:00Z',
+      ends_at: '2026-11-10T21:00:00Z',
+    })
+    expect(listDayLessons([lesson], '2026-11-10')).toEqual([lesson])
+    expect(listDayLessons([lesson], '2026-11-11')).toEqual([])
+  })
 })
 
 it('uses historical Moscow summer time and keeps sub-millisecond midnight overlaps', () => {

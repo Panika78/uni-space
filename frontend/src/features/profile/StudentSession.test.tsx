@@ -8,7 +8,7 @@ import { AuthProvider } from '../auth/AuthProvider'
 import { createQueryClient } from '../../app/queryClient'
 import { appRoutes } from '../../app/router'
 import { createLesson } from '../schedule/testFixtures'
-import { addDays, getMoscowDate, getWeekStart } from '../schedule/calendar'
+import { formatDate } from '../schedule/calendar'
 
 const profiles = {
   A: {
@@ -42,26 +42,30 @@ function error(status: number, code: string) {
 let account: 'A' | 'B'
 let profileError: number | undefined
 let delayProfile: (() => Promise<Response>) | undefined
-let delaySchedule: (() => Promise<Response>) | undefined
-function scheduleResponse(token: 'A' | 'B') {
-  const weekStart = getWeekStart(getMoscowDate())
+let delaySchedule: ((dateFrom: string, dateTo: string) => Promise<Response>) | undefined
+let scheduleDates: Partial<Record<'A' | 'B', string[]>>
+function scheduleResponse(token: 'A' | 'B', dateFrom: string, dateTo: string) {
+  const dates = scheduleDates[token] ?? [dateFrom]
   return Response.json({
-    date_from: weekStart,
-    date_to: addDays(weekStart, 6),
+    date_from: dateFrom,
+    date_to: dateTo,
     timezone: 'Europe/Moscow',
     items: [
-      createLesson({
-        groups: [profiles[token].group],
-        starts_at: new Date().toISOString(),
-        ends_at: new Date(Date.now() + 3600000).toISOString(),
-        course_offering: {
-          id: token === 'A' ? '1' : '2',
-          discipline: {
+      ...dates.map((date) =>
+        createLesson({
+          id: `${token}-${date}`,
+          groups: [profiles[token].group],
+          starts_at: `${date}T12:00:00+03:00`,
+          ends_at: `${date}T13:00:00+03:00`,
+          course_offering: {
             id: token === 'A' ? '1' : '2',
-            name: `Занятие ${token === 'A' ? 'Альфа' : 'Бета'}`,
+            discipline: {
+              id: token === 'A' ? '1' : '2',
+              name: `Занятие ${token === 'A' ? 'Альфа' : 'Бета'}`,
+            },
           },
-        },
-      }),
+        }),
+      ),
     ],
   })
 }
@@ -71,6 +75,9 @@ beforeEach(() => {
   profileError = undefined
   delayProfile = undefined
   delaySchedule = undefined
+  scheduleDates = {}
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-11-10T12:00:00+03:00'))
   vi.stubGlobal('navigator', {
     locks: {
       request: (_name: string, options: LockOptions, action: () => Promise<unknown>) => {
@@ -101,13 +108,16 @@ beforeEach(() => {
         return Response.json(profiles[token])
       }
       if (path === '/api/v1/schedule') {
+        const requestUrl = new URL(String(input), window.location.href)
+        const dateFrom = requestUrl.searchParams.get('date_from')!
+        const dateTo = requestUrl.searchParams.get('date_to')!
         if (delaySchedule) {
           const delayed = delaySchedule
           delaySchedule = undefined
-          return delayed()
+          return delayed(dateFrom, dateTo)
         }
         const token = new Headers(init?.headers).get('Authorization')?.slice(7) as 'A' | 'B'
-        return scheduleResponse(token)
+        return scheduleResponse(token, dateFrom, dateTo)
       }
       throw new Error(`Unexpected request ${path}`)
     }),
@@ -116,6 +126,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 function mount() {
   const client = createQueryClient()
@@ -253,7 +264,8 @@ it('isolates profile and schedule together when both old student responses arriv
   await login(user, 'student-a')
   expect(screen.getByRole('article')).toHaveTextContent('Анна Альфа')
   await user.click(screen.getByRole('link', { name: 'Расписание' }))
-  await screen.findByRole('article', { name: 'Занятие Альфа' })
+  const alphaDay = within(screen.getByRole('region', { name: formatDate('2026-11-09') }))
+  await alphaDay.findByRole('article', { name: 'Занятие Альфа' })
   let completeProfile!: (response: Response) => void
   let completeSchedule!: (response: Response) => void
   let profileStarted = false
@@ -290,17 +302,117 @@ it('isolates profile and schedule together when both old student responses arriv
   await login(user, 'student-b')
   expect(screen.getByRole('article')).toHaveTextContent('Борис Бета')
   await user.click(screen.getByRole('link', { name: 'Расписание' }))
-  await screen.findByRole('article', { name: 'Занятие Бета' })
+  const betaDay = within(screen.getByRole('region', { name: formatDate('2026-11-09') }))
+  await betaDay.findByRole('article', { name: 'Занятие Бета' })
   await act(async () => {
     completeProfile(Response.json(profiles.A))
-    completeSchedule(scheduleResponse('A'))
+    completeSchedule(scheduleResponse('A', '2026-11-09', '2026-11-15'))
     await refresh
   })
   expect(screen.queryByText(/Альфа/)).not.toBeInTheDocument()
   expect(JSON.stringify(client.getQueryData(['student-profile']))).not.toContain('Альфа')
+  expect(client.getQueryData(['student-profile'])).toEqual(
+    expect.objectContaining({
+      id: profiles.B.id,
+      student_id: profiles.B.student_id,
+      full_name: profiles.B.full_name,
+      group: profiles.B.group,
+    }),
+  )
   expect(JSON.stringify(client.getQueriesData({ queryKey: ['schedule'] }))).not.toContain('Альфа')
+  expect(betaDay.getByRole('article', { name: 'Занятие Бета' })).toBeInTheDocument()
+  const scheduleCache = client.getQueryData<{
+    items: {
+      id: string
+      groups: { id: string }[]
+      course_offering: { discipline: { id: string; name: string } }
+    }[]
+  }>(['schedule', '2026-11-09', '2026-11-15'])
+  expect(scheduleCache?.items).toContainEqual(
+    expect.objectContaining({
+      id: 'B-2026-11-09',
+      groups: expect.arrayContaining([expect.objectContaining({ id: profiles.B.group.id })]),
+      course_offering: expect.objectContaining({
+        id: '2',
+        discipline: expect.objectContaining({ id: '2', name: 'Занятие Бета' }),
+      }),
+    }),
+  )
+  expect(JSON.stringify(scheduleCache)).not.toContain('Альфа')
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await user.click(screen.getByRole('link', { name: 'Мой профиль' }))
   expect(await screen.findByRole('heading', { name: 'Мой профиль' })).toBeInTheDocument()
   expect(screen.getByRole('article')).toHaveTextContent('Группа Бета')
+})
+
+it('finds same-discipline lessons in their respective day sections', async () => {
+  scheduleDates.B = ['2026-11-09', '2026-11-10']
+  const { user } = mount()
+  await login(user, 'student-b')
+  await user.click(screen.getByRole('link', { name: 'Расписание' }))
+
+  for (const date of scheduleDates.B) {
+    const day = within(screen.getByRole('region', { name: formatDate(date) }))
+    expect(await day.findByRole('article', { name: 'Занятие Бета' })).toBeInTheDocument()
+  }
+})
+
+it('keeps account B schedule isolated when a Sunday request resolves after Moscow midnight', async () => {
+  vi.setSystemTime(new Date('2026-11-15T23:59:59+03:00'))
+  const { client, user } = mount()
+  await login(user, 'student-a')
+  await user.click(screen.getByRole('link', { name: 'Расписание' }))
+  expect(screen.getByText(/9–15 ноября/)).toBeInTheDocument()
+  await within(screen.getByRole('region', { name: formatDate('2026-11-09') })).findByRole(
+    'article',
+    { name: 'Занятие Альфа' },
+  )
+
+  let completeSchedule!: (response: Response) => void
+  let requestedRange: [string, string] | undefined
+  delaySchedule = (dateFrom, dateTo) => {
+    requestedRange = [dateFrom, dateTo]
+    return new Promise((resolve) => {
+      completeSchedule = resolve
+    })
+  }
+  let refresh!: Promise<void>
+  act(() => {
+    refresh = client.invalidateQueries({ queryKey: ['schedule', '2026-11-09', '2026-11-15'] })
+  })
+  await waitFor(() => expect(requestedRange).toEqual(['2026-11-09', '2026-11-15']))
+
+  vi.setSystemTime(new Date('2026-11-16T00:00:01+03:00'))
+  await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
+  await user.click(screen.getByRole('button', { name: 'Выйти' }))
+  await user.click(
+    screen.getByRole('dialog').querySelector<HTMLButtonElement>('.logout-dialog__confirm')!,
+  )
+  await login(user, 'student-b')
+  await user.click(screen.getByRole('link', { name: 'Расписание' }))
+  expect(screen.getByText(/16–22 ноября/)).toBeInTheDocument()
+  const betaDay = within(screen.getByRole('region', { name: formatDate('2026-11-16') }))
+  await betaDay.findByRole('article', { name: 'Занятие Бета' })
+
+  await act(async () => {
+    completeSchedule(scheduleResponse('A', ...requestedRange!))
+    await refresh
+  })
+  expect(screen.queryByText(/Альфа/)).not.toBeInTheDocument()
+  expect(betaDay.getByRole('article', { name: 'Занятие Бета' })).toBeInTheDocument()
+  expect(client.getQueryData(['schedule', '2026-11-16', '2026-11-22'])).toEqual(
+    expect.objectContaining({
+      date_from: '2026-11-16',
+      date_to: '2026-11-22',
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'B-2026-11-16',
+          course_offering: {
+            id: '2',
+            discipline: expect.objectContaining({ name: 'Занятие Бета' }),
+          },
+        }),
+      ]),
+    }),
+  )
 })
