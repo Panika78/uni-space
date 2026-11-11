@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from pydantic import TypeAdapter
 
+from app.applications.router import router as applications_router
 from app.auth.router import router as auth_router
 from app.core.config import get_settings
 from app.core.errors import install_exception_handlers
@@ -15,7 +16,10 @@ from app.core.schemas import (
     PaginationParams,
     Ref,
 )
+from app.news.router import router as news_router
 from app.notifications import router as notifications_router
+from app.schedule.router import router as schedule_router
+from app.students import router as students_router
 
 settings = get_settings()
 
@@ -29,7 +33,11 @@ app = FastAPI(
 app.add_middleware(ApiHeadersMiddleware)
 install_exception_handlers(app)
 app.include_router(auth_router)
+app.include_router(applications_router)
 app.include_router(notifications_router)
+app.include_router(schedule_router)
+app.include_router(students_router)
+app.include_router(news_router)
 
 
 def create_openapi_schema(application: FastAPI) -> dict:

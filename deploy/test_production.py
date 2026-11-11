@@ -269,6 +269,24 @@ def main(*, legacy=False):
                 input=query,
             ).stdout.strip()
 
+        def wait_for_stopped_api_containers():
+            deadline = time.monotonic() + 10
+            command = [
+                "docker",
+                "ps",
+                "-q",
+                "--filter",
+                f"label=com.docker.compose.project={project}",
+                "--filter",
+                "label=com.docker.compose.service=api",
+            ]
+            while time.monotonic() < deadline:
+                result = run(command, success=False)
+                if result.returncode == 0 and not result.stdout.strip():
+                    return
+                time.sleep(0.1)
+            raise AssertionError("API containers remained running after Compose stop")
+
         try:
             config = json.loads(dc("config", "--format", "json").stdout)
             for service in ("api", "db"):
@@ -454,9 +472,31 @@ assert not Path('/run/secrets/migration_db_password').exists()
 with engine.connect() as c:
     row=c.execute(text("SELECT current_user, rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls FROM pg_roles WHERE rolname=current_user")).one()
     assert tuple(row)==('uni_space_api',False,False,False,False,False)
-    assert c.execute(text("SELECT has_table_privilege(current_user,'public.notifications','SELECT'), has_table_privilege(current_user,'public.notifications','INSERT'), has_table_privilege(current_user,'public.notifications','UPDATE'), has_table_privilege(current_user,'public.notifications','DELETE'), has_sequence_privilege(current_user,'public.notifications_id_seq','USAGE')")).one() == (True,False,False,False,False)
-    c.execute(text("SELECT id,type,title,body,created_at FROM notifications WHERE user_id=:user_id ORDER BY created_at DESC,id DESC LIMIT :limit"), {"user_id": 1, "limit": 21}).all()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'service_types','SELECT')")).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'applications','SELECT')")).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'applications','INSERT')")).scalar_one()
+    assert c.execute(text("SELECT has_sequence_privilege(current_user,'applications_id_seq','USAGE')")).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'news','SELECT')")).scalar_one()
+    assert not c.execute(text("SELECT has_sequence_privilege(current_user,'news_id_seq','USAGE')")).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'notifications','SELECT')")).scalar_one()
+    for privilege in ('INSERT','UPDATE','DELETE'):
+        assert not c.execute(text("SELECT has_table_privilege(current_user,'notifications',:privilege)"), {'privilege': privilege}).scalar_one()
+    assert not c.execute(text("SELECT has_sequence_privilege(current_user,'notifications_id_seq','USAGE')")).scalar_one()
+    for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
+        assert not c.execute(text("SELECT has_table_privilege(current_user,'news',:privilege)"), {'privilege': privilege}).scalar_one()
+    assert not c.execute(text("SELECT has_table_privilege(current_user,'applications','UPDATE')")).scalar_one()
+    assert not c.execute(text("SELECT has_table_privilege(current_user,'applications','DELETE')")).scalar_one()
     print('PASS: API role flags false; isolated secrets')
+    for table in ('users','students','study_groups','programs','org_units','teachers',
+                  'disciplines','course_offerings','buildings','rooms','lessons','lesson_groups','lesson_rooms','news','notifications'):
+        assert c.execute(text("SELECT has_table_privilege(current_user, :table, 'SELECT')"), {'table': table}).scalar_one()
+        c.execute(text(f"SELECT * FROM public.{table} LIMIT 1")).all()
+    for table in ('study_groups','programs','org_units','teachers','disciplines','course_offerings',
+                  'buildings','rooms','lessons','lesson_groups','lesson_rooms'):
+        for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
+            assert not c.execute(text("SELECT has_table_privilege(current_user, :table, :privilege)"),
+                                 {'table': table, 'privilege': privilege}).scalar_one()
+    print('PASS: profile and schedule SELECT permitted; dependent tables remain read-only')
 for statement in (
     "CREATE ROLE forbidden_role", "CREATE DATABASE forbidden_database",
     "CREATE TABLE public.forbidden_table(id int)", "CREATE SCHEMA forbidden_schema",
@@ -466,9 +506,21 @@ for statement in (
     "ALTER TABLE users ADD COLUMN forbidden int", "DELETE FROM refresh_tokens",
     "UPDATE alembic_version SET version_num='forbidden'",
     "CREATE TEMP TABLE forbidden_temp(id int)",
-    "SELECT * FROM public.future_fixture", "SELECT * FROM public.org_units",
+    "SELECT * FROM public.future_fixture",
     "SELECT * FROM public.existing_acl_fixture",
     "SELECT public.existing_function_fixture()", "SELECT public.future_function_fixture()",
+    "INSERT INTO disciplines (name) VALUES ('forbidden')",
+    "UPDATE org_units SET name='forbidden'", "DELETE FROM programs",
+    "INSERT INTO news (title,body,is_published) VALUES ('forbidden','forbidden',false)",
+    "UPDATE news SET title='forbidden'", "DELETE FROM news", "TRUNCATE news",
+    "SELECT nextval('public.news_id_seq')",
+    "INSERT INTO notifications (user_id,type,title,body) VALUES (1,'forbidden','forbidden','forbidden')",
+    "UPDATE notifications SET title='forbidden'", "DELETE FROM notifications",
+    "SELECT nextval('public.notifications_id_seq')",
+    "SELECT nextval('public.org_units_id_seq')", "SELECT nextval('public.programs_id_seq')",
+    "UPDATE lessons SET status='cancelled'", "DELETE FROM lesson_groups",
+    "SELECT * FROM academic_terms", "SELECT * FROM course_groups",
+    "SELECT nextval('public.lessons_id_seq')",
     "SELECT nextval('public.users_id_seq')",
     "SELECT setval('public.auth_sessions_id_seq', 9999)",
 ):
@@ -567,6 +619,28 @@ with SessionLocal.begin() as db:
 """,
                 input=password,
             )
+            dc(
+                "run",
+                "--rm",
+                "-T",
+                "migrate",
+                "python",
+                "-c",
+                (ROOT / "deploy/schedule_fixtures.py").read_text(),
+                input=password,
+            )
+            # ACL reapplication must retain schedule reads and all existing auth permissions.
+            run(["bash", "scripts/configure-postgres.sh"], env=env)
+            published_news_id = sql("""INSERT INTO news (title, body, published_at, is_published)
+VALUES ('Production ACL fixture', 'Fictional published news', now(), true)
+RETURNING id;""")
+            hidden_news_id = sql("""INSERT INTO news (title, body, published_at, is_published)
+VALUES ('Production hidden fixture', 'Fictional hidden news', NULL, false)
+RETURNING id;""")
+            notification_id = sql("""INSERT INTO notifications (user_id, type, title, body)
+VALUES ((SELECT id FROM users WHERE login='schedule-fixture-1'),
+        'acl_fixture', 'Production ACL fixture', 'Fictional private notification')
+RETURNING id;""")
             with httpx.Client(
                 base_url=public_origin,
                 verify=context,
@@ -730,6 +804,166 @@ with SessionLocal.begin() as db:
                         "PASS: pre-transition refresh token remains usable with restricted API",
                         flush=True,
                     )
+                student_login = client.post(
+                    "/api/v1/auth/login",
+                    headers=origin,
+                    json={"login": "schedule-fixture-1", "password": password},
+                )
+                assert student_login.status_code == 200
+                schedule_headers = {
+                    "Authorization": "Bearer " + student_login.json()["access_token"]
+                }
+                notifications = client.get(
+                    "/api/v1/notifications", headers=schedule_headers
+                )
+                assert notifications.status_code == 200, notifications.text
+                assert notifications.headers["cache-control"] == "no-store"
+                assert [item["id"] for item in notifications.json()["items"]] == [
+                    notification_id
+                ]
+                print(
+                    "PASS: real personal notification SELECT under uni_space_api",
+                    flush=True,
+                )
+                news_page = client.get("/api/v1/news", headers=schedule_headers)
+                assert news_page.status_code == 200, news_page.text
+                assert any(
+                    item["id"] == published_news_id
+                    and item["title"] == "Production ACL fixture"
+                    for item in news_page.json()["items"]
+                )
+                news_detail = client.get(
+                    f"/api/v1/news/{published_news_id}", headers=schedule_headers
+                )
+                assert news_detail.status_code == 200, news_detail.text
+                assert news_detail.json()["body"] == "Fictional published news"
+                assert (
+                    client.get(
+                        f"/api/v1/news/{hidden_news_id}", headers=schedule_headers
+                    ).status_code
+                    == 404
+                )
+                print(
+                    "PASS: real news list/detail and hidden-ID filtering under uni_space_api",
+                    flush=True,
+                )
+                profile = client.get("/api/v1/users/me", headers=schedule_headers)
+                assert profile.status_code == 200, profile.text
+                assert profile.headers["cache-control"] == "no-store"
+                first_profile = profile.json()
+                assert first_profile["login"] == "schedule-fixture-1"
+                assert first_profile["full_name"] == "Вымышленный Студент 1"
+                assert first_profile["group"]["name"] == "ТЕСТ-1"
+                assert first_profile["program"]["code"] == "schedule-fixture"
+                assert (
+                    first_profile["faculty"]["name"] == "Тестовый вымышленный факультет"
+                )
+                assert (
+                    client.get(
+                        "/api/v1/users/me",
+                        params={"student_id": "999"},
+                        headers=schedule_headers,
+                    ).status_code
+                    == 422
+                )
+                assert (
+                    client.get(
+                        "/api/v1/users/999", headers=schedule_headers
+                    ).status_code
+                    == 404
+                )
+                assert (
+                    client.get(
+                        "/api/v1/schedule",
+                        params={
+                            "date_from": "2026-11-10",
+                            "date_to": "2026-11-10",
+                            "group_id": "999",
+                        },
+                        headers=schedule_headers,
+                    ).status_code
+                    == 422
+                )
+                schedule = client.get(
+                    "/api/v1/schedule",
+                    params={"date_from": "2026-11-10", "date_to": "2026-11-10"},
+                    headers=schedule_headers,
+                )
+                assert schedule.status_code == 200, schedule.text
+                assert schedule.headers["cache-control"] == "no-store"
+                items = schedule.json()["items"]
+                assert len(items) == 5 and len({item["id"] for item in items}) == 5
+                shared = next(item for item in items if len(item["rooms"]) == 2)
+                assert len(shared["groups"]) == 2
+                assert any(item["latest_lesson"] for item in items)
+                assert not any(
+                    item["course_offering"]["discipline"]["name"]
+                    == "Только вторая группа"
+                    for item in items
+                )
+                print(
+                    "PASS: real GET /schedule under uni_space_api after repeated ACL; rooms, groups, moves, isolation",
+                    flush=True,
+                )
+                moved = next(item for item in items if item["status"] == "moved")
+                assert moved["latest_lesson"]["starts_at"].startswith("2026-12-20")
+                second_login = client.post(
+                    "/api/v1/auth/login",
+                    headers=origin,
+                    json={"login": "schedule-fixture-2", "password": password},
+                )
+                assert second_login.status_code == 200
+                second_schedule = client.get(
+                    "/api/v1/schedule",
+                    params={"date_from": "2026-11-10", "date_to": "2026-11-10"},
+                    headers={
+                        "Authorization": "Bearer " + second_login.json()["access_token"]
+                    },
+                )
+                assert second_schedule.status_code == 200
+                second_headers = {
+                    "Authorization": "Bearer " + second_login.json()["access_token"]
+                }
+                second_notifications = client.get(
+                    "/api/v1/notifications", headers=second_headers
+                )
+                assert second_notifications.status_code == 200
+                assert second_notifications.json()["items"] == []
+                print(
+                    "PASS: production role notification query remains isolated by user",
+                    flush=True,
+                )
+                second_profile = client.get("/api/v1/users/me", headers=second_headers)
+                assert second_profile.status_code == 200
+                assert second_profile.json()["login"] == "schedule-fixture-2"
+                assert second_profile.json()["full_name"] == "Вымышленный Студент 2"
+                assert second_profile.json()["group"]["name"] == "ТЕСТ-2"
+                for key in ("id", "student_id", "group"):
+                    assert second_profile.json()[key] != first_profile[key]
+                assert (
+                    client.get("/api/v1/users/me", headers=schedule_headers).status_code
+                    == 401
+                )
+                print(
+                    "PASS: real /users/me and /schedule for two students under uni_space_api; foreign selectors rejected",
+                    flush=True,
+                )
+                second_items = second_schedule.json()["items"]
+                assert len(second_items) == 2
+                assert any(
+                    item["course_offering"]["discipline"]["name"]
+                    == "Только вторая группа"
+                    for item in second_items
+                )
+                assert not any(
+                    item["course_offering"]["discipline"]["name"]
+                    == "Только первая группа"
+                    for item in second_items
+                )
+                print(
+                    "PASS: second student's real schedule remains isolated under restricted role",
+                    flush=True,
+                )
                 login = client.post(
                     "/api/v1/auth/login",
                     headers=origin,
@@ -751,6 +985,109 @@ with SessionLocal.begin() as db:
                 assert (
                     client.post("/api/v1/auth/refresh", headers=origin).status_code
                     == 401
+                )
+            if not legacy:
+                # Persist a real student application, then restart both containers while
+                # retaining Compose volumes and compare the complete row in PostgreSQL.
+                student_login = f"persistence-{secrets.token_hex(8)}"
+                student_password = secrets.token_urlsafe(24)
+                dc(
+                    "run",
+                    "--rm",
+                    "-T",
+                    "migrate",
+                    "python",
+                    "-c",
+                    """
+import sys
+from argon2 import PasswordHasher
+from app.core.database import SessionLocal
+from app.models import OrgUnit, Program, Student, StudyGroup, User
+login, password = sys.stdin.read().splitlines()
+with SessionLocal.begin() as db:
+    faculty = OrgUnit(name=login, type="faculty")
+    db.add(faculty)
+    db.flush()
+    program = Program(code=login, name=login, direction_code=login,
+                      direction_name=login, faculty_id=faculty.id)
+    db.add(program)
+    db.flush()
+    group = StudyGroup(name=login, program_id=program.id, course_number=1)
+    user = User(login=login, full_name=login, role="student", is_active=True,
+                password_hash=PasswordHasher().hash(password))
+    db.add_all([group, user])
+    db.flush()
+    db.add(Student(user_id=user.id, group_id=group.id, academic_status="enrolled"))
+""",
+                    input=f"{student_login}\n{student_password}",
+                )
+                with httpx.Client(
+                    base_url=public_origin, verify=context, trust_env=False, timeout=10
+                ) as student_client:
+                    student_auth = student_client.post(
+                        "/api/v1/auth/login",
+                        headers=origin,
+                        json={"login": student_login, "password": student_password},
+                    )
+                    assert student_auth.status_code == 200
+                    student_headers = {
+                        **origin,
+                        "Authorization": f"Bearer {student_auth.json()['access_token']}",
+                    }
+                    assert (
+                        student_client.get(
+                            "/api/v1/services", headers=student_headers
+                        ).status_code
+                        == 200
+                    )
+                    submitted = student_client.post(
+                        "/api/v1/applications",
+                        headers=student_headers,
+                        json={
+                            "service_code": "study_certificate",
+                            "form_data": {
+                                "place_of_submission": "Restart persistence — 東京"
+                            },
+                        },
+                    )
+                    assert submitted.status_code == 201
+                    application_id = int(submitted.json()["id"])
+                persisted_before = sql(
+                    f"SELECT to_jsonb(a) FROM applications a WHERE id={application_id}"
+                )
+                assert persisted_before
+                dc("restart", "api")
+                dc("up", "-d", "--wait", "--wait-timeout", "120", "api")
+                dc("restart", "db")
+                dc("up", "-d", "--wait", "--wait-timeout", "120")
+                persisted_after = sql(
+                    f"SELECT to_jsonb(a) FROM applications a WHERE id={application_id}"
+                )
+                assert persisted_after == persisted_before
+                with httpx.Client(
+                    base_url=public_origin, verify=context, trust_env=False, timeout=10
+                ) as after_restart:
+                    assert (
+                        after_restart.get(
+                            "/api/v1/services", headers=student_headers
+                        ).status_code
+                        == 200
+                    )
+                print(
+                    "PASS: PostgreSQL application row unchanged after API and DB restart with persistent volume",
+                    flush=True,
+                )
+                sql(
+                    f"""DELETE FROM applications WHERE id={application_id};
+DELETE FROM refresh_tokens WHERE session_id IN (
+    SELECT id FROM auth_sessions WHERE user_id=(SELECT id FROM users WHERE login='{student_login}')
+);
+DELETE FROM auth_sessions WHERE user_id=(SELECT id FROM users WHERE login='{student_login}');
+DELETE FROM students WHERE user_id=(SELECT id FROM users WHERE login='{student_login}');
+DELETE FROM users WHERE login='{student_login}';
+DELETE FROM study_groups WHERE name='{student_login}';
+DELETE FROM programs WHERE code='{student_login}';
+DELETE FROM org_units WHERE name='{student_login}';"""
                 )
             print(
                 "PASS: verified TLS, SPA/API, scheme, Origin, auth and cookie",
@@ -931,10 +1268,19 @@ for index in range(6):
 'users', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM users t),
 'sessions', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM auth_sessions t),
 'refresh', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM refresh_tokens t),
-'revisions', (SELECT jsonb_agg(to_jsonb(t)) FROM alembic_version t));"""
+'revisions', (SELECT jsonb_agg(to_jsonb(t)) FROM alembic_version t),
+'academic_terms', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM academic_terms t),
+'disciplines', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM disciplines t),
+'course_offerings', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM course_offerings t),
+'course_groups', (SELECT jsonb_agg(to_jsonb(t) ORDER BY course_offering_id,group_id) FROM course_groups t),
+'buildings', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM buildings t),
+'rooms', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM rooms t),
+'lessons', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM lessons t),
+'lesson_groups', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM lesson_groups t),
+'lesson_rooms', (SELECT jsonb_agg(to_jsonb(t) ORDER BY lesson_id,room_id) FROM lesson_rooms t));"""
             expected = sql(snapshot)
             assert sql(
-                "SELECT count(*) FROM users u JOIN auth_sessions s ON s.user_id=u.id JOIN refresh_tokens r ON r.session_id=s.id;"
+                "SELECT count(*) FROM users u JOIN auth_sessions s ON s.user_id=u.id JOIN refresh_tokens r ON r.session_id=s.id WHERE u.login IN ('deployment-check','legacy-fixture');"
             ) == ("4" if legacy else "2")
             backup = temp / "backup.dump"
             run(["bash", "scripts/backup-postgres.sh", str(backup)], env=env)
@@ -1021,6 +1367,7 @@ for index in range(6):
             )
             # Switch only this isolated stack to the verified restore, then back.
             dc("stop", "nginx", "api")
+            wait_for_stopped_api_containers()
             run(
                 ["bash", "scripts/configure-postgres.sh", "restore_deployment_check"],
                 env=env,
@@ -1065,6 +1412,35 @@ for index in range(6):
                 logout = restored.post("/api/v1/auth/logout", headers=origin)
                 assert logout.status_code == 200
                 assert logout.json() == {"session_revoked": True}
+                restored_login = restored.post(
+                    "/api/v1/auth/login",
+                    headers=origin,
+                    json={"login": "schedule-fixture-1", "password": password},
+                )
+                assert restored_login.status_code == 200
+                restored_schedule = restored.get(
+                    "/api/v1/schedule",
+                    params={"date_from": "2026-11-10", "date_to": "2026-11-10"},
+                    headers={
+                        "Authorization": "Bearer "
+                        + restored_login.json()["access_token"]
+                    },
+                )
+                assert restored_schedule.status_code == 200
+                assert restored_schedule.json()["items"] == items
+                restored_profile = restored.get(
+                    "/api/v1/users/me",
+                    headers={
+                        "Authorization": "Bearer "
+                        + restored_login.json()["access_token"]
+                    },
+                )
+                assert restored_profile.status_code == 200
+                assert restored_profile.json() == first_profile
+                print(
+                    "PASS: restored schedule data and restricted API permissions survive recovery",
+                    flush=True,
+                )
             assert sql(snapshot) == expected
             # Even when Compose/db still names the old DB, inspect the recovery API's
             # actual runtime DATABASE_NAME. Implicit switch-back must be refused too.
@@ -1078,6 +1454,7 @@ for index in range(6):
             )
             assert sql(database_acls) == before_switch
             dc("stop", "nginx", "api")
+            wait_for_stopped_api_containers()
             run(["bash", "scripts/configure-postgres.sh"], env=env)
             print(
                 "PASS: restored database HTTPS login/refresh/logout; source unchanged",
