@@ -328,3 +328,32 @@ docker compose -p uni-space-test -f compose.test.yaml down --volumes --remove-or
 GitHub Actions выполняет проверки отдельными jobs для pull request в `main` и
 push в `main`. В CI используются отдельные временные PostgreSQL и тестовые
 учётные данные; secrets и production-конфигурация не используются.
+
+### Установка Chromium в CI
+
+На GitHub-hosted `ubuntu-24.04` официальные deb822-источники Ubuntu используют
+`mirror+file:/etc/apt/apt-mirrors.txt`; там runner задаёт Azure, основной и
+security Ubuntu archives. Шаг установки Chromium добавляет независимый
+`https://mirrors.edge.kernel.org/ubuntu/` последним кандидатом (`priority:4`,
+после штатных кандидатов с приоритетами 1–3). APT сохраняет штатный выбор
+официальных mirrors и переходит к резерву своим `mirror+file` transport при
+сетевом отказе. Это покрывает
+`noble`, `noble-updates`, `noble-backports` и `noble-security`, не изменяя
+сторонние источники или `ubuntu.sources`.
+
+Подписи Ubuntu и TLS остаются включёнными. Перед установкой выполняется
+Ubuntu-only preflight, который требует загрузки всех индексов, включая
+`noble-security`; сторонние APT-источники runner не затрагиваются. APT делает
+один повтор и ждёт не более 15 секунд на сетевое подключение; preflight ограничен
+90 секундами, полная установка Chromium — пятью минутами. Вывод установки
+содержит список зеркал и фактически полученные URL. Playwright по-прежнему
+устанавливает Chromium с `--with-deps`, а ошибка установки или последующих
+тестов завершает job ошибкой.
+
+На одноразовом Ubuntu 24.04 runner режимы можно воспроизвести, задав
+`APT_MIRROR_TEST_MODE=normal` (штатный приоритет), `force-fallback` (штатные
+зеркала направляются на `.invalid`, чтобы проверить именно резерв) или
+`fail-all` (все mirror URLs направляются на
+зарезервированный `.invalid` домен; ожидается ненулевой exit code). Эти режимы
+предназначены только для диагностики: `force-fallback` и `fail-all` меняют
+список зеркал текущего runner.
