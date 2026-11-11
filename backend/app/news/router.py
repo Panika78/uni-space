@@ -34,6 +34,11 @@ def validate_news_query(request: Request) -> None:
         raise HTTPException(422, "validation_error")
 
 
+def validate_news_detail_query(request: Request) -> None:
+    if request.query_params:
+        raise HTTPException(422, "validation_error")
+
+
 @router.get("", response_model=NewsPage)
 def list_news(
     _student: Annotated[Student, Depends(get_current_student)],
@@ -53,9 +58,14 @@ def get_news(
     id: Id,
     _student: Annotated[Student, Depends(get_current_student)],
     db: Annotated[Session, Depends(get_db_session)],
-    _validated_query: Annotated[None, Depends(validate_news_query)] = None,
+    _validated_query: Annotated[None, Depends(validate_news_detail_query)] = None,
 ) -> NewsResponse:
-    result = get_published_news(db, int(id))
+    if len(id) > 19:
+        raise HTTPException(422, "validation_error")
+    news_id = int(id)
+    if news_id > 9_223_372_036_854_775_807:
+        raise HTTPException(422, "validation_error")
+    result = get_published_news(db, news_id)
     if result is None:
         raise HTTPException(404, "not_found")
     return result

@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select, tuple_
 from sqlalchemy.orm import Session
@@ -14,8 +14,10 @@ from app.models.news import News
 from app.news.schemas import News as NewsResponse
 from app.news.schemas import NewsPage, NewsPreview
 
-NEWS_CURSOR_TYPES = (str, int)
+NEWS_CURSOR_TYPES = (int, int)
 EXCERPT_LENGTH = 180
+CURSOR_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+MAX_NEWS_ID = 9_223_372_036_854_775_807
 
 
 def create_excerpt(body: str) -> str:
@@ -28,7 +30,12 @@ def create_excerpt(body: str) -> str:
 
 def _cursor_key(news: News) -> CursorKey:
     assert news.published_at is not None
-    return news.published_at.isoformat(), news.id
+    published_at = news.published_at.astimezone(UTC)
+    elapsed = published_at - CURSOR_EPOCH
+    timestamp_microseconds = (
+        elapsed.days * 86_400_000_000 + elapsed.seconds * 1_000_000 + elapsed.microseconds
+    )
+    return timestamp_microseconds, news.id
 
 
 def list_published_news(db: Session, *, limit: int, cursor: str | None) -> NewsPage:
@@ -40,9 +47,18 @@ def list_published_news(db: Session, *, limit: int, cursor: str | None) -> NewsP
     )
     if after is not None:
         try:
-            published_at = datetime.fromisoformat(str(after[0]))
-            if published_at.utcoffset() is None or not 1 <= after[1] <= 9_223_372_036_854_775_807:
+            max_microseconds = datetime.max.replace(tzinfo=UTC) - CURSOR_EPOCH
+            min_microseconds = datetime.min.replace(tzinfo=UTC) - CURSOR_EPOCH
+            if (
+                not min_microseconds.days * 86_400_000_000
+                <= after[0]
+                <= max_microseconds.days * 86_400_000_000
+                + max_microseconds.seconds * 1_000_000
+                + max_microseconds.microseconds
+                or not 1 <= after[1] <= MAX_NEWS_ID
+            ):
                 raise ValueError
+            published_at = CURSOR_EPOCH + timedelta(microseconds=after[0])
         except (ValueError, OverflowError) as exc:
             raise InvalidCursorError("Cursor does not match this selection") from exc
         statement = statement.where(tuple_(News.published_at, News.id) < (published_at, after[1]))

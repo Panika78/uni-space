@@ -1,10 +1,13 @@
 import base64
 import json
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.dependencies.auth import get_current_student, get_current_user
 from app.dependencies.database import get_db_session
@@ -22,7 +25,7 @@ def test_create_excerpt_normalizes_unicode_whitespace_and_limits_length() -> Non
 
 
 def test_news_list_rejects_cursors_with_invalid_timestamp_or_id(db_session) -> None:
-    malformed_values = [("not-a-date", 1), ("2026-11-10T12:00:00", 1), ("2026-11-10T12:00:00Z", 0)]
+    malformed_values = [("not-a-number", 1), (1, 0), (10**30, 1)]
     for key in malformed_values:
         raw = json.dumps({"v": 2, "direction": "desc", "key": key}, separators=(",", ":"))
         cursor = base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
@@ -55,21 +58,10 @@ def test_news_sql_filters_visibility_and_keyset_pages_are_stable(db_session) -> 
     first = list_published_news(db_session, limit=2, cursor=None)
     assert len(first.items) == 2
     assert first.next_cursor is not None
-    # A newly published item sorts ahead of page one and does not shift its cursor boundary.
-    latest = News(
-        title="arrived-between-pages",
-        body="new",
-        published_at=now + timedelta(seconds=1),
-        is_published=True,
-    )
-    db_session.add(latest)
-    db_session.flush()
-
     second = list_published_news(db_session, limit=2, cursor=first.next_cursor)
     third = list_published_news(db_session, limit=2, cursor=second.next_cursor)
     seen = [item.id for page in (first, second, third) for item in page.items]
     assert len(seen) == len(set(seen)) == len(rows) + 1
-    assert str(latest.id) not in seen
     same_time_ids = [
         int(item.id)
         for page in (first, second, third)
@@ -83,6 +75,86 @@ def test_news_sql_filters_visibility_and_keyset_pages_are_stable(db_session) -> 
     assert get_published_news(db_session, 9_999_999) is None
     assert get_published_news(db_session, rows[0].id) is not None
     assert get_published_news(db_session, boundary.id) is not None
+
+
+@pytest.mark.integration
+def test_news_cursor_uses_absolute_time_across_offset_boundaries(db_session) -> None:
+    first_moment = datetime.fromisoformat("2026-10-25T02:30:00+02:00")
+    second_moment = datetime.fromisoformat("2026-10-25T02:15:00+01:00")
+    older = News(title="offset-older", body="old", published_at=first_moment, is_published=True)
+    newer = News(title="offset-newer", body="new", published_at=second_moment, is_published=True)
+    db_session.add_all([older, newer])
+    db_session.flush()
+
+    first = list_published_news(db_session, limit=1, cursor=None)
+    second = list_published_news(db_session, limit=1, cursor=first.next_cursor)
+
+    assert first.items[0].id == str(newer.id)
+    assert second.items[0].id == str(older.id)
+    assert first.items[0].published_at.astimezone(UTC) > second.items[0].published_at.astimezone(
+        UTC
+    )
+
+
+@pytest.mark.integration
+def test_news_keyset_survives_new_publication_between_transactions(postgresql_engine) -> None:
+    prefix = f"cursor-arrival-{uuid4()}"
+    titles = [f"{prefix}-{index}" for index in range(5)]
+    try:
+        with Session(postgresql_engine) as seed_session:
+            now = datetime.now(UTC) - timedelta(minutes=2)
+            seed_session.add_all(
+                [
+                    News(title=title, body=title, published_at=now, is_published=True)
+                    for title in titles
+                ]
+            )
+            seed_session.commit()
+
+        with Session(postgresql_engine) as first_session:
+            first = list_published_news(first_session, limit=2, cursor=None)
+        assert first.next_cursor is not None
+
+        with Session(postgresql_engine) as publisher_session:
+            arrived = News(
+                title=f"{prefix}-new",
+                body="newly visible",
+                published_at=func.clock_timestamp(),
+                is_published=True,
+            )
+            publisher_session.add(arrived)
+            publisher_session.commit()
+            arrived_id = arrived.id
+
+        with Session(postgresql_engine) as visibility_session:
+            head = list_published_news(visibility_session, limit=2, cursor=None)
+        assert head.items[0].id == str(arrived_id)
+
+        with Session(postgresql_engine) as continuation_session:
+            second = list_published_news(continuation_session, limit=2, cursor=first.next_cursor)
+        assert second.next_cursor is not None
+        with Session(postgresql_engine) as final_session:
+            third = list_published_news(final_session, limit=2, cursor=second.next_cursor)
+
+        original_ids = {item.id for item in first.items + second.items + third.items}
+        assert len(original_ids) == 5
+        assert {item.title for page in (first, second, third) for item in page.items} == set(titles)
+        assert str(arrived_id) not in original_ids
+    finally:
+        with Session(postgresql_engine) as cleanup_session:
+            cleanup_session.execute(delete(News).where(News.title.like(f"{prefix}%")))
+            cleanup_session.commit()
+
+
+@pytest.mark.integration
+def test_news_title_constraint_rejects_whitespace_only_titles(db_session) -> None:
+    for index, title in enumerate(("\t", "\n", " \t\r\n ")):
+        with db_session.begin_nested():
+            db_session.add(
+                News(title=title, body=f"blank-{index}", published_at=None, is_published=False)
+            )
+            with pytest.raises(IntegrityError):
+                db_session.flush()
 
 
 @pytest.mark.integration
@@ -101,6 +173,10 @@ def test_news_api_returns_same_not_found_for_hidden_and_missing_ids(db_session) 
             app.dependency_overrides[get_current_student] = lambda: object()
             assert client.get(f"/api/v1/news/{hidden.id}").status_code == 404
             assert client.get("/api/v1/news/99999999").status_code == 404
+            assert client.get("/api/v1/news/" + "9" * 5000).status_code == 422
+            assert client.get("/api/v1/news/9223372036854775808").status_code == 422
+            assert client.get("/api/v1/news/99999999?limit=1").status_code == 422
+            assert client.get("/api/v1/news/99999999?cursor=broken").status_code == 422
             assert client.get("/api/v1/news?limit=0").status_code == 422
             assert client.get("/api/v1/news?cursor=broken").status_code == 422
             invalid_key = (

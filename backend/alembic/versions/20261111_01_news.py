@@ -26,7 +26,7 @@ def upgrade() -> None:
         sa.Column("author_user_id", sa.BigInteger(), nullable=True),
         sa.Column("published_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("is_published", sa.Boolean(), server_default=sa.text("false"), nullable=False),
-        sa.CheckConstraint("length(btrim(title)) > 0", name="ck_news_title_not_blank"),
+        sa.CheckConstraint("title !~ '^[[:space:]]*$'", name="ck_news_title_not_blank"),
         sa.ForeignKeyConstraint(
             ["author_user_id"], ["users.id"], name="fk_news_author_user_id_users"
         ),

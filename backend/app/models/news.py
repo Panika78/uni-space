@@ -18,7 +18,7 @@ from app.models.base import Base
 class News(Base):
     __tablename__ = "news"
     __table_args__ = (
-        CheckConstraint("length(btrim(title)) > 0", name="ck_news_title_not_blank"),
+        CheckConstraint("title !~ '^[[:space:]]*$'", name="ck_news_title_not_blank"),
         PrimaryKeyConstraint("id", name="pk_news"),
         Index("ix_news_published_at_id", "published_at", "id"),
     )

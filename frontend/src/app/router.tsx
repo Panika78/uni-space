@@ -1,4 +1,4 @@
-import { createBrowserRouter, Link, Navigate, Outlet } from 'react-router-dom'
+import { createBrowserRouter, Link, Navigate, Outlet, ScrollRestoration } from 'react-router-dom'
 
 import { LoginPage, ProtectedRoute, SchedulePage } from '../features/auth/AuthPages'
 import { useAuth } from '../features/auth/AuthProvider'
@@ -30,6 +30,15 @@ function PublicLayout() {
     <PublicFrame>
       <Outlet />
     </PublicFrame>
+  )
+}
+
+function NewsLayout() {
+  return (
+    <>
+      <ScrollRestoration />
+      <Outlet />
+    </>
   )
 }
 
@@ -102,8 +111,13 @@ export const appRoutes: RouteObject[] = [
               { path: '/schedule', element: <SchedulePage /> },
               { path: '/academics', element: <UnavailableSection title="Успеваемость" /> },
               { path: '/services', element: <UnavailableSection title="Услуги и документы" /> },
-              { path: '/news', element: <NewsFeedPage /> },
-              { path: '/news/:id', element: <NewsDetailPage /> },
+              {
+                element: <NewsLayout />,
+                children: [
+                  { path: '/news', element: <NewsFeedPage /> },
+                  { path: '/news/:id', element: <NewsDetailPage /> },
+                ],
+              },
               { path: '/notifications', element: <UnavailableSection title="Уведомления" /> },
               { path: '/profile', element: <UnavailableSection title="Мой профиль" /> },
               { path: '/settings', element: <UnavailableSection title="Настройки" /> },

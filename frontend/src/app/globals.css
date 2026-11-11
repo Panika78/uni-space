@@ -371,6 +371,7 @@ a {
   font-size: 17px;
   line-height: 1.4;
   font-weight: 650;
+  overflow-wrap: anywhere;
 }
 .news-row h2 a {
   color: #332b2d;
