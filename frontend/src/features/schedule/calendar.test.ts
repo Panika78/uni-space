@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { addDays, formatTime, getMoscowDate, getWeekStart, listDayLessons } from './calendar'
+import {
+  addDays,
+  formatTime,
+  getIsoWeekNumber,
+  getMoscowDate,
+  getWeekStart,
+  listDayLessons,
+} from './calendar'
 
 import { createLesson } from './testFixtures'
 
@@ -17,6 +24,12 @@ describe('Moscow calendar independent of browser timezone', () => {
     expect(addDays('2026-12-31', 1)).toBe('2027-01-01')
     expect(addDays('9999-12-31', 7)).toBe('9999-12-31')
     expect(addDays('0001-01-01', -7)).toBe('0001-01-01')
+  })
+  it('uses ISO week numbers across year boundaries', () => {
+    expect(getIsoWeekNumber('2026-11-10')).toBe(46)
+    expect(getIsoWeekNumber('2021-01-01')).toBe(53)
+    expect(getIsoWeekNumber('2024-12-31')).toBe(1)
+    expect(getIsoWeekNumber('2025-01-01')).toBe(1)
   })
   it('places overnight lessons in both days and excludes exact boundaries', () => {
     const crossing = createLesson({

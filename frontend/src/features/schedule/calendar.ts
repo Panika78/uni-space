@@ -30,6 +30,13 @@ export function getWeekStart(date: string): string {
   return addDays(date, -((weekday + 6) % 7))
 }
 
+export function getIsoWeekNumber(date: string): number {
+  const value = new Date(`${date}T12:00:00Z`)
+  value.setUTCDate(value.getUTCDate() + 4 - (value.getUTCDay() || 7))
+  const yearStart = new Date(Date.UTC(value.getUTCFullYear(), 0, 1))
+  return Math.ceil(((value.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
+}
+
 export function formatDate(date: string): string {
   return new Intl.DateTimeFormat('ru-RU', {
     timeZone: timezone,

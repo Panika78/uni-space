@@ -1,23 +1,52 @@
+.schedule-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.schedule-heading h1 {
+  margin: 0;
+}
+.schedule-week-label {
+  margin: 0;
+  color: #554b49;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-align: right;
+}
 .schedule-toolbar,
 .schedule-modes,
 .schedule-period {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.55rem;
 }
 .schedule-toolbar {
   flex-wrap: wrap;
-  margin: 1.25rem 0;
+  margin: 0 0 0.35rem;
+  padding: 0.55rem;
+  border: 1px solid #e6dcd7;
+  border-radius: 0.8rem;
+  background: #f8f3ef;
 }
 .schedule-page button,
 .schedule-date input {
   min-height: 44px;
   border: 1px solid var(--line);
-  border-radius: 0.5rem;
+  border-radius: 0.55rem;
   padding: 0.5rem 0.8rem;
   background: var(--surface, #fff);
-  color: inherit;
+  color: #332927;
   cursor: pointer;
+}
+.schedule-page button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.schedule-page button:focus-visible,
+.schedule-date input:focus-visible {
+  outline: 3px solid #a85d76;
+  outline-offset: 2px;
 }
 .schedule-page button[aria-pressed='true'] {
   background: var(--accent);
@@ -28,28 +57,41 @@
   opacity: 0.45;
   cursor: default;
 }
+.schedule-modes {
+  padding: 0.2rem;
+  background: #ebe3df;
+  border-radius: 0.65rem;
+}
+.schedule-modes button {
+  border-color: transparent;
+}
 .schedule-date {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.45rem;
+  color: #403633;
+  font-size: 0.9rem;
 }
 .schedule-period {
   justify-content: space-between;
-  margin-bottom: 1rem;
+  min-height: 30px;
+  color: #736865;
 }
 .schedule-period p {
-  text-align: center;
-  margin: 0;
+  margin: 0 auto;
+  font-size: 0.78rem;
 }
-.schedule-period small,
-.lesson-card__time small {
-  display: block;
-  font-size: 0.75rem;
-  margin-top: 0.3rem;
+.schedule-period button {
+  min-height: 36px;
+  padding: 0.25rem 0.7rem;
+}
+.schedule-timezone {
+  color: #776d68;
+  font-size: 0.72rem !important;
 }
 .schedule-days {
   display: flex;
-  gap: 0.25rem;
+  gap: 0.3rem;
   margin-bottom: 1rem;
 }
 .schedule-days button {
@@ -63,54 +105,109 @@
 }
 .schedule-day {
   display: none;
-  grid-template-columns: 10rem minmax(0, 1fr);
-  gap: 1rem;
-  margin-bottom: 1.25rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.15rem;
+  margin-bottom: 1.15rem;
 }
 .schedule-page--week .schedule-day,
 .schedule-day.is-selected {
   display: grid;
 }
 .schedule-day h2 {
-  font-size: 0.9rem;
-  font-weight: 600;
-  margin: 0.8rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.1rem;
+  line-height: 1.3;
+  font-weight: 700;
+  color: #342522;
+  margin: 0.75rem 0 0.55rem;
+}
+.schedule-day h2 svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: none;
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .schedule-day__lessons {
   min-width: 0;
 }
 .lesson-card {
   display: grid;
-  grid-template-columns: 7rem minmax(0, 1fr);
-  gap: 1rem;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  gap: 0.9rem;
+  align-items: stretch;
   background: #fff;
-  border: 1px solid var(--line);
+  border: 1px solid #e5dcd7;
   border-radius: 0.75rem;
-  padding: 1rem;
-  margin-bottom: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  margin-bottom: 0.45rem;
   overflow-wrap: anywhere;
+  box-shadow: 0 2px 8px rgb(54 35 29 / 5%);
 }
 .lesson-card__time {
-  font-size: 0.85rem;
-  font-weight: 600;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  flex-wrap: wrap;
+  padding: 0.6rem;
+  border: 1px solid #e9ded9;
+  border-radius: 0.55rem;
+  background: #f8f4f1;
+  color: #463732;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  font-weight: 650;
+}
+.lesson-card__time time {
+  min-width: 0;
+}
+.lesson-card__times {
+  display: inline;
+}
+.lesson-card__details {
+  min-width: 0;
+  border-left: 1px solid #eee5e0;
+  padding-left: 0.9rem;
 }
 .lesson-card h3 {
-  font-size: 1rem;
-  margin: 0 0 0.4rem;
+  color: #2f2421;
+  font-size: 1.03rem;
+  line-height: 1.35;
+  font-weight: 700;
+  margin: 0 0 0.25rem;
 }
 .lesson-card p,
 .lesson-card ul {
-  margin: 0.2rem 0;
-  font-size: 0.85rem;
+  margin: 0.16rem 0;
+  font-size: 0.86rem;
+  line-height: 1.4;
+  color: #493f3b;
+}
+.lesson-card .lesson-card__kind {
+  color: #635550;
+  font-weight: 550;
+}
+.lesson-card .lesson-card__teacher {
+  color: #403633;
 }
 .lesson-card ul {
-  padding-left: 1.2rem;
+  list-style: none;
+  padding: 0;
+}
+.lesson-card li + li {
+  margin-top: 0.1rem;
 }
 .lesson-card--cancelled,
 .lesson-card--moved {
-  background: #f1f3f5;
-  color: #536171;
-  padding-block: 0.65rem;
+  background: #f6f3f1;
+  color: #4a403d;
 }
 .lesson-card--cancelled h3,
 .lesson-card--cancelled time,
@@ -118,11 +215,25 @@
   text-decoration: line-through;
 }
 .lesson-card__status {
-  font-weight: 600;
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 0.16rem 0.55rem;
+  font-size: 0.75rem !important;
+  line-height: 1.35;
+  font-weight: 650;
+}
+.lesson-card__status--cancelled {
+  color: #514b48 !important;
+  background: #e9e5e2;
+}
+.lesson-card__status--moved {
+  color: #6c243d !important;
+  background: #f5e6eb;
 }
 .schedule-empty {
-  margin: 0.8rem 0;
-  color: #536171;
+  margin: 0.35rem 0 0.8rem;
+  color: #635752;
   font-size: 0.9rem;
 }
 @media (min-width: 769px) {
@@ -131,30 +242,48 @@
   }
 }
 @media (max-width: 768px) {
+  .schedule-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .schedule-week-label {
+    text-align: left;
+  }
   .schedule-modes,
   .schedule-day-arrows {
     display: none;
   }
-  .schedule-day,
-  .schedule-page--week .schedule-day {
-    display: none;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.25rem;
+  .schedule-toolbar {
+    gap: 0.35rem;
   }
-  .schedule-day.is-selected,
-  .schedule-page--week .schedule-day.is-selected {
-    display: grid;
+  .schedule-date {
+    flex: 1 1 100%;
+    justify-content: space-between;
   }
-  .lesson-card {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.5rem;
-    padding: 0.8rem;
+  .schedule-date input {
+    min-width: 0;
+    max-width: 65%;
   }
   .schedule-period {
-    gap: 0.35rem;
+    gap: 0.25rem;
     font-size: 0.8rem;
   }
   .schedule-period button {
     flex-shrink: 0;
+  }
+  .lesson-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.55rem;
+    padding: 0.7rem;
+  }
+  .lesson-card__time {
+    min-height: 2.7rem;
+    gap: 0.2rem;
+  }
+  .lesson-card__details {
+    border-left: 0;
+    border-top: 1px solid #eee5e0;
+    padding: 0.5rem 0 0;
   }
 }

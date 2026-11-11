@@ -66,6 +66,18 @@ it('loads the Moscow week, renders known details once and provides no dead disci
   })
 })
 
+it('shows the selected ISO week and wide day headings above the lesson cards', async () => {
+  request.mockResolvedValue(response([createLesson()]))
+  renderSchedule()
+  expect(await screen.findByRole('article')).toBeInTheDocument()
+  expect(screen.getByText('Неделя 46 · 9–15 ноября')).toBeInTheDocument()
+  const section = screen.getByRole('region', { name: 'вторник, 10 ноября' })
+  expect(within(section).getByRole('heading', { name: /вторник, 10 ноября/i })).toBeInTheDocument()
+  expect(within(section).getByRole('article')).toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText('Дата'), { target: { value: '2026-12-31' } })
+  expect(await screen.findByText('Неделя 53 · 28 декабря – 3 января 2027')).toBeInTheDocument()
+})
+
 it('supports Sunday, date selection, week arrows, today and keyboard mode selection', async () => {
   request.mockResolvedValue(response([]))
   renderSchedule()
@@ -129,7 +141,9 @@ it('shows skeletons, nullable details, overnight duplicates by date, and cancell
   expect(await screen.findAllByRole('article')).toHaveLength(4)
   expect(screen.getAllByText('Преподаватель не указан')).toHaveLength(4)
   expect(screen.getByText('Отменено')).toBeInTheDocument()
+  expect(screen.getByText('Отменено')).toHaveClass('lesson-card__status--cancelled')
   expect(screen.getByText(/Перенесено на/)).toHaveTextContent('09:00')
+  expect(screen.getByText(/Перенесено на/)).toHaveClass('lesson-card__status--moved')
 })
 
 it.each([
