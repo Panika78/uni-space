@@ -305,7 +305,14 @@ jobs:
           uv python install 3.12.16
           mkdir -p work/browser-tooling
           npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
-          node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell
+          for attempt in 1 2 3; do
+            if node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then exit 1; fi
+            echo "Playwright browser/dependency install failed on attempt $attempt; retrying for transient package mirror failures."
+            sleep $((attempt * 10))
+          done
           echo "PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
       - name: Apply migrations and create two fictional students
         run: |
@@ -348,7 +355,14 @@ jobs:
           mkdir -p work/browser-tooling
           if ! (
             npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0 &&
-            node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell
+            for attempt in 1 2 3; do
+              if node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell; then
+                break
+              fi
+              if [ "$attempt" -eq 3 ]; then exit 1; fi
+              echo "Playwright browser/dependency install failed on attempt $attempt; retrying for transient package mirror failures."
+              sleep $((attempt * 10))
+            done
           ) > work/browser-install.log 2>&1; then
             cat work/browser-install.log
             tail -n 20 work/browser-install.log | sed 's/%/%25/g;s/\r/%0D/g;s/^/::error title=Browser tooling::/'
