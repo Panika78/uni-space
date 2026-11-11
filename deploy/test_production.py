@@ -269,6 +269,24 @@ def main(*, legacy=False):
                 input=query,
             ).stdout.strip()
 
+        def wait_for_stopped_api_containers():
+            deadline = time.monotonic() + 10
+            command = [
+                "docker",
+                "ps",
+                "-q",
+                "--filter",
+                f"label=com.docker.compose.project={project}",
+                "--filter",
+                "label=com.docker.compose.service=api",
+            ]
+            while time.monotonic() < deadline:
+                result = run(command, success=False)
+                if result.returncode == 0 and not result.stdout.strip():
+                    return
+                time.sleep(0.1)
+            raise AssertionError("API containers remained running after Compose stop")
+
         try:
             config = json.loads(dc("config", "--format", "json").stdout)
             for service in ("api", "db"):
@@ -1128,6 +1146,7 @@ for index in range(6):
             )
             # Switch only this isolated stack to the verified restore, then back.
             dc("stop", "nginx", "api")
+            wait_for_stopped_api_containers()
             run(
                 ["bash", "scripts/configure-postgres.sh", "restore_deployment_check"],
                 env=env,
@@ -1185,6 +1204,7 @@ for index in range(6):
             )
             assert sql(database_acls) == before_switch
             dc("stop", "nginx", "api")
+            wait_for_stopped_api_containers()
             run(["bash", "scripts/configure-postgres.sh"], env=env)
             print(
                 "PASS: restored database HTTPS login/refresh/logout; source unchanged",
