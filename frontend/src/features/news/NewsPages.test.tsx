@@ -96,6 +96,28 @@ describe('university news pages', () => {
     expect(apiFetch).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps modified and non-primary return clicks under native browser handling', async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(page).mockResolvedValueOnce(item)
+    renderNews()
+    fireEvent.click(await screen.findByRole('link', { name: '<img src=x onerror=alert(1)>' }))
+    await screen.findByRole('heading', { name: '<img src=x onerror=alert(1)>' })
+    const backLink = screen.getByRole('link', { name: '← Назад к новостям' })
+
+    for (const modifiers of [
+      { ctrlKey: true },
+      { metaKey: true },
+      { shiftKey: true },
+      { altKey: true },
+      { button: 1 },
+    ]) {
+      expect(fireEvent.click(backLink, modifiers)).toBe(true)
+      expect(backLink).toHaveAttribute('href', '/news')
+      expect(
+        screen.getByRole('heading', { name: '<img src=x onerror=alert(1)>' }),
+      ).toBeInTheDocument()
+    }
+  })
+
   it('renders the empty feed state', async () => {
     vi.mocked(apiFetch).mockResolvedValueOnce({ items: [], next_cursor: null })
     renderNews()
@@ -137,7 +159,7 @@ describe('university news pages', () => {
     }
     const oldPage2 = {
       items: [{ ...page.items[0], id: 'old-2', title: 'Старая страница 2' }],
-      next_cursor: null,
+      next_cursor: 'old-cursor-2',
     }
     const refreshedPage1 = {
       items: [{ ...page.items[0], id: 'new-1', title: 'Новая публикация' }],
@@ -147,13 +169,32 @@ describe('university news pages', () => {
       items: [{ ...page.items[0], id: 'new-2', title: 'Актуальная страница 2' }],
       next_cursor: null,
     }
-    vi.mocked(apiFetch).mockResolvedValueOnce(refreshedPage1).mockResolvedValueOnce(refreshedPage2)
-    renderNews('/news', {
+    let resolveFirstPage: (value: typeof refreshedPage1) => void = () => undefined
+    vi.mocked(apiFetch)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstPage = resolve
+          }),
+      )
+      .mockResolvedValueOnce(refreshedPage2)
+    const queryClient = renderNews('/news', {
       pages: [oldPage, oldPage2],
       pageParams: [null, 'old-cursor'],
       updatedAt: Date.now() - 60_000,
     })
+    expect(
+      Date.now() - (queryClient.getQueryState(['news', 'feed'])?.dataUpdatedAt ?? 0),
+    ).toBeGreaterThan(30_000)
 
+    const loadMore = await screen.findByRole('button', { name: 'Обновляем…' })
+    expect(loadMore).toBeDisabled()
+    fireEvent.click(loadMore)
+    expect(apiFetch).toHaveBeenCalledTimes(1)
+    expect(queryClient.getQueryCache().find({ queryKey: ['news', 'feed'] })?.options.gcTime).toBe(
+      Infinity,
+    )
+    resolveFirstPage(refreshedPage1)
     expect(await screen.findByText('Новая публикация')).toBeInTheDocument()
     expect(await screen.findByText('Актуальная страница 2')).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByText('Снятая публикация')).not.toBeInTheDocument())

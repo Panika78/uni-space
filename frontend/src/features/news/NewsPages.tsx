@@ -1,6 +1,6 @@
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { InfiniteData } from '@tanstack/react-query'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import type { MouseEvent } from 'react'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
@@ -14,7 +14,7 @@ type FeedData = InfiniteData<NewsPage, string | null>
 
 const NEWS_FEED_KEY = ['news', 'feed'] as const
 const NEWS_FRESH_MS = 30_000
-const NEWS_FEED_GC_MS = 30 * 60_000
+const NEWS_ITEM_GC_MS = 30 * 60_000
 
 function formatNewsDate(value: string) {
   return new Intl.DateTimeFormat('ru-RU', {
@@ -60,63 +60,76 @@ function NewsRow({ item }: { item: NewsPreview }) {
 
 export function NewsFeedPage() {
   const queryClient = useQueryClient()
-  const [refreshError, setRefreshError] = useState(false)
-  const [refreshAttempt, setRefreshAttempt] = useState(0)
   const refreshInProgress = useRef(false)
+  const refreshController = useRef<AbortController | null>(null)
   const query = useInfiniteQuery({
     queryKey: NEWS_FEED_KEY,
     queryFn: ({ pageParam, signal }) => getNewsPage(pageParam, signal),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     staleTime: NEWS_FRESH_MS,
-    gcTime: NEWS_FEED_GC_MS,
+    gcTime: Infinity,
     refetchOnMount: false,
   })
+  const refreshMutation = useMutation({
+    mutationFn: async ({ pageCount, signal }: { pageCount: number; signal: AbortSignal }) => {
+      const pages: NewsPage[] = []
+      const pageParams: (string | null)[] = []
+      let cursor: string | null = null
+      for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+        const page = await getNewsPage(cursor, signal)
+        pages.push(page)
+        pageParams.push(cursor)
+        if (!page.next_cursor) break
+        cursor = page.next_cursor
+      }
+      return { pages, pageParams }
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData<FeedData>(NEWS_FEED_KEY, data, { updatedAt: Date.now() })
+    },
+  })
+  const mutateRefresh = refreshMutation.mutateAsync
+
+  const startFeedRefresh = useCallback(
+    (pageCount: number) => {
+      const controller = new AbortController()
+      refreshController.current = controller
+      refreshInProgress.current = true
+      void mutateRefresh({ pageCount, signal: controller.signal })
+        .catch(() => undefined)
+        .finally(() => {
+          if (refreshController.current === controller) {
+            refreshController.current = null
+            refreshInProgress.current = false
+          }
+        })
+      return controller
+    },
+    [mutateRefresh],
+  )
 
   useEffect(() => {
     const cached = queryClient.getQueryData<FeedData>(NEWS_FEED_KEY)
     const state = queryClient.getQueryState<FeedData>(NEWS_FEED_KEY)
     if (!cached || !state || Date.now() - state.dataUpdatedAt <= NEWS_FRESH_MS) return
 
-    const controller = new AbortController()
-    let isActive = true
-    refreshInProgress.current = true
-    void (async () => {
-      const pages: NewsPage[] = []
-      const pageParams: (string | null)[] = []
-      let cursor: string | null = null
-      for (let pageIndex = 0; pageIndex < cached.pages.length; pageIndex += 1) {
-        const page = await getNewsPage(cursor, controller.signal)
-        pages.push(page)
-        pageParams.push(cursor)
-        if (!page.next_cursor) break
-        cursor = page.next_cursor
-      }
-      if (isActive) {
-        queryClient.setQueryData<FeedData>(
-          NEWS_FEED_KEY,
-          { pages, pageParams },
-          { updatedAt: Date.now() },
-        )
-      }
-    })()
-      .catch(() => {
-        if (isActive && !controller.signal.aborted) setRefreshError(true)
-      })
-      .finally(() => {
-        if (isActive) refreshInProgress.current = false
-      })
+    const controller = startFeedRefresh(cached.pages.length)
 
     return () => {
-      isActive = false
-      refreshInProgress.current = false
       controller.abort()
+      if (refreshController.current === controller) {
+        refreshController.current = null
+        refreshInProgress.current = false
+      }
     }
-  }, [queryClient, refreshAttempt])
+  }, [queryClient, startFeedRefresh])
 
   function handleRefreshRetry() {
-    setRefreshError(false)
-    setRefreshAttempt((attempt) => attempt + 1)
+    const cached = queryClient.getQueryData<FeedData>(NEWS_FEED_KEY)
+    if (!cached || refreshInProgress.current) return
+    refreshMutation.reset()
+    startFeedRefresh(cached.pages.length)
   }
 
   return (
@@ -131,7 +144,7 @@ export function NewsFeedPage() {
           onRetry={() => void query.refetch()}
         />
       )}
-      {refreshError && query.data && (
+      {refreshMutation.isError && query.data && (
         <ErrorState
           title="Не удалось обновить новости"
           description="Показаны ранее загруженные публикации. Попробуйте обновить страницу позже."
@@ -155,12 +168,17 @@ export function NewsFeedPage() {
             <button
               className="news-load-more"
               type="button"
-              disabled={query.isFetchingNextPage}
+              disabled={query.isFetchingNextPage || refreshMutation.isPending}
               onClick={() => {
-                if (!refreshInProgress.current) void query.fetchNextPage()
+                if (refreshInProgress.current || refreshMutation.isPending) return
+                void query.fetchNextPage()
               }}
             >
-              {query.isFetchingNextPage ? 'Загружаем…' : 'Показать ещё'}
+              {refreshMutation.isPending
+                ? 'Обновляем…'
+                : query.isFetchingNextPage
+                  ? 'Загружаем…'
+                  : 'Показать ещё'}
             </button>
           )}
           {query.isFetchNextPageError && (
@@ -184,12 +202,20 @@ export function NewsDetailPage() {
     queryKey: ['news', 'item', id],
     queryFn: ({ signal }) => getNews(id, signal),
     staleTime: NEWS_FRESH_MS,
-    gcTime: NEWS_FEED_GC_MS,
+    gcTime: NEWS_ITEM_GC_MS,
     refetchOnMount: true,
   })
 
   function handleBack(event: MouseEvent<HTMLAnchorElement>) {
-    if (!location.state?.fromNewsFeed) return
+    if (
+      !location.state?.fromNewsFeed ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return
     event.preventDefault()
     navigate(-1)
   }

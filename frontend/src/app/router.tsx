@@ -33,7 +33,7 @@ function PublicLayout() {
   )
 }
 
-function NewsLayout() {
+function RootLayout() {
   return (
     <>
       <ScrollRestoration />
@@ -91,7 +91,7 @@ function NotFoundPage() {
 
 export const appRoutes: RouteObject[] = [
   {
-    element: <Outlet />,
+    element: <RootLayout />,
     errorElement: <RouteErrorPage />,
     children: [
       { path: '/', element: <Navigate to="/login" replace /> },
@@ -111,13 +111,8 @@ export const appRoutes: RouteObject[] = [
               { path: '/schedule', element: <SchedulePage /> },
               { path: '/academics', element: <UnavailableSection title="Успеваемость" /> },
               { path: '/services', element: <UnavailableSection title="Услуги и документы" /> },
-              {
-                element: <NewsLayout />,
-                children: [
-                  { path: '/news', element: <NewsFeedPage /> },
-                  { path: '/news/:id', element: <NewsDetailPage /> },
-                ],
-              },
+              { path: '/news', element: <NewsFeedPage /> },
+              { path: '/news/:id', element: <NewsDetailPage /> },
               { path: '/notifications', element: <UnavailableSection title="Уведомления" /> },
               { path: '/profile', element: <UnavailableSection title="Мой профиль" /> },
               { path: '/settings', element: <UnavailableSection title="Настройки" /> },
