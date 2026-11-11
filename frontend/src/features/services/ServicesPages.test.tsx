@@ -219,3 +219,52 @@ it('sends only one request while submission is pending', async () => {
   })
   expect(await screen.findByText('№ 74')).toBeInTheDocument()
 })
+
+it('blocks router and Back navigation while a POST is pending and allows waiting', async () => {
+  let resolveResponse: (value: unknown) => void = () => undefined
+  apiFetch.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        resolveResponse = resolve
+      }),
+  )
+  const router = createMemoryRouter(
+    [
+      { path: '/services/:serviceCode', element: <ApplicationFormPage /> },
+      { path: '/schedule', element: <h1>Расписание</h1> },
+    ],
+    { initialEntries: ['/schedule', '/services/study_certificate'], initialIndex: 1 },
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.change(screen.getByLabelText(/Место предоставления/), {
+    target: { value: 'Деканат' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Отправляем…' })).toBeDisabled())
+
+  await router.navigate('/schedule')
+  expect(
+    await screen.findByRole('dialog', { name: 'Запрос уже отправлен. Покинуть форму?' }),
+  ).toBeInTheDocument()
+  expect(screen.getByText(/уход не отменит запрос/i)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Продолжить заполнение' }))
+  expect(router.state.location.pathname).toBe('/services/study_certificate')
+
+  await router.navigate(-1)
+  expect(
+    await screen.findByRole('dialog', { name: 'Запрос уже отправлен. Покинуть форму?' }),
+  ).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Продолжить заполнение' }))
+  resolveResponse({
+    id: '76',
+    service: { id: '4', code: 'study_certificate', title: 'Справка об обучении' },
+    form_data: { place_of_submission: 'Деканат' },
+    review_status: 'submitted',
+    document_status: 'pending',
+    feedback: null,
+    created_at: '2026-11-10T00:00:00Z',
+    updated_at: '2026-11-10T00:00:00Z',
+  })
+  expect(await screen.findByText('№ 76')).toBeInTheDocument()
+  expect(apiFetch).toHaveBeenCalledTimes(1)
+})

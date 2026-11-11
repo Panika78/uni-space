@@ -8,9 +8,13 @@ const password = process.env.SERVICES_TEST_PASSWORD
 const loginB = process.env.SERVICES_TEST_LOGIN_B
 const passwordB = process.env.SERVICES_TEST_PASSWORD_B || password
 assert.ok(login && password, 'Provide a fictional SERVICES_TEST_LOGIN and SERVICES_TEST_PASSWORD')
+assert.ok(
+  loginB,
+  'Provide a second fictional SERVICES_TEST_LOGIN_B for the required account-isolation scenario',
+)
 
 const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
+  ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
   headless: true,
   args: ['--no-sandbox'],
 })
@@ -80,22 +84,53 @@ try {
   await page.unroute('**/api/v1/applications')
   await field.fill('  Канцелярия\nкорпус № 2 — 東京  ')
 
-  const responseWaiter = page.waitForResponse(
-    (response) =>
-      response.request().method() === 'POST' &&
-      new URL(response.url()).pathname === '/api/v1/applications',
-  )
+  let allowInitialResponse
+  const initialResponseGate = new Promise((resolve) => {
+    allowInitialResponse = resolve
+  })
+  let notifyInitialCommit
+  const initialCommit = new Promise((resolve) => {
+    notifyInitialCommit = resolve
+  })
+  await page.route('**/api/v1/applications', async (route) => {
+    const upstream = await route.fetch()
+    notifyInitialCommit(upstream)
+    await initialResponseGate
+    await route.fulfill({ response: upstream })
+  })
   await page.getByRole('button', { name: 'Отправить заявление' }).click()
+  const committedResponse = await initialCommit
+  assert.equal(committedResponse.status(), 201)
+  await page
+    .locator('.desktop-sidebar')
+    .getByRole('link', { name: 'Расписание', exact: true })
+    .click()
+  const pendingNavigationWarning = page.getByRole('dialog', {
+    name: 'Запрос уже отправлен. Покинуть форму?',
+  })
+  await pendingNavigationWarning.waitFor()
+  assert.match(await pendingNavigationWarning.innerText(), /уход не отменит запрос/i)
+  await page.getByRole('button', { name: 'Продолжить заполнение' }).click()
+  await page.goBack()
+  await pendingNavigationWarning.waitFor()
+  await page.getByRole('button', { name: 'Продолжить заполнение' }).click()
+  const responseWaiter = page.waitForResponse(
+    (candidate) =>
+      candidate.request().method() === 'POST' &&
+      new URL(candidate.url()).pathname === '/api/v1/applications',
+  )
+  allowInitialResponse()
   const response = await responseWaiter
   assert.equal(response.status(), 201)
   assert.match(response.headers().location, /^\/api\/v1\/applications\/[1-9][0-9]*$/)
   const saved = await response.json()
   await page.getByText(`№ ${saved.id}`).waitFor()
   assert.equal(saved.form_data.place_of_submission, 'Канцелярия\nкорпус № 2 — 東京')
+  await page.unroute('**/api/v1/applications')
   assert.equal(postResponses.length, 1, 'The form dispatches a single POST')
   console.log('PASS: desktop catalog, form validation, navigation warning and real PostgreSQL save')
 
-  if (loginB) {
+  {
     const savedId = String(saved.id)
     const firstStudentData = saved.form_data.place_of_submission
     await page.getByRole('button', { name: 'Меню пользователя' }).click()
@@ -155,9 +190,18 @@ try {
     const delayedBody = await delayed.json()
     await page.getByRole('button', { name: 'Меню пользователя' }).click()
     await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+    const pendingLogoutWarning = page.getByRole('dialog', {
+      name: 'Выйти без подтверждения результата?',
+    })
+    await pendingLogoutWarning.waitFor()
+    assert.equal(await page.getByRole('dialog').count(), 1)
+    const pendingLogoutText = await pendingLogoutWarning.innerText()
+    assert.match(pendingLogoutText, /может сохранить заявление/)
+    assert.match(pendingLogoutText, /потерять подтверждение и номер/)
+    assert.doesNotMatch(pendingLogoutText, /не сохранен[ао]?/i)
     await page
-      .getByRole('dialog', { name: 'Потерять введённые данные и выйти?' })
-      .getByRole('button', { name: 'Выйти без сохранения' })
+      .getByRole('dialog', { name: 'Выйти без подтверждения результата?' })
+      .getByRole('button', { name: 'Выйти без подтверждения' })
       .click()
     await page.waitForURL(`${baseURL}/login`)
     await page.getByLabel('Логин').fill(loginB)
@@ -241,8 +285,10 @@ try {
   )
 
   await page.getByRole('link', { name: 'К каталогу услуг' }).click()
-  await page.getByRole('dialog', { name: 'Выйти без сохранения?' }).waitFor()
-  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  await page
+    .getByRole('dialog', { name: 'Результат отправки неизвестен. Покинуть форму?' })
+    .waitFor()
+  await page.getByRole('button', { name: 'Покинуть форму' }).click()
   await page.getByRole('heading', { name: 'Услуги и документы' }).waitFor()
 
   await page.setViewportSize({ width: 360, height: 800 })

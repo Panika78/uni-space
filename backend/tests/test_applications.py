@@ -1,8 +1,9 @@
+import json
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, delete, event, inspect, select, text
+from sqlalchemy import create_engine, delete, event, func, inspect, select, text
 from sqlalchemy.orm import Session
 
 from app.dependencies.auth import get_current_student
@@ -97,7 +98,7 @@ def test_application_http_routes_use_real_bearer_authentication(postgresql_engin
                     == 401
                 )
 
-        for user in students:
+        for index, user in enumerate(students):
             with TestClient(app) as client:
                 login = client.post(
                     "/api/v1/auth/login",
@@ -142,6 +143,73 @@ def test_application_http_routes_use_real_bearer_authentication(postgresql_engin
                     )
                     assert rejected.status_code == 422
 
+                if index == 0:
+                    student_headers = {"Authorization": f"Bearer {token}"}
+                    existing_count = session.scalar(
+                        select(func.count()).where(Application.student_id == student_rows[0].id)
+                    )
+                    for surrogate in ("\ud800", "\udc00"):
+                        body = json.dumps(
+                            {
+                                "service_code": "study_certificate",
+                                "form_data": {"place_of_submission": surrogate},
+                            },
+                            ensure_ascii=True,
+                        )
+                        rejected = client.post(
+                            "/api/v1/applications",
+                            content=body,
+                            headers={
+                                **student_headers,
+                                "Content-Type": "application/json",
+                            },
+                        )
+                        assert rejected.status_code == 422
+                        assert rejected.json()["error"]["details"] == [
+                            {
+                                "field": "form_data.place_of_submission",
+                                "code": "invalid_value",
+                            }
+                        ]
+                        session.expire_all()
+                        assert (
+                            session.scalar(
+                                select(func.count()).where(
+                                    Application.student_id == student_rows[0].id
+                                )
+                            )
+                            == existing_count
+                        )
+
+                    valid_pair_body = json.dumps(
+                        {
+                            "service_code": "study_certificate",
+                            "form_data": {"place_of_submission": "\ud83d\ude00"},
+                        },
+                        ensure_ascii=True,
+                    )
+                    valid_pair = client.post(
+                        "/api/v1/applications",
+                        content=valid_pair_body,
+                        headers={
+                            **student_headers,
+                            "Content-Type": "application/json",
+                        },
+                    )
+                    assert valid_pair.status_code == 201
+                    assert valid_pair.json()["form_data"]["place_of_submission"] == "😀"
+                    assert valid_pair.headers["location"] == (
+                        f"/api/v1/applications/{valid_pair.json()['id']}"
+                    )
+                    created_ids.append(int(valid_pair.json()["id"]))
+                    session.expire_all()
+                    assert (
+                        session.scalar(
+                            select(func.count()).where(Application.student_id == student_rows[0].id)
+                        )
+                        == existing_count + 1
+                    )
+
         with TestClient(app) as teacher_client:
             teacher_login = teacher_client.post(
                 "/api/v1/auth/login",
@@ -167,9 +235,15 @@ def test_application_http_routes_use_real_bearer_authentication(postgresql_engin
 
         session.expire_all()
         rows = [session.get(Application, app_id) for app_id in created_ids]
-        assert [row.student_id for row in rows] == [student_rows[0].id, student_rows[1].id]
+        assert [row.student_id for row in rows] == [
+            student_rows[0].id,
+            student_rows[0].id,
+            student_rows[1].id,
+        ]
         assert [row.form_data["place_of_submission"] for row in rows] == [
-            f"Заявление {students[index].login} — 東京" for index in range(2)
+            f"Заявление {students[0].login} — 東京",
+            "😀",
+            f"Заявление {students[1].login} — 東京",
         ]
     finally:
         if created_ids:

@@ -262,6 +262,73 @@ jobs:
       - name: Run isolated Compose healthcheck regression
         run: bash backend/tests/test_compose_db_healthcheck.sh
 
+  services-browser-e2e:
+    name: Services browser E2E (two test students)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17.11-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
+        env:
+          POSTGRES_DB: uni_space_test
+          POSTGRES_USER: uni_space_test
+          POSTGRES_PASSWORD: test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U uni_space_test -d uni_space_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
+      API_PROXY_TARGET: http://127.0.0.1:8000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.13.7
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install pinned npm and frontend dependencies
+        working-directory: frontend
+        run: |
+          npm install --global npm@11.19.1
+          npm ci
+      - name: Install pinned Python and browser tooling
+        run: |
+          uv python install 3.12.16
+          mkdir -p work/browser-tooling
+          npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
+          node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell
+          echo "PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
+      - name: Apply migrations and create two fictional students
+        run: |
+          uv run --locked --python 3.12.16 --project backend alembic -c backend/alembic.ini upgrade head
+          uv run --locked --python 3.12.16 --project backend python backend/scripts/seed_services_browser_test_students.py >> "$GITHUB_ENV"
+      - name: Start real API and frontend
+        run: |
+          (cd backend && uv run --locked --python 3.12.16 uvicorn app.main:app --host 127.0.0.1 --port 8000 > ../work/services-api.log 2>&1) &
+          (cd frontend && npm run dev -- --host 127.0.0.1 > ../work/services-frontend.log 2>&1) &
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8000/openapi.json >/dev/null && curl --silent --fail http://127.0.0.1:5173/login >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat work/services-api.log work/services-frontend.log
+          exit 1
+      - name: Run services catalog and application browser E2E
+        run: node frontend/e2e/services.browser.mjs
+      - name: Show server logs on failure
+        if: failure()
+        run: tail -n 80 work/services-api.log work/services-frontend.log 2>/dev/null || true
+
   production-deployment:
     name: Production Compose HTTPS and recovery
     # Playwright 1.57 supports Ubuntu 24.04; ubuntu-latest may select 26.04.

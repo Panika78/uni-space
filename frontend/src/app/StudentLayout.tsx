@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FocusEvent } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../features/auth/AuthProvider'
-import { UnsavedChangesProvider } from './UnsavedChangesContext'
+import { UnsavedChangesProvider, type ExitProtectionStatus } from './UnsavedChangesContext'
 import { UnavailableState } from '../shared/ui/StatusStates'
 import { UniversityBrand } from '../shared/ui/UniversityBrand'
 
@@ -35,7 +35,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
-function UserMenu({ hasUnsavedChanges }: { hasUnsavedChanges: boolean }) {
+function UserMenu({ exitStatus }: { exitStatus: ExitProtectionStatus }) {
   const { logout } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
   const [confirmLogout, setConfirmLogout] = useState(false)
@@ -147,9 +147,27 @@ function UserMenu({ hasUnsavedChanges }: { hasUnsavedChanges: boolean }) {
           }}
         >
           <h2 id="logout-dialog-title">
-            {hasUnsavedChanges ? 'Потерять введённые данные и выйти?' : 'Выйти из аккаунта?'}
+            {exitStatus === 'draft'
+              ? 'Потерять введённые данные и выйти?'
+              : exitStatus === 'submitting' || exitStatus === 'uncertain'
+                ? 'Выйти без подтверждения результата?'
+                : 'Выйти из аккаунта?'}
           </h2>
-          {hasUnsavedChanges && <p>Данные заявления не сохранены и будут потеряны.</p>}
+          {exitStatus === 'draft' && (
+            <p>Заявление ещё не отправлено; введённые данные будут потеряны.</p>
+          )}
+          {exitStatus === 'submitting' && (
+            <p>
+              Запрос уже отправлен и может сохранить заявление. Уход не отменит запрос; вы можете
+              потерять подтверждение и номер.
+            </p>
+          )}
+          {exitStatus === 'uncertain' && (
+            <p>
+              Ответ не получен. Заявление могло сохраниться, но подтверждение и номер будут
+              потеряны.
+            </p>
+          )}
           <div className="logout-dialog__actions">
             <button ref={cancelRef} type="button" onClick={closeConfirmation}>
               Отмена
@@ -165,7 +183,11 @@ function UserMenu({ hasUnsavedChanges }: { hasUnsavedChanges: boolean }) {
                 void logout()
               }}
             >
-              {hasUnsavedChanges ? 'Выйти без сохранения' : 'Выйти'}
+              {exitStatus === 'draft'
+                ? 'Выйти без сохранения'
+                : exitStatus === 'none'
+                  ? 'Выйти'
+                  : 'Выйти без подтверждения'}
             </button>
           </div>
         </dialog>
@@ -238,7 +260,7 @@ function MobileDrawer({ onClose }: { onClose: () => void }) {
 
 export function StudentLayout() {
   const [isCollapsed, setIsCollapsed] = useState(false)
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const [exitStatus, setExitStatus] = useState<ExitProtectionStatus>('none')
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const mainContentRef = useRef<HTMLElement>(null)
@@ -327,10 +349,10 @@ export function StudentLayout() {
               Уведомления
             </span>
           </Link>
-          <UserMenu hasUnsavedChanges={hasUnsavedChanges} />
+          <UserMenu exitStatus={exitStatus} />
         </header>
         <main className="student-content" id="main-content" ref={mainContentRef} tabIndex={-1}>
-          <UnsavedChangesProvider value={{ hasUnsavedChanges, setHasUnsavedChanges }}>
+          <UnsavedChangesProvider value={{ status: exitStatus, setStatus: setExitStatus }}>
             <Outlet />
           </UnsavedChangesProvider>
         </main>

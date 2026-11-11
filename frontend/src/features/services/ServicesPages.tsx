@@ -89,20 +89,30 @@ export function ApplicationFormPage() {
   const [value, setValue] = useState('')
   const [touched, setTouched] = useState(false)
   const [pending, setPending] = useState(false)
+  const [uncertain, setUncertain] = useState(false)
   const [application, setApplication] = useState<Application | null>(null)
   const [error, setError] = useState('')
   const [serverFieldError, setServerFieldError] = useState<string | null>(null)
-  const { setHasUnsavedChanges: setUnsavedChanges } = useUnsavedChanges()
+  const { setStatus: setExitStatus } = useUnsavedChanges()
   const input = useRef<HTMLTextAreaElement>(null)
   const leaveDialog = useRef<HTMLDialogElement>(null)
   const continueButton = useRef<HTMLButtonElement>(null)
   const inFlight = useRef(false)
   const dirty = value.length > 0 && !application
-  const blocker = useBlocker(dirty && !pending && !application)
+  const exitStatus = application
+    ? 'none'
+    : pending
+      ? 'submitting'
+      : uncertain
+        ? 'uncertain'
+        : dirty
+          ? 'draft'
+          : 'none'
+  const blocker = useBlocker(exitStatus !== 'none')
   useEffect(() => {
-    setUnsavedChanges(dirty)
-    return () => setUnsavedChanges(false)
-  }, [dirty, setUnsavedChanges])
+    setExitStatus(exitStatus)
+  }, [exitStatus, setExitStatus])
+  useEffect(() => () => setExitStatus('none'), [setExitStatus])
   useEffect(() => {
     if (serverFieldError && !pending) input.current?.focus()
   }, [pending, serverFieldError])
@@ -116,14 +126,14 @@ export function ApplicationFormPage() {
     }
   }, [blocker.state])
   useEffect(() => {
-    if (!dirty) return
+    if (exitStatus === 'none') return
     const handle = (event: BeforeUnloadEvent) => {
       event.preventDefault()
       event.returnValue = ''
     }
     window.addEventListener('beforeunload', handle)
     return () => window.removeEventListener('beforeunload', handle)
-  }, [dirty])
+  }, [exitStatus])
   const normalized = trimPythonWhitespace(value)
   const characterCount = Array.from(normalized).length
   const invalid = characterCount < 1 || characterCount > 300
@@ -170,6 +180,7 @@ export function ApplicationFormPage() {
       }
       const uncertain =
         !(cause instanceof ApiClientError) || cause.status === undefined || cause.status >= 500
+      if (uncertain) setUncertain(true)
       setError(
         uncertain
           ? 'Не удалось получить подтверждение. Заявление могло сохраниться; система не отправляла запрос повторно.'
@@ -259,14 +270,26 @@ export function ApplicationFormPage() {
             blocker.reset()
           }}
         >
-          <h2 id="unsaved-dialog-title">Выйти без сохранения?</h2>
-          <p>Введённые данные будут потеряны.</p>
+          <h2 id="unsaved-dialog-title">
+            {exitStatus === 'submitting'
+              ? 'Запрос уже отправлен. Покинуть форму?'
+              : exitStatus === 'uncertain'
+                ? 'Результат отправки неизвестен. Покинуть форму?'
+                : 'Выйти без сохранения?'}
+          </h2>
+          <p>
+            {exitStatus === 'submitting'
+              ? 'Заявление может сохраниться; уход не отменит запрос, а подтверждение и номер могут быть потеряны.'
+              : exitStatus === 'uncertain'
+                ? 'Заявление могло сохраниться, но подтверждение не получено. Повторная отправка не выполняется автоматически.'
+                : 'Введённые данные ещё не отправлены и будут потеряны.'}
+          </p>
           <div className="unsaved-dialog__actions">
             <button ref={continueButton} type="button" onClick={() => blocker.reset()}>
               Продолжить заполнение
             </button>
             <button type="button" onClick={() => blocker.proceed()}>
-              Выйти
+              {exitStatus === 'draft' ? 'Выйти' : 'Покинуть форму'}
             </button>
           </div>
         </dialog>

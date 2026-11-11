@@ -317,6 +317,40 @@ npm run types:check
 `npm run types:generate`. Unit-тесты запускаются без PostgreSQL по умолчанию;
 job CI дополнительно запускает отмеченные `integration`-тесты на тестовой БД.
 
+Браузерный E2E каталога услуг использует эту же изолированную тестовую БД и
+создаёт двух вымышленных студентов. После миграций из корня репозитория:
+
+```bash
+uv run --locked --python 3.12.16 --project backend python backend/scripts/seed_services_browser_test_students.py > /tmp/services-e2e.env
+mkdir -p work/browser-tooling
+npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
+node work/browser-tooling/node_modules/playwright/cli.js install chromium
+(cd backend && uv run --locked --python 3.12.16 uvicorn app.main:app --host 127.0.0.1 --port 8000)
+```
+
+В отдельном терминале запустите frontend с прокси на тестовый API:
+
+```bash
+cd frontend
+npm run dev -- --host 127.0.0.1
+```
+
+Затем из корня выполните сценарий с тестовыми реквизитами и Playwright из
+изолированного каталога:
+
+```bash
+set -a
+. /tmp/services-e2e.env
+set +a
+export PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_modules/playwright/index.mjs"
+export SERVICES_TEST_URL=http://localhost:5173
+node frontend/e2e/services.browser.mjs
+```
+
+Сценарий требует обоих студентов; он не пропускает проверку изоляции при
+отсутствии второго аккаунта. GitHub Actions запускает его отдельной job с
+одноразовой PostgreSQL, фиктивными аккаунтами и реальными API/UI процессами.
+
 После проверки остановите и удалите только эфемерный контейнер тестовой БД:
 
 ```bash

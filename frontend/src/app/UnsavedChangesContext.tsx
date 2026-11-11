@@ -1,13 +1,15 @@
 import { createContext, useContext } from 'react'
 
+export type ExitProtectionStatus = 'none' | 'draft' | 'submitting' | 'uncertain'
+
 interface UnsavedChangesState {
-  hasUnsavedChanges: boolean
-  setHasUnsavedChanges: (hasUnsavedChanges: boolean) => void
+  status: ExitProtectionStatus
+  setStatus: (status: ExitProtectionStatus) => void
 }
 
 const UnsavedChangesContext = createContext<UnsavedChangesState>({
-  hasUnsavedChanges: false,
-  setHasUnsavedChanges: () => undefined,
+  status: 'none',
+  setStatus: () => undefined,
 })
 
 export const UnsavedChangesProvider = UnsavedChangesContext.Provider
