@@ -1,4 +1,4 @@
-/* global process, console, URL, document, innerWidth, localStorage, sessionStorage, setTimeout, AbortController, performance, Navigator, Storage, DOMException, navigator, fetch */
+/* global process, console, URL, document, innerWidth, localStorage, sessionStorage, setTimeout, AbortController, performance, Navigator, Storage, DOMException, navigator, fetch, window, Event */
 // Run against local Vite + the real backend using two prepared fictional accounts.
 // Playwright is supplied by the environment; no production test route is installed.
 import assert from 'node:assert/strict'
@@ -66,12 +66,22 @@ const page = await context.newPage()
 const testPath = '/api/v1/task007-test-only'
 const apiError = (code) => ({ error: { code, message: 'internal server detail', details: [] } })
 const requests = []
+let currentProfile
+context.on('response', async (response) => {
+  if (
+    !currentProfile &&
+    new URL(response.url()).pathname === '/api/v1/users/me' &&
+    response.status() === 200
+  )
+    currentProfile = await response.json()
+})
 context.on('request', (request) => {
   if (new URL(request.url()).pathname.startsWith('/api/'))
     requests.push(new URL(request.url()).pathname)
 })
 const check = (name) => console.log(`PASS ${name}`)
 const heading = (target, name) => target.getByRole('heading', { name, exact: true }).waitFor()
+const loginHeading = (target) => heading(target, 'Вход в систему')
 async function hasVisibleLogoutAction(target) {
   const trigger = target.getByRole('button', { name: 'Меню пользователя', exact: true })
   if ((await trigger.count()) === 0) return false
@@ -81,12 +91,31 @@ async function hasVisibleLogoutAction(target) {
 async function clickLogout(target) {
   assert.equal(await hasVisibleLogoutAction(target), true, 'Avatar disclosure should expose logout')
   await target.getByRole('button', { name: 'Выйти', exact: true }).click()
+  const dialog = target.getByRole('dialog', { name: 'Выйти из аккаунта?' })
+  await dialog.waitFor()
+  await dialog.getByRole('button', { name: 'Выйти', exact: true }).click()
 }
-async function login(target, name) {
+async function login(target, name, waitForRateWindow = false) {
   await target.goto(`${baseURL}/login`)
   await target.getByLabel('Логин', { exact: true }).fill(name)
   await target.getByLabel('Пароль', { exact: true }).fill(password)
   await target.getByRole('button', { name: 'Войти', exact: true }).click()
+  if (waitForRateWindow) {
+    await target.waitForFunction(
+      () =>
+        window.location.pathname === '/schedule' ||
+        document.querySelector('[role="status"]')?.textContent?.includes('Слишком много попыток'),
+    )
+    if (new URL(target.url()).pathname === '/login') {
+      const message = await target.getByRole('status').innerText()
+      const seconds = /через (\d+) сек/.exec(message)
+      assert.ok(seconds, 'rate limit must provide a retry interval')
+      const countBeforeWait = requests.filter((path) => path.endsWith('/login')).length
+      await new Promise((resolve) => setTimeout(resolve, (Number(seconds[1]) + 1) * 1000))
+      assert.equal(requests.filter((path) => path.endsWith('/login')).length, countBeforeWait)
+      await target.getByRole('button', { name: 'Войти', exact: true }).click()
+    }
+  }
   await heading(target, 'Расписание')
 }
 // Exercise the production HTTP client, with only the absent protected API controlled.
@@ -107,7 +136,7 @@ async function callProtected(target) {
 }
 try {
   await page.goto(`${baseURL}/schedule`)
-  await heading(page, 'Вход')
+  await loginHeading(page)
   assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, 1)
   assert.ok(!(await page.locator('body').innerText()).includes('связаться с сервером'))
@@ -116,24 +145,87 @@ try {
   await page.getByLabel('Пароль', { exact: true }).fill('incorrect-fictional-password')
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
   await page.getByText('Неверный логин или пароль.', { exact: true }).waitFor()
+  assert.equal(
+    await page.getByLabel('Пароль', { exact: true }).inputValue(),
+    'incorrect-fictional-password',
+  )
   check('real invalid_credentials feedback')
   const afterRejectedLogin = requests.length
   await page.reload()
-  await heading(page, 'Вход')
+  await loginHeading(page)
   assert.equal(await page.getByRole('status').count(), 0)
   assert.equal(requests.length, afterRejectedLogin)
   check(
     'confirmed absence followed by rejected login stays quiet after reload without refresh or login retry',
   )
   await login(page, loginA)
+  const beforeCancelledLogout = requests.length
+  await page.getByRole('button', { name: 'Меню пользователя' }).click()
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  const cancellationDialog = page.getByRole('dialog', { name: 'Выйти из аккаунта?' })
+  await cancellationDialog.waitFor()
+  assert.equal(await cancellationDialog.evaluate((element) => element.matches(':modal')), true)
+  assert.equal(requests.length, beforeCancelledLogout)
+  const notificationBox = await page
+    .getByRole('link', {
+      name: 'Уведомления — функция пока недоступна',
+    })
+    .boundingBox()
+  assert.ok(notificationBox)
+  await page.mouse.click(
+    notificationBox.x + notificationBox.width / 2,
+    notificationBox.y + notificationBox.height / 2,
+  )
+  await heading(page, 'Расписание')
+  assert.equal(await cancellationDialog.count(), 1, 'modal must block mobile background clicks')
+  await cancellationDialog.getByRole('button', { name: 'Отмена' }).click()
+  await heading(page, 'Расписание')
+  assert.equal(requests.length, beforeCancelledLogout)
+  assert.equal(
+    await page
+      .getByRole('button', { name: 'Меню пользователя' })
+      .evaluate((element) => element === document.activeElement),
+    true,
+  )
+  await page.getByRole('button', { name: 'Меню пользователя' }).click()
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  await page.keyboard.press('Escape')
+  await heading(page, 'Расписание')
+  assert.equal(requests.length, beforeCancelledLogout)
+  check('logout confirmation cancel and Escape preserve authentication without a POST')
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
   await page.setViewportSize({ width: 1280, height: 900 })
+  await page.getByRole('button', { name: 'Меню пользователя' }).click()
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  const modal = page.getByRole('dialog', { name: 'Выйти из аккаунта?' })
+  assert.equal(await modal.evaluate((element) => element.matches(':modal')), true)
+  const sidebarToggle = page.getByRole('button', { name: 'Свернуть меню' })
+  const sidebarBox = await sidebarToggle.boundingBox()
+  assert.ok(sidebarBox)
+  await page.mouse.click(sidebarBox.x + sidebarBox.width / 2, sidebarBox.y + sidebarBox.height / 2)
+  assert.equal(await sidebarToggle.count(), 1, 'modal must block sidebar clicks')
+  for (let index = 0; index < 4; index++) {
+    await page.keyboard.press('Tab')
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.closest('dialog')?.matches(':modal')),
+      true,
+    )
+  }
+  await page.keyboard.press('Escape')
+  assert.equal(await modal.count(), 0)
+  assert.equal(
+    await page
+      .getByRole('button', { name: 'Меню пользователя' })
+      .evaluate((element) => element === document.activeElement),
+    true,
+  )
+  check('native logout dialog blocks desktop sidebar and traps focus until Escape')
   await page.getByRole('button', { name: 'Свернуть меню' }).click()
   assert.equal(await page.getByTestId('prototype-disclaimer').isVisible(), true)
   await page.getByRole('button', { name: 'Развернуть меню' }).click()
   await page.setViewportSize({ width: 360, height: 800 })
   assert.equal(await page.getByTestId('prototype-disclaimer').isVisible(), true)
-  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+  await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth)
   check('prototype disclaimer remains visible on collapsed desktop and 360px mobile layouts')
   const avatarTrigger = page.getByRole('button', { name: 'Меню пользователя', exact: true })
   await avatarTrigger.focus()
@@ -244,9 +336,9 @@ try {
   const oldResponse = callProtected(second)
   await received
   await clickLogout(page)
-  await heading(page, 'Вход')
+  await loginHeading(page)
   await login(page, loginB)
-  await heading(second, 'Вход')
+  await loginHeading(second)
   releaseLate()
   assert.equal((await oldResponse).error, 'AbortError')
   await context.unroute(`**${testPath}`)
@@ -262,29 +354,26 @@ try {
   )
   fault = 'lose-logout'
   await clickLogout(page)
-  await page.getByText(/сервер не подтвердил выход/).waitFor()
-  assert.equal(
-    await page.getByRole('button', { name: 'Повторить выход', exact: true }).isVisible(),
-    true,
-  )
+  await page.getByText(/Не удалось завершить выход/).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   const sentLogout = await fallbackRequest
   assert.ok((await sentLogout.headerValue('authorization'))?.startsWith('Bearer '))
   assert.ok(!(await sentLogout.headerValue('cookie'))?.includes('uni_space_refresh='))
   const beforeReload = requests.length
   await page.reload()
-  await heading(page, 'Вход')
-  await page.getByText(/Не удалось подтвердить состояние сессии/).waitFor()
-  assert.equal(
-    await page.getByRole('button', { name: 'Повторить выход', exact: true }).isVisible(),
-    true,
-  )
+  await loginHeading(page)
+  await page.evaluate(() => window.dispatchEvent(new Event('online')))
+  assert.equal(requests.slice(beforeReload).filter((path) => path.endsWith('/logout')).length, 0)
   assert.equal(requests.slice(beforeReload).filter((path) => path.endsWith('/refresh')).length, 0)
-  fault = ''
-  await page.getByRole('button', { name: 'Повторить выход', exact: true }).click()
-  await page.getByText('Вы вышли из приложения.', { exact: true }).waitFor()
   assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
-  assert.ok(!(await page.locator('body').innerText()).includes('сервер не подтвердил выход'))
-  check('lost real logout response, reload blocks restoration and explicit retry succeeds')
+  fault = ''
+  await login(page, loginA)
+  assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
+  check('lost logout response is not retried on reload or online; ordinary login restores access')
+  const replacementCookie = (await context.cookies()).find(
+    (value) => value.name === 'uni_space_refresh',
+  )
+  assert.ok(replacementCookie)
   // This refresh was current and unused when the cookie was removed.
   await context.addCookies([fallbackCookie])
   const revokedRefresh = await page.evaluate(async () => {
@@ -292,22 +381,21 @@ try {
     return { status: response.status, code: (await response.json()).error?.code }
   })
   assert.deepEqual(revokedRefresh, { status: 401, code: 'invalid_refresh' })
-  await context.clearCookies()
+  await context.addCookies([replacementCookie])
   check(
     'logout without a cookie sends Bearer and revokes the real session despite its lost response',
   )
 
-  await login(page, loginA)
   await context.route(`**${testPath}`, (route) =>
     route.fulfill({ status: 401, json: apiError('access_expired') }),
   )
   fault = 'lose-refresh'
   await callProtected(page)
-  await heading(page, 'Вход')
+  await loginHeading(page)
   const lostRefreshCount = requests.filter((path) => path.endsWith('/refresh')).length
   await page.reload()
   await second.reload()
-  await Promise.all([heading(page, 'Вход'), heading(second, 'Вход')])
+  await Promise.all([loginHeading(page), loginHeading(second)])
   assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, lostRefreshCount)
   check('lost real refresh response never retries the potentially consumed cookie')
   fault = ''
@@ -333,35 +421,32 @@ try {
   await closingReload
   const countAfterClose = requests.filter((path) => path.endsWith('/refresh')).length
   await second.reload()
-  await heading(second, 'Вход')
+  await loginHeading(second)
   assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, countAfterClose)
   fault = ''
   check('closing the lock holder after rotation leaves a durable recovery barrier')
-  // A closing document may run fetch-abort cleanup before destruction, marking
-  // the lost refresh response as blocked and hiding the other tabs as well.
-  const hasLogoutButton = await hasVisibleLogoutAction(page)
-  if (!hasLogoutButton) {
-    const journal = await page.evaluate(() =>
-      JSON.parse(localStorage.getItem('uni-space.auth-state')),
-    )
-    assert.equal(journal.blocked, true)
-    assert.equal(journal.pending, true)
-    assert.notEqual(journal.ended, true)
-    await heading(page, 'Вход')
-  }
-  if (hasLogoutButton) await clickLogout(page)
-  else await page.getByRole('button', { name: 'Повторить выход', exact: true }).click()
-  await Promise.all([heading(page, 'Вход'), heading(second, 'Вход')])
-  await second.waitForFunction(() => document.querySelector('[role="status"]') === null)
-  const refreshAfterLogout = requests.filter((path) => path.endsWith('/refresh')).length
-  await Promise.all([page.reload(), second.reload()])
-  await Promise.all([heading(page, 'Вход'), heading(second, 'Вход')])
-  assert.equal(await page.getByRole('status').count(), 0)
-  assert.equal(await second.getByRole('status').count(), 0)
-  assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, refreshAfterLogout)
-  check(
-    'confirmed logout synchronizes both tabs and reload shows login without warnings or refresh',
+  // Cleanup may mark the lost response blocked; if the document closes first,
+  // pending alone still prevents reuse of the potentially consumed cookie.
+  const journal = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('uni-space.auth-state')),
   )
+  assert.equal(journal.pending, true)
+  assert.notEqual(journal.ended, true)
+  await page.reload()
+  await Promise.all([loginHeading(page), loginHeading(second)])
+  assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
+  const refreshAfterFailure = requests.filter((path) => path.endsWith('/refresh')).length
+  await login(page, loginA, true)
+  await Promise.all([page.reload(), second.reload()])
+  await Promise.all([heading(page, 'Расписание'), heading(second, 'Расписание')])
+  assert.equal(requests.filter((path) => path.endsWith('/refresh')).length, refreshAfterFailure + 2)
+  check(
+    'failed refresh returns to login; an ordinary login restores both tabs without replaying refresh',
+  )
+
+  await clickLogout(page)
+  await loginHeading(page)
+  check('confirmed logout returns to login before controlled error scenarios')
 
   // Auth errors controlled only for feedback; backend origin protection stays enabled.
   await context.route('**/api/v1/auth/login', (route) =>
@@ -375,6 +460,7 @@ try {
   await page.getByLabel('Пароль', { exact: true }).fill(password)
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
   await page.getByText('Слишком много попыток. Повторите через 37 сек.', { exact: true }).waitFor()
+  assert.equal(await page.getByLabel('Пароль', { exact: true }).inputValue(), password)
   check('controlled Retry-After feedback')
   await context.unroute('**/api/v1/auth/login')
   for (const scenario of ['server', 'network', 'timeout']) {
@@ -397,10 +483,10 @@ try {
     await page.getByRole('button', { name: 'Войти', exact: true }).click()
     const expected =
       scenario === 'server'
-        ? 'Сервис входа временно недоступен'
+        ? 'Не удалось выполнить вход'
         : scenario === 'network'
           ? 'Проверьте соединение'
-          : 'Запрос мог быть выполнен'
+          : 'Проверьте соединение'
     await page.getByText(new RegExp(expected)).waitFor()
     const message = await page.getByRole('status').innerText()
     assert.ok(!/Web Locks|internal server detail|Проверьте данные/.test(message))
@@ -409,7 +495,7 @@ try {
     assert.equal(requests.filter((path) => path.endsWith('/login')).length, countBefore + 1)
     const beforeRecovery = requests.length
     await page.reload()
-    await heading(page, 'Вход')
+    await loginHeading(page)
     assert.equal(requests.length, beforeRecovery)
     check(`controlled login ${scenario} has correct feedback, one POST and no automatic recovery`)
   }
@@ -435,6 +521,14 @@ try {
     })
   }
   const countAuth = () => requests.filter((path) => path.startsWith('/api/v1/auth/')).length
+  // Only synthetic login fixtures need a matching identity fixture. Real sessions above
+  // continue using the real /users/me endpoint, including role and session checks.
+  assert.ok(currentProfile, 'Real student profile must have loaded before lock fixtures')
+  await context.route('**/api/v1/users/me', (route) =>
+    route.request().headers().authorization === 'Bearer fictional-browser-token'
+      ? route.fulfill({ json: currentProfile })
+      : route.continue(),
+  )
   await context.route('**/api/v1/auth/login', (route) =>
     route.fulfill({
       json: { access_token: 'fictional-browser-token', token_type: 'bearer', expires_in: 600 },
@@ -454,7 +548,8 @@ try {
     route.fulfill({ status: 307, headers: { Location: logoutTarget } }),
   )
   await clickLogout(page)
-  await page.getByText(/сервер не подтвердил выход/).waitFor()
+  await page.getByText(/Не удалось завершить выход/).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   assert.equal(logoutRedirects, 0)
   await context.unroute('**/api/v1/auth/logout')
   await context.unroute(logoutTarget)
@@ -464,17 +559,18 @@ try {
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
   await heading(page, 'Расписание')
   await context.unroute('**/api/v1/auth/login')
+  await context.unroute('**/api/v1/users/me')
   await holdAuthLock()
   const beforeWaitingLogout = countAuth()
   await clickLogout(page)
-  await heading(page, 'Вход')
-  await page.getByText(/Закройте зависшую вкладку/).waitFor()
-  assert.ok((await page.getByRole('status').innerText()).includes('отзыв сессии не подтверждён'))
+  await loginHeading(page)
+  await page.getByText(/Не удалось завершить выход/).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   assert.equal(await page.getByRole('button', { name: 'Войти', exact: true }).isEnabled(), true)
   assert.equal(countAuth(), beforeWaitingLogout)
   await releaseAuthLock()
   await page.reload()
-  await heading(page, 'Вход')
+  await loginHeading(page)
   assert.equal(countAuth(), beforeWaitingLogout)
   check(
     'logout waiter times out, hides private UI, never posts after release, and stays blocked after reload',
@@ -485,11 +581,11 @@ try {
   await page.getByLabel('Логин', { exact: true }).fill(loginA)
   await page.getByLabel('Пароль', { exact: true }).fill(password)
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
-  await page.getByText(/Закройте зависшую вкладку/).waitFor()
+  await page.getByText(/Попробуйте ещё раз/).waitFor()
   assert.equal(await page.getByRole('button', { name: 'Войти', exact: true }).isEnabled(), true)
   await releaseAuthLock()
   await page.reload()
-  await heading(page, 'Вход')
+  await loginHeading(page)
   assert.equal(countAuth(), beforeWaitingLogin)
   check('login waiter times out without a POST, stuck busy state or late dispatch')
 
@@ -501,16 +597,13 @@ try {
   const bootstrapping = await context.newPage()
   await bootstrapping.goto(`${baseURL}/schedule`)
   await bootstrapping.getByText('Проверяем сессию…', { exact: true }).waitFor()
-  await bootstrapping.getByText(/Закройте зависшую вкладку/).waitFor()
-  await heading(bootstrapping, 'Вход')
-  assert.ok(!(await bootstrapping.getByRole('status').innerText()).includes('Web Locks'))
+  await loginHeading(bootstrapping)
+  assert.equal(await bootstrapping.getByRole('status').count(), 0)
   assert.equal(countAuth(), beforeWaitingRefresh)
   await releaseAuthLock()
   await bootstrapping.close()
   assert.equal(countAuth(), beforeWaitingRefresh)
-  check(
-    'initial refresh waiter exits initializing, reports lock contention and never dispatches late',
-  )
+  check('initial refresh waiter exits initializing to ordinary login and never dispatches late')
 
   for (const unavailable of ['locks', 'storage']) {
     const unsupportedContext = await browser.newContext({ viewport: { width: 360, height: 800 } })
@@ -530,13 +623,13 @@ try {
       if (new URL(request.url()).pathname.startsWith('/api/')) unsupportedRequests++
     })
     await unsupported.goto(`${baseURL}/login`)
-    await heading(unsupported, 'Вход')
+    await loginHeading(unsupported)
     await unsupported.getByLabel('Логин', { exact: true }).fill(loginA)
     await unsupported.getByLabel('Пароль', { exact: true }).fill(password)
     await unsupported.getByRole('button', { name: 'Войти', exact: true }).click()
     await unsupported
       .getByText(
-        'Вход недоступен в этом браузере. Проверьте поддержку Web Locks и доступ к хранилищу.',
+        'Для безопасного входа нужен современный браузер с поддержкой нескольких вкладок и хранилища сайта.',
         { exact: true },
       )
       .waitFor()

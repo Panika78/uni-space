@@ -1,36 +1,17 @@
-import { getStudentInitials, useStudentProfile } from '../features/profile/StudentProfile'
+import { useStudentProfile, getStudentInitials } from '../features/profile/profileContext'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FocusEvent } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
-import { LogoutConfirmation } from '../features/auth/LogoutConfirmation'
+import { useAuth } from '../features/auth/AuthProvider'
 import { UnavailableState } from '../shared/ui/StatusStates'
+import { UniversityBrand } from '../shared/ui/UniversityBrand'
 
-const universityName =
-  'Российский государственный университет чародейства и волшебства имени А. М. Кашпировского'
 const navigation = [
   { to: '/schedule', label: 'Расписание', icon: '▦' },
   { to: '/academics', label: 'Успеваемость', icon: '▤' },
   { to: '/services', label: 'Услуги и документы', icon: '▧' },
   { to: '/news', label: 'Новости', icon: '▣' },
 ]
-
-function BrandMark() {
-  return (
-    <img className="brand-mark" src="/assets/university-emblem.png" alt="" aria-hidden="true" />
-  )
-}
-
-function UniversityBrand({ compact = false }: { compact?: boolean }) {
-  return (
-    <div className={`university-brand${compact ? ' university-brand--compact' : ''}`}>
-      <BrandMark />
-      <span className="university-brand__copy">
-        <strong>РГУЧВ</strong>
-        <small>{universityName}</small>
-      </span>
-    </div>
-  )
-}
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   return (
@@ -54,12 +35,33 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
-function UserMenu() {
+export function UserMenu({ logoutOnly = false }: { logoutOnly?: boolean }) {
   const profile = useStudentProfile()
-  const [isLogoutOpen, setIsLogoutOpen] = useState(false)
+  const { logout } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
+  const [confirmLogout, setConfirmLogout] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const confirmingRef = useRef(false)
+
+  useEffect(() => {
+    if (!confirmLogout) return
+    const dialog = dialogRef.current
+    dialog?.showModal()
+    cancelRef.current?.focus()
+    return () => {
+      if (dialog?.open) dialog.close()
+    }
+  }, [confirmLogout])
+
+  const closeConfirmation = () => {
+    if (confirmingRef.current) return
+    dialogRef.current?.close()
+    setConfirmLogout(false)
+    triggerRef.current?.focus()
+  }
 
   useEffect(() => {
     if (!isOpen) return
@@ -88,22 +90,22 @@ function UserMenu() {
 
   return (
     <div className="user-menu" ref={containerRef} onBlur={handleBlur}>
-      {isLogoutOpen && (
-        <LogoutConfirmation
-          onClose={() => setIsLogoutOpen(false)}
-          onReturnFocus={() => triggerRef.current?.focus()}
-        />
+      {logoutOnly ? (
+        <button ref={triggerRef} type="button" onClick={() => setConfirmLogout(true)}>
+          Выйти
+        </button>
+      ) : (
+        <button
+          ref={triggerRef}
+          className="avatar-button"
+          aria-label="Меню пользователя"
+          aria-expanded={isOpen}
+          aria-controls="user-menu-panel"
+          onClick={() => setIsOpen((open) => !open)}
+        >
+          <span aria-hidden="true">{getStudentInitials(profile?.full_name)}</span>
+        </button>
       )}
-      <button
-        ref={triggerRef}
-        className="avatar-button"
-        aria-label="Меню пользователя"
-        aria-expanded={isOpen}
-        aria-controls="user-menu-panel"
-        onClick={() => setIsOpen((open) => !open)}
-      >
-        <span aria-hidden="true">{getStudentInitials(profile?.full_name)}</span>
-      </button>
       {isOpen && (
         <div className="user-menu__panel" id="user-menu-panel">
           <Link to="/profile" onClick={() => setIsOpen(false)}>
@@ -115,12 +117,62 @@ function UserMenu() {
           <button
             onClick={() => {
               setIsOpen(false)
-              setIsLogoutOpen(true)
+              setConfirmLogout(true)
             }}
           >
             Выйти
           </button>
         </div>
+      )}
+      {confirmLogout && (
+        <dialog
+          ref={dialogRef}
+          className="logout-dialog"
+          aria-labelledby="logout-dialog-title"
+          onCancel={(event) => {
+            event.preventDefault()
+            closeConfirmation()
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Tab') return
+            const first = cancelRef.current
+            const last =
+              dialogRef.current?.querySelector<HTMLButtonElement>('.logout-dialog__confirm')
+            if (
+              event.shiftKey &&
+              (document.activeElement === first || document.activeElement === event.currentTarget)
+            ) {
+              event.preventDefault()
+              last?.focus()
+            } else if (
+              !event.shiftKey &&
+              (document.activeElement === last || document.activeElement === event.currentTarget)
+            ) {
+              event.preventDefault()
+              first?.focus()
+            }
+          }}
+        >
+          <h2 id="logout-dialog-title">Выйти из аккаунта?</h2>
+          <div className="logout-dialog__actions">
+            <button ref={cancelRef} type="button" onClick={closeConfirmation}>
+              Отмена
+            </button>
+            <button
+              className="logout-dialog__confirm"
+              type="button"
+              onClick={() => {
+                if (confirmingRef.current) return
+                confirmingRef.current = true
+                dialogRef.current?.close()
+                setConfirmLogout(false)
+                void logout()
+              }}
+            >
+              Выйти
+            </button>
+          </div>
+        </dialog>
       )}
     </div>
   )

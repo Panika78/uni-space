@@ -32,7 +32,7 @@ export interface paths {
         put?: never;
         /**
          * Logout Session
-         * @description Refresh-cookie имеет приоритет. При неизвестной/отсутствующей cookie используется необязательный валидный Bearer с проверкой владельца sid. Ответ 204 удаляет cookie, но не доказывает отзыв, если пригодный идентификатор не найден.
+         * @description Refresh-cookie имеет приоритет. При неизвестной/отсутствующей cookie используется необязательный валидный Bearer с проверкой владельца sid. Поле session_revoked сообщает, была ли найдена и отозвана конкретная сессия; cookie удаляется при любом ответе.
          */
         post: operations["logout_session_api_v1_auth_logout_post"];
         delete?: never;
@@ -117,6 +117,11 @@ export interface components {
             login: string;
             /** Password */
             password: string;
+        };
+        /** LogoutResponse */
+        LogoutResponse: {
+            /** Session Revoked */
+            session_revoked: boolean;
         };
         /** Page[dict[str, object]] */
         Page: {
@@ -296,11 +301,13 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["LogoutResponse"];
+                };
             };
             /** @description Unauthorized */
             401: {

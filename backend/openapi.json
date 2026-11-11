@@ -121,6 +121,20 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "LogoutResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "session_revoked": {
+            "title": "Session Revoked",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "session_revoked"
+        ],
+        "title": "LogoutResponse",
+        "type": "object"
+      },
       "Page": {
         "additionalProperties": false,
         "properties": {
@@ -445,7 +459,7 @@
     },
     "/api/v1/auth/logout": {
       "post": {
-        "description": "Refresh-cookie имеет приоритет. При неизвестной/отсутствующей cookie используется необязательный валидный Bearer с проверкой владельца sid. Ответ 204 удаляет cookie, но не доказывает отзыв, если пригодный идентификатор не найден.",
+        "description": "Refresh-cookie имеет приоритет. При неизвестной/отсутствующей cookie используется необязательный валидный Bearer с проверкой владельца sid. Поле session_revoked сообщает, была ли найдена и отозвана конкретная сессия; cookie удаляется при любом ответе.",
         "operationId": "logout_session_api_v1_auth_logout_post",
         "parameters": [
           {
@@ -484,7 +498,14 @@
           }
         ],
         "responses": {
-          "204": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogoutResponse"
+                }
+              }
+            },
             "description": "Successful Response"
           },
           "401": {

@@ -1,33 +1,14 @@
-import { createContext, useContext, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Outlet } from 'react-router-dom'
-import { LogoutConfirmation } from '../auth/LogoutConfirmation'
+import { UserMenu } from '../../app/StudentLayout'
 import { ApiClientError, apiFetch } from '../../shared/api/client'
-import type { components } from '../../shared/api/schema'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 
-type Profile = components['schemas']['StudentProfile']
-const ProfileContext = createContext<Profile | null>(null)
-
-export function useStudentProfile() {
-  return useContext(ProfileContext)
-}
-
-export function getStudentInitials(fullName?: string) {
-  return (
-    fullName
-      ?.trim()
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0].toLocaleUpperCase('ru'))
-      .join('') || '—'
-  )
-}
+import { ProfileContext, useStudentProfile, getStudentInitials } from './profileContext'
+import type { Profile } from './profileContext'
+export { useStudentProfile, getStudentInitials } from './profileContext'
 
 export function StudentAccess() {
-  const [isLogoutOpen, setIsLogoutOpen] = useState(false)
-  const logoutTriggerRef = useRef<HTMLButtonElement>(null)
   const query = useQuery({
     queryKey: ['student-profile'],
     queryFn: ({ signal }) => apiFetch<Profile>('/api/v1/users/me', { authenticated: true, signal }),
@@ -53,15 +34,7 @@ export function StudentAccess() {
               }
         }
       >
-        {isLogoutOpen && (
-          <LogoutConfirmation
-            onClose={() => setIsLogoutOpen(false)}
-            onReturnFocus={() => logoutTriggerRef.current?.focus()}
-          />
-        )}
-        <button ref={logoutTriggerRef} type="button" onClick={() => setIsLogoutOpen(true)}>
-          Выйти
-        </button>
+        <UserMenu logoutOnly />
       </ErrorState>
     )
   }

@@ -57,7 +57,7 @@ def test_auth_empty_body_preserves_existing_behavior():
     assert_error(send_request("login"), 422, "validation_error")
     assert_error(send_request("refresh"), 401, "invalid_refresh")
     response = send_request("logout")
-    assert response.status_code == 204 and response.content == b""
+    assert response.status_code == 200 and response.json() == {"session_revoked": False}
     assert "Max-Age=0" in response.headers["set-cookie"]
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-request-id"] == "body-limit-regression"

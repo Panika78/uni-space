@@ -8,9 +8,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-    secrets: [postgres_password]
+    secrets: [postgres_password, api_db_password, migration_db_password]
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./deploy/postgres:/opt/uni-space-postgres:ro
     networks: [database]
     healthcheck:
       test:
@@ -41,10 +42,10 @@ services:
       TRUSTED_PROXY_IPS: '["${NGINX_PROXY_IP:-172.30.19.2}"]'
       DATABASE_HOST: db
       DATABASE_PORT: '5432'
-      DATABASE_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
-      DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+      DATABASE_USER: uni_space_api
+      DATABASE_PASSWORD_FILE: /run/secrets/api_db_password
       DATABASE_NAME: ${POSTGRES_DB:?Set POSTGRES_DB}
-    secrets: [jwt_signing_key, postgres_password]
+    secrets: [jwt_signing_key, api_db_password]
     networks: [proxy, database]
     depends_on:
       db:
@@ -54,6 +55,25 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+
+  migrate:
+    image: uni-space-api:${RELEASE_TAG:?Set an immutable RELEASE_TAG}
+    profiles: [operations]
+    command: [alembic, upgrade, head]
+    environment:
+      APP_ENV: test
+      # Alembic validates Settings but neither signs tokens nor starts HTTP.
+      JWT_SIGNING_KEY: migration-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ
+      DATABASE_HOST: db
+      DATABASE_PORT: '5432'
+      DATABASE_USER: uni_space_migrator
+      DATABASE_PASSWORD_FILE: /run/secrets/migration_db_password
+      DATABASE_NAME: ${POSTGRES_DB:?Set POSTGRES_DB}
+    secrets: [migration_db_password]
+    networks: [database]
+    depends_on:
+      db:
+        condition: service_healthy
 
   nginx:
     image: uni-space-web:${RELEASE_TAG:?Set an immutable RELEASE_TAG}
@@ -98,6 +118,10 @@ secrets:
     file: ${JWT_SIGNING_KEY_FILE:?Set JWT_SIGNING_KEY_FILE}
   postgres_password:
     file: ${POSTGRES_PASSWORD_FILE:?Set POSTGRES_PASSWORD_FILE}
+  api_db_password:
+    file: ${API_DB_PASSWORD_FILE:?Set API_DB_PASSWORD_FILE}
+  migration_db_password:
+    file: ${MIGRATION_DB_PASSWORD_FILE:?Set MIGRATION_DB_PASSWORD_FILE}
 volumes:
   postgres_data:
 networks:

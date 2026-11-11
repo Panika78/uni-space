@@ -1,6 +1,7 @@
 """Run real isolated deployment checks using existing project HTTPX; see PRODUCTION.md."""
 
 import json
+import hashlib
 import os
 import secrets
 import socket
@@ -163,14 +164,14 @@ def assert_tls_verification_error(url, context, expected_code):
     raise AssertionError("Invalid TLS certificate was accepted")
 
 
-def main():
+def main(*, legacy=False):
     project = f"uni-space-production-test-{secrets.token_hex(4)}"
     (ROOT / "work").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix="production-", dir=ROOT / "work"
     ) as directory:
         temp = Path(directory)
-        for name in ("jwt", "password"):
+        for name in ("jwt", "password", "api_password", "migration_password"):
             (temp / name).write_text(
                 secrets.token_urlsafe(48) + ("@:/?#$&" if name == "password" else "")
             )
@@ -190,6 +191,8 @@ def main():
                     "POSTGRES_USER=deployment_check",
                     f"JWT_SIGNING_KEY_FILE={temp / 'jwt'}",
                     f"POSTGRES_PASSWORD_FILE={temp / 'password'}",
+                    f"API_DB_PASSWORD_FILE={temp / 'api_password'}",
+                    f"MIGRATION_DB_PASSWORD_FILE={temp / 'migration_password'}",
                     f"TLS_CERT_FILE={temp / 'tls.pem'}",
                     f"TLS_KEY_FILE={temp / 'tls.key'}",
                 ]
@@ -217,6 +220,8 @@ def main():
             "POSTGRES_USER",
             "JWT_SIGNING_KEY_FILE",
             "POSTGRES_PASSWORD_FILE",
+            "API_DB_PASSWORD_FILE",
+            "MIGRATION_DB_PASSWORD_FILE",
             "TLS_CERT_FILE",
             "TLS_KEY_FILE",
             "PROXY_SUBNET",
@@ -274,6 +279,61 @@ def main():
                 config["services"]["nginx"]["networks"]
             )
             dc("up", "-d", "--wait", "db")
+            legacy_snapshot = None
+            legacy_refresh = secrets.token_urlsafe(48)
+            if legacy:
+                # PR #31 baseline: official PG volume, migrations run as POSTGRES_USER.
+                baseline = temp / "legacy.yaml"
+                baseline.write_text("""services:
+  migrate:
+    environment:
+      DATABASE_USER: deployment_check
+      DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: !override [postgres_password]
+""")
+                run(
+                    [
+                        *compose,
+                        "-f",
+                        str(baseline),
+                        "run",
+                        "--rm",
+                        "-T",
+                        "migrate",
+                        "alembic",
+                        "upgrade",
+                        "head",
+                    ],
+                    env=env,
+                )
+                token_hash = hashlib.sha256(legacy_refresh.encode()).hexdigest()
+                sql(f"""INSERT INTO users (id,login,password_hash,full_name,role,is_active)
+VALUES (900,'legacy-fixture','unusable-fictional-hash','Legacy Fixture','student',true);
+INSERT INTO auth_sessions (id,user_id,expires_at)
+VALUES (900,900,now()+interval '1 day');
+INSERT INTO refresh_tokens (id,session_id,token_hash,expires_at)
+VALUES (900,900,decode('{token_hash}','hex'),now()+interval '1 hour');""")
+                legacy_snapshot = sql("""SELECT jsonb_build_array(
+(SELECT to_jsonb(u) FROM users u WHERE id=900),
+(SELECT to_jsonb(s) FROM auth_sessions s WHERE id=900),
+(SELECT to_jsonb(r) FROM refresh_tokens r WHERE id=900),
+(SELECT version_num FROM alembic_version));""")
+                dc("down")
+                dc("up", "-d", "--wait", "db")
+            run(["bash", "scripts/configure-postgres.sh"], env=env)
+            if legacy:
+                assert (
+                    sql("""SELECT jsonb_build_array(
+(SELECT to_jsonb(u) FROM users u WHERE id=900),
+(SELECT to_jsonb(s) FROM auth_sessions s WHERE id=900),
+(SELECT to_jsonb(r) FROM refresh_tokens r WHERE id=900),
+(SELECT version_num FROM alembic_version));""")
+                    == legacy_snapshot
+                )
+                print(
+                    "PASS: existing admin-owned volume preserves complete user/session/token/revision",
+                    flush=True,
+                )
             dc("up", "-d", "api")
             for _ in range(40):
                 result = dc(
@@ -290,22 +350,140 @@ def main():
                 time.sleep(0.5)
             else:
                 raise AssertionError("API HTTP did not start")
-            assert (
-                dc(
-                    "exec",
-                    "-T",
-                    "api",
-                    "sh",
-                    "docker-entrypoint.sh",
-                    "python",
-                    "scripts/check_readiness.py",
-                    success=False,
-                ).returncode
-                != 0
-            )
-            dc("run", "--rm", "-T", "api", "alembic", "upgrade", "head")
+            assert dc(
+                "exec",
+                "-T",
+                "api",
+                "sh",
+                "docker-entrypoint.sh",
+                "python",
+                "scripts/check_readiness.py",
+                success=False,
+            ).returncode == (0 if legacy else 1)
+            run(["bash", "scripts/migrate-postgres.sh"], env=env)
             dc("up", "-d", "--wait", "--wait-timeout", "120")
             dc("exec", "-T", "nginx", "nginx", "-t")
+            dc("run", "--rm", "-T", "migrate", "alembic", "check")
+            # F-02/F-03: simulate unsafe historical global AND schema defaults.
+            # Include already-created objects; the API currently needs no routines.
+            sql("""ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator
+GRANT SELECT ON TABLES TO PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator
+GRANT ALL ON TABLES TO uni_space_api;
+ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator
+GRANT ALL ON SEQUENCES TO PUBLIC, uni_space_api;
+ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator
+GRANT EXECUTE ON FUNCTIONS TO PUBLIC, uni_space_api;
+ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator IN SCHEMA public
+GRANT ALL ON TABLES TO PUBLIC, uni_space_api;
+ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator IN SCHEMA public
+GRANT ALL ON SEQUENCES TO PUBLIC, uni_space_api;
+ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator IN SCHEMA public
+GRANT EXECUTE ON FUNCTIONS TO PUBLIC, uni_space_api;
+SET ROLE uni_space_migrator;
+CREATE TABLE public.existing_acl_fixture (id bigint GENERATED BY DEFAULT AS IDENTITY);
+CREATE FUNCTION public.existing_function_fixture() RETURNS name
+LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog AS 'SELECT current_user';
+RESET ROLE;""")
+            assert (
+                sql(
+                    "SELECT has_function_privilege('uni_space_api', 'public.existing_function_fixture()', 'EXECUTE')"
+                )
+                == "t"
+            )
+            # F-04: an ordinary repeat on the running API's database is allowed.
+            run(["bash", "scripts/configure-postgres.sh"], env=env)
+            sql("""SET ROLE uni_space_migrator;
+CREATE TABLE public.future_fixture (id bigint GENERATED BY DEFAULT AS IDENTITY);
+CREATE FUNCTION public.future_function_fixture() RETURNS name
+LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog AS 'SELECT current_user';
+RESET ROLE;""")
+            # Inspect stored default ACLs, not merely whether a SELECT happens to fail.
+            assert (
+                sql("""SELECT count(*) FROM pg_default_acl d,
+LATERAL aclexplode(d.defaclacl) a
+WHERE d.defaclrole='uni_space_migrator'::regrole
+AND (d.defaclnamespace=0 OR d.defaclnamespace='public'::regnamespace)
+AND d.defaclobjtype IN ('r','S','f')
+AND a.grantee IN (0,'uni_space_api'::regrole::oid);""")
+                == "0"
+            )
+            # Also inspect effective ACLs of both old and new tables/sequences/functions.
+            assert (
+                sql("""SELECT count(*) FROM pg_class c,
+LATERAL aclexplode(coalesce(c.relacl, acldefault(
+CASE WHEN c.relkind='S' THEN 's'::\"char\" ELSE 'r'::\"char\" END,c.relowner))) a
+WHERE c.relnamespace='public'::regnamespace
+AND c.relname IN ('existing_acl_fixture','existing_acl_fixture_id_seq',
+                 'future_fixture','future_fixture_id_seq')
+AND a.grantee IN (0,'uni_space_api'::regrole::oid);""")
+                == "0"
+            )
+            assert (
+                sql("""SELECT count(*) FROM pg_proc p,
+LATERAL aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+WHERE p.pronamespace='public'::regnamespace
+AND a.grantee IN (0,'uni_space_api'::regrole::oid);""")
+                == "0"
+            )
+            assert {s["source"] for s in config["services"]["api"]["secrets"]} == {
+                "jwt_signing_key",
+                "api_db_password",
+            }
+            assert "POSTGRES_USER" not in config["services"]["api"]["environment"]
+            sql(
+                "CREATE SCHEMA private_fixture; CREATE TABLE private_fixture.secret (id int);"
+            )
+            dc(
+                "exec",
+                "-T",
+                "api",
+                "sh",
+                "docker-entrypoint.sh",
+                "python",
+                "-c",
+                """
+from sqlalchemy import text, create_engine
+from sqlalchemy.exc import DBAPIError
+from app.core.database import engine
+from app.core.config import get_settings
+from sqlalchemy.engine import make_url
+from pathlib import Path
+assert not Path('/run/secrets/postgres_password').exists()
+assert not Path('/run/secrets/migration_db_password').exists()
+with engine.connect() as c:
+    row=c.execute(text("SELECT current_user, rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls FROM pg_roles WHERE rolname=current_user")).one()
+    assert tuple(row)==('uni_space_api',False,False,False,False,False)
+    print('PASS: API role flags false; isolated secrets')
+for statement in (
+    "CREATE ROLE forbidden_role", "CREATE DATABASE forbidden_database",
+    "CREATE TABLE public.forbidden_table(id int)", "CREATE SCHEMA forbidden_schema",
+    "SET ROLE uni_space_migrator", "SET ROLE deployment_check",
+    "SELECT * FROM private_fixture.secret", "SELECT * FROM pg_authid",
+    "UPDATE users SET role='admin'", "TRUNCATE users",
+    "ALTER TABLE users ADD COLUMN forbidden int", "DELETE FROM refresh_tokens",
+    "UPDATE alembic_version SET version_num='forbidden'",
+    "CREATE TEMP TABLE forbidden_temp(id int)",
+    "SELECT * FROM public.future_fixture", "SELECT * FROM public.org_units",
+    "SELECT * FROM public.existing_acl_fixture",
+    "SELECT public.existing_function_fixture()", "SELECT public.future_function_fixture()",
+    "SELECT nextval('public.users_id_seq')",
+    "SELECT setval('public.auth_sessions_id_seq', 9999)",
+):
+    try:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c: c.execute(text(statement))
+    except DBAPIError as e:
+        assert e.orig.sqlstate == '42501', (statement, e.orig.sqlstate)
+    else: raise AssertionError(statement)
+for database in ('postgres','template1'):
+    other=create_engine(make_url(get_settings().database_url.get_secret_value()).set(database=database))
+    try:
+        with other.connect(): pass
+    except DBAPIError: pass
+    else: raise AssertionError('foreign database accessible')
+print('PASS: API rejects DDL, escalation, foreign schema/database, protected writes')
+""",
+            )
             # SEC-01: test the running binaries, not only image tags in YAML.
             dc(
                 "exec",
@@ -322,6 +500,13 @@ def main():
                 flush=True,
             )
             print("PASS: topology, startup, HTTP/DB/schema readiness", flush=True)
+
+            sql("""DROP TABLE public.future_fixture, public.existing_acl_fixture;
+DROP FUNCTION public.existing_function_fixture(), public.future_function_fixture();""")
+            print(
+                "PASS: restricted API role, isolated mounts, negative permissions and default ACL",
+                flush=True,
+            )
 
             # F-04: a real DNS URL determines both TLS verification hostname and SNI.
             context = ssl.create_default_context(cafile=str(temp / "ca.pem"))
@@ -363,11 +548,10 @@ def main():
             print(result.stdout.strip(), flush=True)
             password = secrets.token_urlsafe(24)
             dc(
-                "exec",
+                "run",
+                "--rm",
                 "-T",
-                "api",
-                "sh",
-                "docker-entrypoint.sh",
+                "migrate",
                 "python",
                 "-c",
                 """
@@ -518,6 +702,32 @@ with SessionLocal.begin() as db:
                     assert denied.status_code == 403
                     assert denied.json()["error"]["code"] == "origin_not_allowed"
                 origin = {"Origin": public_origin}
+                if legacy:
+                    with httpx.Client(
+                        base_url=public_origin,
+                        verify=context,
+                        trust_env=False,
+                        timeout=10,
+                    ) as previous:
+                        previous.cookies.set(
+                            "uni_space_refresh",
+                            legacy_refresh,
+                            domain="uni.test",
+                            path="/api/v1/auth",
+                        )
+                        assert (
+                            previous.post(
+                                "/api/v1/auth/refresh", headers=origin
+                            ).status_code
+                            == 200
+                        )
+                        logout = previous.post("/api/v1/auth/logout", headers=origin)
+                        assert logout.status_code == 200
+                        assert logout.json() == {"session_revoked": True}
+                    print(
+                        "PASS: pre-transition refresh token remains usable with restricted API",
+                        flush=True,
+                    )
                 login = client.post(
                     "/api/v1/auth/login",
                     headers=origin,
@@ -533,10 +743,9 @@ with SessionLocal.begin() as db:
                     client.post("/api/v1/auth/refresh", headers=origin).status_code
                     == 200
                 )
-                assert (
-                    client.post("/api/v1/auth/logout", headers=origin).status_code
-                    == 204
-                )
+                logout = client.post("/api/v1/auth/logout", headers=origin)
+                assert logout.status_code == 200
+                assert logout.json() == {"session_revoked": True}
                 assert (
                     client.post("/api/v1/auth/refresh", headers=origin).status_code
                     == 401
@@ -722,12 +931,9 @@ for index in range(6):
 'refresh', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM refresh_tokens t),
 'revisions', (SELECT jsonb_agg(to_jsonb(t)) FROM alembic_version t));"""
             expected = sql(snapshot)
-            assert (
-                sql(
-                    "SELECT count(*) FROM users u JOIN auth_sessions s ON s.user_id=u.id JOIN refresh_tokens r ON r.session_id=s.id;"
-                )
-                == "2"
-            )
+            assert sql(
+                "SELECT count(*) FROM users u JOIN auth_sessions s ON s.user_id=u.id JOIN refresh_tokens r ON r.session_id=s.id;"
+            ) == ("4" if legacy else "2")
             backup = temp / "backup.dump"
             run(["bash", "scripts/backup-postgres.sh", str(backup)], env=env)
             assert backup.stat().st_mode & 0o777 == 0o600
@@ -781,14 +987,104 @@ for index in range(6):
                 "-T",
                 "-e",
                 "DATABASE_NAME=restore_deployment_check",
-                "api",
+                "migrate",
                 "python",
                 "scripts/check_migrations.py",
+            )
+            database_acls = "SELECT jsonb_agg(jsonb_build_array(datname,datacl) ORDER BY datname) FROM pg_database"
+            before_switch = sql(database_acls)
+            rejected = run(
+                ["bash", "scripts/configure-postgres.sh", "restore_deployment_check"],
+                env=env,
+                success=False,
+            )
+            assert (
+                rejected.returncode != 0
+                and "Stop all API containers" in rejected.stderr
+            )
+            assert sql(database_acls) == before_switch
+            # A new engine connection must still work after the rejected switch.
+            dc(
+                "exec",
+                "-T",
+                "api",
+                "sh",
+                "docker-entrypoint.sh",
+                "python",
+                "scripts/check_migrations.py",
+            )
+            print(
+                "PASS: live API blocks database switch before ACL changes; new connections work",
+                flush=True,
+            )
+            # Switch only this isolated stack to the verified restore, then back.
+            dc("stop", "nginx", "api")
+            run(
+                ["bash", "scripts/configure-postgres.sh", "restore_deployment_check"],
+                env=env,
+            )
+            recovery = temp / "recovery.yaml"
+            recovery.write_text("""services:
+  api:
+    environment:
+      DATABASE_NAME: restore_deployment_check
+""")
+            run(
+                [
+                    *compose,
+                    "-f",
+                    str(recovery),
+                    "up",
+                    "-d",
+                    "--force-recreate",
+                    "--wait",
+                    "--wait-timeout",
+                    "120",
+                    "api",
+                    "nginx",
+                ],
+                env=env,
+            )
+            with httpx.Client(
+                base_url=public_origin, verify=context, trust_env=False, timeout=10
+            ) as restored:
+                assert (
+                    restored.post(
+                        "/api/v1/auth/login",
+                        headers=origin,
+                        json={"login": "deployment-check", "password": password},
+                    ).status_code
+                    == 200
+                )
+                assert (
+                    restored.post("/api/v1/auth/refresh", headers=origin).status_code
+                    == 200
+                )
+                logout = restored.post("/api/v1/auth/logout", headers=origin)
+                assert logout.status_code == 200
+                assert logout.json() == {"session_revoked": True}
+            assert sql(snapshot) == expected
+            # Even when Compose/db still names the old DB, inspect the recovery API's
+            # actual runtime DATABASE_NAME. Implicit switch-back must be refused too.
+            before_switch = sql(database_acls)
+            rejected = run(
+                ["bash", "scripts/configure-postgres.sh"], env=env, success=False
+            )
+            assert (
+                rejected.returncode != 0
+                and "Stop all API containers" in rejected.stderr
+            )
+            assert sql(database_acls) == before_switch
+            dc("stop", "nginx", "api")
+            run(["bash", "scripts/configure-postgres.sh"], env=env)
+            print(
+                "PASS: restored database HTTPS login/refresh/logout; source unchanged",
+                flush=True,
             )
             dc("down")
             dc("up", "-d", "--wait", "--wait-timeout", "120")
             assert sql(snapshot) == expected
-            dc("run", "--rm", "-T", "api", "alembic", "upgrade", "head")
+            run(["bash", "scripts/migrate-postgres.sh"], env=env)
             dc(
                 "up",
                 "-d",
@@ -805,7 +1101,7 @@ for index in range(6):
                 flush=True,
             )
             logs = dc("logs", "api", "db", "nginx").stdout
-            for name in ("jwt", "password"):
+            for name in ("jwt", "password", "api_password", "migration_password"):
                 value = (temp / name).read_text()
                 assert value not in logs and value not in dc("config").stdout
                 dc(
@@ -830,3 +1126,4 @@ for index in range(6):
 if __name__ == "__main__":
     with resolve_test_hostname():
         main()
+        main(legacy=True)

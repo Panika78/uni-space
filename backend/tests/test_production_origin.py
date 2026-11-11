@@ -91,6 +91,8 @@ def test_compose_derives_api_and_nginx_from_one_public_origin(tmp_path):
         POSTGRES_USER="fixture",
         JWT_SIGNING_KEY_FILE=str(tmp_path / "jwt"),
         POSTGRES_PASSWORD_FILE=str(tmp_path / "password"),
+        API_DB_PASSWORD_FILE=str(tmp_path / "api_password"),
+        MIGRATION_DB_PASSWORD_FILE=str(tmp_path / "migration_password"),
         TLS_CERT_FILE=str(tmp_path / "cert"),
         TLS_KEY_FILE=str(tmp_path / "key"),
         # Legacy caller variables must not reintroduce a mismatch in the effective config.

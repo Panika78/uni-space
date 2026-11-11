@@ -62,7 +62,7 @@ it('does not show a protected page before refresh and redirects on invalid cooki
       ),
     )
   })
-  expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
   expect(screen.queryByText(/связаться с сервером/)).not.toBeInTheDocument()
 })
@@ -79,7 +79,7 @@ it('submits once, opens schedule and hides it on logout', async () => {
     .mockResolvedValueOnce(
       Response.json({ access_token: 'test-access', token_type: 'bearer', expires_in: 600 }),
     )
-    .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    .mockResolvedValueOnce(Response.json({ session_revoked: true }))
   vi.stubGlobal('fetch', fetchMock)
   renderRoute('/login')
   const user = userEvent.setup()
@@ -90,8 +90,12 @@ it('submits once, opens schedule and hides it on logout', async () => {
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await user.click(screen.getByRole('button', { name: 'Выйти' }))
-  await user.click(screen.getByRole('button', { name: 'Выйти' }))
-  expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
+  await user.click(
+    screen
+      .getByRole('dialog', { name: 'Выйти из аккаунта?' })
+      .querySelector<HTMLButtonElement>('.logout-dialog__confirm')!,
+  )
+  expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
   expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
     '/api/v1/auth/refresh',
@@ -100,7 +104,7 @@ it('submits once, opens schedule and hides it on logout', async () => {
   ])
 })
 
-it('shows rate feedback and clears password without resubmission', async () => {
+it('shows rate feedback below the fields and keeps the password', async () => {
   const fetchMock = vi
     .fn()
     .mockResolvedValueOnce(
@@ -123,11 +127,75 @@ it('shows rate feedback and clears password without resubmission', async () => {
   await user.click(screen.getByRole('button', { name: 'Войти' }))
   expect(await screen.findByRole('status')).toHaveTextContent('через 42 сек.')
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
-  expect(screen.getByLabelText('Пароль')).toHaveValue('')
+  expect(screen.getByLabelText('Пароль')).toHaveValue('fictional-password')
+  expect(screen.getByRole('status').parentElement).toBe(
+    screen.getByRole('button', { name: 'Войти' }).parentElement,
+  )
+  expect(
+    screen.getByLabelText('Пароль').compareDocumentPosition(screen.getByRole('status')) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy()
   expect(fetchMock).toHaveBeenCalledTimes(2)
 })
 
-it('offers logout retry only while the auth journal records an unconfirmed session end', async () => {
+it.each([
+  [
+    'invalid credentials',
+    Response.json(
+      { error: { code: 'invalid_credentials', message: '', details: [] } },
+      { status: 401 },
+    ),
+  ],
+  ['network failure', new TypeError('offline')],
+])('keeps the password and shows %s below the fields', async (_case, result) => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json(
+        { error: { code: 'invalid_refresh', message: '', details: [] } },
+        { status: 401 },
+      ),
+    )
+  if (result instanceof Response) fetchMock.mockResolvedValueOnce(result)
+  else fetchMock.mockRejectedValueOnce(result)
+  vi.stubGlobal('fetch', fetchMock)
+  renderRoute('/login')
+  const user = userEvent.setup()
+  await user.type(await screen.findByLabelText('Логин'), 'fictional')
+  await user.type(screen.getByLabelText('Пароль'), 'fictional-password')
+  await user.click(screen.getByRole('button', { name: 'Войти' }))
+  const message = await screen.findByRole('status')
+  expect(message.closest('form')).toBeInTheDocument()
+  expect(screen.getByLabelText('Пароль')).toHaveValue('fictional-password')
+  expect(
+    screen.getByLabelText('Пароль').compareDocumentPosition(message) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy()
+})
+
+it('shows the shared university emblem and name above the login heading', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { error: { code: 'invalid_refresh', message: '', details: [] } },
+          { status: 401 },
+        ),
+      ),
+  )
+  renderRoute('/login')
+  const heading = await screen.findByRole('heading', { name: 'Вход в систему' })
+  const emblem = heading.parentElement?.querySelector('img.brand-mark')
+  expect(emblem).toHaveAttribute('src', '/assets/university-emblem.png')
+  expect(heading.parentElement).toHaveTextContent('РГУЧВ')
+  expect(heading.parentElement).toHaveTextContent('РГУЧВ им. А. М. Кашпировского')
+  expect(emblem?.parentElement).toHaveClass('login-brand')
+  expect(emblem!.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+})
+
+it('keeps the ordinary login form after an uncertain logout and recovers on the next login', async () => {
   const fetchMock = vi
     .fn()
     .mockResolvedValueOnce(
@@ -140,7 +208,9 @@ it('offers logout retry only while the auth journal records an unconfirmed sessi
       Response.json({ access_token: 'test-access', token_type: 'bearer', expires_in: 600 }),
     )
     .mockRejectedValueOnce(new TypeError('connection lost'))
-    .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    .mockResolvedValueOnce(
+      Response.json({ access_token: 'replacement-access', token_type: 'bearer', expires_in: 600 }),
+    )
   vi.stubGlobal('fetch', fetchMock)
   renderRoute('/login')
   const user = userEvent.setup()
@@ -150,16 +220,82 @@ it('offers logout retry only while the auth journal records an unconfirmed sessi
   expect(await screen.findByRole('heading', { name: 'Расписание' })).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await user.click(screen.getByRole('button', { name: 'Выйти' }))
-  await user.click(screen.getByRole('button', { name: 'Выйти' }))
-  const retry = await screen.findByRole('button', { name: 'Повторить выход' })
-  expect(screen.getByRole('status')).toHaveTextContent('сервер не подтвердил выход')
-  await user.click(retry)
-  expect(await screen.findByText('Вы вышли из приложения.')).toBeInTheDocument()
+  await user.click(
+    screen
+      .getByRole('dialog', { name: 'Выйти из аккаунта?' })
+      .querySelector<HTMLButtonElement>('.logout-dialog__confirm')!,
+  )
+  expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent('Войдите снова')
+  expect(screen.queryByRole('button', { name: /Повторить выход/ })).not.toBeInTheDocument()
+  expect(screen.getByLabelText('Логин')).toBeEnabled()
+  await user.type(screen.getByLabelText('Логин'), 'fictional')
+  await user.type(screen.getByLabelText('Пароль'), 'fictional-password')
+  await user.click(screen.getByRole('button', { name: 'Войти' }))
+  expect(await screen.findByRole('heading', { name: 'Расписание' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
   expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
     '/api/v1/auth/refresh',
     '/api/v1/auth/login',
     '/api/v1/auth/logout',
+    '/api/v1/auth/login',
+  ])
+})
+
+it('shows the ordinary login form without a technical message when refresh cannot be recovered', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('private transport detail')))
+  renderRoute()
+  expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
+  expect(screen.getByLabelText('Логин')).toBeEnabled()
+  expect(screen.getByLabelText('Пароль')).toBeEnabled()
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  expect(
+    screen.queryByText(/refresh|сессии|выход|Web Locks|private transport/i),
+  ).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /Повторить выход/ })).not.toBeInTheDocument()
+})
+
+it('does not retry an unconfirmed logout when the browser reports network recovery', async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json(
+        { error: { code: 'invalid_refresh', message: '', details: [] } },
+        { status: 401 },
+      ),
+    )
+    .mockResolvedValueOnce(
+      Response.json({ access_token: 'test-access', token_type: 'bearer', expires_in: 600 }),
+    )
+    .mockRejectedValueOnce(new TypeError('offline'))
+    .mockResolvedValueOnce(Response.json({ session_revoked: true }))
+  vi.stubGlobal('fetch', fetchMock)
+  renderRoute('/login')
+  const user = userEvent.setup()
+  await user.type(await screen.findByLabelText('Логин'), 'fictional')
+  await user.type(screen.getByLabelText('Пароль'), 'fictional-password')
+  await user.click(screen.getByRole('button', { name: 'Войти' }))
+  await screen.findByRole('heading', { name: 'Расписание' })
+  await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
+  await user.click(screen.getByRole('button', { name: 'Выйти' }))
+  await user.click(
+    screen
+      .getByRole('dialog', { name: 'Выйти из аккаунта?' })
+      .querySelector<HTMLButtonElement>('.logout-dialog__confirm')!,
+  )
+  expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
+  expect(await screen.findByRole('status')).toHaveTextContent('Войдите снова')
+
+  await act(async () => {
+    window.dispatchEvent(new Event('online'))
+  })
+
+  expect(fetchMock).toHaveBeenCalledTimes(3)
+  expect(screen.getByLabelText('Логин')).toBeEnabled()
+  expect(fetchMock.mock.calls.map(([path]) => path)).toEqual([
+    '/api/v1/auth/refresh',
+    '/api/v1/auth/login',
     '/api/v1/auth/logout',
   ])
+  expect(screen.queryByRole('button', { name: 'Повторить выход' })).not.toBeInTheDocument()
 })

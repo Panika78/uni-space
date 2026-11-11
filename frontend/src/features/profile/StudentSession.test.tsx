@@ -62,7 +62,7 @@ beforeEach(() => {
         account = JSON.parse(String(init?.body)).login === 'student-a' ? 'A' : 'B'
         return Response.json({ access_token: account, token_type: 'bearer', expires_in: 600 })
       }
-      if (path.endsWith('/logout')) return new Response(null, { status: 204 })
+      if (path.endsWith('/logout')) return Response.json({ session_revoked: true })
       if (path.endsWith('/users/me')) {
         if (delayProfile) {
           const delayed = delayProfile
@@ -95,7 +95,7 @@ function mount() {
   return { client, router, user: userEvent.setup() }
 }
 async function login(user: ReturnType<typeof userEvent.setup>, loginName: string) {
-  await screen.findByRole('heading', { name: 'Вход' })
+  await screen.findByRole('heading', { name: 'Вход в систему' })
   await user.type(screen.getByLabelText('Логин'), loginName)
   await user.type(screen.getByLabelText('Пароль'), 'fictional-password')
   await user.click(screen.getByRole('button', { name: 'Войти' }))
@@ -188,10 +188,27 @@ it.each([401, 403, 500])(
     expect(screen.queryByText('Анна Альфа')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Меню пользователя' })).not.toBeInTheDocument()
     if (status === 401)
-      expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
+      expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
     else
       expect(await screen.findByRole('alert')).toHaveTextContent(
         status === 403 ? 'Доступ запрещён' : 'Не удалось загрузить профиль',
       )
+    if (status === 403) {
+      await user.click(screen.getByRole('button', { name: 'Выйти' }))
+      expect(screen.getByRole('dialog', { name: 'Выйти из аккаунта?' })).toBeInTheDocument()
+      expect(vi.mocked(fetch).mock.calls.some(([path]) => String(path).endsWith('/logout'))).toBe(
+        false,
+      )
+      await user.click(screen.getByRole('button', { name: 'Отмена' }))
+      expect(screen.getByRole('alert')).toHaveTextContent('Доступ запрещён')
+      await user.click(screen.getByRole('button', { name: 'Выйти' }))
+      await user.click(
+        screen.getByRole('dialog').querySelector<HTMLButtonElement>('.logout-dialog__confirm')!,
+      )
+      expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
+      expect(
+        vi.mocked(fetch).mock.calls.filter(([path]) => String(path).endsWith('/logout')),
+      ).toHaveLength(1)
+    }
   },
 )

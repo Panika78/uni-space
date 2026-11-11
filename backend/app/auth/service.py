@@ -32,7 +32,11 @@ def create_refresh_token(
 
 
 def create_login_session(
-    db: Session, login: str, password: str, settings: Settings
+    db: Session,
+    login: str,
+    password: str,
+    settings: Settings,
+    previous_refresh_token: str | None = None,
 ) -> tuple[AuthSession, str]:
     with db.begin():
         # Read scalar values: an ORM refresh under the later lock must not mutate
@@ -56,6 +60,12 @@ def create_login_session(
         if user is None or not user.is_active or user.password_hash != snapshot.password_hash:
             raise HTTPException(401, "invalid_credentials")
         now = datetime.now(UTC)
+        # A valid login replaces only the browser session identified by its cookie.
+        # Invalid credentials never revoke an existing session.
+        previous = get_locked_refresh_session(db, previous_refresh_token)
+        if previous:
+            previous_session, _previous_token = previous
+            revoke_session(db, previous_session, now, "login_replaced")
         session = AuthSession(
             user_id=user.id,
             created_at=now,
@@ -150,21 +160,21 @@ def rotate_refresh_token(db: Session, raw_token: str | None) -> tuple[AuthSessio
 
 def revoke_logout_session(
     db: Session, raw_token: str | None, settings: Settings, access_token: str | None = None
-) -> None:
+) -> bool:
     with db.begin():
         locked = get_locked_refresh_session(db, raw_token)
         if locked:
             session, _token = locked
             revoke_session(db, session, datetime.now(UTC), "logout")
-            return  # A known cookie always wins, including used/revoked refresh tokens.
+            return True  # A known cookie always wins, including used/revoked refresh tokens.
         if not access_token:
-            return
+            return False
         try:
             claims = validate_access_token(access_token, settings)
         except HTTPException as error:
             if error.status_code != 401:
                 raise
-            return  # Optional, unusable credentials retain idempotent logout semantics.
+            return False  # Optional, unusable credentials retain idempotent logout semantics.
         session = db.scalar(
             select(AuthSession)
             .where(AuthSession.id == int(claims["sid"]), AuthSession.user_id == int(claims["sub"]))
@@ -173,3 +183,4 @@ def revoke_logout_session(
         )
         if session is not None:
             revoke_session(db, session, datetime.now(UTC), "logout")
+        return session is not None
