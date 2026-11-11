@@ -1,6 +1,7 @@
 /* global process, console, document, window, URL, Event */
 // Real backend and fictional deploy/schedule_fixtures.py; faults are scoped to schedule reads.
 import assert from 'node:assert/strict'
+import { setTimeout as delay } from 'node:timers/promises'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const baseURL = process.env.SCHEDULE_TEST_URL || 'http://localhost:5173'
 const password = process.env.SCHEDULE_TEST_PASSWORD
@@ -34,13 +35,17 @@ async function setScheduleVisibility(page, state) {
   }, state)
 }
 async function waitForScheduleRefresh(page, action) {
+  // A cached week can already be refetching; let it finish before asserting a new request.
+  await page.waitForLoadState('networkidle')
   const result = page.waitForResponse(
     (response) => new URL(response.url()).pathname === '/api/v1/schedule',
   )
   await action()
   const response = await result
   assert.equal(response.status(), 200)
-  return response.json()
+  const data = await response.json()
+  await page.waitForLoadState('networkidle')
+  return data
 }
 async function checkOvernightDates(page) {
   const overnight = page
@@ -175,6 +180,7 @@ try {
       )
       await page.getByRole('button', { name: 'Сегодня', exact: true }).click()
       await page.locator('.schedule-list').waitFor()
+      await page.waitForLoadState('networkidle')
       let releaseOldResponse
       const oldResponseGate = new Promise((resolve) => {
         releaseOldResponse = resolve
@@ -196,9 +202,15 @@ try {
           /* The old request was cancelled at logout. */
         }
       })
-      await setScheduleVisibility(page, 'hidden')
-      await setScheduleVisibility(page, 'visible')
-      await oldResponseReady
+      // Start a new document so this delayed-response test cannot reuse an in-flight refetch.
+      // Delayed focus/reconnect refreshes within one auth provider are covered by Vitest.
+      await page.reload()
+      await Promise.race([
+        oldResponseReady,
+        delay(30000, undefined, { ref: false }).then(() => {
+          throw new Error('Timed out waiting for the buffered background schedule response')
+        }),
+      ])
       await logout(page)
       await login(page, 'schedule-fixture-2')
       releaseOldResponse()
@@ -213,7 +225,7 @@ try {
       await login(page)
       assert.equal(await page.getByText('Только вторая группа', { exact: true }).count(), 0)
       check(
-        'Empty day, account switching, delayed old focus refresh, reconnect after account change, logout/reload; no old account data',
+        'Empty day, account switching, delayed old schedule response, reconnect after account change, logout/reload; no old account data',
       )
       for (const fault of ['network', 500, 403]) {
         await page.route('**/api/v1/schedule?**', (route) =>
