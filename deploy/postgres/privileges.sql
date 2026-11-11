@@ -56,7 +56,7 @@ FROM pg_tables WHERE schemaname='public' AND tablename IN
     ('users','auth_sessions','refresh_tokens','students','alembic_version',
      'study_groups','programs','org_units','teachers','disciplines','course_offerings',
      'buildings','rooms','lessons','lesson_groups','lesson_rooms',
-     'service_types','applications') \gexec
+     'service_types','applications','news') \gexec
 SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
               pg_get_serial_sequence(format('public.%I', tablename), 'id'))
 FROM pg_tables WHERE schemaname='public' AND tablename IN

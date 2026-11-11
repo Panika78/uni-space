@@ -476,11 +476,15 @@ with engine.connect() as c:
     assert c.execute(text("SELECT has_table_privilege(current_user,'applications','SELECT')")).scalar_one()
     assert c.execute(text("SELECT has_table_privilege(current_user,'applications','INSERT')")).scalar_one()
     assert c.execute(text("SELECT has_sequence_privilege(current_user,'applications_id_seq','USAGE')")).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'news','SELECT')")).scalar_one()
+    assert not c.execute(text("SELECT has_sequence_privilege(current_user,'news_id_seq','USAGE')")).scalar_one()
+    for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
+        assert not c.execute(text("SELECT has_table_privilege(current_user,'news',:privilege)"), {'privilege': privilege}).scalar_one()
     assert not c.execute(text("SELECT has_table_privilege(current_user,'applications','UPDATE')")).scalar_one()
     assert not c.execute(text("SELECT has_table_privilege(current_user,'applications','DELETE')")).scalar_one()
     print('PASS: API role flags false; isolated secrets')
     for table in ('users','students','study_groups','programs','org_units','teachers',
-                  'disciplines','course_offerings','buildings','rooms','lessons','lesson_groups','lesson_rooms'):
+                  'disciplines','course_offerings','buildings','rooms','lessons','lesson_groups','lesson_rooms','news'):
         assert c.execute(text("SELECT has_table_privilege(current_user, :table, 'SELECT')"), {'table': table}).scalar_one()
         c.execute(text(f"SELECT * FROM public.{table} LIMIT 1")).all()
     for table in ('study_groups','programs','org_units','teachers','disciplines','course_offerings',
@@ -503,6 +507,9 @@ for statement in (
     "SELECT public.existing_function_fixture()", "SELECT public.future_function_fixture()",
     "INSERT INTO disciplines (name) VALUES ('forbidden')",
     "UPDATE org_units SET name='forbidden'", "DELETE FROM programs",
+    "INSERT INTO news (title,body,is_published) VALUES ('forbidden','forbidden',false)",
+    "UPDATE news SET title='forbidden'", "DELETE FROM news", "TRUNCATE news",
+    "SELECT nextval('public.news_id_seq')",
     "SELECT nextval('public.org_units_id_seq')", "SELECT nextval('public.programs_id_seq')",
     "UPDATE lessons SET status='cancelled'", "DELETE FROM lesson_groups",
     "SELECT * FROM academic_terms", "SELECT * FROM course_groups",
@@ -617,6 +624,12 @@ with SessionLocal.begin() as db:
             )
             # ACL reapplication must retain schedule reads and all existing auth permissions.
             run(["bash", "scripts/configure-postgres.sh"], env=env)
+            published_news_id = sql("""INSERT INTO news (title, body, published_at, is_published)
+VALUES ('Production ACL fixture', 'Fictional published news', now(), true)
+RETURNING id;""")
+            hidden_news_id = sql("""INSERT INTO news (title, body, published_at, is_published)
+VALUES ('Production hidden fixture', 'Fictional hidden news', NULL, false)
+RETURNING id;""")
             with httpx.Client(
                 base_url=public_origin,
                 verify=context,
@@ -789,6 +802,28 @@ with SessionLocal.begin() as db:
                 schedule_headers = {
                     "Authorization": "Bearer " + student_login.json()["access_token"]
                 }
+                news_page = client.get("/api/v1/news", headers=schedule_headers)
+                assert news_page.status_code == 200, news_page.text
+                assert any(
+                    item["id"] == published_news_id
+                    and item["title"] == "Production ACL fixture"
+                    for item in news_page.json()["items"]
+                )
+                news_detail = client.get(
+                    f"/api/v1/news/{published_news_id}", headers=schedule_headers
+                )
+                assert news_detail.status_code == 200, news_detail.text
+                assert news_detail.json()["body"] == "Fictional published news"
+                assert (
+                    client.get(
+                        f"/api/v1/news/{hidden_news_id}", headers=schedule_headers
+                    ).status_code
+                    == 404
+                )
+                print(
+                    "PASS: real news list/detail and hidden-ID filtering under uni_space_api",
+                    flush=True,
+                )
                 profile = client.get("/api/v1/users/me", headers=schedule_headers)
                 assert profile.status_code == 200, profile.text
                 assert profile.headers["cache-control"] == "no-store"

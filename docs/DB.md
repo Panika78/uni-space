@@ -473,7 +473,7 @@ A.starts_at < B.ends_at AND B.starts_at < A.ends_at
 | `applications(student_id, created_at)` | Заявления студента |
 | `applications(assigned_org_unit_id, review_status)` | Очередь сотрудника |
 | `notifications(user_id, read_at, created_at)` | Лента и непрочитанные уведомления |
-| `news(published_at)` | Актуальные публикации |
+| `news(published_at, id)` | Актуальные публикации и стабильная keyset-сортировка |
 | `auth_sessions(user_id, revoked_at, expires_at)` | Поиск и отзыв сессий |
 | `refresh_tokens(token_hash)` (UQ) | Поиск предъявленного токена |
 | `refresh_tokens(session_id, created_at)` | Цепочка и очистка после срока сессии |

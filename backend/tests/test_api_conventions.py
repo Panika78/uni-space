@@ -769,6 +769,8 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
         "/api/v1/applications",
         "/api/v1/schedule",
         "/api/v1/users/me",
+        "/api/v1/news",
+        "/api/v1/news/{id}",
     }
     assert client.get("/api/v1").status_code == 404
     assert client.get("/docs").status_code == 404

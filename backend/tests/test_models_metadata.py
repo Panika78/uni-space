@@ -13,6 +13,7 @@ EXPECTED_TABLES = {
     "teachers",
     "service_types",
     "applications",
+    "news",
 }
 
 
