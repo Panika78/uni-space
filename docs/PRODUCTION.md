@@ -177,7 +177,27 @@ Nginx (важно при замене файла через rename), прове�
 |---|---|---|
 | `POSTGRES_USER` (прежнее имя сохраняется) | `POSTGRES_PASSWORD_FILE`, только `db` | Администратор кластера; bootstrap, backup, создание отдельной restore-БД |
 | `uni_space_migrator` | `MIGRATION_DB_PASSWORD_FILE`, только `db` и одноразовый `migrate` | LOGIN без SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS; владелец public и прикладных объектов, DDL миграций |
-| `uni_space_api` | `API_DB_PASSWORD_FILE`, только `db` и `api` | CONNECT рабочей БД, USAGE public и auth-последовательностей; SELECT users, students, auth_sessions, refresh_tokens, alembic_version, news; INSERT/UPDATE auth_sessions и refresh_tokens |
+| `uni_space_api` | `API_DB_PASSWORD_FILE`, только `db` и `api` | CONNECT рабочей БД, USAGE public и последовательностей auth/applications; SELECT users, students, auth_sessions, refresh_tokens, alembic_version, справочников профиля/расписания (ниже), service_types, applications и news; INSERT applications; INSERT/UPDATE auth_sessions и refresh_tokens |
+
+Для совместной работы TASK-009/010 явно разрешён только `SELECT` на
+`study_groups`, `programs`, `org_units`, `teachers`,
+`disciplines`, `course_offerings`, `buildings`, `rooms`, `lessons`, `lesson_groups`,
+`lesson_rooms`. `academic_terms`/`course_groups` создаются миграцией как основа
+учебной модели, но текущий API их не читает и прав на них не получает. Не выдаются
+права записи или USAGE на последовательности расписания. Список разрешений в
+`deploy/postgres/privileges.sql` применяется существующим migration wrapper до и
+после Alembic, без широких default GRANT. Изолированный production-тест создаёт
+вымышленные учебные фикстуры мигратором, повторяет ACL и выполняет настоящий
+`GET /api/v1/users/me` и `GET /api/v1/schedule` через HTTPS под `uni_space_api`
+для двух студентов, включая собственные учебные связи профиля, общую пару,
+несколько аудиторий, цепочку переносов и изоляцию группы. Отдельно проверяет отказ
+записи в справочники профиля/расписание, использования их последовательностей и
+чтения лишних таблиц. Оба API проверяются также после восстановления БД и повторного ACL.
+
+Для TASK-013 API может создавать собственные заявки: ему выданы `SELECT` на
+`service_types`/`applications`, `INSERT` на `applications` и `USAGE` только на
+`applications.id`. Для TASK-015 ему выдан только `SELECT` на `news`; запись в
+`news` и права на её последовательность запрещены.
 
 API не получает административный или migration secret ни в окружение, ни в mounts.
 В `migrate` нет JWT-секрета приложения: константа удовлетворяет Settings только для

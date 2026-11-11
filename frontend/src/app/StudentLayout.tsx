@@ -1,7 +1,9 @@
+import { useStudentProfile, getStudentInitials } from '../features/profile/profileContext'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FocusEvent } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../features/auth/AuthProvider'
+import { UnsavedChangesProvider, type ExitProtectionStatus } from './UnsavedChangesContext'
 import { UnavailableState } from '../shared/ui/StatusStates'
 import { UniversityBrand } from '../shared/ui/UniversityBrand'
 
@@ -34,7 +36,14 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
-function UserMenu() {
+export function UserMenu({
+  logoutOnly = false,
+  exitStatus = 'none',
+}: {
+  logoutOnly?: boolean
+  exitStatus?: ExitProtectionStatus
+}) {
+  const profile = useStudentProfile()
   const { logout } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
   const [confirmLogout, setConfirmLogout] = useState(false)
@@ -88,20 +97,26 @@ function UserMenu() {
 
   return (
     <div className="user-menu" ref={containerRef} onBlur={handleBlur}>
-      <button
-        ref={triggerRef}
-        className="avatar-button"
-        aria-label="Меню пользователя"
-        aria-expanded={isOpen}
-        aria-controls="user-menu-panel"
-        onClick={() => setIsOpen((open) => !open)}
-      >
-        <span aria-hidden="true">С</span>
-      </button>
+      {logoutOnly ? (
+        <button ref={triggerRef} type="button" onClick={() => setConfirmLogout(true)}>
+          Выйти
+        </button>
+      ) : (
+        <button
+          ref={triggerRef}
+          className="avatar-button"
+          aria-label="Меню пользователя"
+          aria-expanded={isOpen}
+          aria-controls="user-menu-panel"
+          onClick={() => setIsOpen((open) => !open)}
+        >
+          <span aria-hidden="true">{getStudentInitials(profile?.full_name)}</span>
+        </button>
+      )}
       {isOpen && (
         <div className="user-menu__panel" id="user-menu-panel">
           <Link to="/profile" onClick={() => setIsOpen(false)}>
-            Мой профиль <span>Скоро</span>
+            Мой профиль
           </Link>
           <Link to="/settings" onClick={() => setIsOpen(false)}>
             Настройки <span>Скоро</span>
@@ -145,7 +160,28 @@ function UserMenu() {
             }
           }}
         >
-          <h2 id="logout-dialog-title">Выйти из аккаунта?</h2>
+          <h2 id="logout-dialog-title">
+            {exitStatus === 'draft'
+              ? 'Потерять введённые данные и выйти?'
+              : exitStatus === 'submitting' || exitStatus === 'uncertain'
+                ? 'Выйти без подтверждения результата?'
+                : 'Выйти из аккаунта?'}
+          </h2>
+          {exitStatus === 'draft' && (
+            <p>Заявление ещё не отправлено; введённые данные будут потеряны.</p>
+          )}
+          {exitStatus === 'submitting' && (
+            <p>
+              Запрос уже отправлен и может сохранить заявление. Уход не отменит запрос; вы можете
+              потерять подтверждение и номер.
+            </p>
+          )}
+          {exitStatus === 'uncertain' && (
+            <p>
+              Ответ не получен. Заявление могло сохраниться, но подтверждение и номер будут
+              потеряны.
+            </p>
+          )}
           <div className="logout-dialog__actions">
             <button ref={cancelRef} type="button" onClick={closeConfirmation}>
               Отмена
@@ -161,7 +197,11 @@ function UserMenu() {
                 void logout()
               }}
             >
-              Выйти
+              {exitStatus === 'draft'
+                ? 'Выйти без сохранения'
+                : exitStatus === 'none'
+                  ? 'Выйти'
+                  : 'Выйти без подтверждения'}
             </button>
           </div>
         </dialog>
@@ -234,6 +274,7 @@ function MobileDrawer({ onClose }: { onClose: () => void }) {
 
 export function StudentLayout() {
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const [exitStatus, setExitStatus] = useState<ExitProtectionStatus>('none')
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const mainContentRef = useRef<HTMLElement>(null)
@@ -322,10 +363,12 @@ export function StudentLayout() {
               Уведомления
             </span>
           </Link>
-          <UserMenu />
+          <UserMenu exitStatus={exitStatus} />
         </header>
         <main className="student-content" id="main-content" ref={mainContentRef} tabIndex={-1}>
-          <Outlet />
+          <UnsavedChangesProvider value={{ status: exitStatus, setStatus: setExitStatus }}>
+            <Outlet />
+          </UnsavedChangesProvider>
         </main>
       </div>
       {isDrawerOpen && <MobileDrawer onClose={closeDrawer} />}

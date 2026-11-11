@@ -89,7 +89,9 @@ try {
   })
   assert.ok(articleTitle, 'A news link should be visible at the saved feed position')
   const feedPosition = await page.evaluate(() => window.scrollY)
-  const articleLink = page.locator('.news-row__link').filter({ hasText: articleTitle })
+  const articleLink = page
+    .locator('.news-row__link')
+    .filter({ has: page.getByRole('heading', { name: articleTitle, exact: true }) })
   await articleLink.click()
   await page.getByRole('heading', { name: articleTitle, exact: true }).waitFor()
   assert.equal(await page.evaluate(() => window.scrollY), 0)

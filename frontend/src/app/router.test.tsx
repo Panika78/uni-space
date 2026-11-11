@@ -1,8 +1,13 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { createQueryClient } from './queryClient'
 import { appRoutes } from './router'
+import { apiFetch, ApiClientError } from '../shared/api/client'
+import type { components } from '../shared/api/schema'
+import { createLesson } from '../features/schedule/testFixtures'
 import type { RouteObject } from 'react-router-dom'
 
 const auth = vi.hoisted(() => ({
@@ -14,9 +19,50 @@ const auth = vi.hoisted(() => ({
 }))
 
 vi.mock('../features/auth/AuthProvider', () => ({ useAuth: () => auth }))
+vi.mock('../shared/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../shared/api/client')>()),
+  apiFetch: vi.fn(),
+}))
+
+const profile: components['schemas']['StudentProfile'] = {
+  id: '1',
+  student_id: '11',
+  login: 'fictional-student',
+  full_name: 'Тестовый Студент',
+  group: { id: '21', name: 'ТЕСТ-1' },
+  program: { id: '31', code: '01', name: 'Вымышленная программа' },
+  faculty: { id: '41', name: 'Вымышленный факультет' },
+  direction: { code: '01.01', name: 'Вымышленное направление' },
+  course_number: 1,
+  academic_status: 'enrolled',
+}
+const schedule: components['schemas']['ScheduleResponse'] = {
+  date_from: '2026-11-09',
+  date_to: '2026-11-15',
+  timezone: 'Europe/Moscow',
+  items: [createLesson({ groups: [profile.group] })],
+}
+beforeEach(() => {
+  vi.setSystemTime(new Date('2026-11-10T08:00:00Z'))
+  vi.mocked(apiFetch).mockImplementation((input) => {
+    const url = new URL(String(input), window.location.href)
+    if (url.pathname === '/api/v1/users/me' && !url.search) return Promise.resolve(profile)
+    if (
+      url.pathname === '/api/v1/schedule' &&
+      url.searchParams.has('date_from') &&
+      url.searchParams.has('date_to') &&
+      [...url.searchParams.keys()].every((key) => key === 'date_from' || key === 'date_to')
+    ) {
+      return Promise.resolve(schedule)
+    }
+    throw new Error(`Unexpected test API URL: ${url.pathname}`)
+  })
+})
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
+  vi.mocked(apiFetch).mockReset()
   auth.status = 'unauthenticated'
   auth.message = ''
   auth.busy = false
@@ -26,7 +72,11 @@ afterEach(() => {
 
 function renderRouter(path: string) {
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] })
-  render(<RouterProvider router={router} />)
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
 }
 
 describe('route fallbacks', () => {
@@ -79,7 +129,11 @@ describe('route fallbacks', () => {
         },
       ]
       const router = createMemoryRouter(failingRoutes, { initialEntries: ['/broken'] })
-      render(<RouterProvider router={router} />)
+      render(
+        <QueryClientProvider client={createQueryClient()}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>,
+      )
       expect(
         await screen.findByRole('heading', { name: 'Не удалось открыть страницу' }),
       ).toBeInTheDocument()
@@ -88,4 +142,30 @@ describe('route fallbacks', () => {
       expect(screen.getByRole('link', { name: linkName })).toHaveAttribute('href', href)
     },
   )
+})
+
+it('loads StudentAccess before the real schedule and keeps the working profile route', async () => {
+  auth.status = 'authenticated'
+  renderRouter('/schedule')
+  expect(await screen.findByRole('article', { name: 'Вымышленная дисциплина' })).toBeInTheDocument()
+  const urls = vi
+    .mocked(apiFetch)
+    .mock.calls.map(([input]) => new URL(String(input), window.location.href).pathname)
+  expect(urls).toEqual(['/api/v1/users/me', '/api/v1/schedule'])
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Меню пользователя' }))
+  await userEvent.setup().click(screen.getByRole('link', { name: 'Мой профиль' }))
+  expect(await screen.findByRole('heading', { name: 'Мой профиль' })).toBeInTheDocument()
+  expect(screen.getByRole('article')).toHaveTextContent(profile.full_name)
+  expect(screen.getByRole('article')).toHaveTextContent(profile.program.name)
+})
+
+it('does not load or show schedule when StudentAccess rejects access', async () => {
+  auth.status = 'authenticated'
+  vi.mocked(apiFetch).mockRejectedValue(new ApiClientError('Denied', 'forbidden', 403))
+  renderRouter('/schedule')
+  expect(await screen.findByRole('alert')).toHaveTextContent('Доступ запрещён')
+  expect(screen.queryByRole('heading', { name: 'Расписание' })).not.toBeInTheDocument()
+  expect(vi.mocked(apiFetch).mock.calls.map(([input]) => String(input))).toEqual([
+    '/api/v1/users/me',
+  ])
 })

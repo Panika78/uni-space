@@ -14,6 +14,129 @@
         "title": "ApiError",
         "type": "object"
       },
+      "ApplicationFormData": {
+        "additionalProperties": false,
+        "properties": {
+          "place_of_submission": {
+            "title": "Place Of Submission",
+            "type": "string"
+          }
+        },
+        "required": [
+          "place_of_submission"
+        ],
+        "title": "ApplicationFormData",
+        "type": "object"
+      },
+      "ApplicationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "document_status": {
+            "enum": [
+              "not_required",
+              "pending",
+              "ready",
+              "failed"
+            ],
+            "title": "Document Status",
+            "type": "string"
+          },
+          "feedback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback"
+          },
+          "form_data": {
+            "$ref": "#/components/schemas/ApplicationFormData"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "review_status": {
+            "enum": [
+              "submitted",
+              "in_review",
+              "needs_correction",
+              "resubmitted",
+              "approved",
+              "rejected"
+            ],
+            "title": "Review Status",
+            "type": "string"
+          },
+          "service": {
+            "$ref": "#/components/schemas/Service"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "service",
+          "form_data",
+          "review_status",
+          "document_status",
+          "feedback",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ApplicationResponse",
+        "type": "object"
+      },
+      "CourseOfferingRef": {
+        "additionalProperties": false,
+        "properties": {
+          "discipline": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "discipline"
+        ],
+        "title": "CourseOfferingRef",
+        "type": "object"
+      },
+      "CreateApplicationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "form_data": {
+            "$ref": "#/components/schemas/ApplicationFormData"
+          },
+          "service_code": {
+            "const": "study_certificate",
+            "title": "Service Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service_code",
+          "form_data"
+        ],
+        "title": "CreateApplicationRequest",
+        "type": "object"
+      },
       "Date": {
         "format": "date",
         "type": "string"
@@ -21,6 +144,25 @@
       "DateTime": {
         "format": "date-time",
         "type": "string"
+      },
+      "Direction": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "Direction",
+        "type": "object"
       },
       "ErrorBody": {
         "additionalProperties": false,
@@ -78,6 +220,144 @@
       "Id": {
         "pattern": "^[1-9][0-9]*$",
         "type": "string"
+      },
+      "LessonPosition": {
+        "additionalProperties": false,
+        "properties": {
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "scheduled",
+              "cancelled",
+              "moved"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "starts_at",
+          "ends_at",
+          "status"
+        ],
+        "title": "LessonPosition",
+        "type": "object"
+      },
+      "LessonResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "course_offering": {
+            "$ref": "#/components/schemas/CourseOfferingRef"
+          },
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/Ref"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "lecture",
+              "seminar",
+              "lab",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "latest_lesson": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LessonPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "previous_lesson": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LessonPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rooms": {
+            "items": {
+              "$ref": "#/components/schemas/RoomRef"
+            },
+            "title": "Rooms",
+            "type": "array"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "scheduled",
+              "cancelled",
+              "moved"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "teacher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Ref"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "starts_at",
+          "ends_at",
+          "status",
+          "course_offering",
+          "kind",
+          "teacher",
+          "groups",
+          "rooms",
+          "previous_lesson",
+          "latest_lesson"
+        ],
+        "title": "LessonResponse",
+        "type": "object"
       },
       "LoginRequest": {
         "additionalProperties": false,
@@ -268,6 +548,31 @@
         "title": "PaginationParams",
         "type": "object"
       },
+      "ProgramRef": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "code"
+        ],
+        "title": "ProgramRef",
+        "type": "object"
+      },
       "Ref": {
         "additionalProperties": false,
         "properties": {
@@ -286,6 +591,170 @@
           "name"
         ],
         "title": "Ref",
+        "type": "object"
+      },
+      "RoomRef": {
+        "additionalProperties": false,
+        "properties": {
+          "building": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "building"
+        ],
+        "title": "RoomRef",
+        "type": "object"
+      },
+      "ScheduleResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "date_from": {
+            "format": "date",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date",
+            "title": "Date To",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LessonResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "timezone": {
+            "const": "Europe/Moscow",
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date_from",
+          "date_to",
+          "timezone",
+          "items"
+        ],
+        "title": "ScheduleResponse",
+        "type": "object"
+      },
+      "Service": {
+        "properties": {
+          "code": {
+            "const": "study_certificate",
+            "title": "Code",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "title"
+        ],
+        "title": "Service",
+        "type": "object"
+      },
+      "ServiceList": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Service"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ServiceList",
+        "type": "object"
+      },
+      "StudentProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "academic_status": {
+            "enum": [
+              "enrolled",
+              "academic_leave",
+              "expelled",
+              "graduated"
+            ],
+            "title": "Academic Status",
+            "type": "string"
+          },
+          "course_number": {
+            "title": "Course Number",
+            "type": "integer"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/Direction"
+          },
+          "faculty": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "group": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          },
+          "program": {
+            "$ref": "#/components/schemas/ProgramRef"
+          },
+          "student_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Student Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "student_id",
+          "login",
+          "full_name",
+          "faculty",
+          "program",
+          "direction",
+          "group",
+          "course_number",
+          "academic_status"
+        ],
+        "title": "StudentProfile",
         "type": "object"
       },
       "TokenResponse": {
@@ -327,6 +796,80 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/applications": {
+      "post": {
+        "operationId": "submit_application_api_v1_applications_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateApplicationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Submit Application",
+        "tags": [
+          "services",
+          "applications"
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "operationId": "login_user_api_v1_auth_login_post",
@@ -858,6 +1401,197 @@
         "summary": "Get News",
         "tags": [
           "news"
+        ]
+      }
+    },
+    "/api/v1/schedule": {
+      "get": {
+        "operationId": "get_student_schedule_api_v1_schedule_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Date From",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Date To",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Student Schedule",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/v1/services": {
+      "get": {
+        "operationId": "list_services_api_v1_services_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Services",
+        "tags": [
+          "services",
+          "applications"
+        ]
+      }
+    },
+    "/api/v1/users/me": {
+      "get": {
+        "operationId": "get_student_profile_api_v1_users_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentProfile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Student Profile",
+        "tags": [
+          "students"
         ]
       }
     }
