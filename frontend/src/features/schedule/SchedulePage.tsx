@@ -23,18 +23,24 @@ const kinds = {
 const weekdays = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС']
 
 function LessonCard({ lesson }: { lesson: Lesson }) {
+  const startsOn = getMoscowDate(new Date(lesson.starts_at))
+  const endsOn = getMoscowDate(new Date(lesson.ends_at))
+  const crossesMidnight = startsOn !== endsOn
   return (
     <article
       className={`lesson-card lesson-card--${lesson.status}`}
       aria-label={lesson.course_offering.discipline.name}
     >
       <div className="lesson-card__time">
-        <time dateTime={lesson.starts_at}>{formatTime(lesson.starts_at)}</time>
+        <time dateTime={lesson.starts_at}>
+          {crossesMidnight && `${formatDate(startsOn)}, `}
+          {formatTime(lesson.starts_at)}
+        </time>
         <span aria-hidden="true"> — </span>
-        <time dateTime={lesson.ends_at}>{formatTime(lesson.ends_at)}</time>
-        {getMoscowDate(new Date(lesson.starts_at)) !== getMoscowDate(new Date(lesson.ends_at)) && (
-          <small>Окончание: {formatDate(getMoscowDate(new Date(lesson.ends_at)))}</small>
-        )}
+        <time dateTime={lesson.ends_at}>
+          {crossesMidnight && `${formatDate(endsOn)}, `}
+          {formatTime(lesson.ends_at)}
+        </time>
       </div>
       <div className="lesson-card__details">
         <h3>{lesson.course_offering.discipline.name}</h3>
@@ -72,6 +78,8 @@ export function SchedulePage() {
   const dateTo = addDays(weekStart, 6)
   const query = useQuery({
     queryKey: ['schedule', weekStart, dateTo],
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
     queryFn: ({ signal }) =>
       apiFetch<components['schemas']['ScheduleResponse']>(
         `/api/v1/schedule?date_from=${weekStart}&date_to=${dateTo}`,

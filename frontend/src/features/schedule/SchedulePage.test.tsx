@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { QueryClientProvider } from '@tanstack/react-query'
+import { focusManager, onlineManager, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createQueryClient } from '../../app/queryClient'
 import { ApiClientError, apiFetch } from '../../shared/api/client'
@@ -31,10 +31,14 @@ function renderSchedule() {
 beforeEach(() => {
   vi.setSystemTime(new Date('2026-11-10T08:00:00Z'))
   request.mockReset()
+  focusManager.setFocused(true)
+  onlineManager.setOnline(true)
 })
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
+  focusManager.setFocused(undefined)
+  onlineManager.setOnline(true)
 })
 
 it('loads the Moscow week, renders known details once and provides no dead discipline links', async () => {
@@ -50,7 +54,8 @@ it('loads the Moscow week, renders known details once and provides no dead disci
     ]),
   )
   renderSchedule()
-  expect(await screen.findByRole('article')).toHaveTextContent('09:00 — 10:30')
+  const card = await screen.findByRole('article')
+  expect(card.querySelector('.lesson-card__time')).toHaveTextContent(/^09:00 — 10:30$/)
   expect(screen.getByRole('article')).toHaveTextContent('Корпус А · 101')
   expect(screen.getByRole('article')).toHaveTextContent('Корпус Б · 202')
   expect(screen.getByRole('article')).toHaveTextContent('Вымышленный преподаватель')
@@ -159,4 +164,61 @@ it('cancels pending previous week requests and removes private cache on session 
   await queryClient.cancelQueries()
   queryClient.clear()
   expect(queryClient.getQueryCache().getAll()).toHaveLength(0)
+})
+
+it.each(['focus', 'reconnect'] as const)(
+  'refreshes stale schedule on %s using local query options',
+  async (event) => {
+    request.mockResolvedValueOnce(response()).mockResolvedValue(
+      response([
+        createLesson({
+          course_offering: { id: '1', discipline: { id: '1', name: 'Изменённое расписание' } },
+        }),
+      ]),
+    )
+    const { queryClient } = renderSchedule()
+    await screen.findByRole('article', { name: 'Вымышленная дисциплина' })
+    // These remain disabled globally; only schedule opts into refreshing.
+    expect(queryClient.getDefaultOptions().queries).toMatchObject({
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      retry: false,
+      retryOnMount: false,
+    })
+    act(() => {
+      if (event === 'focus') {
+        focusManager.setFocused(false)
+        focusManager.setFocused(true)
+      } else {
+        onlineManager.setOnline(false)
+        onlineManager.setOnline(true)
+      }
+    })
+    expect(
+      await screen.findByRole('article', { name: 'Изменённое расписание' }),
+    ).toBeInTheDocument()
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(screen.queryByRole('button', { name: 'Обновить' })).not.toBeInTheDocument()
+  },
+)
+
+it('shows both Moscow dates and times for the same overnight lesson on adjacent days', async () => {
+  request.mockResolvedValue(
+    response([
+      createLesson({ starts_at: '2026-11-10T20:30:00Z', ends_at: '2026-11-10T21:30:00Z' }),
+    ]),
+  )
+  const { container } = renderSchedule()
+  await screen.findAllByRole('article')
+  for (const day of ['2026-11-10', '2026-11-11']) {
+    fireEvent.change(screen.getByLabelText('Дата'), { target: { value: day } })
+    const card = within(
+      container.querySelector('.schedule-day.is-selected')! as HTMLElement,
+    ).getByRole('article')
+    const times = card.querySelectorAll('time')
+    expect(times[0]).toHaveAttribute('datetime', '2026-11-10T20:30:00Z')
+    expect(times[0]).toHaveTextContent('вторник, 10 ноября, 23:30')
+    expect(times[1]).toHaveAttribute('datetime', '2026-11-10T21:30:00Z')
+    expect(times[1]).toHaveTextContent('среда, 11 ноября, 00:30')
+  }
 })

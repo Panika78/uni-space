@@ -1,4 +1,4 @@
-/* global process, console, document, window, URL */
+/* global process, console, document, window, URL, Event */
 // Real backend and fictional deploy/schedule_fixtures.py; faults are scoped to schedule reads.
 import assert from 'node:assert/strict'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
@@ -25,6 +25,33 @@ async function logout(page) {
   await page.getByRole('dialog').getByRole('button', { name: 'Выйти', exact: true }).click()
   await page.getByRole('heading', { name: 'Вход в систему' }).waitFor()
 }
+// Headless Chromium keeps background pages visible. Exercise its real visibilitychange
+// listener with controlled document visibility; requests still use the real API.
+async function setScheduleVisibility(page, state) {
+  await page.evaluate((visibility) => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: visibility })
+    document.dispatchEvent(new Event('visibilitychange', { bubbles: true }))
+  }, state)
+}
+async function waitForScheduleRefresh(page, action) {
+  const result = page.waitForResponse(
+    (response) => new URL(response.url()).pathname === '/api/v1/schedule',
+  )
+  await action()
+  const response = await result
+  assert.equal(response.status(), 200)
+  return response.json()
+}
+async function checkOvernightDates(page) {
+  const overnight = page
+    .locator('.schedule-day.is-selected .lesson-card')
+    .filter({ hasText: 'Занятие через полночь' })
+  assert.deepEqual(await overnight.locator('time').allTextContents(), [
+    'вторник, 10 ноября, 23:30',
+    'среда, 11 ноября, 00:30',
+  ])
+}
+
 async function noOverflow(page) {
   assert.ok(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -70,6 +97,27 @@ try {
     assert.equal(await shared.count(), 1)
     assert.ok((await shared.innerText()).includes('09:00'))
     assert.equal(await shared.locator('li').count(), 2)
+    assert.equal((await shared.locator('.lesson-card__time').innerText()).trim(), '09:00 — 10:00')
+    await checkOvernightDates(page)
+    await page.getByLabel('Дата', { exact: true }).fill('2026-11-11')
+    await checkOvernightDates(page)
+    await noOverflow(page)
+    await page.getByLabel('Дата', { exact: true }).fill('2026-11-10')
+    await setScheduleVisibility(page, 'hidden')
+    const focused = await waitForScheduleRefresh(page, () => setScheduleVisibility(page, 'visible'))
+    assert.ok(
+      focused.items.some((item) => item.course_offering.discipline.name === 'Только первая группа'),
+    )
+    await context.setOffline(true)
+    const reconnected = await waitForScheduleRefresh(page, () => context.setOffline(false))
+    assert.ok(
+      reconnected.items.some(
+        (item) => item.course_offering.discipline.name === 'Только первая группа',
+      ),
+    )
+    check(
+      `${timezoneId}: focus/reconnect fetch real schedule; both Moscow dates on both overnight days; ordinary times stay compact`,
+    )
     await noOverflow(page)
     await page.screenshot({
       path: new URL(
@@ -148,12 +196,15 @@ try {
           /* The old request was cancelled at logout. */
         }
       })
-      await page.reload()
+      await setScheduleVisibility(page, 'hidden')
+      await setScheduleVisibility(page, 'visible')
       await oldResponseReady
       await logout(page)
       await login(page, 'schedule-fixture-2')
       releaseOldResponse()
       await page.unroute('**/api/v1/schedule?**')
+      await context.setOffline(true)
+      await waitForScheduleRefresh(page, () => context.setOffline(false))
       assert.equal(await page.getByText('Только первая группа', { exact: true }).count(), 0)
       assert.ok(await page.getByText('Только вторая группа', { exact: true }).isVisible())
       await logout(page)
@@ -162,7 +213,7 @@ try {
       await login(page)
       assert.equal(await page.getByText('Только вторая группа', { exact: true }).count(), 0)
       check(
-        'Empty day, account switching, delayed old schedule response, logout/reload; no old account data',
+        'Empty day, account switching, delayed old focus refresh, reconnect after account change, logout/reload; no old account data',
       )
       for (const fault of ['network', 500, 403]) {
         await page.route('**/api/v1/schedule?**', (route) =>
