@@ -1,3 +1,4 @@
+import { useStudentProfile, getStudentInitials } from '../features/profile/profileContext'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FocusEvent } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
@@ -34,7 +35,8 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
-function UserMenu() {
+export function UserMenu({ logoutOnly = false }: { logoutOnly?: boolean }) {
+  const profile = useStudentProfile()
   const { logout } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
   const [confirmLogout, setConfirmLogout] = useState(false)
@@ -88,20 +90,26 @@ function UserMenu() {
 
   return (
     <div className="user-menu" ref={containerRef} onBlur={handleBlur}>
-      <button
-        ref={triggerRef}
-        className="avatar-button"
-        aria-label="Меню пользователя"
-        aria-expanded={isOpen}
-        aria-controls="user-menu-panel"
-        onClick={() => setIsOpen((open) => !open)}
-      >
-        <span aria-hidden="true">С</span>
-      </button>
+      {logoutOnly ? (
+        <button ref={triggerRef} type="button" onClick={() => setConfirmLogout(true)}>
+          Выйти
+        </button>
+      ) : (
+        <button
+          ref={triggerRef}
+          className="avatar-button"
+          aria-label="Меню пользователя"
+          aria-expanded={isOpen}
+          aria-controls="user-menu-panel"
+          onClick={() => setIsOpen((open) => !open)}
+        >
+          <span aria-hidden="true">{getStudentInitials(profile?.full_name)}</span>
+        </button>
+      )}
       {isOpen && (
         <div className="user-menu__panel" id="user-menu-panel">
           <Link to="/profile" onClick={() => setIsOpen(false)}>
-            Мой профиль <span>Скоро</span>
+            Мой профиль
           </Link>
           <Link to="/settings" onClick={() => setIsOpen(false)}>
             Настройки <span>Скоро</span>

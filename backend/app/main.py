@@ -16,6 +16,7 @@ from app.core.schemas import (
     Ref,
 )
 from app.schedule.router import router as schedule_router
+from app.students import router as students_router
 
 settings = get_settings()
 
@@ -30,6 +31,7 @@ app.add_middleware(ApiHeadersMiddleware)
 install_exception_handlers(app)
 app.include_router(auth_router)
 app.include_router(schedule_router)
+app.include_router(students_router)
 
 
 def create_openapi_schema(application: FastAPI) -> dict:

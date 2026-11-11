@@ -54,7 +54,7 @@ REVOKE ALL ON ALL ROUTINES IN SCHEMA public FROM PUBLIC, uni_space_api;
 SELECT format('GRANT SELECT ON public.%I TO uni_space_api', tablename)
 FROM pg_tables WHERE schemaname='public' AND tablename IN
     ('users','auth_sessions','refresh_tokens','students','alembic_version',
-     'study_groups','teachers','disciplines','course_offerings',
+     'study_groups','programs','org_units','teachers','disciplines','course_offerings',
      'buildings','rooms','lessons','lesson_groups','lesson_rooms') \gexec
 SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
               pg_get_serial_sequence(format('public.%I', tablename), 'id'))
