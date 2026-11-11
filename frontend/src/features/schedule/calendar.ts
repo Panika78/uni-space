@@ -32,9 +32,12 @@ export function getWeekStart(date: string): string {
 
 export function getIsoWeekNumber(date: string): number {
   const value = new Date(`${date}T12:00:00Z`)
-  value.setUTCDate(value.getUTCDate() + 4 - (value.getUTCDay() || 7))
-  const yearStart = new Date(Date.UTC(value.getUTCFullYear(), 0, 1))
-  return Math.ceil(((value.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
+  const weekday = value.getUTCDay() || 7
+  value.setUTCDate(value.getUTCDate() + 4 - weekday)
+  const isoYear = value.getUTCFullYear()
+  const yearStart = new Date(`${String(isoYear).padStart(4, '0')}-01-01T12:00:00Z`)
+  const dayOfYear = Math.floor((value.getTime() - yearStart.getTime()) / 86400000) + 1
+  return Math.floor((dayOfYear - 1) / 7) + 1
 }
 
 export function formatDate(date: string): string {

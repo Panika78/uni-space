@@ -242,6 +242,14 @@
   }
 }
 @media (max-width: 768px) {
+  .schedule-day,
+  .schedule-page--week .schedule-day {
+    display: none;
+  }
+  .schedule-day.is-selected,
+  .schedule-page--week .schedule-day.is-selected {
+    display: grid;
+  }
   .schedule-heading {
     align-items: flex-start;
     flex-direction: column;

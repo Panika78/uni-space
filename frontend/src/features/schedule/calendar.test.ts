@@ -30,6 +30,13 @@ describe('Moscow calendar independent of browser timezone', () => {
     expect(getIsoWeekNumber('2021-01-01')).toBe(53)
     expect(getIsoWeekNumber('2024-12-31')).toBe(1)
     expect(getIsoWeekNumber('2025-01-01')).toBe(1)
+    expect(getIsoWeekNumber('2026-12-31')).toBe(53)
+    expect(getIsoWeekNumber('2027-01-01')).toBe(53)
+    expect(getIsoWeekNumber('2027-01-03')).toBe(53)
+    expect(getIsoWeekNumber('2027-01-04')).toBe(1)
+    expect(getIsoWeekNumber('2027-11-10')).toBe(45)
+    expect(getIsoWeekNumber('2027-12-31')).toBe(52)
+    expect(getIsoWeekNumber('0001-01-01')).toBe(1)
   })
   it('places overnight lessons in both days and excludes exact boundaries', () => {
     const crossing = createLesson({
