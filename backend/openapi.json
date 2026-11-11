@@ -22,6 +22,25 @@
         "format": "date-time",
         "type": "string"
       },
+      "Direction": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "Direction",
+        "type": "object"
+      },
       "ErrorBody": {
         "additionalProperties": false,
         "properties": {
@@ -172,6 +191,31 @@
         "title": "PaginationParams",
         "type": "object"
       },
+      "ProgramRef": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "code"
+        ],
+        "title": "ProgramRef",
+        "type": "object"
+      },
       "Ref": {
         "additionalProperties": false,
         "properties": {
@@ -190,6 +234,69 @@
           "name"
         ],
         "title": "Ref",
+        "type": "object"
+      },
+      "StudentProfile": {
+        "additionalProperties": false,
+        "properties": {
+          "academic_status": {
+            "enum": [
+              "enrolled",
+              "academic_leave",
+              "expelled",
+              "graduated"
+            ],
+            "title": "Academic Status",
+            "type": "string"
+          },
+          "course_number": {
+            "title": "Course Number",
+            "type": "integer"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/Direction"
+          },
+          "faculty": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "group": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "login": {
+            "title": "Login",
+            "type": "string"
+          },
+          "program": {
+            "$ref": "#/components/schemas/ProgramRef"
+          },
+          "student_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Student Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "student_id",
+          "login",
+          "full_name",
+          "faculty",
+          "program",
+          "direction",
+          "group",
+          "course_number",
+          "academic_status"
+        ],
+        "title": "StudentProfile",
         "type": "object"
       },
       "TokenResponse": {
@@ -568,6 +675,72 @@
         "summary": "Refresh Session",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/users/me": {
+      "get": {
+        "operationId": "get_student_profile_api_v1_users_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentProfile"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Student Profile",
+        "tags": [
+          "students"
         ]
       }
     }

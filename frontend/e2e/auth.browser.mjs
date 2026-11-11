@@ -66,6 +66,15 @@ const page = await context.newPage()
 const testPath = '/api/v1/task007-test-only'
 const apiError = (code) => ({ error: { code, message: 'internal server detail', details: [] } })
 const requests = []
+let currentProfile
+context.on('response', async (response) => {
+  if (
+    !currentProfile &&
+    new URL(response.url()).pathname === '/api/v1/users/me' &&
+    response.status() === 200
+  )
+    currentProfile = await response.json()
+})
 context.on('request', (request) => {
   if (new URL(request.url()).pathname.startsWith('/api/'))
     requests.push(new URL(request.url()).pathname)
@@ -512,6 +521,14 @@ try {
     })
   }
   const countAuth = () => requests.filter((path) => path.startsWith('/api/v1/auth/')).length
+  // Only synthetic login fixtures need a matching identity fixture. Real sessions above
+  // continue using the real /users/me endpoint, including role and session checks.
+  assert.ok(currentProfile, 'Real student profile must have loaded before lock fixtures')
+  await context.route('**/api/v1/users/me', (route) =>
+    route.request().headers().authorization === 'Bearer fictional-browser-token'
+      ? route.fulfill({ json: currentProfile })
+      : route.continue(),
+  )
   await context.route('**/api/v1/auth/login', (route) =>
     route.fulfill({
       json: { access_token: 'fictional-browser-token', token_type: 'bearer', expires_in: 600 },
@@ -542,6 +559,7 @@ try {
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
   await heading(page, 'Расписание')
   await context.unroute('**/api/v1/auth/login')
+  await context.unroute('**/api/v1/users/me')
   await holdAuthLock()
   const beforeWaitingLogout = countAuth()
   await clickLogout(page)

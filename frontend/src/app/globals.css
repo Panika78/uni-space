@@ -738,3 +738,42 @@ a {
     animation-iteration-count: 1 !important;
   }
 }
+
+.profile-heading {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.profile-avatar {
+  border-radius: 50%;
+  background: #315b4c;
+  color: white;
+  padding: 1rem;
+  flex-shrink: 0;
+}
+.profile-page {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.profile-page section {
+  background: white;
+  padding: 1rem;
+  border-radius: 1rem;
+  margin-top: 1rem;
+}
+.profile-page dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 0.75rem;
+}
+.profile-page dd {
+  margin: 0;
+}
+@media (max-width: 480px) {
+  .profile-page dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .profile-page dt {
+    font-weight: 600;
+  }
+}

@@ -67,6 +67,9 @@ def auth(postgresql_engine, monkeypatch):
     test_app.add_middleware(ApiHeadersMiddleware)
     install_exception_handlers(test_app)
     test_app.include_router(router)
+    from app.students import router as students_router
+
+    test_app.include_router(students_router)
     settings = Settings(
         _env_file=None,
         app_env="test",
@@ -644,7 +647,7 @@ def test_openapi_auth_contract_uses_shared_errors_and_cookie():
     from app.main import app
 
     schema = app.openapi()
-    assert "/api/v1/users/me" not in schema["paths"]
+    assert "/api/v1/users/me" in schema["paths"]
     for path in ["login", "refresh", "logout"]:
         operation = schema["paths"][COOKIE_PATH + "/" + path]["post"]
         for status in ["401", "403", "422", "500"]:
@@ -918,3 +921,118 @@ def test_bearer_fallback_preserves_origin_and_body_protection(auth):
     assert_error(client.logout(access=access, content=b"{}"), 422, "validation_error")
     assert_error(client.logout(access=access, content=b"x" * 16385), 413, "request_too_large")
     assert client.request("GET", "/api/v1/test/user", access=access).status_code == 200
+
+
+def test_student_profiles_are_isolated_and_follow_academic_links(auth):
+    client, engine, ids, logins, student_ids = auth
+    with Session(engine) as db, db.begin():
+        faculty = OrgUnit(name="Other Fictional Faculty", type="faculty")
+        db.add(faculty)
+        db.flush()
+        program = Program(
+            code="02",
+            name="Other Program",
+            direction_code="02.02.02",
+            direction_name="Other Direction",
+            faculty_id=faculty.id,
+        )
+        db.add(program)
+        db.flush()
+        group = StudyGroup(name="Other Group", program_id=program.id, course_number=3)
+        db.add(group)
+        db.flush()
+        student = db.get(Student, student_ids[1])
+        old_group = student.group_id
+        student.group_id = group.id
+        student.academic_status = "academic_leave"
+        db.get(User, ids[1]).full_name = "Other Fictional Student"
+        extra_ids = faculty.id, program.id, group.id
+    try:
+        for index in range(2):
+            _, _, access = login(auth, index)
+            response = client.request("GET", "/api/v1/users/me", access=access)
+            assert response.status_code == 200
+            data = response.json()
+            with Session(engine) as db:
+                student = db.get(Student, student_ids[index])
+                group = db.get(StudyGroup, student.group_id)
+                program = db.get(Program, group.program_id)
+                faculty = db.get(OrgUnit, program.faculty_id)
+                assert data == {
+                    "id": str(ids[index]),
+                    "student_id": str(student_ids[index]),
+                    "login": logins[index],
+                    "full_name": "Other Fictional Student" if index else "Fictional Student",
+                    "faculty": {"id": str(faculty.id), "name": faculty.name},
+                    "program": {"id": str(program.id), "code": program.code, "name": program.name},
+                    "direction": {"code": program.direction_code, "name": program.direction_name},
+                    "group": {"id": str(group.id), "name": group.name},
+                    "course_number": 3 if index else 1,
+                    "academic_status": "academic_leave" if index else "enrolled",
+                }
+                assert data["direction"] == {
+                    "code": "02.02.02" if index else "00.00.00",
+                    "name": "Other Direction" if index else "Fictional Direction",
+                }
+                for identifier in [
+                    data["id"],
+                    data["student_id"],
+                    data["faculty"]["id"],
+                    data["program"]["id"],
+                    data["group"]["id"],
+                ]:
+                    assert identifier.isdecimal() and int(identifier) > 0
+        assert client.request("GET", "/api/v1/users/me").status_code == 401
+        assert client.request("GET", "/api/v1/users/me", access="invalid").status_code == 401
+        with Session(engine) as db, db.begin():
+            db.get(User, ids[1]).role = "teacher"
+        assert client.request("GET", "/api/v1/users/me", access=access).status_code == 403
+    finally:
+        with Session(engine) as db, db.begin():
+            db.get(Student, student_ids[1]).group_id = old_group
+            db.execute(delete(StudyGroup).where(StudyGroup.id == extra_ids[2]))
+            db.execute(delete(Program).where(Program.id == extra_ids[1]))
+            db.execute(delete(OrgUnit).where(OrgUnit.id == extra_ids[0]))
+
+
+@pytest.mark.parametrize(
+    "query", ["student_id=999999", "id=1", "unknown=x", "student_id=1&student_id=2"]
+)
+def test_profile_rejects_unknown_query_parameters(auth, query):
+    client = auth[0]
+    _, _, access = login(auth)
+    assert_error(
+        client.request("GET", "/api/v1/users/me?" + query, access=access), 422, "validation_error"
+    )
+
+
+def test_profile_rejects_invalid_faculty_and_recovers(auth):
+    client, engine, _ids, _logins, student_ids = auth
+    _, _, access = login(auth)
+    with Session(engine) as db:
+        student = db.get(Student, student_ids[0])
+        program = db.get(Program, db.get(StudyGroup, student.group_id).program_id)
+        faculty_id = program.faculty_id
+    for unit_type in ["department", "dean_office", "accounting"]:
+        with Session(engine) as db, db.begin():
+            db.get(OrgUnit, faculty_id).type = unit_type
+        assert_error(
+            client.request("GET", "/api/v1/users/me", access=access), 500, "internal_error"
+        )
+    with Session(engine) as db, db.begin():
+        db.get(OrgUnit, faculty_id).type = "faculty"
+    assert client.request("GET", "/api/v1/users/me", access=access).status_code == 200
+
+
+def test_profile_checks_role_and_account_activity_on_every_request(auth):
+    client, engine, ids, _logins, _student_ids = auth
+    _, _, access = login(auth)
+    assert client.request("GET", "/api/v1/users/me", access=access).status_code == 200
+    with Session(engine) as db, db.begin():
+        db.get(User, ids[0]).role = "teacher"
+    assert_error(client.request("GET", "/api/v1/users/me", access=access), 403, "forbidden")
+    with Session(engine) as db, db.begin():
+        user = db.get(User, ids[0])
+        user.role = "student"
+        user.is_active = False
+    assert_error(client.request("GET", "/api/v1/users/me", access=access), 401, "session_invalid")

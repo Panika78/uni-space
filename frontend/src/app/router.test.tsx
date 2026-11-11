@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -14,6 +15,19 @@ const auth = vi.hoisted(() => ({
 }))
 
 vi.mock('../features/auth/AuthProvider', () => ({ useAuth: () => auth }))
+vi.mock('../shared/api/client', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  apiFetch: vi.fn().mockResolvedValue({
+    id: '1',
+    student_id: '1',
+    full_name: 'Test',
+    group: {},
+    program: {},
+    faculty: {},
+    direction: {},
+    academic_status: 'enrolled',
+  }),
+}))
 
 afterEach(() => {
   cleanup()
@@ -26,7 +40,11 @@ afterEach(() => {
 
 function renderRouter(path: string) {
   const router = createMemoryRouter(appRoutes, { initialEntries: [path] })
-  render(<RouterProvider router={router} />)
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
 }
 
 describe('route fallbacks', () => {
@@ -79,7 +97,11 @@ describe('route fallbacks', () => {
         },
       ]
       const router = createMemoryRouter(failingRoutes, { initialEntries: ['/broken'] })
-      render(<RouterProvider router={router} />)
+      render(
+        <QueryClientProvider client={new QueryClient()}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>,
+      )
       expect(
         await screen.findByRole('heading', { name: 'Не удалось открыть страницу' }),
       ).toBeInTheDocument()
