@@ -75,6 +75,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Student Schedule */
+        get: operations["get_student_schedule_api_v1_schedule_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/services": {
         parameters: {
             query?: never;
@@ -84,6 +101,23 @@ export interface paths {
         };
         /** List Services */
         get: operations["list_services_api_v1_services_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Student Profile */
+        get: operations["get_student_profile_api_v1_users_me_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -134,6 +168,12 @@ export interface components {
              */
             updated_at: string;
         };
+        /** CourseOfferingRef */
+        CourseOfferingRef: {
+            discipline: components["schemas"]["Ref"];
+            /** Id */
+            id: string;
+        };
         /** CreateApplicationRequest */
         CreateApplicationRequest: {
             form_data: components["schemas"]["ApplicationFormData"];
@@ -147,6 +187,13 @@ export interface components {
         Date: string;
         /** Format: date-time */
         DateTime: string;
+        /** Direction */
+        Direction: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+        };
         /** ErrorBody */
         ErrorBody: {
             /** Code */
@@ -164,6 +211,59 @@ export interface components {
             field: string | null;
         };
         Id: string;
+        /** LessonPosition */
+        LessonPosition: {
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /** Id */
+            id: string;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "scheduled" | "cancelled" | "moved";
+        };
+        /** LessonResponse */
+        LessonResponse: {
+            course_offering: components["schemas"]["CourseOfferingRef"];
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /** Groups */
+            groups: components["schemas"]["Ref"][];
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "lecture" | "seminar" | "lab" | "other";
+            latest_lesson: components["schemas"]["LessonPosition"] | null;
+            previous_lesson: components["schemas"]["LessonPosition"] | null;
+            /** Rooms */
+            rooms: components["schemas"]["RoomRef"][];
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "scheduled" | "cancelled" | "moved";
+            teacher: components["schemas"]["Ref"] | null;
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Login */
@@ -198,12 +298,49 @@ export interface components {
              */
             limit: number;
         };
+        /** ProgramRef */
+        ProgramRef: {
+            /** Code */
+            code: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
         /** Ref */
         Ref: {
             /** Id */
             id: string;
             /** Name */
             name: string;
+        };
+        /** RoomRef */
+        RoomRef: {
+            building: components["schemas"]["Ref"];
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** ScheduleResponse */
+        ScheduleResponse: {
+            /**
+             * Date From
+             * Format: date
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date
+             */
+            date_to: string;
+            /** Items */
+            items: components["schemas"]["LessonResponse"][];
+            /**
+             * Timezone
+             * @constant
+             */
+            timezone: "Europe/Moscow";
         };
         /** Service */
         Service: {
@@ -221,6 +358,28 @@ export interface components {
         ServiceList: {
             /** Items */
             items: components["schemas"]["Service"][];
+        };
+        /** StudentProfile */
+        StudentProfile: {
+            /**
+             * Academic Status
+             * @enum {string}
+             */
+            academic_status: "enrolled" | "academic_leave" | "expelled" | "graduated";
+            /** Course Number */
+            course_number: number;
+            direction: components["schemas"]["Direction"];
+            faculty: components["schemas"]["Ref"];
+            /** Full Name */
+            full_name: string;
+            group: components["schemas"]["Ref"];
+            /** Id */
+            id: string;
+            /** Login */
+            login: string;
+            program: components["schemas"]["ProgramRef"];
+            /** Student Id */
+            student_id: string;
         };
         /** TokenResponse */
         TokenResponse: {
@@ -517,6 +676,56 @@ export interface operations {
             };
         };
     };
+    get_student_schedule_api_v1_schedule_get: {
+        parameters: {
+            query: {
+                date_from: string;
+                date_to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     list_services_api_v1_services_get: {
         parameters: {
             query?: never;
@@ -546,6 +755,62 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    get_student_profile_api_v1_users_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudentProfile"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

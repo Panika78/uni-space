@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { useAuth } from './AuthProvider'
-import { LoadingState, UnavailableState } from '../../shared/ui/StatusStates'
+import { LoadingState } from '../../shared/ui/StatusStates'
 import { BrandMark } from '../../shared/ui/UniversityBrand'
 
 export function ProtectedRoute() {
@@ -56,19 +56,6 @@ export function LoginPage() {
           {busy ? 'Подождите…' : 'Войти'}
         </button>
       </form>
-    </section>
-  )
-}
-
-export function SchedulePage() {
-  return (
-    <section className="section-page" aria-labelledby="schedule-title">
-      <p className="section-eyebrow">Студенческий кабинет</p>
-      <h1 id="schedule-title">Расписание</h1>
-      <UnavailableState
-        title="Расписание пока недоступно"
-        description="Содержимое расписания появится в следующих задачах."
-      />
     </section>
   )
 }

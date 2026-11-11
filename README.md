@@ -11,9 +11,91 @@ TypeScript и Vite. Реализованы модели аккаунтов и у
 начальная миграция Alembic и серверная авторизация MVP 1 (login, refresh,
 logout, проверка пользователя и сессии). Frontend поддерживает вход, восстановление
 сессии, безопасный выход и координацию вкладок. Защищённый кабинет содержит
-адаптивный каркас студента; реализованы `/schedule` и каталог услуг с формой
-подачи заявления на справку об обучении. После входа открывается `/schedule`;
-остальные разделы добавляются поэтапно. Приоритет — MVP 1.
+адаптивный каркас студента с навигацией. `/schedule` — стартовый маршрут после
+входа: расписание своей группы на день/неделю, московские даты, преподаватели,
+все аудитории и базовые статусы изменений. Реализован read-only профиль `/profile`
+и API `GET /api/v1/users/me` с серверными академическими связями. Доступ к кабинету
+проверяет `StudentAccess` через этот API, профиль доступен из общего `ProfileContext`.
+Каталог услуг `/services` и форма подачи заявления реализуют TASK-013. Остальные разделы добавляются поэтапно. Приоритет — MVP 1.
+
+## Расписание студента (TASK-010)
+
+`GET /api/v1/schedule?date_from=2026-11-09&date_to=2026-11-15` требует существующий
+Bearer и профиль студента. Обе даты обязательны, допускается 1–31 календарный день
+включительно. Неизвестные параметры (в том числе `student_id`/`group_id`) дают 422.
+Сервер выбирает занятия по `students.group_id` и фактическим `lesson_groups`,
+сортирует по `starts_at, id`; связанные группы и аудитории не размножают занятия.
+Время ответа — UTC; календарь и отображение — `Europe/Moscow`. Занятие через
+полночь видно на обеих пересекаемых датах. Цепочки переносов возвращают
+непосредственного предшественника и последнюю позицию за пределами диапазона;
+позиции без назначения текущей группе не раскрываются.
+
+Миграция `20261111_01` добавляет учебные периоды, дисциплины, проведения с
+`attestation_type`, корпуса, аудитории и связи занятий. Таблицы аккаунтов,
+студентов, преподавателей и групп используются повторно. Подгруппы и серии не
+создаются. Для production используйте существующий `scripts/migrate-postgres.sh`:
+он повторяет явную настройку ACL после миграций. Новые права — только SELECT
+используемых расписанием таблиц; запись в расписание, его последовательности и
+неиспользуемые справочники API недоступны. Подробнее — [PRODUCTION.md](docs/PRODUCTION.md).
+
+Браузерный тест `frontend/e2e/schedule.browser.mjs` использует настоящий API,
+Vite и отдельную тестовую PostgreSQL, не production-данные. В пустой **изолированной**
+БД примените миграции и создайте маленькие вымышленные фикстуры (не демонабор MVP):
+
+```bash
+# Из корня; APP_ENV=test, DATABASE_URL и JWT_SIGNING_KEY указывают на тестовый стенд.
+printf '%s' 'fictional-schedule-password' | PYTHONPATH=backend uv run --locked --python 3.12.16 --project backend python deploy/schedule_fixtures.py
+# Запустите backend :8000 с COOKIE_SECURE=false, ALLOWED_ORIGINS=["http://localhost:5173"]
+# и Vite :5173 с обычным proxy :8000. Playwright устанавливается отдельно от приложения.
+SCHEDULE_TEST_PASSWORD=fictional-schedule-password node frontend/e2e/schedule.browser.mjs
+```
+
+`PLAYWRIGHT_MODULE` задаёт путь к `playwright/index.mjs`, `CHROMIUM_PATH` — необязательный
+путь Chromium. Скрипт проверяет desktop 1440 px, 360 px, Los Angeles/Tokyo/UTC,
+воскресенье, полночь, клавиатуру, пустые дни, ошибки, login/reload/logout и смену
+двух аккаунтов. Он выполняет пять login; повторять полный прогон следует в новом
+окне rate limiter. Скриншоты сохраняются в `work/`. CI выполняет этот тест отдельно;
+production-интеграция проверяет настоящий API под `uni_space_api` после повторного ACL.
+
+## Каталог услуг и заявления (TASK-013)
+
+Каталог `GET /api/v1/services` и отправка `POST /api/v1/applications` используют
+серверную авторизацию студента. Форма справки об обучении сохраняет результат в
+PostgreSQL; при неопределённом исходе отправка автоматически не повторяется.
+Production API получает только SELECT для каталога и SELECT/INSERT для заявлений
+с необходимой sequence usage.
+
+Браузерный сценарий услуг использует отдельную тестовую PostgreSQL и двух
+вымышленных студентов. Команды настройки и запуска приведены в разделе «Проверки
+проекта» ниже; CI исполняет `frontend/e2e/services.browser.mjs` отдельной job.
+
+После миграций на изолированной тестовой БД создайте фиктивные аккаунты и
+запустите backend с `APP_ENV=test`, тестовыми `DATABASE_URL`/`JWT_SIGNING_KEY`,
+`COOKIE_SECURE=false` и `ALLOWED_ORIGINS=["http://localhost:5173"]`:
+
+```bash
+uv run --locked --python 3.12.16 --project backend python backend/scripts/seed_services_browser_test_students.py > /tmp/services-e2e.env
+mkdir -p work/browser-tooling
+npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
+node work/browser-tooling/node_modules/playwright/cli.js install chromium
+(cd backend && uv run --locked --python 3.12.16 uvicorn app.main:app --host 127.0.0.1 --port 8000)
+```
+
+В другом терминале запустите Vite (`cd frontend && npm run dev -- --host
+127.0.0.1`), затем выполните browser E2E с seeded credentials:
+
+```bash
+set -a
+. /tmp/services-e2e.env
+set +a
+export PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_modules/playwright/index.mjs"
+export SERVICES_TEST_URL=http://localhost:5173
+node frontend/e2e/services.browser.mjs
+```
+
+Сценарий требует второго тестового студента и проверяет смену аккаунта без
+пропуска; GitHub Actions выполняет его отдельной job с одноразовой PostgreSQL,
+реальными API/UI процессами и двумя вымышленными аккаунтами.
 
 ## Документация
 
@@ -316,40 +398,6 @@ npm run types:check
 `backend/uv.lock`. Для явного обновления файлов используется отдельная команда
 `npm run types:generate`. Unit-тесты запускаются без PostgreSQL по умолчанию;
 job CI дополнительно запускает отмеченные `integration`-тесты на тестовой БД.
-
-Браузерный E2E каталога услуг использует эту же изолированную тестовую БД и
-создаёт двух вымышленных студентов. После миграций из корня репозитория:
-
-```bash
-uv run --locked --python 3.12.16 --project backend python backend/scripts/seed_services_browser_test_students.py > /tmp/services-e2e.env
-mkdir -p work/browser-tooling
-npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
-node work/browser-tooling/node_modules/playwright/cli.js install chromium
-(cd backend && uv run --locked --python 3.12.16 uvicorn app.main:app --host 127.0.0.1 --port 8000)
-```
-
-В отдельном терминале запустите frontend с прокси на тестовый API:
-
-```bash
-cd frontend
-npm run dev -- --host 127.0.0.1
-```
-
-Затем из корня выполните сценарий с тестовыми реквизитами и Playwright из
-изолированного каталога:
-
-```bash
-set -a
-. /tmp/services-e2e.env
-set +a
-export PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_modules/playwright/index.mjs"
-export SERVICES_TEST_URL=http://localhost:5173
-node frontend/e2e/services.browser.mjs
-```
-
-Сценарий требует обоих студентов; он не пропускает проверку изоляции при
-отсутствии второго аккаунта. GitHub Actions запускает его отдельной job с
-одноразовой PostgreSQL, фиктивными аккаунтами и реальными API/UI процессами.
 
 После проверки остановите и удалите только эфемерный контейнер тестовой БД:
 

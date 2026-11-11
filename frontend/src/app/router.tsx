@@ -1,6 +1,8 @@
+import { StudentAccess, StudentProfilePage } from '../features/profile/StudentProfile'
 import { createBrowserRouter, Link, Navigate, Outlet } from 'react-router-dom'
 
-import { LoginPage, ProtectedRoute, SchedulePage } from '../features/auth/AuthPages'
+import { LoginPage, ProtectedRoute } from '../features/auth/AuthPages'
+import { SchedulePage } from '../features/schedule/SchedulePage'
 import { useAuth } from '../features/auth/AuthProvider'
 import { LoadingState } from '../shared/ui/StatusStates'
 import { StudentLayout, UnavailableSection } from './StudentLayout'
@@ -97,16 +99,21 @@ export const appRoutes: RouteObject[] = [
         element: <ProtectedRoute />,
         children: [
           {
-            element: <StudentLayout />,
+            element: <StudentAccess />,
             children: [
-              { path: '/schedule', element: <SchedulePage /> },
-              { path: '/academics', element: <UnavailableSection title="Успеваемость" /> },
-              { path: '/services', element: <ServicesPage /> },
-              { path: '/services/:serviceCode', element: <ApplicationFormPage /> },
-              { path: '/news', element: <UnavailableSection title="Новости" /> },
-              { path: '/notifications', element: <UnavailableSection title="Уведомления" /> },
-              { path: '/profile', element: <UnavailableSection title="Мой профиль" /> },
-              { path: '/settings', element: <UnavailableSection title="Настройки" /> },
+              {
+                element: <StudentLayout />,
+                children: [
+                  { path: '/schedule', element: <SchedulePage /> },
+                  { path: '/academics', element: <UnavailableSection title="Успеваемость" /> },
+                  { path: '/services', element: <ServicesPage /> },
+                  { path: '/services/:serviceCode', element: <ApplicationFormPage /> },
+                  { path: '/news', element: <UnavailableSection title="Новости" /> },
+                  { path: '/notifications', element: <UnavailableSection title="Уведомления" /> },
+                  { path: '/profile', element: <StudentProfilePage /> },
+                  { path: '/settings', element: <UnavailableSection title="Настройки" /> },
+                ],
+              },
             ],
           },
         ],
