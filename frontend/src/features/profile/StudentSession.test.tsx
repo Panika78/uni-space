@@ -44,7 +44,8 @@ let profileError: number | undefined
 let delayProfile: (() => Promise<Response>) | undefined
 let delaySchedule: (() => Promise<Response>) | undefined
 function scheduleResponse(token: 'A' | 'B') {
-  const weekStart = getWeekStart(getMoscowDate())
+  const today = getMoscowDate()
+  const weekStart = getWeekStart(today)
   return Response.json({
     date_from: weekStart,
     date_to: addDays(weekStart, 6),
@@ -52,8 +53,10 @@ function scheduleResponse(token: 'A' | 'B') {
     items: [
       createLesson({
         groups: [profiles[token].group],
-        starts_at: new Date().toISOString(),
-        ends_at: new Date(Date.now() + 3600000).toISOString(),
+        // Keep the integration fixture inside one Moscow calendar day regardless
+        // of when the test runner happens to execute it.
+        starts_at: `${today}T09:00:00+03:00`,
+        ends_at: `${today}T10:00:00+03:00`,
         course_offering: {
           id: token === 'A' ? '1' : '2',
           discipline: {
