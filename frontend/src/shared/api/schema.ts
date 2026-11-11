@@ -58,6 +58,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Student Schedule */
+        get: operations["get_student_schedule_api_v1_schedule_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/me": {
         parameters: {
             query?: never;
@@ -82,6 +99,12 @@ export interface components {
         /** ApiError */
         ApiError: {
             error: components["schemas"]["ErrorBody"];
+        };
+        /** CourseOfferingRef */
+        CourseOfferingRef: {
+            discipline: components["schemas"]["Ref"];
+            /** Id */
+            id: string;
         };
         /** Format: date */
         Date: string;
@@ -111,6 +134,59 @@ export interface components {
             field: string | null;
         };
         Id: string;
+        /** LessonPosition */
+        LessonPosition: {
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /** Id */
+            id: string;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "scheduled" | "cancelled" | "moved";
+        };
+        /** LessonResponse */
+        LessonResponse: {
+            course_offering: components["schemas"]["CourseOfferingRef"];
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /** Groups */
+            groups: components["schemas"]["Ref"][];
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "lecture" | "seminar" | "lab" | "other";
+            latest_lesson: components["schemas"]["LessonPosition"] | null;
+            previous_lesson: components["schemas"]["LessonPosition"] | null;
+            /** Rooms */
+            rooms: components["schemas"]["RoomRef"][];
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "scheduled" | "cancelled" | "moved";
+            teacher: components["schemas"]["Ref"] | null;
+        };
         /** LoginRequest */
         LoginRequest: {
             /** Login */
@@ -160,6 +236,34 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+        };
+        /** RoomRef */
+        RoomRef: {
+            building: components["schemas"]["Ref"];
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** ScheduleResponse */
+        ScheduleResponse: {
+            /**
+             * Date From
+             * Format: date
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date
+             */
+            date_to: string;
+            /** Items */
+            items: components["schemas"]["LessonResponse"][];
+            /**
+             * Timezone
+             * @constant
+             */
+            timezone: "Europe/Moscow";
         };
         /** StudentProfile */
         StudentProfile: {
@@ -417,6 +521,56 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    get_student_schedule_api_v1_schedule_get: {
+        parameters: {
+            query: {
+                date_from: string;
+                date_to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

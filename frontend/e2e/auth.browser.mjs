@@ -521,14 +521,27 @@ try {
     })
   }
   const countAuth = () => requests.filter((path) => path.startsWith('/api/v1/auth/')).length
-  // Only synthetic login fixtures need a matching identity fixture. Real sessions above
-  // continue using the real /users/me endpoint, including role and session checks.
+  // Synthetic login fixtures need matching protected data fixtures. Real sessions above
+  // continue using the real profile and schedule APIs, including session checks.
   assert.ok(currentProfile, 'Real student profile must have loaded before lock fixtures')
   await context.route('**/api/v1/users/me', (route) =>
     route.request().headers().authorization === 'Bearer fictional-browser-token'
       ? route.fulfill({ json: currentProfile })
       : route.continue(),
   )
+  await context.route('**/api/v1/schedule?*', (route) => {
+    if (route.request().headers().authorization !== 'Bearer fictional-browser-token')
+      return route.continue()
+    const query = new URL(route.request().url()).searchParams
+    return route.fulfill({
+      json: {
+        date_from: query.get('date_from'),
+        date_to: query.get('date_to'),
+        timezone: 'Europe/Moscow',
+        items: [],
+      },
+    })
+  })
   await context.route('**/api/v1/auth/login', (route) =>
     route.fulfill({
       json: { access_token: 'fictional-browser-token', token_type: 'bearer', expires_in: 600 },

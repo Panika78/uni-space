@@ -14,6 +14,25 @@
         "title": "ApiError",
         "type": "object"
       },
+      "CourseOfferingRef": {
+        "additionalProperties": false,
+        "properties": {
+          "discipline": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "discipline"
+        ],
+        "title": "CourseOfferingRef",
+        "type": "object"
+      },
       "Date": {
         "format": "date",
         "type": "string"
@@ -97,6 +116,144 @@
       "Id": {
         "pattern": "^[1-9][0-9]*$",
         "type": "string"
+      },
+      "LessonPosition": {
+        "additionalProperties": false,
+        "properties": {
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "scheduled",
+              "cancelled",
+              "moved"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "starts_at",
+          "ends_at",
+          "status"
+        ],
+        "title": "LessonPosition",
+        "type": "object"
+      },
+      "LessonResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "course_offering": {
+            "$ref": "#/components/schemas/CourseOfferingRef"
+          },
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/Ref"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "lecture",
+              "seminar",
+              "lab",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "latest_lesson": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LessonPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "previous_lesson": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LessonPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rooms": {
+            "items": {
+              "$ref": "#/components/schemas/RoomRef"
+            },
+            "title": "Rooms",
+            "type": "array"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "scheduled",
+              "cancelled",
+              "moved"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "teacher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Ref"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "starts_at",
+          "ends_at",
+          "status",
+          "course_offering",
+          "kind",
+          "teacher",
+          "groups",
+          "rooms",
+          "previous_lesson",
+          "latest_lesson"
+        ],
+        "title": "LessonResponse",
+        "type": "object"
       },
       "LoginRequest": {
         "additionalProperties": false,
@@ -234,6 +391,65 @@
           "name"
         ],
         "title": "Ref",
+        "type": "object"
+      },
+      "RoomRef": {
+        "additionalProperties": false,
+        "properties": {
+          "building": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "building"
+        ],
+        "title": "RoomRef",
+        "type": "object"
+      },
+      "ScheduleResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "date_from": {
+            "format": "date",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date",
+            "title": "Date To",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LessonResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "timezone": {
+            "const": "Europe/Moscow",
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date_from",
+          "date_to",
+          "timezone",
+          "items"
+        ],
+        "title": "ScheduleResponse",
         "type": "object"
       },
       "StudentProfile": {
@@ -675,6 +891,84 @@
         "summary": "Refresh Session",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/schedule": {
+      "get": {
+        "operationId": "get_student_schedule_api_v1_schedule_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Date From",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Date To",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Student Schedule",
+        "tags": [
+          "schedule"
         ]
       }
     },

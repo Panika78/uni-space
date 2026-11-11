@@ -7,6 +7,8 @@ import { authEpochStorageKey } from '../auth/authSession'
 import { AuthProvider } from '../auth/AuthProvider'
 import { createQueryClient } from '../../app/queryClient'
 import { appRoutes } from '../../app/router'
+import { createLesson } from '../schedule/testFixtures'
+import { addDays, getMoscowDate, getWeekStart } from '../schedule/calendar'
 
 const profiles = {
   A: {
@@ -40,11 +42,35 @@ function error(status: number, code: string) {
 let account: 'A' | 'B'
 let profileError: number | undefined
 let delayProfile: (() => Promise<Response>) | undefined
+let delaySchedule: (() => Promise<Response>) | undefined
+function scheduleResponse(token: 'A' | 'B') {
+  const weekStart = getWeekStart(getMoscowDate())
+  return Response.json({
+    date_from: weekStart,
+    date_to: addDays(weekStart, 6),
+    timezone: 'Europe/Moscow',
+    items: [
+      createLesson({
+        groups: [profiles[token].group],
+        starts_at: new Date().toISOString(),
+        ends_at: new Date(Date.now() + 3600000).toISOString(),
+        course_offering: {
+          id: token === 'A' ? '1' : '2',
+          discipline: {
+            id: token === 'A' ? '1' : '2',
+            name: `Занятие ${token === 'A' ? 'Альфа' : 'Бета'}`,
+          },
+        },
+      }),
+    ],
+  })
+}
 beforeEach(() => {
   localStorage.clear()
   account = 'A'
   profileError = undefined
   delayProfile = undefined
+  delaySchedule = undefined
   vi.stubGlobal('navigator', {
     locks: {
       request: (_name: string, options: LockOptions, action: () => Promise<unknown>) => {
@@ -73,6 +99,15 @@ beforeEach(() => {
           return error(profileError, profileError === 401 ? 'session_invalid' : 'forbidden')
         const token = new Headers(init?.headers).get('Authorization')?.slice(7) as 'A' | 'B'
         return Response.json(profiles[token])
+      }
+      if (path === '/api/v1/schedule') {
+        if (delaySchedule) {
+          const delayed = delaySchedule
+          delaySchedule = undefined
+          return delayed()
+        }
+        const token = new Headers(init?.headers).get('Authorization')?.slice(7) as 'A' | 'B'
+        return scheduleResponse(token)
       }
       throw new Error(`Unexpected request ${path}`)
     }),
@@ -212,3 +247,60 @@ it.each([401, 403, 500])(
     }
   },
 )
+
+it('isolates profile and schedule together when both old student responses arrive after account change', async () => {
+  const { client, user } = mount()
+  await login(user, 'student-a')
+  expect(screen.getByRole('article')).toHaveTextContent('Анна Альфа')
+  await user.click(screen.getByRole('link', { name: 'Расписание' }))
+  await screen.findByRole('article', { name: 'Занятие Альфа' })
+  let completeProfile!: (response: Response) => void
+  let completeSchedule!: (response: Response) => void
+  let profileStarted = false
+  let scheduleStarted = false
+  delayProfile = () => {
+    profileStarted = true
+    return new Promise((resolve) => {
+      completeProfile = resolve
+    })
+  }
+  delaySchedule = () => {
+    scheduleStarted = true
+    return new Promise((resolve) => {
+      completeSchedule = resolve
+    })
+  }
+  let refresh!: Promise<unknown>
+  act(() => {
+    refresh = Promise.all([
+      client.invalidateQueries({ queryKey: ['student-profile'] }),
+      client.invalidateQueries({ queryKey: ['schedule'] }),
+    ])
+  })
+  await waitFor(() => {
+    expect(profileStarted).toBe(true)
+    expect(scheduleStarted).toBe(true)
+  })
+  await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
+  await user.click(screen.getByRole('button', { name: 'Выйти' }))
+  await user.click(
+    screen.getByRole('dialog').querySelector<HTMLButtonElement>('.logout-dialog__confirm')!,
+  )
+  expect(screen.queryByText(/Альфа/)).not.toBeInTheDocument()
+  await login(user, 'student-b')
+  expect(screen.getByRole('article')).toHaveTextContent('Борис Бета')
+  await user.click(screen.getByRole('link', { name: 'Расписание' }))
+  await screen.findByRole('article', { name: 'Занятие Бета' })
+  await act(async () => {
+    completeProfile(Response.json(profiles.A))
+    completeSchedule(scheduleResponse('A'))
+    await refresh
+  })
+  expect(screen.queryByText(/Альфа/)).not.toBeInTheDocument()
+  expect(JSON.stringify(client.getQueryData(['student-profile']))).not.toContain('Альфа')
+  expect(JSON.stringify(client.getQueriesData({ queryKey: ['schedule'] }))).not.toContain('Альфа')
+  await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
+  await user.click(screen.getByRole('link', { name: 'Мой профиль' }))
+  expect(await screen.findByRole('heading', { name: 'Мой профиль' })).toBeInTheDocument()
+  expect(screen.getByRole('article')).toHaveTextContent('Группа Бета')
+})

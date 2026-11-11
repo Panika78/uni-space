@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createQueryClient } from '../../app/queryClient'
 import { AuthProvider } from './AuthProvider'
-import { LoginPage, ProtectedRoute, SchedulePage } from './AuthPages'
+import { LoginPage, ProtectedRoute } from './AuthPages'
 import { StudentLayout } from '../../app/StudentLayout'
 
 beforeEach(() => {
@@ -30,7 +30,7 @@ function renderRoute(path = '/schedule') {
             <Route path="/login" element={<LoginPage />} />
             <Route element={<ProtectedRoute />}>
               <Route element={<StudentLayout />}>
-                <Route path="/schedule" element={<SchedulePage />} />
+                <Route path="/schedule" element={<h1>Расписание</h1>} />
               </Route>
             </Route>
           </Routes>
