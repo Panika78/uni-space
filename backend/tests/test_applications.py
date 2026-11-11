@@ -19,9 +19,12 @@ def test_form_data_trims_text_and_rejects_blank_or_oversized_values():
     )
     assert ApplicationFormData(place_of_submission=" x ").place_of_submission == "x"
     assert len(ApplicationFormData(place_of_submission="я" * 300).place_of_submission) == 300
+    assert len(ApplicationFormData(place_of_submission="А" * 299 + "😀").place_of_submission) == 300
     for value in [" \n ", "x" * 301, 3, None]:
         with pytest.raises(ValueError):
             ApplicationFormData(place_of_submission=value)
+    with pytest.raises(ValueError):
+        ApplicationFormData(place_of_submission="valid\x00text")
 
 
 @pytest.mark.integration
@@ -57,6 +60,15 @@ def test_application_submission_is_owned_and_returns_location_and_server_state(d
     current_student = [student]
     app.dependency_overrides[get_current_student] = lambda: current_student[0]
     try:
+        db_session.add(
+            ServiceType(
+                code="future_service",
+                title="Unsupported service",
+                processing_mode="manual",
+                produces_document=False,
+            )
+        )
+        db_session.flush()
         response = TestClient(app).post(
             "/api/v1/applications",
             json={
@@ -73,6 +85,29 @@ def test_application_submission_is_owned_and_returns_location_and_server_state(d
         assert body["feedback"] is None
         assert db_session.get(Application, int(body["id"])).student_id == student.id
         assert db_session.get(Application, int(body["id"])).version == 1
+
+        accepted_unicode_limit = TestClient(app).post(
+            "/api/v1/applications",
+            json={
+                "service_code": "study_certificate",
+                "form_data": {"place_of_submission": "А" * 299 + "😀"},
+            },
+        )
+        assert accepted_unicode_limit.status_code == 201
+        assert len(accepted_unicode_limit.json()["form_data"]["place_of_submission"]) == 300
+        for rejected_value in ("А" * 300 + "😀", "valid\x00text"):
+            rejected = TestClient(app).post(
+                "/api/v1/applications",
+                json={
+                    "service_code": "study_certificate",
+                    "form_data": {"place_of_submission": rejected_value},
+                },
+            )
+            assert rejected.status_code == 422
+            assert rejected.json()["error"]["code"] == "validation_error"
+            assert rejected.json()["error"]["details"] == [
+                {"field": "form_data.place_of_submission", "code": "invalid_value"}
+            ]
 
         catalog = TestClient(app).get("/api/v1/services")
         assert catalog.status_code == 200
@@ -110,7 +145,7 @@ def test_application_submission_is_owned_and_returns_location_and_server_state(d
         )
         event.remove(db_session, "before_commit", fail_before_commit)
         assert failed_commit.status_code == 500
-        assert db_session.query(Application).filter_by(student_id=student.id).count() == 1
+        assert db_session.query(Application).filter_by(student_id=student.id).count() == 2
 
         second_user = User(
             login=f"{suffix}-second",
@@ -141,7 +176,7 @@ def test_application_submission_is_owned_and_returns_location_and_server_state(d
             db_session.get(Application, int(second_response.json()["id"])).student_id
             == second_student.id
         )
-        assert db_session.query(Application).filter_by(student_id=student.id).count() == 1
+        assert db_session.query(Application).filter_by(student_id=student.id).count() == 2
         assert db_session.query(Application).filter_by(student_id=second_student.id).count() == 1
         current_student[0] = student
 
@@ -150,7 +185,7 @@ def test_application_submission_is_owned_and_returns_location_and_server_state(d
             json={"service_code": "not-a-service", "form_data": {"place_of_submission": "X"}},
         )
         assert again.status_code == 422
-        assert db_session.query(Application).filter_by(student_id=student.id).count() == 1
+        assert db_session.query(Application).filter_by(student_id=student.id).count() == 2
     finally:
         app.dependency_overrides.pop(get_db_session, None)
         app.dependency_overrides.pop(get_current_student, None)

@@ -27,7 +27,11 @@ def list_services(
     _student: Annotated[Student, Depends(get_current_student)],
     db: Annotated[Session, Depends(get_db_session)],
 ) -> ServiceList:
-    services = db.scalars(select(ServiceType).order_by(ServiceType.code)).all()
+    services = db.scalars(
+        select(ServiceType)
+        .where(ServiceType.code == "study_certificate")
+        .order_by(ServiceType.code)
+    ).all()
     return ServiceList(items=[Service(id=str(s.id), code=s.code, title=s.title) for s in services])
 
 

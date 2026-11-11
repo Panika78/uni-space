@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FocusEvent } from 'react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../features/auth/AuthProvider'
+import { UnsavedChangesProvider } from './UnsavedChangesContext'
 import { UnavailableState } from '../shared/ui/StatusStates'
 import { UniversityBrand } from '../shared/ui/UniversityBrand'
 
@@ -34,7 +35,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
-function UserMenu() {
+function UserMenu({ hasUnsavedChanges }: { hasUnsavedChanges: boolean }) {
   const { logout } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
   const [confirmLogout, setConfirmLogout] = useState(false)
@@ -145,7 +146,10 @@ function UserMenu() {
             }
           }}
         >
-          <h2 id="logout-dialog-title">Выйти из аккаунта?</h2>
+          <h2 id="logout-dialog-title">
+            {hasUnsavedChanges ? 'Потерять введённые данные и выйти?' : 'Выйти из аккаунта?'}
+          </h2>
+          {hasUnsavedChanges && <p>Данные заявления не сохранены и будут потеряны.</p>}
           <div className="logout-dialog__actions">
             <button ref={cancelRef} type="button" onClick={closeConfirmation}>
               Отмена
@@ -161,7 +165,7 @@ function UserMenu() {
                 void logout()
               }}
             >
-              Выйти
+              {hasUnsavedChanges ? 'Выйти без сохранения' : 'Выйти'}
             </button>
           </div>
         </dialog>
@@ -234,6 +238,7 @@ function MobileDrawer({ onClose }: { onClose: () => void }) {
 
 export function StudentLayout() {
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const mainContentRef = useRef<HTMLElement>(null)
@@ -322,10 +327,12 @@ export function StudentLayout() {
               Уведомления
             </span>
           </Link>
-          <UserMenu />
+          <UserMenu hasUnsavedChanges={hasUnsavedChanges} />
         </header>
         <main className="student-content" id="main-content" ref={mainContentRef} tabIndex={-1}>
-          <Outlet />
+          <UnsavedChangesProvider value={{ hasUnsavedChanges, setHasUnsavedChanges }}>
+            <Outlet />
+          </UnsavedChangesProvider>
         </main>
       </div>
       {isDrawerOpen && <MobileDrawer onClose={closeDrawer} />}

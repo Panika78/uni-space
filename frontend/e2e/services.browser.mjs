@@ -1,4 +1,4 @@
-/* global process, console, URL, document, window */
+/* global process, console, URL, document, window, setTimeout */
 import assert from 'node:assert/strict'
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
@@ -19,7 +19,8 @@ try {
   page.on('response', (response) => {
     if (
       response.request().method() === 'POST' &&
-      new URL(response.url()).pathname === '/api/v1/applications'
+      new URL(response.url()).pathname === '/api/v1/applications' &&
+      response.status() === 201
     )
       postResponses.push(response)
   })
@@ -34,6 +35,9 @@ try {
   await page.getByRole('link', { name: 'Подать заявление' }).click()
   await page.getByRole('heading', { name: 'Справка об обучении' }).waitFor()
   const field = page.getByLabel(/Место предоставления/)
+  assert.equal(await field.getAttribute('required'), '')
+  assert.equal(await field.getAttribute('aria-required'), 'true')
+  await page.getByText('Знак * обозначает обязательное поле.').waitFor()
   await page.getByRole('button', { name: 'Отправить заявление' }).click()
   assert.equal(await field.evaluate((node) => node === document.activeElement), true)
 
@@ -43,6 +47,36 @@ try {
   await page.getByRole('dialog', { name: 'Выйти без сохранения?' }).waitFor()
   await page.getByRole('button', { name: 'Продолжить заполнение' }).click()
   assert.match(page.url(), /\/services\/study_certificate$/)
+
+  await page.getByRole('button', { name: 'Меню пользователя' }).click()
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  const logoutWarning = page.getByRole('dialog', { name: 'Потерять введённые данные и выйти?' })
+  await logoutWarning.waitFor()
+  assert.equal(await page.getByRole('dialog').count(), 1)
+  await page.getByRole('button', { name: 'Отмена' }).click()
+  assert.match(page.url(), /\/services\/study_certificate$/)
+  assert.ok((await field.inputValue()).includes('Канцелярия'))
+
+  await page.route('**/api/v1/applications', (route) =>
+    route.fulfill({
+      status: 422,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'validation_error',
+          message: 'Проверьте введённые данные',
+          details: [{ field: 'form_data.place_of_submission', code: 'invalid_value' }],
+        },
+      }),
+    }),
+  )
+  await field.fill('server validation')
+  await page.getByRole('button', { name: 'Отправить заявление' }).click()
+  await page.getByText('Проверьте значение: от 1 до 300 символов.').waitFor()
+  assert.equal(await field.getAttribute('aria-invalid'), 'true')
+  assert.equal(await field.evaluate((node) => node === document.activeElement), true)
+  await page.unroute('**/api/v1/applications')
+  await field.fill('  Канцелярия\nкорпус № 2 — 東京  ')
 
   const responseWaiter = page.waitForResponse(
     (response) =>
@@ -59,15 +93,94 @@ try {
   assert.equal(postResponses.length, 1, 'The form dispatches a single POST')
   console.log('PASS: desktop catalog, form validation, navigation warning and real PostgreSQL save')
 
-  await page.setViewportSize({ width: 360, height: 800 })
-  await page.goto(`${baseURL}/services`)
+  await page.getByRole('button', { name: 'Вернуться к каталогу' }).click()
+  await page.getByRole('link', { name: 'Подать заявление' }).click()
+  const maxField = page.getByLabel(/Место предоставления/)
+  const maxValue = 'А'.repeat(299) + '😀'
+  await maxField.fill(maxValue)
+  const maxResponseWaiter = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === '/api/v1/applications',
+  )
+  await page.getByRole('button', { name: 'Отправить заявление' }).click()
+  const maxResponse = await maxResponseWaiter
+  assert.equal(maxResponse.status(), 201)
+  assert.equal(Array.from((await maxResponse.json()).form_data.place_of_submission).length, 300)
+  await page.getByRole('button', { name: 'Вернуться к каталогу' }).click()
+  await page.getByRole('link', { name: 'Подать заявление' }).click()
+  const overLimitField = page.getByLabel(/Место предоставления/)
+  await overLimitField.fill('А'.repeat(300) + '😀')
+  await page.getByRole('button', { name: 'Отправить заявление' }).click()
+  await page.getByText(/от 1 до 300 символов/).waitFor()
+  assert.equal(await overLimitField.getAttribute('aria-invalid'), 'true')
+  assert.equal(postResponses.length, 2, 'A 301-code-point value is rejected before POST')
+
+  const timeoutField = page.getByLabel(/Место предоставления/)
+  await timeoutField.fill('Зависший запрос')
+  await page.route('**/api/v1/applications', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 35_000))
+    await route.abort()
+  })
+  await page.getByRole('button', { name: 'Отправить заявление' }).click()
+  await page.getByRole('alert').filter({ hasText: 'Заявление могло сохраниться' }).waitFor({
+    timeout: 34_000,
+  })
+  await page.getByRole('button', { name: 'Отправить заявление' }).waitFor({ state: 'visible' })
+  assert.equal(await page.getByRole('button', { name: 'Отправить заявление' }).isDisabled(), false)
+  assert.equal(postResponses.length, 2, 'Timed out request was not retried')
+  await page.unrouteAll({ behavior: 'ignoreErrors' })
+  console.log(
+    'PASS: Unicode boundaries, server field errors, logout warning and POST timeout recovery',
+  )
+
+  await page.getByRole('link', { name: 'К каталогу услуг' }).click()
+  await page.getByRole('dialog', { name: 'Выйти без сохранения?' }).waitFor()
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
   await page.getByRole('heading', { name: 'Услуги и документы' }).waitFor()
-  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+
+  await page.setViewportSize({ width: 360, height: 800 })
+  await page.route('**/api/v1/services', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        items: [
+          {
+            id: '999',
+            code: 'study_certificate',
+            title: 'А'.repeat(280),
+          },
+        ],
+      }),
+    }),
+  )
+  await page.goto(`${baseURL}/services`)
+  await page.getByRole('heading', { name: 'А'.repeat(280) }).waitFor()
+  for (const width of [360, 320]) {
+    await page.setViewportSize({ width, height: 800 })
+    assert.ok(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `No horizontal overflow at ${width}px with a long unbroken title`,
+    )
+  }
   await page.getByRole('link', { name: 'Подать заявление' }).click()
   await page.getByRole('heading', { name: 'Справка об обучении' }).waitFor()
-  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+  for (const width of [360, 320]) {
+    await page.setViewportSize({ width, height: 800 })
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+  }
+  await page.getByLabel(/Место предоставления/).fill('Тестовые несохранённые данные')
+  await page.getByRole('button', { name: 'Меню пользователя' }).click()
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  await page.getByRole('dialog', { name: 'Потерять введённые данные и выйти?' }).waitFor()
+  assert.equal(await page.getByRole('dialog').count(), 1)
+  await page.getByRole('button', { name: 'Выйти без сохранения' }).click()
+  await page.waitForURL(`${baseURL}/login`)
+  assert.equal(await page.getByLabel(/Место предоставления/).count(), 0)
+  console.log('PASS: confirmed logout warns once and clears the form')
   await context.close()
-  console.log('PASS: 360px catalog and application form without horizontal overflow')
+  console.log('PASS: 320px and 360px catalog/form without horizontal overflow')
 } finally {
   await browser.close()
 }

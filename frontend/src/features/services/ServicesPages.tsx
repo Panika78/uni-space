@@ -1,11 +1,38 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useBlocker, useNavigate, useParams } from 'react-router-dom'
+import { useUnsavedChanges } from '../../app/UnsavedChangesContext'
 import { ApiClientError, apiFetch } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 
 type Service = components['schemas']['Service']
 type Application = components['schemas']['ApplicationResponse']
 type CreateApplicationRequest = components['schemas']['CreateApplicationRequest']
+
+const isPythonWhitespace = (character: string) => {
+  const codePoint = character.codePointAt(0) ?? 0
+  return (
+    (codePoint >= 9 && codePoint <= 13) ||
+    (codePoint >= 28 && codePoint <= 32) ||
+    codePoint === 133 ||
+    codePoint === 160 ||
+    codePoint === 5760 ||
+    (codePoint >= 8192 && codePoint <= 8202) ||
+    codePoint === 8232 ||
+    codePoint === 8233 ||
+    codePoint === 8239 ||
+    codePoint === 8287 ||
+    codePoint === 12288
+  )
+}
+
+const trimPythonWhitespace = (text: string) => {
+  const characters = Array.from(text)
+  let start = 0
+  let end = characters.length
+  while (start < end && isPythonWhitespace(characters[start])) start += 1
+  while (end > start && isPythonWhitespace(characters[end - 1])) end -= 1
+  return characters.slice(start, end).join('')
+}
 
 export function ServicesPage() {
   const [services, setServices] = useState<Service[] | null>(null)
@@ -64,12 +91,21 @@ export function ApplicationFormPage() {
   const [pending, setPending] = useState(false)
   const [application, setApplication] = useState<Application | null>(null)
   const [error, setError] = useState('')
+  const [serverFieldError, setServerFieldError] = useState<string | null>(null)
+  const { setHasUnsavedChanges: setUnsavedChanges } = useUnsavedChanges()
   const input = useRef<HTMLTextAreaElement>(null)
   const leaveDialog = useRef<HTMLDialogElement>(null)
   const continueButton = useRef<HTMLButtonElement>(null)
   const inFlight = useRef(false)
   const dirty = value.length > 0 && !application
   const blocker = useBlocker(dirty && !pending && !application)
+  useEffect(() => {
+    setUnsavedChanges(dirty)
+    return () => setUnsavedChanges(false)
+  }, [dirty, setUnsavedChanges])
+  useEffect(() => {
+    if (serverFieldError && !pending) input.current?.focus()
+  }, [pending, serverFieldError])
   useEffect(() => {
     const dialog = leaveDialog.current
     if (blocker.state === 'blocked') {
@@ -88,12 +124,14 @@ export function ApplicationFormPage() {
     window.addEventListener('beforeunload', handle)
     return () => window.removeEventListener('beforeunload', handle)
   }, [dirty])
-  const normalized = value.trim()
-  const invalid = normalized.length < 1 || normalized.length > 300
+  const normalized = trimPythonWhitespace(value)
+  const characterCount = Array.from(normalized).length
+  const invalid = characterCount < 1 || characterCount > 300
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setTouched(true)
     setError('')
+    setServerFieldError(null)
     if (invalid) {
       input.current?.focus()
       return
@@ -105,6 +143,7 @@ export function ApplicationFormPage() {
       const result = await apiFetch<Application>('/api/v1/applications', {
         method: 'POST',
         authenticated: true,
+        signal: AbortSignal.timeout(30_000),
         body: JSON.stringify({
           service_code: 'study_certificate',
           form_data: { place_of_submission: normalized },
@@ -112,6 +151,23 @@ export function ApplicationFormPage() {
       })
       setApplication(result)
     } catch (cause) {
+      const fieldError =
+        cause instanceof ApiClientError
+          ? cause.details.find(
+              (detail) =>
+                detail.field === 'form_data.place_of_submission' ||
+                detail.field === 'place_of_submission',
+            )
+          : undefined
+      if (fieldError) {
+        setServerFieldError(
+          fieldError.code === 'required'
+            ? 'Заполните обязательное поле.'
+            : 'Проверьте значение: от 1 до 300 символов.',
+        )
+        setTouched(true)
+        return
+      }
       const uncertain =
         !(cause instanceof ApiClientError) || cause.status === undefined || cause.status >= 500
       setError(
@@ -124,7 +180,10 @@ export function ApplicationFormPage() {
       setPending(false)
     }
   }
-  const hasFieldError = touched && invalid
+  const fieldMessage =
+    serverFieldError ??
+    (invalid ? 'Введите от 1 до 300 символов после удаления пробелов по краям.' : null)
+  const hasFieldError = Boolean(serverFieldError || (touched && invalid))
   if (serviceCode !== 'study_certificate') {
     return (
       <section className="section-page service-page" role="alert">
@@ -165,17 +224,21 @@ export function ApplicationFormPage() {
             name="place_of_submission"
             rows={3}
             value={value}
-            onChange={(event) => setValue(event.target.value)}
+            onChange={(event) => {
+              setValue(event.target.value)
+              setServerFieldError(null)
+            }}
             onBlur={() => setTouched(true)}
+            required
+            aria-required="true"
             aria-invalid={hasFieldError}
             aria-describedby={hasFieldError ? 'place-error' : 'place-help'}
             disabled={pending}
           />
           <small id={hasFieldError ? 'place-error' : 'place-help'}>
-            {hasFieldError
-              ? 'Введите от 1 до 300 символов после удаления пробелов по краям.'
-              : 'От 1 до 300 символов.'}
+            {fieldMessage ?? 'От 1 до 300 символов.'}
           </small>
+          <small>Знак * обозначает обязательное поле.</small>
           {error && (
             <p role="alert" className="application-error">
               {error}

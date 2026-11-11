@@ -2,13 +2,29 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }))
+const { apiFetch, ApiClientError } = vi.hoisted(() => {
+  class MockApiClientError extends Error {
+    status?: number
+    code: string
+    details: Array<{ field: string | null; code: string }>
+
+    constructor(
+      message: string,
+      code: string,
+      status?: number,
+      details: Array<{ field: string | null; code: string }> = [],
+    ) {
+      super(message)
+      this.status = status
+      this.code = code
+      this.details = details
+    }
+  }
+  return { apiFetch: vi.fn(), ApiClientError: MockApiClientError }
+})
 vi.mock('../../shared/api/client', () => ({
   apiFetch: (...args: unknown[]) => apiFetch(...args),
-  ApiClientError: class ApiClientError extends Error {
-    status?: number
-    code = 'network_error'
-  },
+  ApiClientError,
 }))
 
 import { ApplicationFormPage, ServicesPage } from './ServicesPages'
@@ -90,6 +106,84 @@ it('does not automatically retry an application when the response is lost', asyn
   fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
   expect(await screen.findByText(/заявление могло сохраниться/i)).toBeInTheDocument()
   expect(apiFetch).toHaveBeenCalledTimes(1)
+})
+
+it('shows server validation under the field and focuses it', async () => {
+  apiFetch.mockRejectedValueOnce(
+    new ApiClientError('Проверьте введённые данные', 'validation_error', 422, [
+      { field: 'form_data.place_of_submission', code: 'invalid_value' },
+    ]),
+  )
+  const router = createMemoryRouter(
+    [{ path: '/services/:serviceCode', element: <ApplicationFormPage /> }],
+    { initialEntries: ['/services/study_certificate'] },
+  )
+  render(<RouterProvider router={router} />)
+  const field = screen.getByLabelText(/Место предоставления/)
+  fireEvent.change(field, { target: { value: 'valid locally' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+  expect(await screen.findByText('Проверьте значение: от 1 до 300 символов.')).toBeInTheDocument()
+  expect(field).toHaveAttribute('aria-invalid', 'true')
+  await waitFor(() => expect(field).toHaveFocus())
+})
+
+it('uses Python whitespace and Unicode code point boundaries in the form', async () => {
+  apiFetch.mockResolvedValueOnce({
+    id: '75',
+    service: { id: '4', code: 'study_certificate', title: 'Справка об обучении' },
+    form_data: { place_of_submission: 'A'.repeat(299) + '😀' },
+    review_status: 'submitted',
+    document_status: 'pending',
+    feedback: null,
+    created_at: '2026-11-10T00:00:00Z',
+    updated_at: '2026-11-10T00:00:00Z',
+  })
+  const router = createMemoryRouter(
+    [{ path: '/services/:serviceCode', element: <ApplicationFormPage /> }],
+    { initialEntries: ['/services/study_certificate'] },
+  )
+  render(<RouterProvider router={router} />)
+  const field = screen.getByLabelText(/Место предоставления/)
+  expect(field).toHaveAttribute('required')
+  expect(field).toHaveAttribute('aria-required', 'true')
+  expect(screen.getByText('Знак * обозначает обязательное поле.')).toBeInTheDocument()
+  fireEvent.change(field, { target: { value: '\u0085' + 'A'.repeat(299) + '😀\u0085' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+  expect(await screen.findByText('№ 75')).toBeInTheDocument()
+  expect(JSON.parse(apiFetch.mock.calls[0][1].body).form_data.place_of_submission).toBe(
+    'A'.repeat(299) + '😀',
+  )
+})
+
+it('returns from a timed out POST to the editable form without retrying or claiming failure', async () => {
+  const timeoutController = new AbortController()
+  vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal)
+  apiFetch.mockImplementationOnce(
+    (_url: string, options: { signal: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(options.signal.reason), {
+          once: true,
+        })
+      }),
+  )
+  const router = createMemoryRouter(
+    [{ path: '/services/:serviceCode', element: <ApplicationFormPage /> }],
+    { initialEntries: ['/services/study_certificate'] },
+  )
+  render(<RouterProvider router={router} />)
+  const field = screen.getByLabelText(/Место предоставления/)
+  fireEvent.change(field, { target: { value: 'Офис' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+  expect(apiFetch).toHaveBeenCalledTimes(1)
+  expect(AbortSignal.timeout).toHaveBeenCalledWith(30_000)
+  expect(apiFetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal)
+  timeoutController.abort(new DOMException('Timed out', 'TimeoutError'))
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: 'Отправить заявление' })).toBeEnabled()
+  })
+  expect(screen.getByRole('alert')).toHaveTextContent(/могло сохраниться/i)
+  expect(apiFetch).toHaveBeenCalledTimes(1)
+  vi.restoreAllMocks()
 })
 
 it('sends only one request while submission is pending', async () => {

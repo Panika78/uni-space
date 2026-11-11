@@ -25,7 +25,7 @@ class ApplicationFormData(RequestModel):
         if not isinstance(value, str):
             raise ValueError("invalid text")
         value = value.strip()
-        if not 1 <= len(value) <= 300:
+        if "\x00" in value or not 1 <= len(value) <= 300:
             raise ValueError("invalid length")
         return value
 

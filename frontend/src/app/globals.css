@@ -68,9 +68,16 @@ a {
   justify-content: space-between;
   gap: 24px;
 }
+.service-card > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .service-card h2,
 .application-success h2 {
   margin: 12px 0;
+}
+.service-card h2 {
+  overflow-wrap: anywhere;
 }
 .service-card p,
 .application-success p,
@@ -91,6 +98,9 @@ a {
   font-weight: 650;
   text-decoration: none;
   cursor: pointer;
+}
+.service-card .service-action {
+  flex: 0 0 auto;
 }
 .service-action:disabled {
   opacity: 0.65;
