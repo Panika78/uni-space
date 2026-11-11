@@ -966,13 +966,19 @@ def test_notifications_are_private_and_use_stable_keyset_pagination(auth):
     assert_error(client.request("GET", "/api/v1/notifications"), 401, "invalid_access")
     first = client.request(
         "GET",
-        "/api/v1/notifications?limit=2&user_id=" + str(user_ids[1]),
+        "/api/v1/notifications?limit=2",
         access=first_access,
     )
     assert first.status_code == 200, first.text
     assert [item["id"] for item in first.json()["items"]] == expected_ids[:2]
     assert first.json()["next_cursor"]
     assert first.json()["items"][0]["body"].startswith("<script>")
+    for parameter in ("user_id=" + str(user_ids[1]), "student_id=999", "arbitrary=value"):
+        assert_error(
+            client.request("GET", f"/api/v1/notifications?{parameter}", access=first_access),
+            422,
+            "validation_error",
+        )
 
     with Session(engine) as db, db.begin():
         db.add(
@@ -1004,6 +1010,11 @@ def test_notifications_are_private_and_use_stable_keyset_pagination(auth):
         db.execute(update(User).where(User.id == user_ids[0]).values(role="student"))
     assert_error(
         client.request("GET", "/api/v1/notifications?limit=0", access=first_access),
+        422,
+        "validation_error",
+    )
+    assert_error(
+        client.request("GET", "/api/v1/notifications?limit=1.0", access=first_access),
         422,
         "validation_error",
     )

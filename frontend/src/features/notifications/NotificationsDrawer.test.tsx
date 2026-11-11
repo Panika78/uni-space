@@ -68,7 +68,7 @@ describe('NotificationsDrawer', () => {
     expect(await screen.findByText('Пока нет уведомлений.')).toBeInTheDocument()
   })
 
-  it('drops a delayed response when the drawer is closed and opened for another session', async () => {
+  it('aborts a delayed response when the drawer is unmounted', async () => {
     let resolveFirst!: (page: { items: (typeof notification)[]; next_cursor: null }) => void
     let resolveSecond!: (page: { items: (typeof notification)[]; next_cursor: null }) => void
     vi.mocked(apiFetch)

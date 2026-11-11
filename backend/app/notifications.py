@@ -7,7 +7,7 @@ from sqlalchemy import select, tuple_
 from sqlalchemy.orm import Session
 
 from app.core.pagination import decode_page_cursor, paginate_results
-from app.core.schemas import ApiError, DateTime, Id, Page, RequestModel
+from app.core.schemas import ApiError, DateTime, Id, Page, PaginationParams, RequestModel
 from app.dependencies.auth import get_current_student
 from app.dependencies.database import get_db_session
 from app.models import Notification, Student
@@ -38,10 +38,10 @@ router = APIRouter(
 def list_notifications(
     student: Annotated[Student, Depends(get_current_student)],
     db: Annotated[Session, Depends(get_db_session)],
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    cursor: Annotated[str | None, Query()] = None,
+    pagination: Annotated[PaginationParams, Query()],
 ) -> NotificationPage:
-    boundary = decode_page_cursor(cursor, key_types=(str, int), direction="desc")
+    limit = pagination.limit
+    boundary = decode_page_cursor(pagination.cursor, key_types=(str, int), direction="desc")
     statement = select(Notification).where(Notification.user_id == student.user_id)
     if boundary is not None:
         created_at, notification_id = boundary

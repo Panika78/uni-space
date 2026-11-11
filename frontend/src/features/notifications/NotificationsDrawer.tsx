@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { apiFetch } from '../../shared/api/client'
+import type { components } from '../../shared/api/schema'
 
-type Notification = { id: string; type: string; title: string; body: string; created_at: string }
-type Page = { items: Notification[]; next_cursor: string | null }
+type Notification = components['schemas']['NotificationResponse']
+type Page = components['schemas']['NotificationPage']
 
 const labels: Record<string, string> = {
   schedule_changed: 'Изменение расписания',
@@ -29,6 +31,7 @@ function NotificationRow({ item }: { item: Notification }) {
 export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
   const panelRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
+  const lastFocusedRef = useRef<HTMLElement | null>(null)
   const requestRef = useRef<AbortController | null>(null)
   const [items, setItems] = useState<Notification[]>([])
   const [cursor, setCursor] = useState<string | null>(null)
@@ -37,26 +40,38 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState(false)
   const [moreError, setMoreError] = useState(false)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     closeRef.current?.focus()
     const previousOverflow = document.body.style.overflow
+    const root = document.getElementById('root')
+    const wasRootInert = root?.inert ?? false
+    if (root) root.inert = true
     document.body.style.overflow = 'hidden'
+    const focusableElements = () =>
+      Array.from(
+        panelRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((element) => !element.closest('[hidden], [inert]'))
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
         onClose()
       }
       if (event.key !== 'Tab') return
-      const focusable = Array.from(
-        panelRef.current?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
-        ) ?? [],
-      )
+      const focusable = focusableElements()
       const first = focusable[0]
       const last = focusable.at(-1)
+      const activeElement = document.activeElement as HTMLElement | null
       if (!first || !last) {
         event.preventDefault()
         panelRef.current?.focus()
+      } else if (
+        !panelRef.current?.contains(document.activeElement) ||
+        !focusable.includes(activeElement as HTMLElement)
+      ) {
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
       } else if (event.shiftKey && document.activeElement === first) {
         event.preventDefault()
         last.focus()
@@ -66,8 +81,18 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
       }
     }
     document.addEventListener('keydown', handleKeyDown)
+    const observer = new MutationObserver(() => {
+      const lastFocused = lastFocusedRef.current
+      if (lastFocused && (!lastFocused.isConnected || lastFocused.matches(':disabled'))) {
+        closeRef.current?.focus()
+      }
+    })
+    if (panelRef.current)
+      observer.observe(panelRef.current, { subtree: true, childList: true, attributes: true })
     return () => {
+      observer.disconnect()
       document.body.style.overflow = previousOverflow
+      if (root) root.inert = wasRootInert
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [onClose])
@@ -118,15 +143,19 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
     }
   }, [load])
 
-  return (
+  return createPortal(
     <div className="notification-drawer-layer">
       <button
         className="notification-backdrop"
         aria-label="Закрыть уведомления"
+        tabIndex={-1}
         onClick={onClose}
       />
       <aside
         ref={panelRef}
+        onFocusCapture={(event) => {
+          lastFocusedRef.current = event.target as HTMLElement
+        }}
         className="notification-drawer"
         role="dialog"
         aria-modal="true"
@@ -180,6 +209,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
           )}
         </div>
       </aside>
-    </div>
+    </div>,
+    document.body,
   )
 }
