@@ -45,15 +45,20 @@ function getErrorMessage(error: unknown) {
 function NewsRow({ item }: { item: NewsPreview }) {
   return (
     <article className="news-row">
-      <time className="news-row__date" dateTime={item.published_at}>
-        {formatNewsDate(item.published_at)}
-      </time>
-      <h2>
-        <Link to={`/news/${encodeURIComponent(item.id)}`} state={{ fromNewsFeed: true }}>
-          {item.title}
-        </Link>
-      </h2>
-      <p>{item.excerpt}</p>
+      <Link
+        className="news-row__link"
+        to={`/news/${encodeURIComponent(item.id)}`}
+        state={{ fromNewsFeed: true }}
+      >
+        <time className="news-row__date" dateTime={item.published_at}>
+          {formatNewsDate(item.published_at)}
+        </time>
+        <h2>{item.title}</h2>
+        <p>{item.excerpt}</p>
+        <span className="news-row__arrow" aria-hidden="true">
+          →
+        </span>
+      </Link>
     </article>
   )
 }
@@ -158,12 +163,14 @@ export function NewsFeedPage() {
         />
       )}
       {query.data && query.data.pages.some((page) => page.items.length > 0) && (
-        <div className="news-feed" aria-label="Лента университетских новостей">
-          {query.data.pages
-            .flatMap((page) => page.items)
-            .map((item) => (
-              <NewsRow key={item.id} item={item} />
-            ))}
+        <>
+          <div className="news-feed" aria-label="Лента университетских новостей">
+            {query.data.pages
+              .flatMap((page) => page.items)
+              .map((item) => (
+                <NewsRow key={item.id} item={item} />
+              ))}
+          </div>
           {query.hasNextPage && (
             <button
               className="news-load-more"
@@ -174,11 +181,15 @@ export function NewsFeedPage() {
                 void query.fetchNextPage()
               }}
             >
-              {refreshMutation.isPending
-                ? 'Обновляем…'
-                : query.isFetchingNextPage
-                  ? 'Загружаем…'
-                  : 'Показать ещё'}
+              <span className="news-load-more__line" aria-hidden="true" />
+              <span>
+                {refreshMutation.isPending
+                  ? 'Обновляем…'
+                  : query.isFetchingNextPage
+                    ? 'Загружаем…'
+                    : 'Показать ещё'}
+              </span>
+              <span className="news-load-more__line" aria-hidden="true" />
             </button>
           )}
           {query.isFetchNextPageError && (
@@ -188,7 +199,7 @@ export function NewsFeedPage() {
               onRetry={() => void query.fetchNextPage()}
             />
           )}
-        </div>
+        </>
       )}
     </section>
   )
@@ -244,7 +255,10 @@ function NewsArticle({ news }: { news: News }) {
       <time className="news-row__date" dateTime={news.published_at}>
         {formatNewsDate(news.published_at)}
       </time>
-      <h1 id="news-detail-title">{news.title}</h1>
+      <h1 id="news-detail-title" className="news-article__title">
+        {news.title}
+      </h1>
+      <span className="news-article__rule" aria-hidden="true" />
       <p className="news-article__body">{news.body}</p>
     </article>
   )

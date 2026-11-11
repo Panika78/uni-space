@@ -67,7 +67,13 @@ describe('university news pages', () => {
     vi.mocked(apiFetch).mockResolvedValueOnce(page).mockResolvedValueOnce(item)
     renderNews()
 
-    const title = await screen.findByRole('link', { name: '<img src=x onerror=alert(1)>' })
+    const title = await screen.findByRole('link', { name: /onerror=alert\(1\)/ })
+    expect(title.querySelector('time')).toHaveAttribute('dateTime', page.items[0].published_at)
+    expect(title.querySelector('h2')).toHaveTextContent(page.items[0].title)
+    expect(title.querySelector('p')).toHaveTextContent(page.items[0].excerpt)
+    expect(title.querySelector('.news-row__arrow')).toHaveAttribute('aria-hidden', 'true')
+    expect(title.closest('.news-feed')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Показать ещё' })).not.toBeInTheDocument()
     expect(document.querySelector('img')).not.toBeInTheDocument()
     fireEvent.click(title)
     expect(
@@ -99,7 +105,7 @@ describe('university news pages', () => {
   it('keeps modified and non-primary return clicks under native browser handling', async () => {
     vi.mocked(apiFetch).mockResolvedValueOnce(page).mockResolvedValueOnce(item)
     renderNews()
-    fireEvent.click(await screen.findByRole('link', { name: '<img src=x onerror=alert(1)>' }))
+    fireEvent.click(await screen.findByRole('link', { name: /onerror=alert\(1\)/ }))
     await screen.findByRole('heading', { name: '<img src=x onerror=alert(1)>' })
     const backLink = screen.getByRole('link', { name: '← Назад к новостям' })
 
@@ -142,13 +148,13 @@ describe('university news pages', () => {
     renderNews()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Показать ещё' }))
-    const articleLink = await screen.findByRole('link', { name: 'Страница вторая' })
+    const articleLink = await screen.findByRole('link', { name: /Страница вторая/ })
     fireEvent.click(articleLink)
     expect(await screen.findByRole('heading', { name: 'Страница вторая' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('link', { name: '← Назад к новостям' }))
 
-    expect(await screen.findByRole('link', { name: 'Страница первая' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Страница вторая' })).toBeInTheDocument()
+    expect(await screen.findByRole('link', { name: /Страница первая/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Страница вторая/ })).toBeInTheDocument()
     expect(apiFetch).toHaveBeenCalledTimes(3)
   })
 

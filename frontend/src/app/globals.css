@@ -355,52 +355,102 @@ a {
 }
 .news-feed {
   margin-top: 22px;
-  border-top: 1px solid var(--line);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
   background: #fff;
 }
 .news-row {
-  padding: 18px 20px;
+  padding: 0;
   border-bottom: 1px solid var(--line);
+}
+.news-row:last-child {
+  border-bottom: 0;
+}
+.news-row__link {
+  position: relative;
+  display: block;
+  min-height: 144px;
+  padding: 23px 64px 25px 26px;
+  color: inherit;
+  text-decoration: none;
+  transition: background-color 120ms ease;
+}
+.news-row__link:hover {
+  background: #fcfaf8;
+}
+.news-row__link:focus-visible {
+  z-index: 1;
+  border-radius: 3px;
 }
 .news-row__date {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.45;
 }
-.news-row h2 {
-  margin: 7px 0 5px;
-  font-size: 17px;
+.news-row__link h2 {
+  margin: 8px 0 7px;
+  color: #292326;
+  font-size: 19px;
   line-height: 1.4;
-  font-weight: 650;
+  font-weight: 680;
+  letter-spacing: -0.015em;
   overflow-wrap: anywhere;
 }
-.news-row h2 a {
-  color: #332b2d;
-  text-decoration: none;
-}
-.news-row h2 a:hover,
 .news-back-link:hover {
   color: var(--accent);
   text-decoration: underline;
 }
-.news-row p {
+.news-row__link p {
   margin: 0;
   color: #51494a;
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: 15px;
+  line-height: 1.65;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.news-load-more {
-  display: block;
-  min-height: 44px;
-  margin: 16px auto 0;
-  padding: 8px 18px;
-  border: 1px solid #b98a91;
-  border-radius: 7px;
+.news-row__arrow {
+  position: absolute;
+  top: 50%;
+  right: 27px;
   color: var(--accent);
-  background: #fff;
-  font-weight: 650;
+  font-size: 28px;
+  font-weight: 450;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+.news-load-more {
+  display: flex;
+  width: min(100%, 560px);
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin: 23px auto 12px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--accent);
+  background: transparent;
+  font-size: 16px;
+  font-weight: 700;
   cursor: pointer;
+}
+.news-load-more__line {
+  height: 1px;
+  flex: 1 1 auto;
+  background: #d9cec3;
+  transition: background-color 120ms ease;
+}
+.news-load-more:hover:not(:disabled) {
+  color: #591626;
+}
+.news-load-more:hover:not(:disabled) .news-load-more__line {
+  background: #bca9a0;
+}
+.news-load-more:focus-visible {
+  outline: 3px solid #d99838;
+  outline-offset: 2px;
 }
 .news-load-more:disabled {
   opacity: 0.6;
@@ -415,22 +465,34 @@ a {
   text-decoration: none;
 }
 .news-article {
-  padding: 24px;
+  padding: 42px 48px 46px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 14px;
   background: #fff;
 }
-.news-article h1 {
-  margin: 10px 0 22px;
-  font-size: 25px;
-  line-height: 1.35;
+.news-article .news-article__title {
+  max-width: 24ch;
+  margin: 14px 0 26px;
+  color: #20212a;
+  font-size: clamp(30px, 3.1vw, 40px);
+  font-weight: 720;
+  line-height: 1.2;
+  letter-spacing: -0.035em;
   overflow-wrap: anywhere;
 }
+.news-article__rule {
+  display: block;
+  width: 72px;
+  height: 3px;
+  margin: 0 0 32px;
+  background: var(--accent);
+}
 .news-article__body {
+  max-width: 78ch;
   margin: 0;
-  color: #332b2d;
-  font-size: 15px;
-  line-height: 1.75;
+  color: #292326;
+  font-size: 18px;
+  line-height: 1.8;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -812,13 +874,36 @@ a {
     padding: 22px 18px;
   }
   .news-row {
-    padding: 16px 13px;
+    padding: 0;
+  }
+  .news-row__link {
+    min-height: 0;
+    padding: 18px 42px 20px 15px;
+  }
+  .news-row__link h2 {
+    font-size: 17px;
+  }
+  .news-row__link p {
+    font-size: 14px;
+  }
+  .news-row__arrow {
+    right: 14px;
+    font-size: 24px;
+  }
+  .news-load-more {
+    gap: 12px;
+    font-size: 15px;
   }
   .news-article {
-    padding: 18px 14px;
+    padding: 24px 18px 28px;
   }
-  .news-article h1 {
-    font-size: 22px;
+  .news-article .news-article__title {
+    margin-bottom: 22px;
+    font-size: 29px;
+  }
+  .news-article__body {
+    font-size: 16px;
+    line-height: 1.75;
   }
 }
 @media (prefers-reduced-motion: reduce) {
