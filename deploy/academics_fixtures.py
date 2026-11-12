@@ -37,8 +37,10 @@ def seed_academics_fixtures():
         if any(student is None for student in students):
             raise RuntimeError("Create fictional schedule students first")
         term = db.scalar(
-            select(AcademicTerm).where(AcademicTerm.name == "Тестовая осень 2026")
+            select(AcademicTerm).where(AcademicTerm.name == "Тестовый текущий семестр")
         )
+        if term is None:
+            raise RuntimeError("Create the fictional current term first")
         for index, kind in enumerate(("exam", "pass_fail", "graded_pass", "exam")):
             discipline = add(
                 Discipline, name=f"Успеваемость: тестовый предмет {index + 1}"

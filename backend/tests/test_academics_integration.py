@@ -38,11 +38,13 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def academics(db_session):
     db = db_session
+    created = []
 
     def add(model, **values):
         obj = model(**values)
         db.add(obj)
         db.flush()
+        created.append(obj)
         return obj
 
     faculty = add(OrgUnit, name="Вымышленный факультет", type="faculty")
@@ -382,3 +384,225 @@ def test_assignment_lesson_matches_course_and_group(academics):
             text("UPDATE lessons SET course_offering_id=:other WHERE id=:id"),
             {"other": other.id, "id": lesson.id},
         )
+
+
+@pytest.mark.parametrize("change", ["group", "assessment", "smaller_assessment"])
+def test_graded_assignment_cannot_change_identity_and_keeps_results(academics, change):
+    s = academics
+    course = s.offering()
+    assignment = s.assignment(course)
+    result = s.result(assignment, 8)
+    replacement = s.add(
+        Assessment,
+        course_offering_id=course.id,
+        title="Другая работа",
+        type="test",
+        max_score=5 if change == "smaller_assessment" else 10,
+    )
+    before = s.request().json()
+    field, value = (
+        ("group_id", s.groups[1].id) if change == "group" else ("assessment_id", replacement.id)
+    )
+    with pytest.raises(IntegrityError), s.db.begin_nested():
+        s.db.execute(
+            text(f"UPDATE assessment_groups SET {field}=:value WHERE id=:id"),
+            {"value": value, "id": assignment.id},
+        )
+    s.db.expire_all()
+    assert assignment.group_id == s.groups[0].id
+    assert assignment.assessment_id != replacement.id
+    assert result.assessment_group_id == assignment.id and result.score == 8
+    assert s.request().json() == before
+    assert s.request(1).json()["items"][0]["total_score"] == 0
+
+
+def test_maximum_cannot_drop_below_existing_score_and_failed_update_is_atomic(academics):
+    s = academics
+    course = s.offering()
+    assignment = s.assignment(course)
+    result = s.result(assignment, 8)
+    before = s.request().json()
+    with pytest.raises(IntegrityError), s.db.begin_nested():
+        s.db.execute(
+            text("UPDATE assessments SET max_score=5 WHERE id=:id"),
+            {"id": assignment.assessment_id},
+        )
+    s.db.expire_all()
+    assert s.db.get(Assessment, assignment.assessment_id).max_score == 10
+    assert result.score == 8
+    assert s.request().json() == before
+
+
+def test_ungraded_assignment_can_move_and_maximum_can_change_without_mvp2_lock(academics):
+    s = academics
+    course = s.offering()
+    assignment = s.assignment(course)
+    replacement = s.add(
+        Assessment, course_offering_id=course.id, title="Другая работа", type="test", max_score=5
+    )
+    s.db.execute(
+        text("UPDATE assessment_groups SET group_id=:group, assessment_id=:work WHERE id=:id"),
+        {"group": s.groups[1].id, "work": replacement.id, "id": assignment.id},
+    )
+    s.db.expire_all()
+    result = s.result(assignment, 4, student=1)
+    for maximum in (10, 4):
+        s.db.execute(
+            text("UPDATE assessments SET max_score=:maximum WHERE id=:id"),
+            {"maximum": maximum, "id": replacement.id},
+        )
+    s.db.execute(
+        text("UPDATE assessment_groups SET planned_date='2026-10-01' WHERE id=:id"),
+        {"id": assignment.id},
+    )
+    s.db.execute(text("DELETE FROM assessment_results WHERE id=:id"), {"id": result.id})
+    s.db.execute(text("UPDATE assessments SET max_score=0 WHERE id=:id"), {"id": replacement.id})
+    s.db.execute(
+        text("UPDATE assessment_groups SET group_id=:group WHERE id=:id"),
+        {"group": s.groups[0].id, "id": assignment.id},
+    )
+    s.db.expire_all()
+    assert assignment.group_id == s.groups[0].id
+    assert s.db.get(Assessment, replacement.id).max_score == 0
+
+
+@pytest.fixture
+def committed_academics(postgresql_engine):
+    from sqlalchemy import delete, inspect
+    from sqlalchemy.orm import Session
+
+    with Session(postgresql_engine, expire_on_commit=False) as db:
+        s = academics.__wrapped__(db)
+        try:
+            yield s
+        finally:
+            db.rollback()
+            assignment_ids = [
+                inspect(obj).identity[0]
+                for obj in s.created
+                if isinstance(obj, AssessmentGroup) and inspect(obj).identity
+            ]
+            db.execute(
+                delete(AssessmentResult).where(
+                    AssessmentResult.assessment_group_id.in_(assignment_ids)
+                )
+            )
+            db.execute(delete(AssessmentGroup).where(AssessmentGroup.id.in_(assignment_ids)))
+            for obj in reversed(s.created):
+                state = inspect(obj)
+                if state.identity:
+                    db.execute(
+                        delete(type(obj)).where(
+                            *[
+                                column == value
+                                for column, value in zip(
+                                    state.mapper.primary_key, state.identity, strict=True
+                                )
+                            ]
+                        )
+                    )
+            db.commit()
+
+
+@pytest.mark.parametrize("isolation", ["READ COMMITTED", "REPEATABLE READ", "SERIALIZABLE"])
+@pytest.mark.parametrize(
+    ("change", "update_result"),
+    [("maximum", False), ("group", False), ("assessment", False), ("maximum", True)],
+)
+@pytest.mark.parametrize("result_first", [True, False])
+def test_concurrent_result_and_parent_changes_preserve_integrity(
+    committed_academics, postgresql_engine, isolation, change, result_first, update_result
+):
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sqlalchemy.exc import DBAPIError
+
+    s = committed_academics
+    course = s.offering()
+    assignment = s.assignment(course)
+    replacement = s.add(
+        Assessment, course_offering_id=course.id, title="Другая работа", type="test", max_score=5
+    )
+    if update_result:
+        s.result(assignment, 4)
+    s.db.commit()
+    result_sql = text("""INSERT INTO assessment_results
+        (assessment_group_id, student_id, score, graded_at)
+        VALUES (:assignment, :student, 8, now())""")
+    if update_result:
+        result_sql = text(
+            "UPDATE assessment_results SET score=8 WHERE assessment_group_id=:assignment"
+        )
+    mutation_sql = {
+        "maximum": text("UPDATE assessments SET max_score=5 WHERE id=:assessment"),
+        "group": text("UPDATE assessment_groups SET group_id=:group WHERE id=:assignment"),
+        "assessment": text(
+            "UPDATE assessment_groups SET assessment_id=:replacement WHERE id=:assignment"
+        ),
+    }[change]
+    values = dict(
+        assignment=assignment.id,
+        student=s.students[0].id,
+        assessment=assignment.assessment_id,
+        group=s.groups[1].id,
+        replacement=replacement.id,
+    )
+    first_sql, second_sql = (
+        (result_sql, mutation_sql) if result_first else (mutation_sql, result_sql)
+    )
+    with (
+        postgresql_engine.connect().execution_options(isolation_level=isolation) as first,
+        postgresql_engine.connect().execution_options(isolation_level=isolation) as second,
+    ):
+        # Both snapshots predate the first commit; a lock-only solution is unsafe in RR.
+        first.begin()
+        second.begin()
+        second.execute(text("SET LOCAL lock_timeout='5s'"))
+        second.execute(text("SET LOCAL statement_timeout='10s'"))
+        second_pid = second.scalar(text("SELECT pg_backend_pid()"))
+        first.execute(first_sql, values)
+
+        def run_second():
+            try:
+                second.execute(second_sql, values)
+                second.commit()
+                return None
+            except DBAPIError as exc:
+                second.rollback()
+                return exc.orig.sqlstate
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(run_second)
+            try:
+                with postgresql_engine.connect() as monitor:
+                    deadline = time.monotonic() + 4
+                    while not monitor.scalar(
+                        text("SELECT cardinality(pg_blocking_pids(:pid))"), {"pid": second_pid}
+                    ):
+                        assert not future.done(), (
+                            "The conflicting SQL must wait on the first transaction"
+                        )
+                        assert time.monotonic() < deadline, "No PostgreSQL lock wait observed"
+                        time.sleep(0.01)
+                first.commit()
+            finally:
+                first.rollback()
+            assert future.result(timeout=12) in {"23514", "40001"}
+    s.db.expire_all()
+    row = s.db.get(AssessmentGroup, assignment.id)
+    results = s.db.query(AssessmentResult).filter_by(assessment_group_id=assignment.id).all()
+    if result_first:
+        assert len(results) == 1 and results[0].score == 8
+        assert row.group_id == s.groups[0].id and row.assessment_id == values["assessment"]
+        assert s.db.get(Assessment, values["assessment"]).max_score == 10
+    else:
+        assert len(results) == int(update_result)
+        if update_result:
+            assert results[0].score == 4
+        if change == "maximum":
+            assert s.db.get(Assessment, values["assessment"]).max_score == 5
+        elif change == "group":
+            assert row.group_id == s.groups[1].id
+        else:
+            assert row.assessment_id == replacement.id

@@ -65,7 +65,12 @@ try {
   await page.reload()
   await page.getByRole('alert').waitFor()
   assert.equal(await page.locator('.academics-page table').count(), 0)
-  await page.getByRole('button', { name: 'Повторить', exact: true }).focus()
+  // Begin from a fresh document so keyboard traversal starts in natural tab order.
+  const retry = page.getByRole('button', { name: 'Повторить', exact: true })
+  for (let step = 0; step < 20; step += 1) {
+    await page.keyboard.press('Tab')
+    if (await retry.evaluate((el) => document.activeElement === el)) break
+  }
   assert.ok(
     await page
       .getByRole('button', { name: 'Повторить', exact: true })
@@ -74,7 +79,7 @@ try {
   await page.unroute(endpoint)
   await page.keyboard.press('Enter')
   await page.getByText('6 / 30', { exact: true }).waitFor()
-  check('API error hides grades; keyboard retry loads real results')
+  check('API error hides grades; natural Tab navigation and Enter retry load real results')
   for (const data of [
     { term: null, items: [] },
     {
