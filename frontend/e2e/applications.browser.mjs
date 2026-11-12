@@ -19,7 +19,20 @@ try {
       await page.goto(`${base}/login`)
       await page.getByLabel('Логин').fill(account)
       await page.getByLabel('Пароль').fill(process.env.SERVICES_TEST_PASSWORD)
-      await page.getByRole('button', { name: 'Войти', exact: true }).click()
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const pending = page.waitForResponse(
+          (response) => new URL(response.url()).pathname === '/api/v1/auth/login',
+        )
+        await page.getByRole('button', { name: 'Войти', exact: true }).click()
+        const response = await pending
+        if (response.status() === 200) break
+        assert.equal(response.status(), 429)
+        // Both viewports use the real five-attempt login limiter. Respect its
+        // window rather than weakening auth settings for the browser suite.
+        const seconds = Number(response.headers()['retry-after'])
+        assert.ok(seconds > 0 && seconds <= 60)
+        await page.waitForTimeout(seconds * 1000)
+      }
       await page.waitForURL(`${base}/schedule`)
     }
     async function logout() {
