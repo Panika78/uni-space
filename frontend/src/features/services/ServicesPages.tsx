@@ -246,6 +246,8 @@ export function ApplicationFormPage() {
       queryClient.removeQueries({ queryKey: applicationsKey })
       setApplication(result)
     } catch (cause) {
+      // The shared client aborts requests from an obsolete auth generation.
+      if (cause instanceof DOMException && cause.name === 'AbortError') return
       const fieldError =
         cause instanceof ApiClientError
           ? cause.details.find(

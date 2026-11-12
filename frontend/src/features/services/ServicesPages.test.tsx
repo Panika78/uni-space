@@ -47,7 +47,9 @@ function render(ui: ReactNode) {
   )
 }
 
-beforeEach(() => apiFetch.mockReset())
+beforeEach(() => {
+  apiFetch.mockReset()
+})
 afterEach(cleanup)
 
 it('loads the real service catalog and offers the separate application form', async () => {
@@ -325,4 +327,35 @@ it('blocks router and Back navigation while a POST is pending and allows waiting
   })
   expect(await screen.findByText('№ 76')).toBeInTheDocument()
   expect(apiFetch).toHaveBeenCalledTimes(1)
+})
+
+it('does not clear the new account cache when an old POST is aborted', async () => {
+  let reject!: (reason: unknown) => void
+  apiFetch.mockImplementation(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail
+      }),
+  )
+  const client = new QueryClient()
+  const router = createMemoryRouter(
+    [{ path: '/services/:serviceCode', element: <ApplicationFormPage /> }],
+    { initialEntries: ['/services/study_certificate'] },
+  )
+  const view = testingRender(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
+  fireEvent.change(screen.getByLabelText(/Место предоставления/), {
+    target: { value: 'Old account' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+  await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1))
+  view.unmount()
+  client.clear()
+  client.setQueryData(['applications'], { items: [{ id: 'new-account' }] })
+  reject(new DOMException('Obsolete session', 'AbortError'))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect(client.getQueryData(['applications'])).toEqual({ items: [{ id: 'new-account' }] })
 })
