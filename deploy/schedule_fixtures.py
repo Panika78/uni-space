@@ -135,6 +135,44 @@ def seed_schedule_fixtures(password):
             "2026-11-10T16:00:00+03:00", status="cancelled", name="Отменённое занятие"
         )
 
+        # Additional TASK-011 positions use other dates, preserving existing day fixtures.
+        single = lesson(
+            "2026-11-12T09:00:00+03:00", status="moved", name="Одиночный перенос"
+        )
+        lesson(
+            "2026-11-13T10:00:00+03:00",
+            previous_lesson_id=single.id,
+            name="Результат одиночного переноса",
+        )
+        cancelled_root = lesson(
+            "2026-11-12T11:00:00+03:00",
+            status="moved",
+            name="Перенос с отменённым результатом",
+        )
+        cancelled_middle = lesson(
+            "2026-11-20T11:00:00+03:00",
+            status="moved",
+            previous_lesson_id=cancelled_root.id,
+            name="Промежуточная позиция отменённой цепочки",
+        )
+        lesson(
+            "2027-01-03T00:30:00+03:00",
+            status="cancelled",
+            previous_lesson_id=cancelled_middle.id,
+            name="Отменённый результат цепочки",
+        )
+        unavailable = lesson(
+            "2026-11-12T13:00:00+03:00",
+            status="moved",
+            name="Недоступный результат переноса",
+        )
+        lesson(
+            "2027-01-04T09:00:00+03:00",
+            previous_lesson_id=unavailable.id,
+            assigned=groups[1:],
+            name="Скрытая позиция другой группы",
+        )
+
 
 if __name__ == "__main__":
     seed_schedule_fixtures(sys.stdin.read())

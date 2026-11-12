@@ -40,10 +40,11 @@ export function getIsoWeekNumber(date: string): number {
   return Math.floor((dayOfYear - 1) / 7) + 1
 }
 
-export function formatDate(date: string): string {
+export function formatDate(date: string, includeYear = false): string {
   return new Intl.DateTimeFormat('ru-RU', {
     timeZone: timezone,
     weekday: 'long',
+    ...(includeYear ? { year: 'numeric' as const } : {}),
     day: 'numeric',
     month: 'long',
   }).format(new Date(`${date}T12:00:00Z`))
