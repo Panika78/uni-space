@@ -313,8 +313,8 @@ jobs:
           uv run --locked --python 3.12.16 --project backend python backend/scripts/seed_services_browser_test_students.py >> "$GITHUB_ENV"
       - name: Start real API and frontend
         run: |
-          (cd backend && uv run --locked --python 3.12.16 uvicorn app.main:app --host 127.0.0.1 --port 8000 > ../work/services-api.log 2>&1) &
-          (cd frontend && npm run dev -- --host 127.0.0.1 > ../work/services-frontend.log 2>&1) &
+          setsid bash -c 'echo $$ > work/services-api.pid; cd backend && exec uv run --locked --python 3.12.16 uvicorn app.main:app --host 127.0.0.1 --port 8000' > work/services-api.log 2>&1 < /dev/null &
+          setsid bash -c 'cd frontend && exec npm run dev -- --host 127.0.0.1' > work/services-frontend.log 2>&1 < /dev/null &
           for attempt in $(seq 1 60); do
             if curl --silent --fail http://127.0.0.1:8000/api/openapi.json >/dev/null && curl --silent --fail http://127.0.0.1:5173/login >/dev/null; then
               exit 0
@@ -328,6 +328,30 @@ jobs:
           AUTH_TEST_LOGIN_A="$SERVICES_TEST_LOGIN" \
           AUTH_TEST_PASSWORD="$SERVICES_TEST_PASSWORD" \
           node frontend/e2e/notifications.browser.mjs
+      - name: Restart API between browser suites
+        run: |
+          set -e
+          api_pid="$(cat work/services-api.pid)"
+          kill -- "-$api_pid"
+          for attempt in $(seq 1 30); do
+            if ! curl --silent --fail http://127.0.0.1:8000/api/openapi.json >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          if curl --silent --fail http://127.0.0.1:8000/api/openapi.json >/dev/null; then
+            echo 'The notification E2E API process did not stop.' >&2
+            exit 1
+          fi
+          setsid bash -c 'echo $$ > work/services-api.pid; cd backend && exec uv run --locked --python 3.12.16 uvicorn app.main:app --host 127.0.0.1 --port 8000' > work/services-api.log 2>&1 < /dev/null &
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8000/api/openapi.json >/dev/null && curl --silent --fail http://127.0.0.1:5173/login >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat work/services-api.log work/services-frontend.log
+          exit 1
       - name: Run services catalog and application browser E2E
         run: node frontend/e2e/services.browser.mjs
       - name: Show server logs on failure
