@@ -101,10 +101,41 @@ seed подтверждает профиль, группу и программу
 
 ## Production
 
-Для этого используйте только отдельную демонстрационную БД после резервной копии.
-Пароли загрузите из защищённого хранилища или скрытого интерактивного ввода; не
-кладите их в `PROD_ENV_FILE`, git, CI или build args. Production seed запускается
-только явно в one-off контейнере `migrate` с ролью `uni_space_migrator`, точным
-подтверждением host/database и флагом `DEMO_SEED_ALLOW_PRODUCTION` из раздела
-production-команд README. Роль `uni_space_api` не получает дополнительных прав.
-Повторный seed не является восстановлением backup и не заменяет проверку данных.
+Используйте только выделенную демонстрационную БД после проверенной резервной
+копии. Сначала задайте `PROD_ENV_FILE` на приватный production env-файл по
+`docs/PRODUCTION.md`, поднимите/проверьте `db` и примените миграции обычной
+production-командой. Не запускайте seed на рабочей БД. Пароли загрузите из
+защищённого хранилища или скрытого интерактивного ввода; не кладите их в
+`PROD_ENV_FILE`, git, CI или build args.
+
+После проверки `POSTGRES_DB` в приватном env-файле выполните из корня проекта.
+Подтверждения включают фактические database и host; укажите их точно. Флаг
+разрешения требуется только для этой явной one-off операции:
+
+```bash
+set -a
+source "$PROD_ENV_FILE"
+set +a
+read -r -s -p 'Пароль ПЗ-101: ' DEMO_STUDENT_A_PASSWORD; printf '\n'
+read -r -s -p 'Пароль ПМ-201: ' DEMO_STUDENT_B_PASSWORD; printf '\n'
+export DEMO_STUDENT_A_PASSWORD DEMO_STUDENT_B_PASSWORD
+export DEMO_SEED_ALLOWED_DATABASE="$POSTGRES_DB"
+export DEMO_SEED_ALLOWED_HOST=db
+export DEMO_SEED_CONFIRM="SEED_UNI_SPACE_DEMO_DATA:$POSTGRES_DB@db"
+export DEMO_SEED_ALLOW_PRODUCTION=YES_I_HAVE_A_BACKUP
+bash scripts/production-compose.sh run --rm -T \
+  -e DEMO_STUDENT_A_PASSWORD -e DEMO_STUDENT_B_PASSWORD \
+  -e DEMO_SEED_ALLOWED_DATABASE -e DEMO_SEED_ALLOWED_HOST \
+  -e DEMO_SEED_CONFIRM -e DEMO_SEED_ALLOW_PRODUCTION \
+  migrate python scripts/seed_demo_data.py
+unset DEMO_STUDENT_A_PASSWORD DEMO_STUDENT_B_PASSWORD DEMO_SEED_CONFIRM \
+  DEMO_SEED_ALLOW_PRODUCTION DEMO_SEED_ALLOWED_DATABASE DEMO_SEED_ALLOWED_HOST
+```
+
+Это запускает seed отдельным контейнером `migrate` с ограниченной для API не
+являющейся runtime-ролью `uni_space_migrator`; `uni_space_api` дополнительных прав
+не получает. Повторное применение используйте только на той же БД и с теми же
+паролями. Несовпадающий пароль, неожиданное состояние записи или неоднозначная
+принадлежность seed приводит к отказу транзакции без автоматической ротации
+паролей и без изменения посторонних записей. Повторный seed не является
+восстановлением backup и не заменяет проверку данных.
