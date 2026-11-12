@@ -379,7 +379,9 @@ jobs:
           cat work/services-api.log work/services-frontend.log
           exit 1
       - name: Run application list and details browser E2E
-        run: node frontend/e2e/applications.browser.mjs
+        run: |
+          node frontend/e2e/applications.browser.mjs
+          node frontend/e2e/applications-review.browser.mjs
       - name: Show server logs on failure
         if: failure()
         run: tail -n 80 work/services-api.log work/services-frontend.log 2>/dev/null || true

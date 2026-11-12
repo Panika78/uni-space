@@ -1359,9 +1359,14 @@ a {
   border-bottom: 2px solid currentColor;
 }
 .applications-table {
+  table-layout: fixed;
   width: 100%;
   border-collapse: collapse;
   margin-block: 1rem;
+}
+.applications-table th:nth-child(2),
+.applications-table th:nth-child(3) {
+  width: 12rem;
 }
 .applications-table th,
 .applications-table td {
@@ -1369,6 +1374,9 @@ a {
   padding: 1rem 0.5rem;
   border-bottom: 1px solid var(--line);
   overflow-wrap: anywhere;
+}
+.application-field-label {
+  display: none;
 }
 .application-detail dd {
   margin: 0.25rem 0 1.25rem;
@@ -1387,7 +1395,19 @@ a {
     display: block;
   }
   .applications-table thead {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .application-field-label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--muted);
+    margin-bottom: 0.2rem;
   }
   .applications-table tr {
     border: 1px solid var(--line);

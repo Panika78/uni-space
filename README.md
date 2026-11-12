@@ -144,6 +144,7 @@ export PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_modules/playwright/inde
 export SERVICES_TEST_URL=http://localhost:5173
 node frontend/e2e/services.browser.mjs
 node frontend/e2e/applications.browser.mjs
+node frontend/e2e/applications-review.browser.mjs
 ```
 
 Сценарий требует второго тестового студента и проверяет смену аккаунта без
@@ -152,6 +153,12 @@ node frontend/e2e/applications.browser.mjs
 `applications.browser.mjs` проверяет TASK-014 на desktop и 360 px: создание,
 детали, список, повторный вход, «Показать ещё», восстановление прокрутки,
 потерянный ответ POST и изоляцию аккаунтов.
+`applications-review.browser.mjs` использует управляемые тестовые ответы GET для
+проверки обновления всех загруженных страниц, 200 → 404/network error → 200,
+мобильных подписей и полного клавиатурного возврата с fallback при исчезновении
+исходной записи. Список обновляется при каждом повторном открытии; загруженные
+страницы сохраняются в персональном кеше, а контекст возврата привязан к исходной
+записи и записи истории браузера.
 
 ## Документация
 
