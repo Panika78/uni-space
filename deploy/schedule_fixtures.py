@@ -86,9 +86,11 @@ def seed_schedule_fixtures(password):
             Teacher, full_name="Вымышленный Преподаватель С Очень Длинным Именем"
         )
 
-        def lesson(starts, *, assigned=None, name=None, **values):
+        def lesson(starts, *, assigned=None, name=None, previous=None, **values):
             course = offering
-            if name:
+            if previous:
+                course = db.get(CourseOffering, previous.course_offering_id)
+            elif name:
                 subject = add(Discipline, name=name)
                 course = add(
                     CourseOffering,
@@ -96,18 +98,19 @@ def seed_schedule_fixtures(password):
                     term_id=term.id,
                     attestation_type="pass_fail",
                 )
-                for group in groups[:1] if assigned is None else assigned:
-                    add(CourseGroup, course_offering_id=course.id, group_id=group.id)
             start = datetime.fromisoformat(starts)
             item = add(
                 Lesson,
                 course_offering_id=course.id,
+                previous_lesson_id=previous.id if previous else None,
                 starts_at=start,
                 ends_at=start + timedelta(hours=1),
                 kind="lecture",
                 **values,
             )
             for group in groups[:1] if assigned is None else assigned:
+                if db.get(CourseGroup, (course.id, group.id)) is None:
+                    add(CourseGroup, course_offering_id=course.id, group_id=group.id)
                 add(LessonGroup, lesson_id=item.id, group_id=group.id)
             return item
 
@@ -127,12 +130,44 @@ def seed_schedule_fixtures(password):
         old = lesson(
             "2026-11-10T14:00:00+03:00", status="moved", name="Первая позиция переноса"
         )
-        middle = lesson(
-            "2026-11-20T14:00:00+03:00", status="moved", previous_lesson_id=old.id
-        )
-        lesson("2026-12-20T14:00:00+03:00", previous_lesson_id=middle.id)
+        middle = lesson("2026-11-20T14:00:00+03:00", status="moved", previous=old)
+        lesson("2026-12-20T14:00:00+03:00", previous=middle)
         lesson(
             "2026-11-10T16:00:00+03:00", status="cancelled", name="Отменённое занятие"
+        )
+
+        # Additional TASK-011 positions use other dates, preserving existing day fixtures.
+        single = lesson(
+            "2026-11-12T09:00:00+03:00", status="moved", name="Одиночный перенос"
+        )
+        lesson(
+            "2026-11-13T10:00:00+03:00",
+            previous=single,
+        )
+        cancelled_root = lesson(
+            "2026-11-12T11:00:00+03:00",
+            status="moved",
+            name="Перенос с отменённым результатом",
+        )
+        cancelled_middle = lesson(
+            "2026-11-20T11:00:00+03:00",
+            status="moved",
+            previous=cancelled_root,
+        )
+        lesson(
+            "2027-01-03T00:30:00+03:00",
+            status="cancelled",
+            previous=cancelled_middle,
+        )
+        unavailable = lesson(
+            "2026-11-12T13:00:00+03:00",
+            status="moved",
+            name="Недоступный результат переноса",
+        )
+        lesson(
+            "2027-01-04T09:00:00+03:00",
+            previous=unavailable,
+            assigned=groups[1:],
         )
 
 

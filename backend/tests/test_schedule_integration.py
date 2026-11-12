@@ -183,16 +183,19 @@ def test_schedule_uses_moscow_half_open_intersection_and_nullable_details(schedu
     assert s.request(start="9999-12-31").status_code == 200
 
 
-def test_schedule_resolves_repeated_moves_outside_range_and_cancelled_terminal(schedule):
+@pytest.mark.parametrize("terminal_status", ["scheduled", "cancelled"])
+def test_schedule_resolves_repeated_moves_outside_range_and_cancelled_terminal(
+    schedule, terminal_status
+):
     s = schedule
     a = s.lesson(status="moved")
     b = s.lesson("2026-11-20T09:00:00+03:00", previous_lesson_id=a.id, status="moved")
-    c = s.lesson("2026-12-20T09:00:00+03:00", previous_lesson_id=b.id, status="cancelled")
+    c = s.lesson("2026-12-20T09:00:00+03:00", previous_lesson_id=b.id, status=terminal_status)
     old = s.request().json()["items"][0]
     middle = s.request(start="2026-11-20").json()["items"][0]
     last = s.request(start="2026-12-20").json()["items"][0]
     assert old["latest_lesson"]["id"] == middle["latest_lesson"]["id"] == str(c.id)
-    assert old["latest_lesson"]["status"] == "cancelled"
+    assert old["latest_lesson"]["status"] == terminal_status
     assert old["previous_lesson"] is None
     assert middle["previous_lesson"]["id"] == str(a.id)
     assert last["previous_lesson"]["id"] == str(b.id)
@@ -340,3 +343,21 @@ def test_schedule_resolves_authorized_terminal_after_intermediate_group_reassign
     assert s.request(start="2026-11-20").json()["items"] == []
     assert s.request(1, start="2026-11-20").json()["items"][0]["latest_lesson"] is None
     assert s.request(start="2026-12-20").json()["items"][0]["previous_lesson"] is None
+
+
+def test_schedule_single_move_retains_immediate_predecessor_outside_week(schedule):
+    s = schedule
+    a = s.lesson(status="moved")
+    b = s.lesson("2027-01-03T00:30:00+03:00", previous_lesson_id=a.id)
+    old = s.request().json()["items"][0]
+    current = s.request(start="2027-01-03").json()["items"][0]
+    assert old["latest_lesson"] == {
+        "id": str(b.id),
+        "starts_at": "2027-01-02T21:30:00Z",
+        "ends_at": "2027-01-02T22:30:00Z",
+        "status": "scheduled",
+    }
+    assert current["previous_lesson"]["id"] == str(a.id)
+    assert current["latest_lesson"] is None
+    assert current["status"] == "scheduled"
+    assert s.request(1, start="2027-01-03").json()["items"] == []

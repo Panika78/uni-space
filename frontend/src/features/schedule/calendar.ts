@@ -40,10 +40,11 @@ export function getIsoWeekNumber(date: string): number {
   return Math.floor((dayOfYear - 1) / 7) + 1
 }
 
-export function formatDate(date: string): string {
+export function formatDate(date: string, includeYear = false): string {
   return new Intl.DateTimeFormat('ru-RU', {
     timeZone: timezone,
     weekday: 'long',
+    ...(includeYear ? { year: 'numeric' as const } : {}),
     day: 'numeric',
     month: 'long',
   }).format(new Date(`${date}T12:00:00Z`))
@@ -68,6 +69,7 @@ const boundaryTime = new Intl.DateTimeFormat('en-GB', {
 export function listDayLessons(items: Lesson[], date: string): Lesson[] {
   return items.filter((lesson) => {
     const startDate = getMoscowDate(new Date(lesson.starts_at))
+    if (lesson.status !== 'scheduled') return startDate === date
     const end = new Date(lesson.ends_at)
     const endDate = getMoscowDate(end)
     // Compare Moscow calendar dates, preserving IANA historical offsets and sub-ms ends.
