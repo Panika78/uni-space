@@ -1,4 +1,4 @@
-from app.models.accounts import AuthSession, RefreshToken, User
+from app.models.accounts import AuthSession, Notification, RefreshToken, User
 from app.models.applications import Application, ServiceType
 from app.models.base import Base
 from app.models.news import News
@@ -29,6 +29,7 @@ __all__ = [
     "Application",
     "Base",
     "News",
+    "Notification",
     "OrgUnit",
     "Program",
     "RefreshToken",

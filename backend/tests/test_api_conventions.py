@@ -301,13 +301,22 @@ def test_pagination_params_rejects_malformed_cursor(cursor: str) -> None:
         PaginationParams(cursor=cursor)
 
 
-@pytest.mark.parametrize("query", ["limit=0", "limit=101", "cursor=invalid", "unexpected=1"])
+@pytest.mark.parametrize(
+    "query", ["limit=0", "limit=101", "limit=1.0", "cursor=invalid", "unexpected=1"]
+)
 def test_invalid_pagination_query_returns_422(query: str) -> None:
     client = TestClient(make_error_test_app())
     response = client.get(f"/api/v1/page?{query}")
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_error"
     assert response.headers.get("x-request-id")
+
+
+def test_pagination_query_accepts_integer_strings() -> None:
+    client = TestClient(make_error_test_app())
+    response = client.get("/api/v1/page?limit=1")
+    assert response.status_code == 200
+    assert response.json()["limit"] == 1
 
 
 @pytest.mark.parametrize(
@@ -771,6 +780,7 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
         "/api/v1/users/me",
         "/api/v1/news",
         "/api/v1/news/{id}",
+        "/api/v1/notifications",
     }
     assert client.get("/api/v1").status_code == 404
     assert client.get("/docs").status_code == 404

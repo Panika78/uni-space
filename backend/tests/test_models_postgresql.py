@@ -21,6 +21,7 @@ EXPECTED_MODEL_TABLES = {
     "users",
     "auth_sessions",
     "refresh_tokens",
+    "notifications",
     "org_units",
     "programs",
     "study_groups",
@@ -31,6 +32,14 @@ REQUIRED_COLUMNS = {
     "users": {"id", "login", "password_hash", "full_name", "role", "is_active", "created_at"},
     "auth_sessions": {"id", "user_id", "created_at", "expires_at"},
     "refresh_tokens": {"id", "session_id", "token_hash", "created_at", "expires_at"},
+    "notifications": {
+        "id",
+        "user_id",
+        "type",
+        "title",
+        "body",
+        "created_at",
+    },
     "org_units": {"id", "name", "type"},
     "programs": {"id", "code", "name", "direction_code", "direction_name", "faculty_id"},
     "study_groups": {"id", "name", "program_id", "course_number"},
@@ -43,6 +52,7 @@ EXPECTED_FOREIGN_KEYS = {
         ("session_id", "auth_sessions", "id"),
         ("parent_token_id", "refresh_tokens", "id"),
     },
+    "notifications": {("user_id", "users", "id")},
     "org_units": {("parent_id", "org_units", "id")},
     "programs": {("faculty_id", "org_units", "id")},
     "study_groups": {("program_id", "programs", "id")},
@@ -179,6 +189,14 @@ def test_postgresql_required_columns_and_foreign_keys_match_the_models(postgresq
             for foreign_key in inspector.get_foreign_keys(table_name, schema="public")
         }
         assert actual_keys == expected_keys
+
+    notification_columns = {
+        column["name"]: column["nullable"]
+        for column in inspector.get_columns("notifications", schema="public")
+    }
+    assert all(
+        notification_columns[column] is True for column in ("entity_type", "entity_id", "read_at")
+    )
 
 
 def test_users_reject_duplicate_login(db_session) -> None:

@@ -17,6 +17,7 @@ from app.core.schemas import (
     Ref,
 )
 from app.news.router import router as news_router
+from app.notifications import router as notifications_router
 from app.schedule.router import router as schedule_router
 from app.students import router as students_router
 
@@ -33,6 +34,7 @@ app.add_middleware(ApiHeadersMiddleware)
 install_exception_handlers(app)
 app.include_router(auth_router)
 app.include_router(applications_router)
+app.include_router(notifications_router)
 app.include_router(schedule_router)
 app.include_router(students_router)
 app.include_router(news_router)

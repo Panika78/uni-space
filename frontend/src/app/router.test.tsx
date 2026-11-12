@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
@@ -47,6 +47,8 @@ beforeEach(() => {
   vi.mocked(apiFetch).mockImplementation((input) => {
     const url = new URL(String(input), window.location.href)
     if (url.pathname === '/api/v1/users/me' && !url.search) return Promise.resolve(profile)
+    if (url.pathname === '/api/v1/notifications')
+      return Promise.resolve({ items: [], next_cursor: null })
     if (
       url.pathname === '/api/v1/schedule' &&
       url.searchParams.has('date_from') &&
@@ -168,4 +170,24 @@ it('does not load or show schedule when StudentAccess rejects access', async () 
   expect(vi.mocked(apiFetch).mock.calls.map(([input]) => String(input))).toEqual([
     '/api/v1/users/me',
   ])
+})
+
+it('opens the protected notification drawer directly from its route and closes back to schedule', async () => {
+  auth.status = 'authenticated'
+  renderRouter('/notifications')
+  expect(await screen.findByRole('dialog', { name: 'Уведомления' })).toBeInTheDocument()
+  expect(await screen.findByText('Пока нет уведомлений.')).toBeInTheDocument()
+  await userEvent.setup().click(
+    within(screen.getByRole('dialog', { name: 'Уведомления' })).getByRole('button', {
+      name: 'Закрыть уведомления',
+    }),
+  )
+  expect(await screen.findByRole('heading', { name: 'Расписание' })).toBeInTheDocument()
+})
+
+it('keeps the notification route behind the existing authentication guard', async () => {
+  auth.status = 'unauthenticated'
+  renderRouter('/notifications')
+  expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
+  expect(screen.queryByRole('dialog', { name: 'Уведомления' })).not.toBeInTheDocument()
 })

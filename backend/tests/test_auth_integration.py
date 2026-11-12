@@ -9,7 +9,7 @@ import httpx
 import jwt
 import pytest
 from fastapi import Depends, FastAPI
-from sqlalchemy import delete, event, select, text
+from sqlalchemy import delete, event, select, text, update
 from sqlalchemy.orm import Session
 
 from app.auth import router as auth_routes
@@ -22,7 +22,17 @@ from app.core.errors import install_exception_handlers
 from app.core.middleware import ApiHeadersMiddleware
 from app.dependencies.auth import get_current_student, get_current_user
 from app.dependencies.database import get_db_session
-from app.models import AuthSession, OrgUnit, Program, RefreshToken, Student, StudyGroup, User
+from app.models import (
+    AuthSession,
+    Notification,
+    OrgUnit,
+    Program,
+    RefreshToken,
+    Student,
+    StudyGroup,
+    User,
+)
+from app.notifications import router as notification_routes
 
 pytestmark = pytest.mark.integration
 PASSWORD = "fictional-auth-password"
@@ -70,6 +80,7 @@ def auth(postgresql_engine, monkeypatch):
     from app.students import router as students_router
 
     test_app.include_router(students_router)
+    test_app.include_router(notification_routes)
     settings = Settings(
         _env_file=None,
         app_env="test",
@@ -138,6 +149,7 @@ def auth(postgresql_engine, monkeypatch):
         yield AuthClient(test_app), postgresql_engine, ids, logins, student_ids
     finally:
         with Session(postgresql_engine) as db, db.begin():
+            db.execute(delete(Notification).where(Notification.user_id.in_(ids)))
             session_ids = select(AuthSession.id).where(AuthSession.user_id.in_(ids))
             db.execute(delete(RefreshToken).where(RefreshToken.session_id.in_(session_ids)))
             db.execute(delete(AuthSession).where(AuthSession.user_id.in_(ids)))
@@ -1036,3 +1048,96 @@ def test_profile_checks_role_and_account_activity_on_every_request(auth):
         user.role = "student"
         user.is_active = False
     assert_error(client.request("GET", "/api/v1/users/me", access=access), 401, "session_invalid")
+
+
+def test_notifications_are_private_and_use_stable_keyset_pagination(auth):
+    client, engine, user_ids, _logins, _student_ids = auth
+    _first_login, _cookie, first_access = login(auth, 0)
+    _second_login, _cookie, second_access = login(auth, 1)
+    created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    with Session(engine) as db, db.begin():
+        rows = [
+            Notification(
+                user_id=user_ids[0],
+                type="fixture_type",
+                title=f"Student one {index}",
+                body="<script>alert('text')</script>\nПример",
+                created_at=created_at,
+            )
+            for index in range(3)
+        ]
+        rows.append(
+            Notification(
+                user_id=user_ids[1],
+                type="unknown_future_type",
+                title="Student two only",
+                body="Личное сообщение",
+                created_at=created_at,
+            )
+        )
+        db.add_all(rows)
+        db.flush()
+        expected_ids = [
+            str(row.id) for row in sorted(rows[:3], key=lambda item: item.id, reverse=True)
+        ]
+
+    assert_error(client.request("GET", "/api/v1/notifications"), 401, "invalid_access")
+    first = client.request(
+        "GET",
+        "/api/v1/notifications?limit=2",
+        access=first_access,
+    )
+    assert first.status_code == 200, first.text
+    assert [item["id"] for item in first.json()["items"]] == expected_ids[:2]
+    assert first.json()["next_cursor"]
+    assert first.json()["items"][0]["body"].startswith("<script>")
+    for parameter in ("user_id=" + str(user_ids[1]), "student_id=999", "arbitrary=value"):
+        assert_error(
+            client.request("GET", f"/api/v1/notifications?{parameter}", access=first_access),
+            422,
+            "validation_error",
+        )
+
+    with Session(engine) as db, db.begin():
+        db.add(
+            Notification(
+                user_id=user_ids[0],
+                type="new",
+                title="Arrived later",
+                body="Новая запись",
+                created_at=datetime(2027, 1, 1, tzinfo=UTC),
+            )
+        )
+    second = client.request(
+        "GET",
+        "/api/v1/notifications?limit=2&cursor=" + first.json()["next_cursor"],
+        access=first_access,
+    )
+    assert second.status_code == 200, second.text
+    assert [item["id"] for item in second.json()["items"]] == expected_ids[2:]
+    assert second.json()["next_cursor"] is None
+
+    private = client.request("GET", "/api/v1/notifications?limit=100", access=second_access)
+    assert [item["title"] for item in private.json()["items"]] == ["Student two only"]
+    with Session(engine) as db, db.begin():
+        db.execute(update(User).where(User.id == user_ids[0]).values(role="teacher"))
+    assert_error(
+        client.request("GET", "/api/v1/notifications", access=first_access), 403, "forbidden"
+    )
+    with Session(engine) as db, db.begin():
+        db.execute(update(User).where(User.id == user_ids[0]).values(role="student"))
+    assert_error(
+        client.request("GET", "/api/v1/notifications?limit=0", access=first_access),
+        422,
+        "validation_error",
+    )
+    assert_error(
+        client.request("GET", "/api/v1/notifications?limit=1.0", access=first_access),
+        422,
+        "validation_error",
+    )
+    assert_error(
+        client.request("GET", "/api/v1/notifications?cursor=bad", access=first_access),
+        422,
+        "validation_error",
+    )

@@ -177,7 +177,7 @@ Nginx (важно при замене файла через rename), прове�
 |---|---|---|
 | `POSTGRES_USER` (прежнее имя сохраняется) | `POSTGRES_PASSWORD_FILE`, только `db` | Администратор кластера; bootstrap, backup, создание отдельной restore-БД |
 | `uni_space_migrator` | `MIGRATION_DB_PASSWORD_FILE`, только `db` и одноразовый `migrate` | LOGIN без SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS; владелец public и прикладных объектов, DDL миграций |
-| `uni_space_api` | `API_DB_PASSWORD_FILE`, только `db` и `api` | CONNECT рабочей БД, USAGE public и последовательностей auth/applications; SELECT users, students, auth_sessions, refresh_tokens, alembic_version, справочников профиля/расписания (ниже), service_types, applications и news; INSERT applications; INSERT/UPDATE auth_sessions и refresh_tokens |
+| `uni_space_api` | `API_DB_PASSWORD_FILE`, только `db` и `api` | CONNECT рабочей БД, USAGE public и последовательностей auth/applications; SELECT users, students, auth_sessions, refresh_tokens, alembic_version, справочников профиля/расписания (ниже), service_types, applications, news и notifications; INSERT applications; INSERT/UPDATE auth_sessions и refresh_tokens |
 
 Для совместной работы TASK-009/010 явно разрешён только `SELECT` на
 `study_groups`, `programs`, `org_units`, `teachers`,
@@ -197,7 +197,8 @@ Nginx (важно при замене файла через rename), прове�
 Для TASK-013 API может создавать собственные заявки: ему выданы `SELECT` на
 `service_types`/`applications`, `INSERT` на `applications` и `USAGE` только на
 `applications.id`. Для TASK-015 ему выдан только `SELECT` на `news`; запись в
-`news` и права на её последовательность запрещены.
+`news` и права на её последовательность запрещены. Для TASK-016 уведомления доступны
+runtime-роли только для чтения: `SELECT` на `notifications`, без DML и sequence USAGE.
 
 API не получает административный или migration secret ни в окружение, ни в mounts.
 В `migrate` нет JWT-секрета приложения: константа удовлетворяет Settings только для

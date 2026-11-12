@@ -73,8 +73,16 @@ class Page[T](RequestModel):
     next_cursor: str | None
 
 
+def parse_pagination_limit(value: object) -> int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
+        return int(value)
+    raise ValueError("Input should be a whole number")
+
+
 class PaginationParams(RequestModel):
-    limit: int = Field(default=20, ge=1, le=100)
+    limit: Annotated[int, BeforeValidator(parse_pagination_limit)] = Field(default=20, ge=1, le=100)
     cursor: str | None = None
 
     @field_validator("cursor")

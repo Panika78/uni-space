@@ -478,13 +478,17 @@ with engine.connect() as c:
     assert c.execute(text("SELECT has_sequence_privilege(current_user,'applications_id_seq','USAGE')")).scalar_one()
     assert c.execute(text("SELECT has_table_privilege(current_user,'news','SELECT')")).scalar_one()
     assert not c.execute(text("SELECT has_sequence_privilege(current_user,'news_id_seq','USAGE')")).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'notifications','SELECT')")).scalar_one()
+    for privilege in ('INSERT','UPDATE','DELETE'):
+        assert not c.execute(text("SELECT has_table_privilege(current_user,'notifications',:privilege)"), {'privilege': privilege}).scalar_one()
+    assert not c.execute(text("SELECT has_sequence_privilege(current_user,'notifications_id_seq','USAGE')")).scalar_one()
     for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'news',:privilege)"), {'privilege': privilege}).scalar_one()
     assert not c.execute(text("SELECT has_table_privilege(current_user,'applications','UPDATE')")).scalar_one()
     assert not c.execute(text("SELECT has_table_privilege(current_user,'applications','DELETE')")).scalar_one()
     print('PASS: API role flags false; isolated secrets')
     for table in ('users','students','study_groups','programs','org_units','teachers',
-                  'disciplines','course_offerings','buildings','rooms','lessons','lesson_groups','lesson_rooms','news'):
+                  'disciplines','course_offerings','buildings','rooms','lessons','lesson_groups','lesson_rooms','news','notifications'):
         assert c.execute(text("SELECT has_table_privilege(current_user, :table, 'SELECT')"), {'table': table}).scalar_one()
         c.execute(text(f"SELECT * FROM public.{table} LIMIT 1")).all()
     for table in ('study_groups','programs','org_units','teachers','disciplines','course_offerings',
@@ -510,6 +514,9 @@ for statement in (
     "INSERT INTO news (title,body,is_published) VALUES ('forbidden','forbidden',false)",
     "UPDATE news SET title='forbidden'", "DELETE FROM news", "TRUNCATE news",
     "SELECT nextval('public.news_id_seq')",
+    "INSERT INTO notifications (user_id,type,title,body) VALUES (1,'forbidden','forbidden','forbidden')",
+    "UPDATE notifications SET title='forbidden'", "DELETE FROM notifications",
+    "SELECT nextval('public.notifications_id_seq')",
     "SELECT nextval('public.org_units_id_seq')", "SELECT nextval('public.programs_id_seq')",
     "UPDATE lessons SET status='cancelled'", "DELETE FROM lesson_groups",
     "SELECT * FROM academic_terms", "SELECT * FROM course_groups",
@@ -629,6 +636,10 @@ VALUES ('Production ACL fixture', 'Fictional published news', now(), true)
 RETURNING id;""")
             hidden_news_id = sql("""INSERT INTO news (title, body, published_at, is_published)
 VALUES ('Production hidden fixture', 'Fictional hidden news', NULL, false)
+RETURNING id;""")
+            notification_id = sql("""INSERT INTO notifications (user_id, type, title, body)
+VALUES ((SELECT id FROM users WHERE login='schedule-fixture-1'),
+        'acl_fixture', 'Production ACL fixture', 'Fictional private notification')
 RETURNING id;""")
             with httpx.Client(
                 base_url=public_origin,
@@ -802,6 +813,18 @@ RETURNING id;""")
                 schedule_headers = {
                     "Authorization": "Bearer " + student_login.json()["access_token"]
                 }
+                notifications = client.get(
+                    "/api/v1/notifications", headers=schedule_headers
+                )
+                assert notifications.status_code == 200, notifications.text
+                assert notifications.headers["cache-control"] == "no-store"
+                assert [item["id"] for item in notifications.json()["items"]] == [
+                    notification_id
+                ]
+                print(
+                    "PASS: real personal notification SELECT under uni_space_api",
+                    flush=True,
+                )
                 news_page = client.get("/api/v1/news", headers=schedule_headers)
                 assert news_page.status_code == 200, news_page.text
                 assert any(
@@ -901,6 +924,15 @@ RETURNING id;""")
                 second_headers = {
                     "Authorization": "Bearer " + second_login.json()["access_token"]
                 }
+                second_notifications = client.get(
+                    "/api/v1/notifications", headers=second_headers
+                )
+                assert second_notifications.status_code == 200
+                assert second_notifications.json()["items"] == []
+                print(
+                    "PASS: production role notification query remains isolated by user",
+                    flush=True,
+                )
                 second_profile = client.get("/api/v1/users/me", headers=second_headers)
                 assert second_profile.status_code == 200
                 assert second_profile.json()["login"] == "schedule-fixture-2"
