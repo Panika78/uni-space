@@ -16,7 +16,7 @@ permissions:
 jobs:
   backend-lint:
     name: Backend lint and format
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -41,7 +41,7 @@ jobs:
 
   backend-tests:
     name: Backend tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     services:
       postgres:
         image: postgres:17.11-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
@@ -86,7 +86,7 @@ jobs:
 
   frontend-lint:
     name: Frontend ESLint and Prettier
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -110,7 +110,7 @@ jobs:
 
   frontend-typecheck:
     name: Frontend TypeScript
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -129,7 +129,7 @@ jobs:
 
   frontend-tests:
     name: Frontend Vitest
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -148,7 +148,7 @@ jobs:
 
   frontend-build:
     name: Frontend production build
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -167,7 +167,7 @@ jobs:
 
   api-types:
     name: Generated API types current
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -199,7 +199,7 @@ jobs:
 
   migrations:
     name: PostgreSQL migrations at current Alembic heads
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     services:
       postgres:
         image: postgres:17.11-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
@@ -256,7 +256,7 @@ jobs:
 
   db-healthcheck:
     name: Compose PostgreSQL healthcheck regression
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       - name: Run isolated Compose healthcheck regression
@@ -264,7 +264,7 @@ jobs:
 
   services-browser-e2e:
     name: Services browser E2E (two test students)
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64]
     services:
       postgres:
         image: postgres:17.11-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
@@ -337,7 +337,7 @@ jobs:
   production-deployment:
     name: Production Compose HTTPS and recovery
     # Playwright 1.57 supports Ubuntu 24.04; ubuntu-latest may select 26.04.
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -383,7 +383,7 @@ jobs:
 
   schedule-browser:
     name: Student schedule in Chromium
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64]
     env:
       APP_ENV: test
       DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
