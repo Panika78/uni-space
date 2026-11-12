@@ -2,6 +2,7 @@
 
 import sys
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from app.auth.security import PASSWORD_HASHER
 from app.core.database import SessionLocal
@@ -57,11 +58,20 @@ def seed_schedule_fixtures(password):
                 is_active=True,
             )
             add(Student, user_id=user.id, group_id=group.id, academic_status="enrolled")
+        # Schedule scenarios use explicit lesson dates; academics uses today's
+        # Moscow term. Derive its bounds at seeding time, never freeze production time.
+        today = datetime.now(ZoneInfo("Europe/Moscow")).date()
+        if today.month == 1:
+            starts_on, ends_on = date(today.year - 1, 9, 1), date(today.year, 1, 31)
+        elif today.month < 9:
+            starts_on, ends_on = date(today.year, 2, 1), date(today.year, 8, 31)
+        else:
+            starts_on, ends_on = date(today.year, 9, 1), date(today.year + 1, 1, 31)
         term = add(
             AcademicTerm,
-            name="Тестовая осень 2026",
-            starts_on=date(2026, 9, 1),
-            ends_on=date(2027, 1, 31),
+            name="Тестовый текущий семестр",
+            starts_on=starts_on,
+            ends_on=ends_on,
         )
         discipline = add(
             Discipline,

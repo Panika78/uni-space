@@ -488,11 +488,15 @@ with engine.connect() as c:
     assert not c.execute(text("SELECT has_table_privilege(current_user,'applications','DELETE')")).scalar_one()
     print('PASS: API role flags false; isolated secrets')
     for table in ('users','students','study_groups','programs','org_units','teachers',
-                  'disciplines','course_offerings','buildings','rooms','lessons','lesson_groups','lesson_rooms','news','notifications'):
+                  'disciplines','course_offerings','buildings','rooms','lessons','lesson_groups',
+                  'lesson_rooms','news','notifications','academic_terms','course_groups',
+                  'assessments','assessment_groups','assessment_results','final_results'):
         assert c.execute(text("SELECT has_table_privilege(current_user, :table, 'SELECT')"), {'table': table}).scalar_one()
         c.execute(text(f"SELECT * FROM public.{table} LIMIT 1")).all()
     for table in ('study_groups','programs','org_units','teachers','disciplines','course_offerings',
-                  'buildings','rooms','lessons','lesson_groups','lesson_rooms'):
+                  'buildings','rooms','lessons','lesson_groups','lesson_rooms',
+                  'academic_terms','course_groups','assessments','assessment_groups',
+                  'assessment_results','final_results'):
         for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
             assert not c.execute(text("SELECT has_table_privilege(current_user, :table, :privilege)"),
                                  {'table': table, 'privilege': privilege}).scalar_one()
@@ -519,7 +523,9 @@ for statement in (
     "SELECT nextval('public.notifications_id_seq')",
     "SELECT nextval('public.org_units_id_seq')", "SELECT nextval('public.programs_id_seq')",
     "UPDATE lessons SET status='cancelled'", "DELETE FROM lesson_groups",
-    "SELECT * FROM academic_terms", "SELECT * FROM course_groups",
+    "INSERT INTO assessments (course_offering_id,title,type,max_score) VALUES (1,'forbidden','test',10)",
+    "UPDATE assessment_groups SET planned_date=CURRENT_DATE", "DELETE FROM assessment_results",
+    "UPDATE final_results SET grade_value=5", "SELECT nextval('public.final_results_id_seq')",
     "SELECT nextval('public.lessons_id_seq')",
     "SELECT nextval('public.users_id_seq')",
     "SELECT setval('public.auth_sessions_id_seq', 9999)",
@@ -628,6 +634,15 @@ with SessionLocal.begin() as db:
                 "-c",
                 (ROOT / "deploy/schedule_fixtures.py").read_text(),
                 input=password,
+            )
+            dc(
+                "run",
+                "--rm",
+                "-T",
+                "migrate",
+                "python",
+                "-c",
+                (ROOT / "deploy/academics_fixtures.py").read_text(),
             )
             # ACL reapplication must retain schedule reads and all existing auth permissions.
             run(["bash", "scripts/configure-postgres.sh"], env=env)
@@ -847,6 +862,32 @@ RETURNING id;""")
                     "PASS: real news list/detail and hidden-ID filtering under uni_space_api",
                     flush=True,
                 )
+                academics = client.get("/api/v1/academics", headers=schedule_headers)
+                assert academics.status_code == 200, academics.text
+                assert academics.headers["cache-control"] == "no-store"
+                academic_items = academics.json()["items"]
+                scored = next(
+                    i
+                    for i in academic_items
+                    if i["discipline"]["name"] == "Успеваемость: тестовый предмет 1"
+                )
+                assert (
+                    scored["total_score"],
+                    scored["max_score"],
+                    scored["graded_assessment_count"],
+                    scored["assessment_count"],
+                ) == (6, 30, 2, 3)
+                assert scored["final_result"]["has_debt"] is True
+                assert (
+                    client.get(
+                        "/api/v1/academics?student_id=1", headers=schedule_headers
+                    ).status_code
+                    == 422
+                )
+                print(
+                    "PASS: real /academics under restricted uni_space_api after repeated ACL",
+                    flush=True,
+                )
                 profile = client.get("/api/v1/users/me", headers=schedule_headers)
                 assert profile.status_code == 200, profile.text
                 assert profile.headers["cache-control"] == "no-store"
@@ -920,6 +961,20 @@ RETURNING id;""")
                         "Authorization": "Bearer " + second_login.json()["access_token"]
                     },
                 )
+                second_academics = client.get(
+                    "/api/v1/academics",
+                    headers={
+                        "Authorization": "Bearer " + second_login.json()["access_token"]
+                    },
+                )
+                assert second_academics.status_code == 200
+                second_scored = next(
+                    i
+                    for i in second_academics.json()["items"]
+                    if i["course_offering_id"] == scored["course_offering_id"]
+                )
+                assert second_scored["total_score"] == 18
+                assert second_scored["final_result"]["grade_value"] == 5
                 assert second_schedule.status_code == 200
                 second_headers = {
                     "Authorization": "Bearer " + second_login.json()["access_token"]
@@ -1277,7 +1332,12 @@ for index in range(6):
 'rooms', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM rooms t),
 'lessons', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM lessons t),
 'lesson_groups', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM lesson_groups t),
-'lesson_rooms', (SELECT jsonb_agg(to_jsonb(t) ORDER BY lesson_id,room_id) FROM lesson_rooms t));"""
+'lesson_rooms', (SELECT jsonb_agg(to_jsonb(t) ORDER BY lesson_id,room_id) FROM lesson_rooms t),
+'assessments', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM assessments t),
+'assessment_groups', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM assessment_groups t),
+'assessment_results', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM assessment_results t),
+'final_results', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM final_results t),
+'notifications', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM notifications t));"""
             expected = sql(snapshot)
             assert sql(
                 "SELECT count(*) FROM users u JOIN auth_sessions s ON s.user_id=u.id JOIN refresh_tokens r ON r.session_id=s.id WHERE u.login IN ('deployment-check','legacy-fixture');"
@@ -1426,6 +1486,24 @@ for index in range(6):
                         + restored_login.json()["access_token"]
                     },
                 )
+                restored_academics = restored.get(
+                    "/api/v1/academics",
+                    headers={
+                        "Authorization": "Bearer "
+                        + restored_login.json()["access_token"]
+                    },
+                )
+                restored_notifications = restored.get(
+                    "/api/v1/notifications",
+                    headers={
+                        "Authorization": "Bearer "
+                        + restored_login.json()["access_token"]
+                    },
+                )
+                assert restored_notifications.status_code == 200
+                assert restored_notifications.json() == notifications.json()
+                assert restored_academics.status_code == 200
+                assert restored_academics.json()["items"] == academic_items
                 assert restored_schedule.status_code == 200
                 assert restored_schedule.json()["items"] == items
                 restored_profile = restored.get(

@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/v1/academics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Academics */
+        get: operations["get_academics_api_v1_academics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/applications": {
         parameters: {
             query?: never;
@@ -181,6 +198,49 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AcademicItem */
+        AcademicItem: {
+            /** Assessment Count */
+            assessment_count: number;
+            /**
+             * Attestation Type
+             * @enum {string}
+             */
+            attestation_type: "exam" | "pass_fail" | "graded_pass";
+            /** Course Offering Id */
+            course_offering_id: string;
+            discipline: components["schemas"]["Ref"];
+            final_result: components["schemas"]["FinalResultResponse"];
+            /** Graded Assessment Count */
+            graded_assessment_count: number;
+            /** Max Score */
+            max_score: number;
+            /** Total Score */
+            total_score: number;
+        };
+        /** AcademicTermResponse */
+        AcademicTermResponse: {
+            /**
+             * Ends On
+             * Format: date
+             */
+            ends_on: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Starts On
+             * Format: date
+             */
+            starts_on: string;
+        };
+        /** AcademicsResponse */
+        AcademicsResponse: {
+            /** Items */
+            items: components["schemas"]["AcademicItem"][];
+            term: components["schemas"]["AcademicTermResponse"] | null;
+        };
         /** ApiError */
         ApiError: {
             error: components["schemas"]["ErrorBody"];
@@ -260,6 +320,19 @@ export interface components {
             code: string;
             /** Field */
             field: string | null;
+        };
+        /** FinalResultResponse */
+        FinalResultResponse: {
+            /** Grade Value */
+            grade_value: (2 | 3 | 4 | 5) | null;
+            /** Has Debt */
+            has_debt: boolean;
+            /** Passed */
+            passed: boolean | null;
+            /** Retake Date */
+            retake_date: string | null;
+            /** Retake Location */
+            retake_location: string | null;
         };
         Id: string;
         /** LessonPosition */
@@ -513,6 +586,62 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_academics_api_v1_academics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcademicsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     submit_application_api_v1_applications_post: {
         parameters: {
             query?: never;

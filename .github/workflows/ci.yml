@@ -390,8 +390,8 @@ jobs:
           docker build -f deploy/Dockerfile.web -t uni-space-web:task019 .
       - name: Check deployment test formatting
         run: |
-          uv run --locked --python 3.12.16 --project backend ruff check deploy/test_production.py deploy/schedule_fixtures.py
-          uv run --locked --python 3.12.16 --project backend ruff format --check deploy/test_production.py deploy/schedule_fixtures.py
+          uv run --locked --python 3.12.16 --project backend ruff check deploy/test_production.py deploy/schedule_fixtures.py deploy/academics_fixtures.py
+          uv run --locked --python 3.12.16 --project backend ruff format --check deploy/test_production.py deploy/schedule_fixtures.py deploy/academics_fixtures.py
           node --check deploy/spa.browser.mjs
       - name: Test isolated HTTPS deployment and backup recovery
         run: |
@@ -461,3 +461,61 @@ jobs:
             sleep 1
           done
           PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs SCHEDULE_TEST_PASSWORD=fictional-schedule-password node frontend/e2e/schedule.browser.mjs
+
+  academics-browser:
+    name: Student academics in Chromium
+    runs-on: ubuntu-24.04
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
+      COOKIE_SECURE: 'false'
+      ALLOWED_ORIGINS: '["http://localhost:5173"]'
+    services:
+      postgres:
+        image: postgres:17.11-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
+        env:
+          POSTGRES_DB: uni_space_test
+          POSTGRES_USER: uni_space_test
+          POSTGRES_PASSWORD: test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U uni_space_test -d uni_space_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.13.7
+          enable-cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.22.1
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Prepare isolated application and browser fixtures
+        run: |
+          npm install --global npm@11.19.1
+          npm ci --prefix frontend
+          uv python install 3.12.16
+          uv sync --locked --project backend --python 3.12.16
+          (cd backend && uv run --locked --python 3.12.16 alembic upgrade head)
+          printf '%s' 'fictional-schedule-password' | PYTHONPATH=backend uv run --locked --python 3.12.16 --project backend python deploy/schedule_fixtures.py
+          PYTHONPATH=backend uv run --locked --python 3.12.16 --project backend python deploy/academics_fixtures.py
+          mkdir -p work/browser-tooling
+          npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
+          node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell
+      - name: Run real academics browser scenarios
+        run: |
+          (cd backend && exec .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000) > work/api.log 2>&1 &
+          api_pid=$!
+          (cd frontend && exec node node_modules/vite/bin/vite.js --host 0.0.0.0) > work/vite.log 2>&1 &
+          vite_pid=$!
+          trap 'kill "$api_pid" "$vite_pid" 2>/dev/null || true; wait "$api_pid" "$vite_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/api/openapi.json >/dev/null && curl -fsS http://localhost:5173 >/dev/null; then break; fi
+            sleep 1
+          done
+          PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs SCHEDULE_TEST_PASSWORD=fictional-schedule-password node frontend/e2e/academics.browser.mjs

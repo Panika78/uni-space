@@ -1,0 +1,109 @@
+.academics-page {
+  min-width: 0;
+}
+.academics-term {
+  color: var(--text-muted, #65716b);
+  margin-bottom: 2rem;
+}
+.academics-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.9rem;
+}
+.academics-table th,
+.academics-table td {
+  text-align: left;
+  padding: 1rem 0.75rem;
+  border-bottom: 1px solid #dce3de;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.academics-table thead th {
+  color: #58685f;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.academics-table th:first-child {
+  width: 44%;
+}
+.academics-table tbody th {
+  font-weight: 500;
+}
+.academics-table small {
+  display: block;
+  color: #58685f;
+  margin-top: 0.35rem;
+}
+.academics-session {
+  margin-top: 2.5rem;
+}
+.academics-label {
+  display: inline-block;
+  border-radius: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+}
+.academics-label--pending {
+  background: #edf0ee;
+  color: #4d5c53;
+}
+.academics-label--complete {
+  background: #e5eee7;
+  color: #285a3b;
+}
+.academics-label--debt {
+  background: #f7e9e5;
+  color: #873d2a;
+}
+.academics-debt,
+.academics-retake {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+}
+.academics-debt {
+  color: #873d2a;
+}
+.academics-mobile-label {
+  display: none;
+}
+@media (max-width: 640px) {
+  .academics-table,
+  .academics-table tbody {
+    display: block;
+  }
+  .academics-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .academics-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    padding: 1rem 0;
+    border-bottom: 1px solid #dce3de;
+    gap: 0.65rem;
+  }
+  .academics-table th:first-child,
+  .academics-table tbody th {
+    grid-column: 1 / -1;
+    width: auto;
+  }
+  .academics-table th,
+  .academics-table td {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+  .academics-session td {
+    grid-column: 1 / -1;
+  }
+  .academics-mobile-label {
+    display: block;
+    color: #58685f;
+    font-size: 0.75rem;
+    margin-bottom: 0.3rem;
+  }
+}
