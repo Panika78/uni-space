@@ -148,8 +148,12 @@ export function SchedulePage() {
       ),
   })
   useEffect(() => {
-    if (query.isError) pendingPosition.current = null
-    if (!pendingPosition.current || !query.isSuccess) return
+    if (!navigation || getMoscowDate(new Date(navigation.starts_at)) !== date) {
+      pendingPosition.current = null
+      return
+    }
+    // Keep the requested position across transient failures; wait for fresh week data.
+    if (!pendingPosition.current || !query.isSuccess || query.isFetching) return
     const cards = pageRef.current?.querySelectorAll<HTMLElement>(
       '.schedule-day.is-selected [data-lesson-id]',
     )
@@ -159,10 +163,15 @@ export function SchedulePage() {
     if (target) {
       target.focus()
       target.scrollIntoView?.({ block: 'nearest' })
+      pendingPosition.current = null
     }
-    // If assignments changed since the source response, never synthesize a target.
-    pendingPosition.current = null
-  }, [date, navigation, query.data, query.isSuccess, query.isError])
+  }, [date, navigation, query.data, query.isSuccess, query.isFetching])
+  const isPositionUnavailable =
+    navigation !== null &&
+    getMoscowDate(new Date(navigation.starts_at)) === date &&
+    query.isSuccess &&
+    !query.isFetching &&
+    !listDayLessons(query.data.items, date).some((lesson) => lesson.id === navigation.id)
   const days = [...new Set(Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)))]
   const error = query.error
   const denied = error instanceof ApiClientError && error.status === 403
@@ -252,6 +261,11 @@ export function SchedulePage() {
           </button>
         ))}
       </div>
+      {isPositionUnavailable && (
+        <p role="status" className="schedule-empty">
+          Не удалось найти выбранную позицию в расписании. Возможно, расписание изменилось.
+        </p>
+      )}
       {query.isPending ? (
         <LoadingState title="Загружаем расписание…" />
       ) : query.isError ? (

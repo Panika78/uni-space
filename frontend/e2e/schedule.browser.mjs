@@ -91,6 +91,34 @@ async function checkOvernightDates(page) {
   ])
 }
 
+async function checkCancelledLesson(card, width) {
+  assert.ok((await card.innerText()).includes('Отменено'))
+  for (const selector of ['time', 'h3']) {
+    assert.ok(
+      await card
+        .locator(selector)
+        .evaluateAll(
+          (nodes) =>
+            nodes.length > 0 &&
+            nodes.every((node) =>
+              window.getComputedStyle(node).textDecorationLine.includes('line-through'),
+            ),
+        ),
+      `Cancelled ${selector} is struck through`,
+    )
+  }
+  assert.equal(await card.locator('.lesson-card__teacher, .lesson-card__kind, li').count(), 0)
+  const timeStyle = await card.locator('.lesson-card__time').evaluate((node) => {
+    const style = window.getComputedStyle(node)
+    return { minHeight: style.minHeight, padding: style.paddingTop, border: style.borderTopWidth }
+  })
+  assert.deepEqual(timeStyle, { minHeight: '0px', padding: '0px', border: '0px' })
+  if (width === 360) {
+    const box = await card.boundingBox()
+    assert.ok(box.width <= 360 && box.height <= 120, 'Cancelled row remains compact at 360px')
+  }
+}
+
 async function checkScheduleChanges(page, width) {
   for (const mode of width === 1440 ? ['День', 'Неделя'] : ['День']) {
     if (width === 1440) await page.getByRole('button', { name: mode, exact: true }).click()
@@ -98,10 +126,12 @@ async function checkScheduleChanges(page, width) {
       ['Одиночный перенос', '2026-11-12', '2026-11-13', 'scheduled'],
       ['Первая позиция переноса', '2026-11-10', '2026-12-20', 'scheduled'],
       ['Перенос с отменённым результатом', '2026-11-12', '2027-01-03', 'cancelled'],
-      ['Промежуточная позиция отменённой цепочки', '2026-11-20', '2027-01-03', 'cancelled'],
+      ['Перенос с отменённым результатом', '2026-11-20', '2027-01-03', 'cancelled'],
     ]) {
       await page.getByLabel('Дата', { exact: true }).fill(sourceDate)
-      const source = page.getByRole('article', { name: sourceName, exact: true })
+      const source = page
+        .locator('.schedule-day.is-selected')
+        .getByRole('article', { name: sourceName, exact: true })
       await source.waitFor()
       assert.equal(await source.locator('.lesson-card__teacher').count(), 0)
       assert.ok(
@@ -112,6 +142,7 @@ async function checkScheduleChanges(page, width) {
             window.getComputedStyle(node).textDecorationLine.includes('line-through'),
           ),
       )
+      const disciplineName = await source.locator('h3').innerText()
       const text = await source.innerText()
       assert.ok(text.includes('Перенесено на'))
       assert.equal(text.includes('Отменено'), targetStatus === 'cancelled')
@@ -127,8 +158,9 @@ async function checkScheduleChanges(page, width) {
       const target = page.locator('.schedule-day.is-selected .lesson-card:focus')
       await target.waitFor()
       assert.ok((await target.getAttribute('class')).includes(`lesson-card--${targetStatus}`))
+      assert.equal(await target.locator('h3').innerText(), disciplineName)
       assert.equal(await target.getByText(/Перенесено/).count(), 0)
-      if (targetStatus === 'cancelled') assert.ok((await target.innerText()).includes('Отменено'))
+      if (targetStatus === 'cancelled') await checkCancelledLesson(target, width)
       else assert.equal(await target.locator('.lesson-card__teacher').count(), 1)
       if (width === 1440)
         assert.equal(
@@ -138,12 +170,16 @@ async function checkScheduleChanges(page, width) {
       await noOverflow(page)
     }
   }
+  await page.getByLabel('Дата', { exact: true }).fill('2026-11-10')
+  const cancelled = page.getByRole('article', { name: 'Отменённое занятие' })
+  await cancelled.waitFor()
+  await checkCancelledLesson(cancelled, width)
   await page.getByLabel('Дата', { exact: true }).fill('2026-11-12')
   const unavailable = page.getByRole('article', { name: 'Недоступный результат переноса' })
   await unavailable.waitFor()
   assert.equal(await unavailable.locator('.lesson-card__status').innerText(), 'Перенесено')
   assert.equal(await unavailable.getByRole('button').count(), 0)
-  assert.equal(await page.getByText('Скрытая позиция другой группы', { exact: true }).count(), 0)
+  assert.equal(await page.locator('.schedule-day.is-selected .lesson-card').count(), 3)
   assert.equal(await page.getByText('Неактуально', { exact: true }).count(), 0)
   await noOverflow(page)
   await page.screenshot({ path: `work/schedule-changes-${width}.png`, fullPage: true })

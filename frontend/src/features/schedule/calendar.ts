@@ -69,6 +69,7 @@ const boundaryTime = new Intl.DateTimeFormat('en-GB', {
 export function listDayLessons(items: Lesson[], date: string): Lesson[] {
   return items.filter((lesson) => {
     const startDate = getMoscowDate(new Date(lesson.starts_at))
+    if (lesson.status !== 'scheduled') return startDate === date
     const end = new Date(lesson.ends_at)
     const endDate = getMoscowDate(end)
     // Compare Moscow calendar dates, preserving IANA historical offsets and sub-ms ends.

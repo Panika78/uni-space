@@ -91,3 +91,17 @@ it('uses historical Moscow summer time and keeps sub-millisecond midnight overla
   })
   expect(listDayLessons([fraction], '2026-11-11')).toEqual([fraction])
 })
+
+it.each(['scheduled', 'moved', 'cancelled'] as const)(
+  'places an overnight %s lesson on the appropriate Moscow dates',
+  (status) => {
+    const lesson = createLesson({
+      status,
+      starts_at: '2026-12-31T20:30:00Z',
+      ends_at: '2026-12-31T21:30:00Z',
+    })
+    expect(listDayLessons([lesson], '2026-12-31')).toEqual([lesson])
+    expect(listDayLessons([lesson], '2027-01-01')).toEqual(status === 'scheduled' ? [lesson] : [])
+    expect(formatTime(lesson.ends_at)).toBe('00:30')
+  },
+)
