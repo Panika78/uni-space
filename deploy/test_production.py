@@ -1109,7 +1109,9 @@ with SessionLocal.begin() as db:
                     application_id = int(submitted.json()["id"])
                     application_path = f"/api/v1/applications/{application_id}"
                     assert (
-                        student_client.get(application_path, headers=student_headers).json()
+                        student_client.get(
+                            application_path, headers=student_headers
+                        ).json()
                         == submitted.json()
                     )
                     application_page = student_client.get(
@@ -1139,12 +1141,17 @@ with SessionLocal.begin() as db:
                         == 200
                     )
                     assert (
-                        after_restart.get(application_path, headers=student_headers).json()
+                        after_restart.get(
+                            application_path, headers=student_headers
+                        ).json()
                         == submitted.json()
                     )
-                    assert submitted.json() in after_restart.get(
-                        "/api/v1/applications", headers=student_headers
-                    ).json()["items"]
+                    assert (
+                        submitted.json()
+                        in after_restart.get(
+                            "/api/v1/applications", headers=student_headers
+                        ).json()["items"]
+                    )
                 print(
                     "PASS: PostgreSQL application row unchanged after API and DB restart with persistent volume",
                     flush=True,
