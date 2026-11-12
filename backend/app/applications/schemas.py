@@ -2,7 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.core.schemas import DateTime, Id, RequestModel
+from app.core.schemas import DateTime, Id, Page, RequestModel
 
 
 class Service(BaseModel):
@@ -50,3 +50,7 @@ class ApplicationResponse(RequestModel):
     feedback: str | None
     created_at: DateTime
     updated_at: DateTime
+
+
+class ApplicationPage(Page[ApplicationResponse]):
+    pass

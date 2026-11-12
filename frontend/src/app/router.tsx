@@ -7,6 +7,7 @@ import { SchedulePage } from '../features/schedule/SchedulePage'
 import { useAuth } from '../features/auth/AuthProvider'
 import { LoadingState } from '../shared/ui/StatusStates'
 import { StudentLayout, UnavailableSection } from './StudentLayout'
+import { ApplicationDetailPage } from '../features/services/ApplicationsPages'
 import { ApplicationFormPage, ServicesPage } from '../features/services/ServicesPages'
 import { NewsDetailPage, NewsFeedPage } from '../features/news/NewsPages'
 import type { ReactNode } from 'react'
@@ -117,6 +118,7 @@ export const appRoutes: RouteObject[] = [
                 children: [
                   { path: '/schedule', element: <SchedulePage /> },
                   { path: '/academics', element: <AcademicsPage /> },
+                  { path: '/applications/:id', element: <ApplicationDetailPage /> },
                   { path: '/services', element: <ServicesPage /> },
                   { path: '/services/:serviceCode', element: <ApplicationFormPage /> },
                   { path: '/news', element: <NewsFeedPage /> },

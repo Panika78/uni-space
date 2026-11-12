@@ -1,4 +1,12 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
+import {
+  cleanup,
+  fireEvent,
+  render as testingRender,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
@@ -28,6 +36,16 @@ vi.mock('../../shared/api/client', () => ({
 }))
 
 import { ApplicationFormPage, ServicesPage } from './ServicesPages'
+
+function render(ui: ReactNode) {
+  return testingRender(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      {ui}
+    </QueryClientProvider>,
+  )
+}
 
 beforeEach(() => apiFetch.mockReset())
 afterEach(cleanup)
