@@ -7,6 +7,7 @@ import sys
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from argon2.exceptions import VerifyMismatchError
 from sqlalchemy import select, text
 from sqlalchemy.engine import make_url
 
@@ -46,9 +47,10 @@ DEMO_NEWS = (
     (
         "Об изменении расписания занятий 19 ноября в учебно-лабораторном корпусе",
         "19 ноября 2026 года в учебно-лабораторном корпусе проводится внеплановая "
-        "проверка защитных контуров из-за нестабильного магического фона. "
+        "проверка оборудования. "
         "Лабораторная работа по общей и неорганической "
-        "химии отменена. Введение в зельеварение переносится на 20 ноября в Главный "
+        "химии отменена. Введение в зельеварение сначала переносится на 20 ноября, "
+        "затем на окончательную дату — 23 ноября 2026 года — в Главный "
         "учебный корпус. Практикум по гадательным системам переносится с 19 на 21 "
         "ноября в Северную башню. Проверьте личное расписание: исходные занятия "
         "помечены как перенесённые или отменённые, новые позиции связаны с ними.",
@@ -68,6 +70,15 @@ DEMO_NEWS = (
         "демонстрации; у объявления нет действующих контактов или ссылки для отклика.",
         datetime(2026, 11, 8, 10, tzinfo=MOSCOW),
     ),
+)
+LEGACY_INTRO_NEWS_BODY = (
+    "19 ноября 2026 года в учебно-лабораторном корпусе проводится внеплановая "
+    "проверка защитных контуров из-за нестабильного магического фона. "
+    "Лабораторная работа по общей и неорганической химии отменена. "
+    "Введение в зельеварение переносится на 20 ноября в Главный учебный "
+    "корпус. Практикум по гадательным системам переносится с 19 на 21 "
+    "ноября в Северную башню. Проверьте личное расписание: исходные занятия "
+    "помечены как перенесённые или отменённые, новые позиции связаны с ними."
 )
 
 
@@ -120,17 +131,63 @@ def require_safe_target() -> None:
         raise RuntimeError("Connected database or role does not match the confirmed seed target")
 
 
-def one_or_create(session, model, identity: dict, values: dict):
+def one_or_create(session, model, identity: dict, values: dict, *, mutable: dict | None = None):
     matches = session.scalars(select(model).filter_by(**identity)).all()
     if len(matches) > 1:
         raise RuntimeError(f"Ambiguous existing {model.__tablename__} seed identity")
     instance = matches[0] if matches else model(**identity, **values)
-    for key, value in values.items():
-        setattr(instance, key, value)
+    if matches:
+        for key, value in values.items():
+            current_value = getattr(instance, key)
+            allowed_previous_values = (mutable or {}).get(key, set())
+            if current_value != value and current_value not in allowed_previous_values:
+                raise RuntimeError(
+                    f"Existing {model.__tablename__} seed identity has unexpected data"
+                )
+            if current_value != value:
+                setattr(instance, key, value)
+    else:
+        for key, value in values.items():
+            setattr(instance, key, value)
     if not matches:
         session.add(instance)
     session.flush()
     return instance
+
+
+def validate_active_schedule(session) -> None:
+    """Reject overlapping active lessons by room, teacher, or student group."""
+    lessons = session.scalars(
+        select(Lesson).where(
+            Lesson.status == "scheduled",
+            Lesson.starts_at >= datetime.combine(TERM_START, time.min, MOSCOW),
+            Lesson.starts_at < datetime.combine(TERM_END + timedelta(days=1), time.min, MOSCOW),
+        )
+    ).all()
+    rooms_by_lesson: dict[int, set[int]] = {}
+    groups_by_lesson: dict[int, set[int]] = {}
+    for lesson in lessons:
+        rooms_by_lesson[lesson.id] = set(
+            session.scalars(select(LessonRoom.room_id).where(LessonRoom.lesson_id == lesson.id))
+        )
+        groups_by_lesson[lesson.id] = set(
+            session.scalars(select(LessonGroup.group_id).where(LessonGroup.lesson_id == lesson.id))
+        )
+    for index, left in enumerate(lessons):
+        for right in lessons[index + 1 :]:
+            if left.starts_at >= right.ends_at or right.starts_at >= left.ends_at:
+                continue
+            if (
+                left.teacher_id == right.teacher_id
+                or rooms_by_lesson[left.id] & rooms_by_lesson[right.id]
+                or groups_by_lesson[left.id] & groups_by_lesson[right.id]
+            ):
+                raise RuntimeError("Generated schedule contains an overlapping active lesson")
+
+
+def require_seed_status(lesson: Lesson, accepted_statuses: set[str]) -> None:
+    if lesson.status not in accepted_statuses:
+        raise RuntimeError("Existing lesson status is not owned by the demonstration seed")
 
 
 def seed_demo_data() -> None:
@@ -226,20 +283,60 @@ def seed_demo_data() -> None:
         users = {}
         students = {}
         for key, login, full_name, password_var in (
-            ("pz", "demo-pz101", "Артём Сергеевич Лавров", "DEMO_STUDENT_A_PASSWORD"),
+            ("pz", "demo-pz101", "Иван Сергеевич Гончаров", "DEMO_STUDENT_A_PASSWORD"),
             ("pm", "demo-pm201", "Амели Викторовна Волкова", "DEMO_STUDENT_B_PASSWORD"),
         ):
             existing = db.scalar(select(User).where(User.login == login))
-            if existing and (existing.role != "student" or existing.full_name != full_name):
+            legacy_name = "Артём Сергеевич Лавров" if key == "pz" else full_name
+            if existing and existing.role != "student":
                 raise RuntimeError(f"Refusing to take over existing account {login}")
+            if existing and existing.full_name not in {full_name, legacy_name}:
+                raise RuntimeError(f"Refusing to rename unverified account {login}")
+            if existing:
+                profile = db.scalar(select(Student).where(Student.user_id == existing.id))
+                if profile is None:
+                    raise RuntimeError(f"Cannot verify demonstration account ownership for {login}")
+                expected_group = "ПЗ-101" if key == "pz" else "ПМ-201"
+                expected_program = (
+                    ("ПЗ", "Прикладное зельеварение", "04.03.01", "Химия")
+                    if key == "pz"
+                    else (
+                        "ПМ",
+                        "Прикладная мантика и прогностика",
+                        "01.03.02",
+                        "Прикладная математика и информатика",
+                    )
+                )
+                group = db.get(StudyGroup, profile.group_id)
+                program = db.get(Program, group.program_id) if group else None
+                faculty = db.get(OrgUnit, program.faculty_id) if program else None
+                if (
+                    group is None
+                    or group.name != expected_group
+                    or group.course_number != (1 if key == "pz" else 2)
+                    or profile.academic_status != "enrolled"
+                    or program is None
+                    or (
+                        program.code,
+                        program.name,
+                        program.direction_code,
+                        program.direction_name,
+                    )
+                    != expected_program
+                    or faculty is None
+                    or faculty.name != "Факультет естественных наук"
+                    or faculty.type != "faculty"
+                ):
+                    raise RuntimeError(f"Cannot verify demonstration account ownership for {login}")
             password = os.environ[password_var]
-            password_hash = (
-                existing.password_hash
-                if existing
-                and PASSWORD_HASHER.check_needs_rehash(existing.password_hash) is False
-                and PASSWORD_HASHER.verify(existing.password_hash, password)
-                else PASSWORD_HASHER.hash(password)
-            )
+            if existing:
+                try:
+                    password_matches = PASSWORD_HASHER.verify(existing.password_hash, password)
+                except VerifyMismatchError:
+                    password_matches = False
+                if not password_matches:
+                    raise RuntimeError(f"Supplied password does not match existing account {login}")
+            password_hash = existing.password_hash if existing else PASSWORD_HASHER.hash(password)
             users[key] = one_or_create(
                 db,
                 User,
@@ -248,8 +345,9 @@ def seed_demo_data() -> None:
                     "password_hash": password_hash,
                     "full_name": full_name,
                     "role": "student",
-                    "is_active": True,
+                    "is_active": existing.is_active if existing else True,
                 },
+                mutable={"full_name": {legacy_name, full_name}},
             )
             students[key] = one_or_create(
                 db,
@@ -392,26 +490,30 @@ def seed_demo_data() -> None:
             "pz": [
                 (0, "09:00", 2, ("ГУК", "201"), "lecture"),
                 (0, "11:00", 4, ("ГУК", "215"), "seminar"),
-                (1, "09:00", 9, ("УЛК", "106"), "lab"),
-                (1, "13:00", 0, ("ГУК", "304"), "lecture"),
-                (2, "10:00", 10, ("УЛК", "Лаборатория № 3"), "lab"),
-                (2, "13:00", 5, ("ГУК", "402"), "lab"),
+                (1, "09:00", 1, ("ГУК", "304"), "lecture"),
+                (1, "11:00", 0, ("ГУК", "201"), "lecture"),
+                (1, "13:00", 8, ("УЛК", "112"), "seminar"),
+                (2, "09:00", 7, ("ГУК", "304"), "seminar"),
+                (2, "11:00", 5, ("ГУК", "402"), "lab"),
+                (2, "13:00", 6, ("ГУК", "215"), "lecture"),
                 (3, "09:00", 9, ("УЛК", "106"), "lab"),
-                (3, "11:00", 10, ("УЛК", "Лаборатория № 3"), "lab"),
-                (4, "10:00", 11, ("УЛК", "112"), "lab"),
-                (4, "13:00", 3, ("ГУК", "304"), "seminar"),
+                (3, "13:00", 10, ("УЛК", "Лаборатория № 3"), "lab"),
+                (4, "09:00", 11, ("УЛК", "112"), "lab"),
+                (4, "11:00", 3, ("ГУК", "215"), "seminar"),
             ],
             "pm": [
-                (0, "09:00", 1, ("ГУК", "201"), "lecture"),
-                (0, "11:00", 7, ("ГУК", "215"), "seminar"),
-                (1, "09:00", 4, ("ГУК", "215"), "seminar"),
-                (1, "13:00", 9, ("ГУК", "304"), "lecture"),
-                (2, "10:00", 8, ("ГУК", "304"), "seminar"),
-                (2, "13:00", 5, ("ГУК", "402"), "lecture"),
-                (3, "09:00", 0, ("ГУК", "201"), "seminar"),
+                (0, "09:00", 7, ("УЛК", "213"), "seminar"),
+                (0, "13:00", 3, ("ГУК", "304"), "lecture"),
+                (1, "09:00", 1, ("ГУК", "201"), "lecture"),
+                (1, "11:00", 4, ("ГУК", "215"), "seminar"),
+                (1, "13:00", 5, ("ГУК", "402"), "lecture"),
+                (2, "09:00", 0, ("ГУК", "201"), "seminar"),
+                (2, "11:00", 6, ("ГУК", "215"), "seminar"),
+                (2, "13:00", 9, ("ГУК", "304"), "lecture"),
+                (3, "09:00", 11, ("ГУК", "201"), "seminar"),
                 (3, "11:00", 8, ("УЛК", "213"), "seminar"),
-                (4, "10:00", 11, ("ГУК", "304"), "seminar"),
-                (4, "13:00", 6, ("ГУК", "402"), "seminar"),
+                (3, "13:00", 10, ("ГУК", "402"), "seminar"),
+                (4, "09:00", 2, ("ГУК", "304"), "lecture"),
             ],
         }
         generated: dict[tuple[str, date, str], Lesson] = {}
@@ -428,6 +530,20 @@ def seed_demo_data() -> None:
                             "course_offering_id": offerings[(key, subject_name)].id,
                             "starts_at": starts,
                         }
+                        existing_lesson = db.scalar(select(Lesson).filter_by(**identity))
+                        allowed_statuses = set()
+                        if current == date(2026, 11, 19):
+                            if key == "pz" and subject_name == "Общая и неорганическая химия":
+                                allowed_statuses.add("cancelled")
+                            if key == "pz" and subject_name == "Введение в зельеварение":
+                                allowed_statuses.add("moved")
+                            if key == "pm" and subject_name == "Практикум по гадательным системам":
+                                allowed_statuses.add("moved")
+                        status_mutations = (
+                            {"status": allowed_statuses}
+                            if existing_lesson and existing_lesson.status in allowed_statuses
+                            else {}
+                        )
                         lesson = one_or_create(
                             db,
                             Lesson,
@@ -441,6 +557,7 @@ def seed_demo_data() -> None:
                                 "is_additional": False,
                                 "created_by_user_id": None,
                             },
+                            mutable=status_mutations,
                         )
                         generated[(key, current, subject_name)] = lesson
                         if not db.scalar(
@@ -462,6 +579,7 @@ def seed_demo_data() -> None:
             key: str, subject: str, from_day: date, to_day: date, to_time: str, room_key
         ):
             source = generated[(key, from_day, subject)]
+            require_seed_status(source, {"scheduled", "moved"})
             source.status = "moved"
             replacement_start = datetime.combine(to_day, time.fromisoformat(to_time), MOSCOW)
             replacement = one_or_create(
@@ -477,6 +595,7 @@ def seed_demo_data() -> None:
                     "is_additional": False,
                     "created_by_user_id": None,
                 },
+                mutable={"status": {"moved"}},
             )
             for row in db.scalars(
                 select(LessonGroup).where(LessonGroup.lesson_id == source.id)
@@ -494,8 +613,11 @@ def seed_demo_data() -> None:
             return replacement
 
         # Thursday PZ lab cancellation; PZ introductory lesson moved through two positions.
-        generated[("pz", date(2026, 11, 19), "Общая и неорганическая химия")].status = "cancelled"
+        chemistry_source = generated[("pz", date(2026, 11, 19), "Общая и неорганическая химия")]
+        require_seed_status(chemistry_source, {"scheduled", "cancelled"})
+        chemistry_source.status = "cancelled"
         root = generated[("pz", date(2026, 11, 19), "Введение в зельеварение")]
+        require_seed_status(root, {"scheduled", "moved"})
         root.status = "moved"
         middle = move_lesson(
             "pz",
@@ -505,6 +627,7 @@ def seed_demo_data() -> None:
             "15:00",
             ("ГУК", "304"),
         )
+        require_seed_status(middle, {"scheduled", "moved"})
         middle.status = "moved"
         final_start = datetime(2026, 11, 23, 15, tzinfo=MOSCOW)
         final = one_or_create(
@@ -539,6 +662,8 @@ def seed_demo_data() -> None:
             "11:00",
             ("СБ", "14"),
         )
+
+        validate_active_schedule(db)
 
         # Current works only; first year has no final results or closed prior terms.
         assessment_profiles = {
@@ -596,8 +721,13 @@ def seed_demo_data() -> None:
                             )
                         )
                     else:
+                        expected_graded_at = datetime(2026, 11, 10, 12, tzinfo=UTC)
+                        if result.score != score or result.graded_at != expected_graded_at:
+                            raise RuntimeError(
+                                "Existing assessment result differs from demonstration data"
+                            )
                         result.score = score
-                        result.graded_at = datetime(2026, 11, 10, 12, tzinfo=UTC)
+                        result.graded_at = expected_graded_at
 
         study_certificate = db.scalar(
             select(ServiceType).where(ServiceType.code == "study_certificate")
@@ -608,6 +738,22 @@ def seed_demo_data() -> None:
             )
 
         for title, body, published_at in DEMO_NEWS:
+            allowed_bodies = {body}
+            if title == DEMO_NEWS[0][0]:
+                allowed_bodies.add(LEGACY_INTRO_NEWS_BODY)
+            existing_news = db.scalars(select(News).where(News.title == title)).all()
+            if existing_news:
+                if len(existing_news) != 1:
+                    raise RuntimeError("Ambiguous existing demonstration news identity")
+                if (
+                    existing_news[0].published_at != published_at
+                    or existing_news[0].author_user_id is not None
+                    or existing_news[0].body not in allowed_bodies
+                    or existing_news[0].is_published is not True
+                ):
+                    raise RuntimeError(
+                        "Existing news identity is not owned by the demonstration seed"
+                    )
             one_or_create(
                 db,
                 News,
@@ -618,6 +764,7 @@ def seed_demo_data() -> None:
                     "published_at": published_at,
                     "is_published": True,
                 },
+                mutable={"body": allowed_bodies},
             )
         for key, notification_type, title, body in (
             (
