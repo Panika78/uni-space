@@ -70,6 +70,18 @@ export function ApplicationsList() {
     gcTime: Infinity,
   })
   const items = query.data?.pages.flatMap((page) => page.items) ?? []
+  // A failed refresh leaves the old snapshot/cursors intact. Only a complete
+  // refetch can make that snapshot eligible for further pagination again.
+  const canLoadMore = query.hasNextPage && !query.isFetching && !query.isRefetchError
+  function handleLoadMore() {
+    if (!canLoadMore) return
+    void query.fetchNextPage({ cancelRefetch: false })
+  }
+  function handleRetry() {
+    if (query.isFetching) return
+    if (query.isFetchNextPageError) handleLoadMore()
+    else void query.refetch({ cancelRefetch: false })
+  }
   useEffect(() => {
     const target = returnFocus.current
     if (!target || target.locationKey !== location.key) return
@@ -104,15 +116,19 @@ export function ApplicationsList() {
       )}
       {query.isError && (
         <ErrorState
-          title="Не удалось загрузить заявления"
+          title={
+            query.isFetchNextPageError
+              ? 'Не удалось загрузить следующую страницу'
+              : 'Не удалось загрузить заявления'
+          }
           description={
-            query.data
-              ? 'Показаны ранее загруженные заявления. Их данные могут быть неактуальны; повторите загрузку.'
-              : 'Проверьте соединение и повторите попытку.'
+            query.isFetchNextPageError
+              ? 'Ранее загруженные заявления сохранены. Повторите загрузку следующей страницы.'
+              : query.data
+                ? 'Показаны ранее загруженные заявления. Их данные могут быть неактуальны; повторите загрузку.'
+                : 'Проверьте соединение и повторите попытку.'
           }
-          onRetry={() =>
-            void (query.isFetchNextPageError ? query.fetchNextPage() : query.refetch())
-          }
+          onRetry={handleRetry}
         />
       )}
       {query.isSuccess && items.length === 0 && (
@@ -187,11 +203,7 @@ export function ApplicationsList() {
         </table>
       )}
       {query.hasNextPage && (
-        <button
-          className="service-action"
-          disabled={query.isFetching}
-          onClick={() => void query.fetchNextPage()}
-        >
+        <button className="service-action" disabled={!canLoadMore} onClick={handleLoadMore}>
           {query.isFetchingNextPage ? 'Загружаем…' : 'Показать ещё'}
         </button>
       )}

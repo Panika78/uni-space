@@ -145,6 +145,7 @@ export SERVICES_TEST_URL=http://localhost:5173
 node frontend/e2e/services.browser.mjs
 node frontend/e2e/applications.browser.mjs
 node frontend/e2e/applications-review.browser.mjs
+node frontend/e2e/applications-pagination.browser.mjs
 ```
 
 Сценарий требует второго тестового студента и проверяет смену аккаунта без
@@ -159,6 +160,9 @@ node frontend/e2e/applications-review.browser.mjs
 исходной записи. Список обновляется при каждом повторном открытии; загруженные
 страницы сохраняются в персональном кеше, а контекст возврата привязан к исходной
 записи и записи истории браузера.
+`applications-pagination.browser.mjs` проверяет запрет продолжения по старому
+курсору после ошибки refresh, полный повтор обновления и независимый повтор
+неудачной загрузки следующей страницы, включая клавиатуру и прокрутку на обеих ширинах.
 
 ## Документация
 

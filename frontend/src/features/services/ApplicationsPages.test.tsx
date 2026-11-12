@@ -260,3 +260,172 @@ it('records the private return target without clearing a list refresh error', as
   client.removeQueries({ queryKey: ['applications'] })
   expect(client.getQueryData(['applications', 'return-focus'])).toBeUndefined()
 })
+
+function createApplications(count: number) {
+  return Array.from({ length: count }, (_, index) => ({ ...item, id: String(count - index) }))
+}
+function selectApplicationPage(rows: ReturnType<typeof createApplications>, cursor: string | null) {
+  const remaining = cursor ? rows.filter((row) => Number(row.id) < Number(cursor.slice(7))) : rows
+  const selected = remaining.slice(0, 20)
+  return {
+    items: selected,
+    next_cursor: remaining.length > 20 ? `cursor-${selected.at(-1)!.id}` : null,
+  }
+}
+function createDeferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((complete) => {
+    resolve = complete
+  })
+  return { promise, resolve }
+}
+function getVisibleApplicationIds() {
+  return screen
+    .getAllByRole('link', { name: /№ / })
+    .map((link) => link.textContent?.match(/№ (\d+)$/)?.[1])
+}
+
+it('blocks the old cursor after first-page refresh failure and recovers all 26 records', async () => {
+  let rows = createApplications(25)
+  let failRefresh = false
+  const cursors: (string | null)[] = []
+  apiFetch.mockImplementation((path: string) => {
+    const cursor = new URL(path, 'http://localhost').searchParams.get('cursor')
+    cursors.push(cursor)
+    return !cursor && failRefresh
+      ? Promise.reject(new Error('refresh offline'))
+      : Promise.resolve(selectApplicationPage(rows, cursor))
+  })
+  const { router } = mount()
+  await screen.findByRole('link', { name: /№ 6$/ })
+  rows = [{ ...item, id: '26', created_at: '2026-11-02T12:00:00Z' }, ...rows]
+  failRefresh = true
+  await act(async () => {
+    await router.navigate('/other')
+  })
+  await act(async () => {
+    await router.navigate('/services')
+  })
+  await screen.findByRole('alert')
+  expect(getVisibleApplicationIds()).toEqual(
+    createApplications(25)
+      .slice(0, 20)
+      .map((row) => row.id),
+  )
+  expect(screen.getByText(/Их данные могут быть неактуальны/)).toBeInTheDocument()
+  const before = [...cursors]
+  fireEvent.click(screen.getByRole('button', { name: 'Показать ещё' }))
+  await act(async () => {})
+  expect(cursors).toEqual(before)
+  expect(screen.getByRole('button', { name: 'Показать ещё' })).toBeDisabled()
+  failRefresh = false
+  fireEvent.click(screen.getByRole('button', { name: 'Повторить' }))
+  await screen.findByRole('link', { name: /№ 26$/ })
+  expect(screen.getByRole('button', { name: 'Показать ещё' })).toBeEnabled()
+  fireEvent.click(screen.getByRole('button', { name: 'Показать ещё' }))
+  await screen.findByRole('link', { name: /№ 1$/ })
+  expect(getVisibleApplicationIds()).toEqual(rows.map((row) => row.id))
+  expect(cursors).toEqual([null, null, null, 'cursor-7'])
+})
+
+it('blocks pagination after a second refresh page fails and deduplicates full-refresh retry', async () => {
+  let rows = createApplications(45)
+  let failRefresh = false
+  let retryGate: ReturnType<
+    typeof createDeferred<ReturnType<typeof selectApplicationPage>>
+  > | null = null
+  const secondRetryGate = createDeferred<ReturnType<typeof selectApplicationPage>>()
+  const cursors: (string | null)[] = []
+  apiFetch.mockImplementation((path: string) => {
+    const cursor = new URL(path, 'http://localhost').searchParams.get('cursor')
+    cursors.push(cursor)
+    if (!cursor && retryGate) return retryGate.promise
+    if (cursor && failRefresh) return Promise.reject(new Error('second refresh page offline'))
+    if (cursor === 'cursor-27' && retryGate) return secondRetryGate.promise
+    return Promise.resolve(selectApplicationPage(rows, cursor))
+  })
+  const { router } = mount()
+  fireEvent.click(await screen.findByRole('button', { name: 'Показать ещё' }))
+  await screen.findByRole('link', { name: /№ 6$/ })
+  rows = [{ ...item, id: '46', created_at: '2026-11-02T12:00:00Z' }, ...rows]
+  failRefresh = true
+  await act(async () => {
+    await router.navigate('/other')
+  })
+  await act(async () => {
+    await router.navigate('/services')
+  })
+  await screen.findByRole('alert')
+  expect(getVisibleApplicationIds()).toEqual(
+    createApplications(45)
+      .slice(0, 40)
+      .map((row) => row.id),
+  )
+  const before = [...cursors]
+  fireEvent.click(screen.getByRole('button', { name: 'Показать ещё' }))
+  await act(async () => {})
+  expect(cursors).toEqual(before)
+  failRefresh = false
+  retryGate = createDeferred()
+  act(() => {
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Показать ещё' }))
+  })
+  await waitFor(() => expect(cursors).toHaveLength(before.length + 1))
+  expect(apiFetch.mock.calls.at(-1)?.[1].signal.aborted).toBe(false)
+  await act(async () => {
+    retryGate!.resolve(selectApplicationPage(rows, null))
+    await retryGate!.promise
+  })
+  await waitFor(() => expect(cursors).toHaveLength(before.length + 2))
+  expect(getVisibleApplicationIds()).toEqual(
+    createApplications(45)
+      .slice(0, 40)
+      .map((row) => row.id),
+  )
+  expect(screen.getByRole('button', { name: 'Показать ещё' })).toBeDisabled()
+  await act(async () => {
+    secondRetryGate.resolve(selectApplicationPage(rows, 'cursor-27'))
+    await secondRetryGate.promise
+  })
+  await screen.findByRole('link', { name: /№ 46$/ })
+  expect(getVisibleApplicationIds()).toEqual(rows.slice(0, 40).map((row) => row.id))
+  fireEvent.click(screen.getByRole('button', { name: 'Показать ещё' }))
+  await screen.findByRole('link', { name: /№ 1$/ })
+  expect(getVisibleApplicationIds()).toEqual(rows.map((row) => row.id))
+  expect(cursors).toEqual([null, 'cursor-26', null, 'cursor-27', null, 'cursor-27', 'cursor-7'])
+})
+
+it('retries only the failed next page once without losing the valid first page', async () => {
+  const rows = createApplications(25)
+  const gate = createDeferred<ReturnType<typeof selectApplicationPage>>()
+  const cursors: (string | null)[] = []
+  apiFetch.mockImplementation((path: string) => {
+    const cursor = new URL(path, 'http://localhost').searchParams.get('cursor')
+    cursors.push(cursor)
+    if (!cursor) return Promise.resolve(selectApplicationPage(rows, null))
+    if (cursors.length === 2) return Promise.reject(new Error('next page offline'))
+    return gate.promise
+  })
+  mount()
+  fireEvent.click(await screen.findByRole('button', { name: 'Показать ещё' }))
+  await screen.findByRole('alert')
+  expect(getVisibleApplicationIds()).toEqual(rows.slice(0, 20).map((row) => row.id))
+  expect(screen.getByText('Не удалось загрузить следующую страницу')).toBeInTheDocument()
+  expect(screen.queryByText(/Их данные могут быть неактуальны/)).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Показать ещё' })).toBeEnabled()
+  act(() => {
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Показать ещё' }))
+  })
+  await waitFor(() => expect(cursors).toHaveLength(3))
+  expect(apiFetch.mock.calls.at(-1)?.[1].signal.aborted).toBe(false)
+  await act(async () => {
+    gate.resolve(selectApplicationPage(rows, 'cursor-6'))
+    await gate.promise
+  })
+  await screen.findByRole('link', { name: /№ 1$/ })
+  expect(getVisibleApplicationIds()).toEqual(rows.map((row) => row.id))
+  expect(cursors).toEqual([null, 'cursor-6', 'cursor-6'])
+})

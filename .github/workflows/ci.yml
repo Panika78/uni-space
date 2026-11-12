@@ -382,6 +382,7 @@ jobs:
         run: |
           node frontend/e2e/applications.browser.mjs
           node frontend/e2e/applications-review.browser.mjs
+          node frontend/e2e/applications-pagination.browser.mjs
       - name: Show server logs on failure
         if: failure()
         run: tail -n 80 work/services-api.log work/services-frontend.log 2>/dev/null || true

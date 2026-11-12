@@ -25,16 +25,24 @@ try {
     let items = Array.from({ length: 43 }, (_, index) => makeItem(100 - index))
     let detailFailure = null
     const listRequests = []
-    // Count completed work separately from StrictMode development cancellations.
-    let cancelledLists = 0
-    page.on('requestfailed', (request) => {
-      if (new URL(request.url()).pathname === '/api/v1/applications') cancelledLists++
-    })
+    const routedRequests = []
+    // Pair completion with the same request. StrictMode can cancel a fetch
+    // before routing; a separate global failure count cannot measure completed requests.
+    async function countCompletedRequests(start) {
+      const completed = await Promise.all(
+        routedRequests.slice(start).map(async (request) => {
+          const response = await request.response()
+          return response !== null && (await response.finished()) === null
+        }),
+      )
+      return completed.filter(Boolean).length
+    }
     await page.route('**/api/v1/applications**', async (route) => {
       const url = new URL(route.request().url())
       if (url.pathname === '/api/v1/applications') {
         const cursor = url.searchParams.get('cursor')
         listRequests.push(cursor)
+        routedRequests.push(route.request())
         const remaining = cursor ? items.filter((item) => Number(item.id) < Number(cursor)) : items
         const selected = remaining.slice(0, 20)
         return route.fulfill({
@@ -87,7 +95,6 @@ try {
     assert.equal(await heading.evaluate((element) => element === document.activeElement), true)
     items = items.map((item) => (item.id === '65' ? { ...item, review_status: 'approved' } : item))
     const requestsBeforeReturn = listRequests.length
-    const cancelledBeforeReturn = cancelledLists
     await tabTo(page.getByRole('link', { name: /К моим заявлениям/ }))
     await page.keyboard.press('Enter')
     await target.waitFor()
@@ -97,7 +104,7 @@ try {
     await page.getByText('Одобрено', { exact: true }).waitFor()
 
     assert.equal(
-      listRequests.length - requestsBeforeReturn - (cancelledLists - cancelledBeforeReturn),
+      await countCompletedRequests(requestsBeforeReturn),
       2,
       'Refresh completes both cached pages exactly once',
     )
@@ -106,14 +113,13 @@ try {
     await page.waitForFunction((y) => Math.abs(window.scrollY - y) < 5, scroll)
     // Reopening the tab refreshes both pages from the new first-page boundary.
     const requestsBeforeTab = listRequests.length
-    const cancelledBeforeTab = cancelledLists
     const oldBoundary = listRequests.at(-1)
     items = [makeItem(101), ...items]
     await page.getByRole('link', { name: 'Каталог услуг', exact: true }).click()
     await page.getByRole('link', { name: 'Мои заявления', exact: true }).click()
     await page.getByRole('link', { name: /№ 101$/ }).waitFor()
     await page.getByText('Обновляем заявления…', { exact: true }).waitFor({ state: 'hidden' })
-    assert.equal(listRequests.length - requestsBeforeTab - (cancelledLists - cancelledBeforeTab), 2)
+    assert.equal(await countCompletedRequests(requestsBeforeTab), 2)
     assert.equal(listRequests.at(-1), items[19].id)
     assert.notEqual(oldBoundary, listRequests.at(-1))
     assert.equal(await page.locator('.applications-table tbody tr').count(), 40)
