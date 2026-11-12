@@ -57,6 +57,10 @@ try {
   await page.getByRole('heading', { name: 'Вход в систему', exact: true }).waitFor()
   const emblem = page.locator('.login-card img.brand-mark')
   assert.ok(await emblem.isVisible(), 'University emblem is visible on mobile login')
+  await page.waitForFunction(() => {
+    const image = document.querySelector('.login-card img.brand-mark')
+    return image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0
+  })
   assert.ok(
     await emblem.evaluate((image) => image.complete && image.naturalWidth > 0),
     'University emblem loads successfully',

@@ -121,7 +121,7 @@ export const appRoutes: RouteObject[] = [
                   { path: '/services/:serviceCode', element: <ApplicationFormPage /> },
                   { path: '/news', element: <NewsFeedPage /> },
                   { path: '/news/:id', element: <NewsDetailPage /> },
-                  { path: '/notifications', element: <UnavailableSection title="Уведомления" /> },
+                  { path: '/notifications', element: null },
                   { path: '/profile', element: <StudentProfilePage /> },
                   { path: '/settings', element: <UnavailableSection title="Настройки" /> },
                 ],

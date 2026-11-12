@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
@@ -47,14 +47,24 @@ function formatWeekRange(start: string, end: string): string {
   return `${Number(start.slice(8))} ${month} – ${endDate}`
 }
 
-function LessonCard({ lesson }: { lesson: Lesson }) {
+function LessonCard({
+  lesson,
+  onNavigate,
+}: {
+  lesson: Lesson
+  onNavigate: (position: NonNullable<Lesson['latest_lesson']>) => void
+}) {
   const startsOn = getMoscowDate(new Date(lesson.starts_at))
   const endsOn = getMoscowDate(new Date(lesson.ends_at))
   const crossesMidnight = startsOn !== endsOn
+  const isCurrent = lesson.status === 'scheduled'
+  const latest = lesson.latest_lesson
   return (
     <article
       className={`lesson-card lesson-card--${lesson.status}`}
       aria-label={lesson.course_offering.discipline.name}
+      data-lesson-id={lesson.id}
+      tabIndex={-1}
     >
       <div className="lesson-card__time">
         <span className="lesson-card__times">
@@ -71,28 +81,41 @@ function LessonCard({ lesson }: { lesson: Lesson }) {
       </div>
       <div className="lesson-card__details">
         <h3>{lesson.course_offering.discipline.name}</h3>
-        <p className="lesson-card__kind">{kinds[lesson.kind]}</p>
-        <p className="lesson-card__teacher">{lesson.teacher?.name ?? 'Преподаватель не указан'}</p>
-        {lesson.rooms.length ? (
-          <ul aria-label="Аудитории">
-            {lesson.rooms.map((room) => (
-              <li key={room.id}>
-                {room.building.name} · {room.name}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>Аудитория не указана</p>
+        {isCurrent && (
+          <>
+            <p className="lesson-card__kind">{kinds[lesson.kind]}</p>
+            <p className="lesson-card__teacher">
+              {lesson.teacher?.name ?? 'Преподаватель не указан'}
+            </p>
+            {lesson.rooms.length ? (
+              <ul aria-label="Аудитории">
+                {lesson.rooms.map((room) => (
+                  <li key={room.id}>
+                    {room.building.name} · {room.name}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>Аудитория не указана</p>
+            )}
+          </>
         )}
         {lesson.status === 'cancelled' && (
           <p className="lesson-card__status lesson-card__status--cancelled">Отменено</p>
         )}
         {lesson.status === 'moved' && (
-          <p className="lesson-card__status lesson-card__status--moved">
-            {lesson.latest_lesson
-              ? `Перенесено на ${formatDate(getMoscowDate(new Date(lesson.latest_lesson.starts_at)))}, ${formatTime(lesson.latest_lesson.starts_at)}`
-              : 'Перенесено'}
-          </p>
+          <>
+            <p className="lesson-card__status lesson-card__status--moved">
+              {latest
+                ? `Перенесено на ${formatDate(getMoscowDate(new Date(latest.starts_at)), true)}, ${formatTime(latest.starts_at)}${latest.status === 'cancelled' ? ' · Отменено' : ''}`
+                : 'Перенесено'}
+            </p>
+            {latest && (
+              <button className="lesson-card__navigate" onClick={() => onNavigate(latest)}>
+                Показать конечную позицию
+              </button>
+            )}
+          </>
         )}
       </div>
     </article>
@@ -102,6 +125,14 @@ function LessonCard({ lesson }: { lesson: Lesson }) {
 export function SchedulePage() {
   const [date, setDate] = useState(getMoscowDate)
   const [mode, setMode] = useState<'day' | 'week'>('day')
+  const [navigation, setNavigation] = useState<Lesson['latest_lesson']>(null)
+  const pageRef = useRef<HTMLElement>(null)
+  const pendingPosition = useRef<string | null>(null)
+  function navigateToLesson(position: NonNullable<Lesson['latest_lesson']>) {
+    pendingPosition.current = position.id
+    setNavigation({ ...position })
+    setDate(getMoscowDate(new Date(position.starts_at)))
+  }
   const weekStart = getWeekStart(date)
   // A whole week also supplies the mobile day selector, including Sunday.
   const dateTo = addDays(weekStart, 6)
@@ -116,6 +147,31 @@ export function SchedulePage() {
         { authenticated: true, signal },
       ),
   })
+  useEffect(() => {
+    if (!navigation || getMoscowDate(new Date(navigation.starts_at)) !== date) {
+      pendingPosition.current = null
+      return
+    }
+    // Keep the requested position across transient failures; wait for fresh week data.
+    if (!pendingPosition.current || !query.isSuccess || query.isFetching) return
+    const cards = pageRef.current?.querySelectorAll<HTMLElement>(
+      '.schedule-day.is-selected [data-lesson-id]',
+    )
+    const target = Array.from(cards ?? []).find(
+      (card) => card.dataset.lessonId === pendingPosition.current,
+    )
+    if (target) {
+      target.focus()
+      target.scrollIntoView?.({ block: 'nearest' })
+      pendingPosition.current = null
+    }
+  }, [date, navigation, query.data, query.isSuccess, query.isFetching])
+  const isPositionUnavailable =
+    navigation !== null &&
+    getMoscowDate(new Date(navigation.starts_at)) === date &&
+    query.isSuccess &&
+    !query.isFetching &&
+    !listDayLessons(query.data.items, date).some((lesson) => lesson.id === navigation.id)
   const days = [...new Set(Array.from({ length: 7 }, (_, index) => addDays(weekStart, index)))]
   const error = query.error
   const denied = error instanceof ApiClientError && error.status === 403
@@ -123,6 +179,7 @@ export function SchedulePage() {
 
   return (
     <section
+      ref={pageRef}
       className={`section-page schedule-page schedule-page--${mode}`}
       aria-labelledby="schedule-title"
     >
@@ -204,6 +261,11 @@ export function SchedulePage() {
           </button>
         ))}
       </div>
+      {isPositionUnavailable && (
+        <p role="status" className="schedule-empty">
+          Не удалось найти выбранную позицию в расписании. Возможно, расписание изменилось.
+        </p>
+      )}
       {query.isPending ? (
         <LoadingState title="Загружаем расписание…" />
       ) : query.isError ? (
@@ -249,7 +311,9 @@ export function SchedulePage() {
                 </h2>
                 <div className="schedule-day__lessons">
                   {lessons.length ? (
-                    lessons.map((lesson) => <LessonCard key={lesson.id} lesson={lesson} />)
+                    lessons.map((lesson) => (
+                      <LessonCard key={lesson.id} lesson={lesson} onNavigate={navigateToLesson} />
+                    ))
                   ) : (
                     <p className="schedule-empty">Занятий нет</p>
                   )}

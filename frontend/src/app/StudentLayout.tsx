@@ -1,11 +1,12 @@
 import { useStudentProfile, getStudentInitials } from '../features/profile/profileContext'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FocusEvent } from 'react'
-import { Link, NavLink, Outlet } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../features/auth/AuthProvider'
 import { UnsavedChangesProvider, type ExitProtectionStatus } from './UnsavedChangesContext'
 import { UnavailableState } from '../shared/ui/StatusStates'
 import { UniversityBrand } from '../shared/ui/UniversityBrand'
+import { NotificationsDrawer } from '../features/notifications/NotificationsDrawer'
 
 const navigation = [
   { to: '/schedule', label: 'Расписание', icon: '▦' },
@@ -277,9 +278,23 @@ export function StudentLayout() {
   const [exitStatus, setExitStatus] = useState<ExitProtectionStatus>('none')
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const notificationTriggerRef = useRef<HTMLButtonElement>(null)
   const mainContentRef = useRef<HTMLElement>(null)
   const wasDrawerOpen = useRef(false)
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
+  const showNotifications = isNotificationsOpen || location.pathname === '/notifications'
   const closeDrawer = useCallback(() => setIsDrawerOpen(false), [])
+  const openNotifications = useCallback(() => {
+    setIsDrawerOpen(false)
+    setIsNotificationsOpen(true)
+  }, [])
+  const closeNotifications = useCallback(() => {
+    setIsNotificationsOpen(false)
+    if (location.pathname === '/notifications') navigate('/schedule', { replace: true })
+    window.setTimeout(() => notificationTriggerRef.current?.focus(), 0)
+  }, [location.pathname, navigate])
 
   useEffect(() => {
     const desktopViewport = window.matchMedia?.('(min-width: 721px)')
@@ -338,11 +353,14 @@ export function StudentLayout() {
             <br />
             Неофициальный сервис
           </span>
-          <Link
+          <button
+            ref={notificationTriggerRef}
             className="notification-link"
-            to="/notifications"
-            aria-label="Уведомления — функция пока недоступна"
-            title="Уведомления — функция пока недоступна"
+            type="button"
+            aria-label="Уведомления"
+            aria-expanded={showNotifications}
+            aria-controls="notification-drawer-title"
+            onClick={openNotifications}
           >
             <svg
               aria-hidden="true"
@@ -362,7 +380,7 @@ export function StudentLayout() {
             <span className="notification-label" aria-hidden="true">
               Уведомления
             </span>
-          </Link>
+          </button>
           <UserMenu exitStatus={exitStatus} />
         </header>
         <main className="student-content" id="main-content" ref={mainContentRef} tabIndex={-1}>
@@ -372,6 +390,7 @@ export function StudentLayout() {
         </main>
       </div>
       {isDrawerOpen && <MobileDrawer onClose={closeDrawer} />}
+      {showNotifications && <NotificationsDrawer onClose={closeNotifications} />}
     </div>
   )
 }

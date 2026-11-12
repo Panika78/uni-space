@@ -295,3 +295,42 @@
     padding: 0.5rem 0 0;
   }
 }
+
+/* Historical positions remain readable without reserving a full current card. */
+.lesson-card--cancelled,
+.lesson-card--moved {
+  padding: 0.45rem 0.7rem;
+  box-shadow: none;
+  align-items: center;
+  gap: 0.5rem;
+}
+.lesson-card--cancelled .lesson-card__time,
+.lesson-card--moved .lesson-card__time {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  min-height: 0;
+}
+.lesson-card--cancelled .lesson-card__details,
+.lesson-card--moved .lesson-card__details {
+  border: 0;
+  padding: 0;
+}
+.lesson-card--cancelled h3,
+.lesson-card--moved h3 {
+  font-size: 0.9rem;
+  color: #635752;
+  font-weight: 550;
+}
+.lesson-card__navigate {
+  display: block;
+  max-width: 100%;
+  margin-top: 0.25rem;
+  text-align: left;
+  font-size: 0.8rem;
+  text-decoration: underline;
+}
+.lesson-card:focus {
+  outline: 3px solid #a85d76;
+  outline-offset: 2px;
+}

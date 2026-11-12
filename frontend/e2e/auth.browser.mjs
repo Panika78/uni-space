@@ -167,9 +167,7 @@ try {
   assert.equal(await cancellationDialog.evaluate((element) => element.matches(':modal')), true)
   assert.equal(requests.length, beforeCancelledLogout)
   const notificationBox = await page
-    .getByRole('link', {
-      name: 'Уведомления — функция пока недоступна',
-    })
+    .getByRole('button', { name: 'Уведомления', exact: true })
     .boundingBox()
   assert.ok(notificationBox)
   await page.mouse.click(
@@ -237,16 +235,20 @@ try {
   assert.equal(await avatarTrigger.getAttribute('aria-expanded'), 'false')
   assert.equal(await avatarTrigger.evaluate((element) => element === document.activeElement), true)
   check('avatar disclosure supports native keyboard focus and Escape restoration')
-  const notificationLink = page.getByRole('link', {
-    name: 'Уведомления — функция пока недоступна',
-  })
-  await notificationLink.focus()
+  const notificationBell = page.getByRole('button', { name: 'Уведомления', exact: true })
+  await notificationBell.focus()
   await page.keyboard.press('Enter')
-  await heading(page, 'Уведомления')
-  await page.getByText('Функция пока недоступна', { exact: true }).waitFor()
-  await page.goBack()
+  const notificationDialog = page.getByRole('dialog', { name: 'Уведомления' })
+  await notificationDialog.waitFor()
+  assert.equal(await page.locator('#root').evaluate((element) => element.inert), true)
+  await page.keyboard.press('Escape')
+  await page.waitForFunction(() => !document.querySelector('[role="dialog"][aria-modal="true"]'))
   await heading(page, 'Расписание')
-  check('notification link is keyboard accessible and routes to its unavailable page')
+  assert.equal(
+    await notificationBell.evaluate((element) => element === document.activeElement),
+    true,
+  )
+  check('notification bell opens the protected drawer and restores focus after Escape')
   const cookie = (await context.cookies()).find((value) => value.name === 'uni_space_refresh')
   assert.ok(cookie?.httpOnly && cookie.path === '/api/v1/auth' && cookie.sameSite === 'Lax')
   await page.reload()

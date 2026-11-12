@@ -139,7 +139,13 @@ it('shows skeletons, nullable details, overnight duplicates by date, and cancell
     )
   })
   expect(await screen.findAllByRole('article')).toHaveLength(4)
-  expect(screen.getAllByText('Преподаватель не указан')).toHaveLength(4)
+  expect(screen.getAllByText('Преподаватель не указан')).toHaveLength(2)
+  for (const card of screen.getAllByRole('article')) {
+    if (card.classList.contains('lesson-card--scheduled')) continue
+    expect(card.querySelector('.lesson-card__kind')).toBeNull()
+    expect(card.querySelector('.lesson-card__teacher')).toBeNull()
+    expect(within(card).queryByText('Аудитория не указана')).not.toBeInTheDocument()
+  }
   expect(screen.getByText('Отменено')).toBeInTheDocument()
   expect(screen.getByText('Отменено')).toHaveClass('lesson-card__status--cancelled')
   expect(screen.getByText(/Перенесено на/)).toHaveTextContent('09:00')
@@ -236,3 +242,199 @@ it('shows both Moscow dates and times for the same overnight lesson on adjacent 
     expect(times[1]).toHaveTextContent('среда, 11 ноября, 00:30')
   }
 })
+
+it.each(['day', 'week'] as const)(
+  'navigates by keyboard to the Moscow start date across years preserving %s mode',
+  async (mode) => {
+    const latest = {
+      id: '30',
+      starts_at: '2027-01-02T21:30:00Z',
+      ends_at: '2027-01-03T00:30:00Z',
+      status: 'scheduled' as const,
+    }
+    const a = createLesson({ id: '10', status: 'moved', latest_lesson: latest })
+    const b = createLesson({ id: '20', status: 'moved', latest_lesson: latest, previous_lesson: a })
+    const c = createLesson({ ...latest, previous_lesson: b })
+    request.mockImplementation(async (url) =>
+      String(url).includes('2026-12-28') ? response([c]) : response([a, b]),
+    )
+    const { container } = renderSchedule()
+    await screen.findAllByRole('article')
+    if (mode === 'week')
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Неделя' }))
+    const source = screen.getAllByRole('article')[0]!
+    expect(within(source).getByText(/Перенесено на/)).toHaveTextContent('3 января 2027 г., 00:30')
+    const action = within(source).getByRole('button', { name: 'Показать конечную позицию' })
+    action.focus()
+    await userEvent.setup().keyboard('{Enter}')
+    await waitFor(() => expect(screen.getByLabelText('Дата')).toHaveValue('2027-01-03'))
+    await waitFor(() =>
+      expect(request).toHaveBeenLastCalledWith(
+        '/api/v1/schedule?date_from=2026-12-28&date_to=2027-01-03',
+        expect.anything(),
+      ),
+    )
+    const target = await screen.findByRole('article')
+    await waitFor(() => expect(target).toHaveFocus())
+    expect(target).toHaveClass('lesson-card--scheduled')
+    expect(within(target).queryByText(/Перенесено/)).not.toBeInTheDocument()
+    expect(within(target).getByText('Преподаватель не указан')).toBeInTheDocument()
+    expect(container.querySelector('.schedule-page')).toHaveClass(`schedule-page--${mode}`)
+  },
+)
+
+it('shows cancelled terminal positions explicitly and never invents unavailable relationships', async () => {
+  const latest = {
+    id: '3',
+    starts_at: '2026-12-20T06:00:00Z',
+    ends_at: '2026-12-20T07:00:00Z',
+    status: 'cancelled' as const,
+  }
+  request.mockResolvedValue(
+    response([
+      createLesson({ id: '1', status: 'moved', latest_lesson: latest }),
+      createLesson({ id: '2', status: 'moved', latest_lesson: latest }),
+      createLesson({ id: '4', status: 'moved', latest_lesson: null, previous_lesson: null }),
+      createLesson({ id: '5', status: 'cancelled', previous_lesson: null }),
+    ]),
+  )
+  renderSchedule()
+  const cards = await screen.findAllByRole('article')
+  for (const card of cards.slice(0, 2)) {
+    expect(within(card).getByText(/Перенесено на/)).toHaveTextContent('09:00 · Отменено')
+    expect(card).toHaveClass('lesson-card--moved')
+  }
+  expect(within(cards[2]!).getByText('Перенесено')).toBeInTheDocument()
+  expect(within(cards[2]!).queryByRole('button')).not.toBeInTheDocument()
+  expect(within(cards[3]!).getByText('Отменено')).toBeInTheDocument()
+  expect(within(cards[3]!).queryByText(/Перенесено/)).not.toBeInTheDocument()
+  expect(screen.queryByText('Неактуально')).not.toBeInTheDocument()
+})
+
+it('focuses a single move target within the same day without reloading the week', async () => {
+  const a = createLesson({ id: '1', status: 'moved' })
+  const b = createLesson({ id: '2', starts_at: '2026-11-10T10:00:00Z', previous_lesson: a })
+  a.latest_lesson = b
+  request.mockResolvedValue(response([a, b]))
+  renderSchedule()
+  await screen.findAllByRole('article')
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Показать конечную позицию' }))
+  expect(screen.getAllByRole('article')[1]).toHaveFocus()
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Показать конечную позицию' }))
+  expect(screen.getAllByRole('article')[1]).toHaveFocus()
+  expect(request).toHaveBeenCalledTimes(1)
+})
+
+it.each([false, true])(
+  'announces an unavailable target neutrally (moved to another day: %s)',
+  async (isOnAnotherDay) => {
+    const latest = {
+      id: '30',
+      starts_at: '2027-01-02T21:30:00Z',
+      ends_at: '2027-01-02T22:30:00Z',
+      status: 'scheduled' as const,
+    }
+    request
+      .mockResolvedValueOnce(response([createLesson({ status: 'moved', latest_lesson: latest })]))
+      .mockResolvedValue(
+        response(
+          isOnAnotherDay
+            ? [
+                createLesson({
+                  ...latest,
+                  starts_at: '2026-12-30T06:00:00Z',
+                  ends_at: '2026-12-30T07:00:00Z',
+                }),
+              ]
+            : [],
+        ),
+      )
+    const { queryClient, container } = renderSchedule()
+    await screen.findByRole('article')
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Показать конечную позицию' }))
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Не удалось найти выбранную позицию в расписании. Возможно, расписание изменилось.',
+    )
+    expect(
+      within(container.querySelector('.schedule-day.is-selected')! as HTMLElement).queryByRole(
+        'article',
+      ),
+    ).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Дата')).toHaveValue('2027-01-03')
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(request).toHaveBeenLastCalledWith(
+      '/api/v1/schedule?date_from=2026-12-28&date_to=2027-01-03',
+      expect.anything(),
+    )
+    request.mockResolvedValue(response([createLesson(latest)]))
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['schedule'] })
+    })
+    await waitFor(() =>
+      expect(
+        container.querySelector('.schedule-day.is-selected [data-lesson-id="30"]'),
+      ).toHaveFocus(),
+    )
+    expect(screen.queryByText(/Не удалось найти выбранную позицию/)).not.toBeInTheDocument()
+  },
+)
+
+it('restores target focus and scroll after a failed week request is retried successfully', async () => {
+  const latest = {
+    id: '30',
+    starts_at: '2027-01-02T21:30:00Z',
+    ends_at: '2027-01-02T22:30:00Z',
+    status: 'scheduled' as const,
+  }
+  request
+    .mockResolvedValueOnce(response([createLesson({ status: 'moved', latest_lesson: latest })]))
+    .mockRejectedValueOnce(new ApiClientError('private', 'internal_error', 500))
+    .mockResolvedValue(response([createLesson(latest)]))
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+  const scroll = vi.fn()
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+    configurable: true,
+    value: scroll,
+  })
+  try {
+    renderSchedule()
+    await screen.findByRole('article')
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Показать конечную позицию' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Не удалось загрузить расписание')
+    expect(screen.queryByText(/Не удалось найти выбранную позицию/)).not.toBeInTheDocument()
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Повторить' }))
+    const target = await screen.findByRole('article')
+    await waitFor(() => expect(target).toHaveFocus())
+    expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'nearest' })
+    expect(screen.getByLabelText('Дата')).toHaveValue('2027-01-03')
+    expect(request).toHaveBeenCalledTimes(3)
+  } finally {
+    if (original) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', original)
+    else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
+  }
+})
+
+it.each(['scheduled', 'moved', 'cancelled'] as const)(
+  'keeps the correct end time of an overnight %s lesson without duplicating historical rows',
+  async (status) => {
+    request.mockResolvedValue(
+      response([
+        createLesson({
+          status,
+          starts_at: '2026-11-10T20:30:00Z',
+          ends_at: '2026-11-10T21:30:00Z',
+        }),
+      ]),
+    )
+    const { container } = renderSchedule()
+    await screen.findAllByRole('article')
+    const selected = () => container.querySelector('.schedule-day.is-selected')! as HTMLElement
+    expect(within(selected()).getByRole('article').querySelectorAll('time')[1]).toHaveTextContent(
+      'среда, 11 ноября, 00:30',
+    )
+    fireEvent.change(screen.getByLabelText('Дата'), { target: { value: '2026-11-11' } })
+    expect(within(selected()).queryAllByRole('article')).toHaveLength(
+      status === 'scheduled' ? 1 : 0,
+    )
+  },
+)

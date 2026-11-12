@@ -6,6 +6,7 @@ EXPECTED_TABLES = {
     "users",
     "auth_sessions",
     "refresh_tokens",
+    "notifications",
     "org_units",
     "programs",
     "study_groups",

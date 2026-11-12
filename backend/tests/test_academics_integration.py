@@ -606,3 +606,30 @@ def test_concurrent_result_and_parent_changes_preserve_integrity(
             assert row.group_id == s.groups[1].id
         else:
             assert row.assessment_id == replacement.id
+
+
+def test_notification_and_academic_apis_coexist_and_isolate_both_students(academics):
+    from app.models import Notification
+    from app.notifications import router as notifications_router
+
+    s = academics
+    s.app.include_router(notifications_router)
+    course = s.offering()
+    for index, score in enumerate((6, 8)):
+        s.result(s.assignment(course, group=index), score, student=index)
+        s.add(
+            Notification,
+            user_id=s.users[index].id,
+            type="fixture",
+            title=f"Личное уведомление {index}",
+            body="Вымышленные данные",
+        )
+    for index, score in enumerate((6, 8)):
+        headers = {"Authorization": f"Bearer {s.tokens[index]}"}
+        assert s.request(index).json()["items"][0]["total_score"] == score
+        notifications = s.client.get("/api/v1/notifications", headers=headers)
+        assert notifications.status_code == 200
+        assert notifications.headers["cache-control"] == "no-store"
+        assert [item["title"] for item in notifications.json()["items"]] == [
+            f"Личное уведомление {index}"
+        ]
