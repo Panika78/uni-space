@@ -1,3 +1,4 @@
+from app.models.academics import Assessment, AssessmentGroup, AssessmentResult, FinalResult
 from app.models.accounts import AuthSession, RefreshToken, User
 from app.models.applications import Application, ServiceType
 from app.models.base import Base
@@ -16,6 +17,10 @@ from app.models.schedule import (
 from app.models.university import OrgUnit, Program, Student, StudyGroup, Teacher
 
 __all__ = [
+    "Assessment",
+    "AssessmentGroup",
+    "AssessmentResult",
+    "FinalResult",
     "AcademicTerm",
     "Discipline",
     "CourseOffering",

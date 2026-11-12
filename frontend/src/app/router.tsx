@@ -2,6 +2,7 @@ import { StudentAccess, StudentProfilePage } from '../features/profile/StudentPr
 import { createBrowserRouter, Link, Navigate, Outlet, ScrollRestoration } from 'react-router-dom'
 
 import { LoginPage, ProtectedRoute } from '../features/auth/AuthPages'
+import { AcademicsPage } from '../features/academics/AcademicsPage'
 import { SchedulePage } from '../features/schedule/SchedulePage'
 import { useAuth } from '../features/auth/AuthProvider'
 import { LoadingState } from '../shared/ui/StatusStates'
@@ -115,7 +116,7 @@ export const appRoutes: RouteObject[] = [
                 element: <StudentLayout />,
                 children: [
                   { path: '/schedule', element: <SchedulePage /> },
-                  { path: '/academics', element: <UnavailableSection title="Успеваемость" /> },
+                  { path: '/academics', element: <AcademicsPage /> },
                   { path: '/services', element: <ServicesPage /> },
                   { path: '/services/:serviceCode', element: <ApplicationFormPage /> },
                   { path: '/news', element: <NewsFeedPage /> },

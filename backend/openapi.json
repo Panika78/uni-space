@@ -1,6 +1,119 @@
 {
   "components": {
     "schemas": {
+      "AcademicItem": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_count": {
+            "title": "Assessment Count",
+            "type": "integer"
+          },
+          "attestation_type": {
+            "enum": [
+              "exam",
+              "pass_fail",
+              "graded_pass"
+            ],
+            "title": "Attestation Type",
+            "type": "string"
+          },
+          "course_offering_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Course Offering Id",
+            "type": "string"
+          },
+          "discipline": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "final_result": {
+            "$ref": "#/components/schemas/FinalResultResponse"
+          },
+          "graded_assessment_count": {
+            "title": "Graded Assessment Count",
+            "type": "integer"
+          },
+          "max_score": {
+            "title": "Max Score",
+            "type": "integer"
+          },
+          "total_score": {
+            "title": "Total Score",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "course_offering_id",
+          "discipline",
+          "total_score",
+          "max_score",
+          "graded_assessment_count",
+          "assessment_count",
+          "attestation_type",
+          "final_result"
+        ],
+        "title": "AcademicItem",
+        "type": "object"
+      },
+      "AcademicTermResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "ends_on": {
+            "format": "date",
+            "title": "Ends On",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "starts_on": {
+            "format": "date",
+            "title": "Starts On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "starts_on",
+          "ends_on"
+        ],
+        "title": "AcademicTermResponse",
+        "type": "object"
+      },
+      "AcademicsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AcademicItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "term": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AcademicTermResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "term",
+          "items"
+        ],
+        "title": "AcademicsResponse",
+        "type": "object"
+      },
       "ApiError": {
         "additionalProperties": false,
         "properties": {
@@ -215,6 +328,75 @@
           "code"
         ],
         "title": "ErrorDetail",
+        "type": "object"
+      },
+      "FinalResultResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "grade_value": {
+            "anyOf": [
+              {
+                "enum": [
+                  2,
+                  3,
+                  4,
+                  5
+                ],
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grade Value"
+          },
+          "has_debt": {
+            "title": "Has Debt",
+            "type": "boolean"
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passed"
+          },
+          "retake_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retake Date"
+          },
+          "retake_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retake Location"
+          }
+        },
+        "required": [
+          "grade_value",
+          "passed",
+          "has_debt",
+          "retake_date",
+          "retake_location"
+        ],
+        "title": "FinalResultResponse",
         "type": "object"
       },
       "Id": {
@@ -796,6 +978,72 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/academics": {
+      "get": {
+        "operationId": "get_academics_api_v1_academics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcademicsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Academics",
+        "tags": [
+          "academics"
+        ]
+      }
+    },
     "/api/v1/applications": {
       "post": {
         "operationId": "submit_application_api_v1_applications_post",
