@@ -120,8 +120,8 @@ async function checkCancelledLesson(card, width) {
 }
 
 async function checkScheduleChanges(page, width) {
-  for (const mode of width === 1440 ? ['День', 'Неделя'] : ['День']) {
-    if (width === 1440) await page.getByRole('button', { name: mode, exact: true }).click()
+  for (const mode of ['День', 'Неделя']) {
+    await page.getByRole('button', { name: mode, exact: true }).click()
     for (const [sourceName, sourceDate, targetDate, targetStatus] of [
       ['Одиночный перенос', '2026-11-12', '2026-11-13', 'scheduled'],
       ['Первая позиция переноса', '2026-11-10', '2026-12-20', 'scheduled'],
@@ -162,11 +162,10 @@ async function checkScheduleChanges(page, width) {
       assert.equal(await target.getByText(/Перенесено/).count(), 0)
       if (targetStatus === 'cancelled') await checkCancelledLesson(target, width)
       else assert.equal(await target.locator('.lesson-card__teacher').count(), 1)
-      if (width === 1440)
-        assert.equal(
-          await page.getByRole('button', { name: mode, exact: true }).getAttribute('aria-pressed'),
-          'true',
-        )
+      assert.equal(
+        await page.getByRole('button', { name: mode, exact: true }).getAttribute('aria-pressed'),
+        'true',
+      )
       await noOverflow(page)
     }
   }
@@ -183,7 +182,7 @@ async function checkScheduleChanges(page, width) {
   assert.equal(await page.getByText('Неактуально', { exact: true }).count(), 0)
   await noOverflow(page)
   await page.screenshot({ path: `work/schedule-changes-${width}.png`, fullPage: true })
-  if (width === 1440) await page.getByRole('button', { name: 'День', exact: true }).click()
+  await page.getByRole('button', { name: 'День', exact: true }).click()
   await page.getByLabel('Дата', { exact: true }).fill('2026-11-10')
   await page.locator('.schedule-list').waitFor()
   check(
@@ -299,7 +298,8 @@ try {
       assert.equal(await page.getByText('Занятие через полночь', { exact: true }).count(), 2)
       assert.ok(await page.getByText('Воскресное занятие', { exact: true }).isVisible())
       await page.setViewportSize({ width: 360, height: 1000 })
-      assert.equal(await page.locator('.schedule-day:visible').count(), 1)
+      assert.equal(await page.locator('.schedule-day:visible').count(), 7)
+      assert.equal(await page.getByRole('group', { name: 'Дни недели' }).count(), 0)
       assert.ok(await page.locator('.schedule-day.is-selected').isVisible())
       await page.setViewportSize({ width: 1440, height: 1000 })
       assert.equal(await page.locator('.schedule-day:visible').count(), 7)

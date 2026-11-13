@@ -85,7 +85,6 @@ function LessonCard({
         <h3>{lesson.course_offering.discipline.name}</h3>
         {isCurrent && (
           <>
-            <p className="lesson-card__kind">{kinds[lesson.kind]}</p>
             <p className="lesson-card__teacher">
               {lesson.teacher?.name ?? 'Преподаватель не указан'}
             </p>
@@ -120,6 +119,7 @@ function LessonCard({
           </>
         )}
       </div>
+      {isCurrent && <span className="lesson-card__tag">{kinds[lesson.kind]}</span>}
     </article>
   )
 }
