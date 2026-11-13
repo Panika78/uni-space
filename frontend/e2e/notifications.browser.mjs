@@ -1,4 +1,4 @@
-/* global process, console, document, window, Element, performance, MutationObserver */
+/* global process, console, document, window, Element, performance, MutationObserver, setTimeout, clearTimeout */
 // Run against local Vite + the real backend with two prepared fictional accounts.
 // Playwright is supplied by the existing browser tooling used for auth.browser.mjs.
 import assert from 'node:assert/strict'
@@ -158,6 +158,7 @@ const closeDrawerAndAssert = async (label, closeAction) => {
     await stopFocusDiagnostics()
   }
 }
+let releaseLastPageGate = () => {}
 try {
   await page.goto(`${baseURL}/login`)
   await page.getByLabel('Логин', { exact: true }).fill(login)
@@ -168,10 +169,36 @@ try {
   let requestIndex = 0
   let lastPageRequestPending = false
   let lastPageResponseReleased = false
-  let releaseLastPage
-  const lastPageGate = new Promise((resolve) => {
-    releaseLastPage = resolve
+  let resolveLastPageRequestEntered
+  const lastPageRequestEntered = new Promise((resolve) => {
+    resolveLastPageRequestEntered = resolve
   })
+  const waitForLastPageRequestEntered = async () => {
+    let timeoutHandle
+    try {
+      await Promise.race([
+        lastPageRequestEntered,
+        new Promise((_, reject) => {
+          timeoutHandle = setTimeout(
+            () => reject(new Error('Timed out waiting for the third notifications request')),
+            5000,
+          )
+        }),
+      ])
+    } finally {
+      clearTimeout(timeoutHandle)
+    }
+  }
+  let resolveLastPageGate
+  const lastPageGate = new Promise((resolve) => {
+    resolveLastPageGate = resolve
+  })
+  const releaseLastPage = () => {
+    if (lastPageResponseReleased) return
+    lastPageResponseReleased = true
+    resolveLastPageGate()
+  }
+  releaseLastPageGate = releaseLastPage
   await context.route('**/api/v1/notifications?*', async (route) => {
     requestIndex++
     if (requestIndex === 1) {
@@ -193,9 +220,9 @@ try {
       await route.fulfill({ status: 503, json: apiError('internal_error') })
     } else if (requestIndex === 3) {
       lastPageRequestPending = true
+      resolveLastPageRequestEntered()
       await lastPageGate
       lastPageRequestPending = false
-      lastPageResponseReleased = true
       await route.fulfill({
         json: {
           items: [
@@ -236,6 +263,7 @@ try {
   const loadingMore = page.getByRole('button', { name: 'Загружаем…', exact: true })
   await loadingMore.waitFor()
   assert.equal(await loadingMore.isDisabled(), true)
+  await waitForLastPageRequestEntered()
   assert.equal(lastPageRequestPending, true, 'last-page response must still be gated')
   assert.equal(lastPageResponseReleased, false, 'last-page response must not be released yet')
   const closeButton = dialog.getByRole('button', { name: 'Закрыть уведомления', exact: true })
@@ -304,6 +332,7 @@ try {
   await context.unroute('**/api/v1/notifications?*')
   check('desktop drawer restores focus after close button, Escape, and backdrop')
 } finally {
+  releaseLastPageGate()
   await context.close()
   await browser.close()
 }
