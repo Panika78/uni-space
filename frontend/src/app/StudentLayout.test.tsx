@@ -48,6 +48,9 @@ function renderStudentLayout(path = '/schedule') {
           <Route path="/academics" element={<h1>Успеваемость</h1>} />
           <Route path="/profile" element={<h1>Мой профиль</h1>} />
           <Route path="/notifications" element={null} />
+          <Route path="/applications/:id" element={<h1>Заявление</h1>} />
+          <Route path="/services/:code" element={<h1>Услуга</h1>} />
+          <Route path="/news/:id" element={<h1>Новость</h1>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -256,4 +259,14 @@ describe('student dashboard navigation', () => {
     await waitFor(() => expect(trigger).toHaveFocus())
     expect(document.body.style.overflow).toBe('')
   })
+})
+
+it.each([
+  ['/applications/1', 'Услуги и документы'],
+  ['/services/study_certificate', 'Услуги и документы'],
+  ['/news/1', 'Новости'],
+])('keeps section navigation active on %s', (path, label) => {
+  mockViewport(1440)
+  renderStudentLayout(path)
+  expect(screen.getByRole('link', { name: label })).toHaveAttribute('aria-current', 'page')
 })

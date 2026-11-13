@@ -1,7 +1,7 @@
 import { useStudentProfile, getStudentInitials } from '../features/profile/profileContext'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FocusEvent } from 'react'
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../features/auth/AuthProvider'
 import { UnsavedChangesProvider, type ExitProtectionStatus } from './UnsavedChangesContext'
 import { UnavailableState } from '../shared/ui/StatusStates'
@@ -18,23 +18,30 @@ const navigation = [
 ] as const
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
+  const { pathname } = useLocation()
   return (
     <nav className="student-navigation" aria-label="Разделы кабинета">
-      {navigation.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          onClick={onNavigate}
-          className={({ isActive }) => `student-navigation__link${isActive ? ' is-active' : ''}`}
-          end
-          title={item.label}
-        >
-          <span className="navigation-icon" aria-hidden="true">
-            <Icon name={item.icon} />
-          </span>
-          <span className="navigation-label">{item.label}</span>
-        </NavLink>
-      ))}
+      {navigation.map((item) => {
+        const isActive =
+          pathname === item.to ||
+          pathname.startsWith(`${item.to}/`) ||
+          (item.to === '/services' && pathname.startsWith('/applications/'))
+        return (
+          <Link
+            key={item.to}
+            to={item.to}
+            onClick={onNavigate}
+            className={`student-navigation__link${isActive ? ' is-active' : ''}`}
+            aria-current={isActive ? 'page' : undefined}
+            title={item.label}
+          >
+            <span className="navigation-icon" aria-hidden="true">
+              <Icon name={item.icon} />
+            </span>
+            <span className="navigation-label">{item.label}</span>
+          </Link>
+        )
+      })}
     </nav>
   )
 }

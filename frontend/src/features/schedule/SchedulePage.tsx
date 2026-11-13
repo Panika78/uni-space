@@ -259,64 +259,66 @@ export function SchedulePage() {
         </label>
       </div>
       <p className="schedule-timezone">Московское время · Europe/Moscow</p>
-      {mode === 'day' ? (
-        <div className="schedule-days" role="group" aria-label="Дни недели">
-          {days.map((day, index) => (
-            <button
-              key={day}
-              aria-label={formatDate(day)}
-              aria-pressed={date === day}
-              onClick={() => setDate(day)}
-            >
-              {weekdays[index]}
-              <span>{Number(day.slice(8))}</span>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="schedule-week-overview">
-          <Icon name="calendar" />
-          <div>
-            <strong>Неделя целиком</strong>
-            <p>{weekLabel}</p>
+      <AnimatedRegion className="schedule-selectors" contentKey={mode}>
+        {mode === 'day' ? (
+          <div className="schedule-days" role="group" aria-label="Дни недели">
+            {days.map((day, index) => (
+              <button
+                key={day}
+                aria-label={formatDate(day)}
+                aria-pressed={date === day}
+                onClick={() => setDate(day)}
+              >
+                {weekdays[index]}
+                <span>{Number(day.slice(8))}</span>
+              </button>
+            ))}
           </div>
-          <span>Нажмите на день ниже, чтобы открыть его отдельно</span>
-        </div>
-      )}
+        ) : (
+          <div className="schedule-week-overview">
+            <Icon name="calendar" />
+            <div>
+              <strong>Неделя целиком</strong>
+              <p>{weekLabel}</p>
+            </div>
+            <span>Нажмите на день ниже, чтобы открыть его отдельно</span>
+          </div>
+        )}
+      </AnimatedRegion>
       {isPositionUnavailable && (
         <p role="status" className="schedule-empty">
           Не удалось найти выбранную позицию в расписании. Возможно, расписание изменилось.
         </p>
       )}
-      {query.isPending ? (
-        <LoadingState title="Загружаем расписание…" />
-      ) : query.isError ? (
-        <ErrorState
-          title={
-            denied
-              ? 'Нет доступа к расписанию'
-              : expired
-                ? 'Сессия завершена'
-                : 'Не удалось загрузить расписание'
-          }
-          description={
-            denied
-              ? 'Расписание доступно только студентам.'
-              : expired
-                ? 'Войдите в аккаунт заново.'
-                : 'Проверьте подключение и повторите запрос.'
-          }
-          onRetry={
-            denied || expired
-              ? undefined
-              : () => {
-                  void query.refetch()
-                }
-          }
-        />
-      ) : (
-        <AnimatedRegion className="schedule-list" contentKey={`${mode}-${date}`}>
-          <div aria-live="polite">
+      <AnimatedRegion className="schedule-stage" contentKey={`${mode}-${date}-${query.status}`}>
+        {query.isPending ? (
+          <LoadingState title="Загружаем расписание…" />
+        ) : query.isError ? (
+          <ErrorState
+            title={
+              denied
+                ? 'Нет доступа к расписанию'
+                : expired
+                  ? 'Сессия завершена'
+                  : 'Не удалось загрузить расписание'
+            }
+            description={
+              denied
+                ? 'Расписание доступно только студентам.'
+                : expired
+                  ? 'Войдите в аккаунт заново.'
+                  : 'Проверьте подключение и повторите запрос.'
+            }
+            onRetry={
+              denied || expired
+                ? undefined
+                : () => {
+                    void query.refetch()
+                  }
+            }
+          />
+        ) : (
+          <div className="schedule-list" aria-live="polite">
             {days.map((day) => {
               const lessons = listDayLessons(query.data.items, day)
               return (
@@ -335,6 +337,7 @@ export function SchedulePage() {
                         className="schedule-open-day"
                         onClick={() => {
                           setDate(day)
+                          setMode('day')
                         }}
                       >
                         {formatDate(day)}
@@ -357,8 +360,8 @@ export function SchedulePage() {
               )
             })}
           </div>
-        </AnimatedRegion>
-      )}
+        )}
+      </AnimatedRegion>
     </section>
   )
 }
