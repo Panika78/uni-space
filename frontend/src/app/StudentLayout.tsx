@@ -8,6 +8,7 @@ import { UnavailableState } from '../shared/ui/StatusStates'
 import { UniversityBrand } from '../shared/ui/UniversityBrand'
 import { NotificationsDrawer } from '../features/notifications/NotificationsDrawer'
 import { Icon } from '../shared/ui/Icon'
+import { useOverlayPresence } from '../shared/ui/useOverlayPresence'
 
 const navigation = [
   { to: '/schedule', label: 'Расписание', icon: 'calendar' },
@@ -48,6 +49,7 @@ export function UserMenu({
   const profile = useStudentProfile()
   const { logout } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
+  const { present: isMenuPresent, rootRef: menuPanelRef } = useOverlayPresence(isOpen, 'menu')
   const [confirmLogout, setConfirmLogout] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -115,8 +117,14 @@ export function UserMenu({
           <span aria-hidden="true">{getStudentInitials(profile?.full_name)}</span>
         </button>
       )}
-      {isOpen && (
-        <div className="user-menu__panel" id="user-menu-panel">
+      {isMenuPresent && (
+        <div
+          ref={menuPanelRef}
+          inert={!isOpen}
+          aria-hidden={!isOpen || undefined}
+          className="user-menu__panel"
+          id="user-menu-panel"
+        >
           <Link to="/profile" onClick={() => setIsOpen(false)}>
             Мой профиль
           </Link>
@@ -212,10 +220,12 @@ export function UserMenu({
   )
 }
 
-function MobileDrawer({ onClose }: { onClose: () => void }) {
+function MobileDrawer({ onClose, isOpen }: { onClose: () => void; isOpen: boolean }) {
+  const { present, rootRef } = useOverlayPresence(isOpen, 'left')
   const closeRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
+    if (!isOpen) return
     closeRef.current?.focus()
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -246,12 +256,20 @@ function MobileDrawer({ onClose }: { onClose: () => void }) {
       document.body.style.overflow = previousOverflow
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [onClose])
+  }, [onClose, isOpen])
+
+  if (!present) return null
 
   return (
-    <div className="mobile-drawer-layer">
+    <div
+      ref={rootRef}
+      className="mobile-drawer-layer"
+      inert={!isOpen}
+      aria-hidden={!isOpen || undefined}
+    >
       <button className="drawer-backdrop" aria-label="Закрыть меню" onClick={onClose} />
       <aside
+        data-motion-panel
         className="mobile-drawer"
         role="dialog"
         aria-modal="true"
@@ -393,8 +411,8 @@ export function StudentLayout() {
           </UnsavedChangesProvider>
         </main>
       </div>
-      {isDrawerOpen && <MobileDrawer onClose={closeDrawer} />}
-      {showNotifications && <NotificationsDrawer onClose={closeNotifications} />}
+      <MobileDrawer isOpen={isDrawerOpen} onClose={closeDrawer} />
+      <NotificationsDrawer isOpen={showNotifications} onClose={closeNotifications} />
     </div>
   )
 }
