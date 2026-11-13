@@ -612,7 +612,17 @@ jobs:
             if curl -fsS http://localhost:8000/api/openapi.json >/dev/null && curl -fsS http://localhost:5173 >/dev/null; then break; fi
             sleep 1
           done
-          PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs node frontend/e2e/demo-data.browser.mjs | tee work/mvp1-acceptance.txt
+          export PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs
+          node frontend/e2e/demo-data.browser.mjs | tee work/mvp1-acceptance.txt
+          kill "$api_pid"
+          wait "$api_pid" || test "$?" -eq 143
+          (cd backend && ACCESS_TTL_SECONDS=2 exec .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000) > work/api-expiry.log 2>&1 &
+          api_pid=$!
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/api/openapi.json >/dev/null; then break; fi
+            sleep 1
+          done
+          node frontend/e2e/access-expiry.browser.mjs | tee -a work/mvp1-acceptance.txt
       - name: Upload acceptance evidence without auth logs
         if: always()
         uses: actions/upload-artifact@v4
