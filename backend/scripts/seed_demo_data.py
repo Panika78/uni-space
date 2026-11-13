@@ -255,6 +255,42 @@ def require_seed_status(lesson: Lesson, accepted_statuses: set[str]) -> None:
         raise RuntimeError("Existing lesson status is not owned by the demonstration seed")
 
 
+def require_lesson_relations(
+    session,
+    lesson: Lesson,
+    expected_groups: set[int],
+    expected_rooms: set[int],
+) -> None:
+    actual_groups = set(
+        session.scalars(select(LessonGroup.group_id).where(LessonGroup.lesson_id == lesson.id))
+    )
+    if actual_groups != expected_groups:
+        raise RuntimeError(
+            "Seed lesson has unexpected lesson_groups relations "
+            f"(lesson_id={lesson.id}, starts_at={lesson.starts_at.isoformat()})"
+        )
+    actual_rooms = set(
+        session.scalars(select(LessonRoom.room_id).where(LessonRoom.lesson_id == lesson.id))
+    )
+    if actual_rooms != expected_rooms:
+        raise RuntimeError(
+            "Seed lesson has unexpected lesson_rooms relations "
+            f"(lesson_id={lesson.id}, starts_at={lesson.starts_at.isoformat()})"
+        )
+
+
+def create_lesson_relations(
+    session,
+    lesson: Lesson,
+    group_assignments: set[int],
+    room_ids: set[int],
+) -> None:
+    session.add_all(
+        LessonGroup(lesson_id=lesson.id, group_id=group_id) for group_id in group_assignments
+    )
+    session.add_all(LessonRoom(lesson_id=lesson.id, room_id=room_id) for room_id in room_ids)
+
+
 def seed_demo_data() -> None:
     require_safe_target()
     with SessionLocal.begin() as db:
@@ -625,16 +661,13 @@ def seed_demo_data() -> None:
                             mutable=status_mutations,
                         )
                         generated[(key, current, subject_name)] = lesson
-                        if not db.scalar(
-                            select(LessonGroup.id).where(
-                                LessonGroup.lesson_id == lesson.id,
-                                LessonGroup.group_id == groups[key].id,
-                            )
-                        ):
-                            db.add(LessonGroup(lesson_id=lesson.id, group_id=groups[key].id))
                         room = rooms[room_key]
-                        if db.get(LessonRoom, (lesson.id, room.id)) is None:
-                            db.add(LessonRoom(lesson_id=lesson.id, room_id=room.id))
+                        expected_groups = {groups[key].id}
+                        expected_rooms = {room.id}
+                        if existing_lesson is None:
+                            create_lesson_relations(db, lesson, expected_groups, expected_rooms)
+                        else:
+                            require_lesson_relations(db, lesson, expected_groups, expected_rooms)
             current += timedelta(days=1)
         db.flush()
 
@@ -645,12 +678,31 @@ def seed_demo_data() -> None:
         ):
             source = generated[(key, from_day, subject)]
             require_seed_status(source, {"scheduled", "moved"})
+            expected_groups = {groups[key].id}
+            source_room_id = rooms[
+                next(
+                    room_key
+                    for weekday, start_time, subject_index, room_key, _kind in templates[key]
+                    if weekday == from_day.weekday() and subjects[key][subject_index][0] == subject
+                )
+            ].id
+            require_lesson_relations(db, source, expected_groups, {source_room_id})
             source.status = "moved"
             replacement_start = datetime.combine(to_day, time.fromisoformat(to_time), MOSCOW)
+            replacement_identity = {
+                "course_offering_id": source.course_offering_id,
+                "starts_at": replacement_start,
+            }
+            existing_replacements = db.scalars(
+                select(Lesson).filter_by(**replacement_identity)
+            ).all()
+            if len(existing_replacements) > 1:
+                raise RuntimeError("Ambiguous existing demonstration lesson identity")
+            replacement_is_new = not existing_replacements
             replacement = one_or_create(
                 db,
                 Lesson,
-                {"course_offering_id": source.course_offering_id, "starts_at": replacement_start},
+                replacement_identity,
                 {
                     "teacher_id": source.teacher_id,
                     "ends_at": replacement_start + timedelta(minutes=90),
@@ -662,19 +714,11 @@ def seed_demo_data() -> None:
                 },
                 mutable={"status": {"moved"}},
             )
-            for row in db.scalars(
-                select(LessonGroup).where(LessonGroup.lesson_id == source.id)
-            ).all():
-                if not db.scalar(
-                    select(LessonGroup.id).where(
-                        LessonGroup.lesson_id == replacement.id,
-                        LessonGroup.group_id == row.group_id,
-                    )
-                ):
-                    db.add(LessonGroup(lesson_id=replacement.id, group_id=row.group_id))
-            room = rooms[room_key]
-            if db.get(LessonRoom, (replacement.id, room.id)) is None:
-                db.add(LessonRoom(lesson_id=replacement.id, room_id=room.id))
+            expected_rooms = {rooms[room_key].id}
+            if replacement_is_new:
+                create_lesson_relations(db, replacement, expected_groups, expected_rooms)
+            else:
+                require_lesson_relations(db, replacement, expected_groups, expected_rooms)
             return replacement
 
         # Thursday PZ lab cancellation; PZ introductory lesson moved through two positions.
@@ -695,10 +739,18 @@ def seed_demo_data() -> None:
         require_seed_status(middle, {"scheduled", "moved"})
         middle.status = "moved"
         final_start = datetime(2026, 11, 23, 15, tzinfo=MOSCOW)
+        final_identity = {
+            "course_offering_id": middle.course_offering_id,
+            "starts_at": final_start,
+        }
+        existing_finals = db.scalars(select(Lesson).filter_by(**final_identity)).all()
+        if len(existing_finals) > 1:
+            raise RuntimeError("Ambiguous existing demonstration lesson identity")
+        final_is_new = not existing_finals
         final = one_or_create(
             db,
             Lesson,
-            {"course_offering_id": middle.course_offering_id, "starts_at": final_start},
+            final_identity,
             {
                 "teacher_id": middle.teacher_id,
                 "ends_at": final_start + timedelta(minutes=90),
@@ -709,16 +761,13 @@ def seed_demo_data() -> None:
                 "created_by_user_id": None,
             },
         )
-        for row in db.scalars(select(LessonGroup).where(LessonGroup.lesson_id == middle.id)).all():
-            if not db.scalar(
-                select(LessonGroup.id).where(
-                    LessonGroup.lesson_id == final.id, LessonGroup.group_id == row.group_id
-                )
-            ):
-                db.add(LessonGroup(lesson_id=final.id, group_id=row.group_id))
         final_room = rooms[("ГУК", "304")]
-        if db.get(LessonRoom, (final.id, final_room.id)) is None:
-            db.add(LessonRoom(lesson_id=final.id, room_id=final_room.id))
+        final_groups = {groups["pz"].id}
+        final_rooms = {final_room.id}
+        if final_is_new:
+            create_lesson_relations(db, final, final_groups, final_rooms)
+        else:
+            require_lesson_relations(db, final, final_groups, final_rooms)
         move_lesson(
             "pm",
             "Практикум по гадательным системам",

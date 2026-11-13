@@ -437,6 +437,151 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
     assert foreign_news.body == "Посторонняя запись с совпавшим заголовком"
 
 
+def test_demo_seed_rejects_modified_lesson_relations_without_repairing_them(
+    db_session, monkeypatch
+):
+    seed = load_seed_module()
+    url = make_url(get_settings().database_url.get_secret_value())
+    configure_seed_target(monkeypatch, url)
+    monkeypatch.setenv("DEMO_STUDENT_A_PASSWORD", token_urlsafe(24))
+    monkeypatch.setenv("DEMO_STUDENT_B_PASSWORD", token_urlsafe(24))
+
+    def new_session():
+        return Session(bind=db_session.connection(), join_transaction_mode="create_savepoint")
+
+    class SessionFactory:
+        @contextmanager
+        def begin(self):
+            with new_session() as session, session.begin():
+                yield session
+
+        def __call__(self):
+            return new_session()
+
+    monkeypatch.setattr(seed, "SessionLocal", SessionFactory())
+    seed.seed_demo_data()
+
+    lesson = db_session.scalar(
+        select(Lesson)
+        .join(seed.CourseOffering)
+        .join(seed.Discipline)
+        .where(
+            seed.Discipline.name == "Иностранный язык",
+            Lesson.starts_at == datetime(2026, 11, 16, 11, tzinfo=seed.MOSCOW),
+        )
+    )
+    assert lesson is not None
+    expected_room = db_session.scalar(
+        select(LessonRoom.room_id).where(LessonRoom.lesson_id == lesson.id)
+    )
+    expected_group = db_session.scalar(
+        select(LessonGroup.group_id).where(LessonGroup.lesson_id == lesson.id)
+    )
+    extra_room = db_session.scalar(select(seed.Room.id).where(seed.Room.id != expected_room))
+    extra_group = db_session.scalar(
+        select(seed.StudyGroup.id).where(seed.StudyGroup.id != expected_group)
+    )
+    assert expected_room is not None and expected_group is not None
+    assert extra_room is not None and extra_group is not None
+    lesson_id = lesson.id
+
+    scenarios = (
+        ("extra room", lambda: db_session.add(LessonRoom(lesson_id=lesson_id, room_id=extra_room))),
+        (
+            "missing room",
+            lambda: db_session.delete(db_session.get(LessonRoom, (lesson_id, expected_room))),
+        ),
+        (
+            "replacement room",
+            lambda: (
+                db_session.delete(db_session.get(LessonRoom, (lesson_id, expected_room))),
+                db_session.add(LessonRoom(lesson_id=lesson_id, room_id=extra_room)),
+            ),
+        ),
+        (
+            "extra group",
+            lambda: db_session.add(LessonGroup(lesson_id=lesson_id, group_id=extra_group)),
+        ),
+        (
+            "missing group",
+            lambda: db_session.delete(
+                db_session.scalar(select(LessonGroup).where(LessonGroup.lesson_id == lesson_id))
+            ),
+        ),
+    )
+    for description, mutate in scenarios:
+        mutate()
+        db_session.flush()
+        damaged = {
+            table: tuple(tuple(row) for row in db_session.execute(text(f'SELECT * FROM "{table}"')))
+            for table in ("lessons", "lesson_groups", "lesson_rooms")
+        }
+        with pytest.raises(RuntimeError, match="unexpected lesson_"):
+            seed.seed_demo_data()
+        after = {
+            table: tuple(tuple(row) for row in db_session.execute(text(f'SELECT * FROM "{table}"')))
+            for table in ("lessons", "lesson_groups", "lesson_rooms")
+        }
+        assert after == damaged, description
+        # Restore only the test's deliberate mutation before checking the next case.
+        for row in db_session.scalars(
+            select(LessonRoom).where(LessonRoom.lesson_id == lesson_id)
+        ).all():
+            db_session.delete(row)
+        for row in db_session.scalars(
+            select(LessonGroup).where(LessonGroup.lesson_id == lesson_id)
+        ).all():
+            db_session.delete(row)
+        db_session.flush()
+        db_session.add(LessonRoom(lesson_id=lesson_id, room_id=expected_room))
+        db_session.add(LessonGroup(lesson_id=lesson_id, group_id=expected_group))
+        db_session.flush()
+
+    # Seed-generated move nodes must use trusted template relations, and a
+    # corrupted source/intermediate/final node must not propagate down-chain.
+    moved_nodes = (
+        ("Введение в зельеварение", datetime(2026, 11, 19, 13, tzinfo=seed.MOSCOW)),
+        ("Введение в зельеварение", datetime(2026, 11, 20, 15, tzinfo=seed.MOSCOW)),
+        ("Введение в зельеварение", datetime(2026, 11, 23, 15, tzinfo=seed.MOSCOW)),
+        ("Практикум по гадательным системам", datetime(2026, 11, 21, 11, tzinfo=seed.MOSCOW)),
+    )
+    for discipline_name, starts_at in moved_nodes:
+        moved = db_session.scalar(
+            select(Lesson)
+            .join(seed.CourseOffering)
+            .join(seed.Discipline)
+            .where(seed.Discipline.name == discipline_name, Lesson.starts_at == starts_at)
+        )
+        assert moved is not None
+        moved_id = moved.id
+        original_room = db_session.scalar(
+            select(LessonRoom.room_id).where(LessonRoom.lesson_id == moved_id)
+        )
+        assert original_room is not None
+        replacement_room = db_session.scalar(
+            select(seed.Room.id).where(seed.Room.id != original_room)
+        )
+        assert replacement_room is not None
+        db_session.delete(db_session.get(LessonRoom, (moved_id, original_room)))
+        db_session.add(LessonRoom(lesson_id=moved_id, room_id=replacement_room))
+        db_session.flush()
+        before_chain_failure = tuple(
+            tuple(row) for row in db_session.execute(text('SELECT * FROM "lessons"'))
+        )
+        with pytest.raises(RuntimeError, match="unexpected lesson_rooms"):
+            seed.seed_demo_data()
+        assert (
+            tuple(tuple(row) for row in db_session.execute(text('SELECT * FROM "lessons"')))
+            == before_chain_failure
+        )
+        assert set(
+            db_session.scalars(select(LessonRoom.room_id).where(LessonRoom.lesson_id == moved_id))
+        ) == {replacement_room}
+        db_session.delete(db_session.get(LessonRoom, (moved_id, replacement_room)))
+        db_session.add(LessonRoom(lesson_id=moved_id, room_id=original_room))
+        db_session.flush()
+
+
 def test_demo_seed_refuses_unconfirmed_database(monkeypatch):
     seed = load_seed_module()
     url = make_url(get_settings().database_url.get_secret_value())
@@ -540,6 +685,7 @@ def test_production_environment_without_production_approval_is_refused(monkeypat
 
 def test_demo_seed_cli_migrates_clean_database_and_preserves_records(postgresql_engine):
     """Run the documented executable against an isolated, freshly migrated PostgreSQL DB."""
+    seed = load_seed_module()
     database_name = f"demo_seed_{uuid4().hex[:16]}"
     with postgresql_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as admin:
         admin.execute(text(f'CREATE DATABASE "{database_name}"'))
@@ -595,9 +741,7 @@ def test_demo_seed_cli_migrates_clean_database_and_preserves_records(postgresql_
             application = Application(
                 student_id=pz.id,
                 service_type_id=db.scalar(
-                    select(load_seed_module().ServiceType.id).where(
-                        load_seed_module().ServiceType.code == "study_certificate"
-                    )
+                    select(seed.ServiceType.id).where(seed.ServiceType.code == "study_certificate")
                 ),
                 review_status="submitted",
                 document_status="pending",
@@ -683,6 +827,64 @@ def test_demo_seed_cli_migrates_clean_database_and_preserves_records(postgresql_
             assert {
                 table: db.scalar(text(f"SELECT count(*) FROM {table}")) for table in before_counts
             } == before_counts
+
+            pz_group_id = db.scalar(select(Student.group_id).where(Student.id == pz_student_id))
+            target_lesson = db.scalar(
+                select(seed.Lesson)
+                .join(seed.LessonGroup)
+                .join(seed.CourseOffering)
+                .join(seed.Discipline)
+                .where(
+                    seed.LessonGroup.group_id == pz_group_id,
+                    seed.Discipline.name == "Иностранный язык",
+                    seed.Lesson.starts_at == datetime(2026, 11, 16, 11, 0, tzinfo=seed.MOSCOW),
+                )
+            )
+            expected_room_id = db.scalar(
+                select(seed.Room.id)
+                .join(seed.Building)
+                .where(
+                    seed.Room.name == "215", seed.Building.name == "Главный учебный корпус (ГУК)"
+                )
+            )
+            unexpected_room_id = db.scalar(
+                select(seed.Room.id)
+                .join(seed.Building)
+                .where(
+                    seed.Room.name == "304", seed.Building.name == "Главный учебный корпус (ГУК)"
+                )
+            )
+            assert target_lesson is not None
+            target_lesson_id = target_lesson.id
+            assert expected_room_id is not None and unexpected_room_id is not None
+            assert db.get(seed.LessonRoom, (target_lesson.id, expected_room_id)) is not None
+            assert db.get(seed.LessonRoom, (target_lesson.id, unexpected_room_id)) is None
+            db.delete(db.get(seed.LessonRoom, (target_lesson.id, expected_room_id)))
+            db.add(seed.LessonRoom(lesson_id=target_lesson.id, room_id=unexpected_room_id))
+            db.commit()
+
+        def snapshot_database():
+            with app_database.connect() as connection:
+                return {
+                    table: tuple(
+                        tuple(row) for row in connection.execute(text(f'SELECT * FROM "{table}"'))
+                    )
+                    for table in inspect(app_database).get_table_names()
+                }
+
+        damaged_relations = snapshot_database()
+        rejected_modified_relation = run(str(seed_path))
+        assert rejected_modified_relation.returncode != 0
+        assert snapshot_database() == damaged_relations
+        with Session(app_database) as db:
+            actual_rooms = set(
+                db.scalars(
+                    select(seed.LessonRoom.room_id).where(
+                        seed.LessonRoom.lesson_id == target_lesson_id
+                    )
+                )
+            )
+            assert actual_rooms == {unexpected_room_id}
     finally:
         app_database.dispose()
         with postgresql_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as admin:
