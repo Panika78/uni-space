@@ -1,3 +1,5 @@
+import universityBuilding from '../../assets/university-building.webp'
+import './profile.css'
 import { useQuery } from '@tanstack/react-query'
 import { Outlet } from 'react-router-dom'
 import { UserMenu } from '../../app/StudentLayout'
@@ -58,49 +60,56 @@ export function StudentProfilePage() {
   return (
     <article className="section-page profile-page">
       <h1>Мой профиль</h1>
+      <p className="profile-subtitle">Личная информация и сведения об обучении</p>
       <header className="profile-heading">
+        <img className="profile-building" src={universityBuilding} alt="" aria-hidden="true" />
         <span className="profile-avatar" aria-hidden="true">
           {initials}
         </span>
-        <div>
+        <div className="profile-heading__copy">
           <h2>{profile.full_name}</h2>
-          <p>{profile.group.name}</p>
+          <p className="profile-meta">
+            {profile.group.name}
+            <span className="profile-status">{statuses[profile.academic_status]}</span>
+          </p>
         </div>
       </header>
-      <section>
-        <h2>Личные данные</h2>
-        <dl>
-          <dt>ФИО</dt>
-          <dd>{profile.full_name}</dd>
-          <dt>Логин</dt>
-          <dd>{profile.login}</dd>
-        </dl>
-      </section>
-      <section>
-        <h2>Обучение</h2>
-        <dl>
-          <dt>Факультет</dt>
-          <dd>{profile.faculty.name}</dd>
-          <dt>Программа</dt>
-          <dd>
-            {profile.program.code} · {profile.program.name}
-          </dd>
-          <dt>Направление</dt>
-          <dd>
-            {profile.direction.code} · {profile.direction.name}
-          </dd>
-          <dt>Курс</dt>
-          <dd>{profile.course_number}</dd>
-          <dt>Группа</dt>
-          <dd>{profile.group.name}</dd>
-          <dt>Академический статус</dt>
-          <dd>{statuses[profile.academic_status]}</dd>
-        </dl>
-      </section>
-      <section>
-        <h2>Контакты</h2>
-        <p>Контактные данные не предоставлены.</p>
-      </section>
+      <div className="profile-grid">
+        <section className="profile-personal">
+          <h2>Личные данные</h2>
+          <dl>
+            <dt>ФИО</dt>
+            <dd>{profile.full_name}</dd>
+            <dt>Логин</dt>
+            <dd>{profile.login}</dd>
+          </dl>
+        </section>
+        <section className="profile-education">
+          <h2>Обучение</h2>
+          <dl>
+            <dt>Факультет</dt>
+            <dd>{profile.faculty.name}</dd>
+            <dt>Программа</dt>
+            <dd>
+              {profile.program.code} · {profile.program.name}
+            </dd>
+            <dt>Направление</dt>
+            <dd>
+              {profile.direction.code} · {profile.direction.name}
+            </dd>
+            <dt>Курс</dt>
+            <dd>{profile.course_number}</dd>
+            <dt>Группа</dt>
+            <dd>{profile.group.name}</dd>
+            <dt>Академический статус</dt>
+            <dd>{statuses[profile.academic_status]}</dd>
+          </dl>
+        </section>
+        <section className="profile-contacts">
+          <h2>Контакты</h2>
+          <p>Контактные данные не предоставлены.</p>
+        </section>
+      </div>
     </article>
   )
 }

@@ -7,13 +7,14 @@ import { UnsavedChangesProvider, type ExitProtectionStatus } from './UnsavedChan
 import { UnavailableState } from '../shared/ui/StatusStates'
 import { UniversityBrand } from '../shared/ui/UniversityBrand'
 import { NotificationsDrawer } from '../features/notifications/NotificationsDrawer'
+import { Icon } from '../shared/ui/Icon'
 
 const navigation = [
-  { to: '/schedule', label: 'Расписание', icon: '▦' },
-  { to: '/academics', label: 'Успеваемость', icon: '▤' },
-  { to: '/services', label: 'Услуги и документы', icon: '▧' },
-  { to: '/news', label: 'Новости', icon: '▣' },
-]
+  { to: '/schedule', label: 'Расписание', icon: 'calendar' },
+  { to: '/academics', label: 'Успеваемость', icon: 'book' },
+  { to: '/services', label: 'Услуги и документы', icon: 'file' },
+  { to: '/news', label: 'Новости', icon: 'news' },
+] as const
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   return (
@@ -28,7 +29,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
           title={item.label}
         >
           <span className="navigation-icon" aria-hidden="true">
-            {item.icon}
+            <Icon name={item.icon} />
           </span>
           <span className="navigation-label">{item.label}</span>
         </NavLink>
@@ -331,12 +332,15 @@ export function StudentLayout() {
           aria-label={isCollapsed ? 'Развернуть меню' : 'Свернуть меню'}
           aria-expanded={!isCollapsed}
         >
-          <span aria-hidden="true">{isCollapsed ? '»' : '«'}</span>
+          <Icon name={isCollapsed ? 'right' : 'left'} />
           <span className="navigation-label">Свернуть меню</span>
         </button>
       </aside>
 
       <div className="student-main-column">
+        <div className="ambient-canvas" aria-hidden="true">
+          <span className="ambient-orbit" />
+        </div>
         <header className="student-topbar">
           <button
             ref={menuButtonRef}
@@ -345,7 +349,7 @@ export function StudentLayout() {
             aria-expanded={isDrawerOpen}
             onClick={() => setIsDrawerOpen(true)}
           >
-            <span aria-hidden="true">☰</span>
+            <Icon name="menu" />
           </button>
           <span className="topbar-spacer" />
           <span className="topbar-prototype-note" data-testid="prototype-disclaimer">
