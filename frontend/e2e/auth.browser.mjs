@@ -83,6 +83,47 @@ context.on('request', (request) => {
 const check = (name) => console.log(`PASS ${name}`)
 const heading = (target, name) => target.getByRole('heading', { name, exact: true }).waitFor()
 const loginHeading = (target) => heading(target, 'Вход в систему')
+async function assertNotificationFocusRestored(target, notificationBell, label) {
+  const getState = () =>
+    target.evaluate(() => ({
+      drawerOpen: Boolean(document.querySelector('[role="dialog"][aria-modal="true"]')),
+      activeElement: document.activeElement
+        ? {
+            tag: document.activeElement.tagName,
+            id: document.activeElement.id,
+            className: document.activeElement.className,
+            ariaLabel: document.activeElement.getAttribute('aria-label'),
+          }
+        : null,
+      rootInert: document.querySelector('#root')?.inert ?? null,
+      bodyOverflow: document.body.style.overflow,
+    }))
+  try {
+    await target.waitForFunction(
+      () => document.querySelector('[role="dialog"][aria-modal="true"]') === null,
+      null,
+      { timeout: 5000 },
+    )
+  } catch {
+    throw new Error(`${label}: drawer did not close; state=${JSON.stringify(await getState())}`)
+  }
+  try {
+    await target.waitForFunction(
+      () => document.querySelector('[aria-label="Уведомления"]') === document.activeElement,
+      null,
+      { timeout: 1500 },
+    )
+  } catch {
+    throw new Error(
+      `${label}: focus did not return to notification bell; state=${JSON.stringify(await getState())}`,
+    )
+  }
+  assert.equal(
+    await notificationBell.evaluate((element) => element === document.activeElement),
+    true,
+  )
+  assert.equal(await target.locator('#root').evaluate((element) => element.inert), false)
+}
 async function hasVisibleLogoutAction(target) {
   const trigger = target.getByRole('button', { name: 'Меню пользователя', exact: true })
   if ((await trigger.count()) === 0) return false
@@ -243,12 +284,8 @@ try {
   await notificationDialog.waitFor()
   assert.equal(await page.locator('#root').evaluate((element) => element.inert), true)
   await page.keyboard.press('Escape')
-  await page.waitForFunction(() => !document.querySelector('[role="dialog"][aria-modal="true"]'))
   await heading(page, 'Расписание')
-  assert.equal(
-    await notificationBell.evaluate((element) => element === document.activeElement),
-    true,
-  )
+  await assertNotificationFocusRestored(page, notificationBell, 'auth E2E Escape')
   check('notification bell opens the protected drawer and restores focus after Escape')
   const cookie = (await context.cookies()).find((value) => value.name === 'uni_space_refresh')
   assert.ok(cookie?.httpOnly && cookie.path === '/api/v1/auth' && cookie.sameSite === 'Lax')
