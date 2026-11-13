@@ -108,6 +108,13 @@ it('supports Sunday, date selection, week arrows, today and keyboard mode select
   week.focus()
   await user.keyboard('{Enter}')
   expect(week).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.queryByRole('group', { name: 'Дни недели' })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Следующая неделя' }))
+  await user.click(screen.getByRole('button', { name: 'День' }))
+  expect(screen.getByLabelText('Дата')).toHaveValue('2026-11-17')
+  expect(
+    within(screen.getByRole('group', { name: 'Дни недели' })).getAllByRole('button')[1],
+  ).toHaveAttribute('aria-pressed', 'true')
 })
 
 it('shows skeletons, nullable details, overnight duplicates by date, and cancelled/moved states', async () => {

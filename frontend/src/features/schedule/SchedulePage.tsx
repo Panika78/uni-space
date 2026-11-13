@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
+import { Icon } from '../../shared/ui/Icon'
+import { AnimatedRegion } from '../../shared/ui/AnimatedRegion'
 import {
   addDays,
   formatDate,
@@ -184,13 +186,16 @@ export function SchedulePage() {
       aria-labelledby="schedule-title"
     >
       <div className="schedule-heading">
-        <h1 id="schedule-title">Расписание</h1>
-        <p className="schedule-week-label">
-          Неделя {getIsoWeekNumber(date)} · {weekLabel}
-        </p>
+        <div>
+          <p className="section-eyebrow">Учебный календарь</p>
+          <h1 id="schedule-title">Расписание</h1>
+          <p className="schedule-week-label">
+            Неделя {getIsoWeekNumber(date)} · {weekLabel}
+          </p>
+        </div>
       </div>
       <div className="schedule-toolbar">
-        <div className="schedule-modes" role="group" aria-label="Вид расписания">
+        <div className="schedule-modes" data-mode={mode} role="group" aria-label="Вид расписания">
           <button aria-pressed={mode === 'day'} onClick={() => setMode('day')}>
             День
           </button>
@@ -198,7 +203,9 @@ export function SchedulePage() {
             Неделя
           </button>
         </div>
-        <button onClick={() => setDate(getMoscowDate())}>Сегодня</button>
+        <button className="schedule-today" onClick={() => setDate(getMoscowDate())}>
+          Сегодня
+        </button>
         {mode === 'day' && (
           <div className="schedule-day-arrows" role="group" aria-label="Переключение даты">
             <button
@@ -217,9 +224,29 @@ export function SchedulePage() {
             </button>
           </div>
         )}
+        <div className="schedule-week-arrows" role="group" aria-label="Переключение недели">
+          <button
+            aria-label="Предыдущая неделя"
+            disabled={weekStart <= '0001-01-01'}
+            onClick={() => setDate(addDays(date, -7))}
+          >
+            <Icon name="left" />
+          </button>
+          <button
+            aria-label="Следующая неделя"
+            disabled={dateTo >= '9999-12-31'}
+            onClick={() => setDate(addDays(date, 7))}
+          >
+            <Icon name="right" />
+          </button>
+        </div>
         <label className="schedule-date">
-          Дата
+          <span className="schedule-date-label">Дата</span>
+          <span className="schedule-calendar-icon">
+            <Icon name="calendar" />
+          </span>
           <input
+            aria-label="Дата"
             type="date"
             value={date}
             min="0001-01-01"
@@ -231,36 +258,31 @@ export function SchedulePage() {
           />
         </label>
       </div>
-      <div className="schedule-period">
-        <button
-          aria-label="Предыдущая неделя"
-          disabled={weekStart <= '0001-01-01'}
-          onClick={() => setDate(addDays(date, -7))}
-        >
-          ‹
-        </button>
-        <p className="schedule-timezone">Московское время · Europe/Moscow</p>
-        <button
-          aria-label="Следующая неделя"
-          disabled={dateTo >= '9999-12-31'}
-          onClick={() => setDate(addDays(date, 7))}
-        >
-          ›
-        </button>
-      </div>
-      <div className="schedule-days" role="group" aria-label="Дни недели">
-        {days.map((day, index) => (
-          <button
-            key={day}
-            aria-label={formatDate(day)}
-            aria-pressed={date === day}
-            onClick={() => setDate(day)}
-          >
-            {weekdays[index]}
-            <span>{Number(day.slice(8))}</span>
-          </button>
-        ))}
-      </div>
+      <p className="schedule-timezone">Московское время · Europe/Moscow</p>
+      {mode === 'day' ? (
+        <div className="schedule-days" role="group" aria-label="Дни недели">
+          {days.map((day, index) => (
+            <button
+              key={day}
+              aria-label={formatDate(day)}
+              aria-pressed={date === day}
+              onClick={() => setDate(day)}
+            >
+              {weekdays[index]}
+              <span>{Number(day.slice(8))}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="schedule-week-overview">
+          <Icon name="calendar" />
+          <div>
+            <strong>Неделя целиком</strong>
+            <p>{weekLabel}</p>
+          </div>
+          <span>Нажмите на день ниже, чтобы открыть его отдельно</span>
+        </div>
+      )}
       {isPositionUnavailable && (
         <p role="status" className="schedule-empty">
           Не удалось найти выбранную позицию в расписании. Возможно, расписание изменилось.
@@ -293,35 +315,49 @@ export function SchedulePage() {
           }
         />
       ) : (
-        <div className="schedule-list" aria-live="polite">
-          {days.map((day) => {
-            const lessons = listDayLessons(query.data.items, day)
-            return (
-              <section
-                key={day}
-                className={`schedule-day${day === date ? ' is-selected' : ''}`}
-                aria-label={formatDate(day)}
-              >
-                <h2>
-                  <svg aria-hidden="true" viewBox="0 0 20 20" focusable="false">
-                    <rect x="3" y="5" width="14" height="12" rx="2" />
-                    <path d="M6 3v4M14 3v4M3 9h14" />
-                  </svg>
-                  {formatDate(day)}
-                </h2>
-                <div className="schedule-day__lessons">
-                  {lessons.length ? (
-                    lessons.map((lesson) => (
-                      <LessonCard key={lesson.id} lesson={lesson} onNavigate={navigateToLesson} />
-                    ))
-                  ) : (
-                    <p className="schedule-empty">Занятий нет</p>
-                  )}
-                </div>
-              </section>
-            )
-          })}
-        </div>
+        <AnimatedRegion className="schedule-list" contentKey={`${mode}-${date}`}>
+          <div aria-live="polite">
+            {days.map((day) => {
+              const lessons = listDayLessons(query.data.items, day)
+              return (
+                <section
+                  key={day}
+                  className={`schedule-day${day === date ? ' is-selected' : ''}`}
+                  aria-label={formatDate(day)}
+                >
+                  <h2>
+                    <svg aria-hidden="true" viewBox="0 0 20 20" focusable="false">
+                      <rect x="3" y="5" width="14" height="12" rx="2" />
+                      <path d="M6 3v4M14 3v4M3 9h14" />
+                    </svg>
+                    {mode === 'week' ? (
+                      <button
+                        className="schedule-open-day"
+                        onClick={() => {
+                          setDate(day)
+                        }}
+                      >
+                        {formatDate(day)}
+                        <Icon name="right" />
+                      </button>
+                    ) : (
+                      formatDate(day)
+                    )}
+                  </h2>
+                  <div className="schedule-day__lessons">
+                    {lessons.length ? (
+                      lessons.map((lesson) => (
+                        <LessonCard key={lesson.id} lesson={lesson} onNavigate={navigateToLesson} />
+                      ))
+                    ) : (
+                      <p className="schedule-empty">Занятий нет</p>
+                    )}
+                  </div>
+                </section>
+              )
+            })}
+          </div>
+        </AnimatedRegion>
       )}
     </section>
   )
