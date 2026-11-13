@@ -1,4 +1,4 @@
-/* global process, console, Date, Buffer */
+/* global process, console, Buffer */
 // Real expiry: run after restarting the isolated API with ACCESS_TTL_SECONDS=2.
 import assert from 'node:assert/strict'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
