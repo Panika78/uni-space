@@ -51,6 +51,86 @@ async function logout(page) {
   await page.getByRole('heading', { name: 'Вход в систему' }).waitFor()
 }
 
+function field(scope, label) {
+  return scope
+    .locator('dt')
+    .filter({ hasText: new RegExp(`^${label}$`) })
+    .locator('xpath=following-sibling::dd[1]')
+}
+async function readApi(page, path) {
+  return page.evaluate(async (path) => {
+    const { apiFetch } = await import('/src/shared/api/client.ts')
+    return apiFetch(`/api/v1/${path}`, { authenticated: true })
+  }, path)
+}
+async function compareApplication(page, created) {
+  await page.getByRole('heading', { name: `Заявление № ${created.id}`, exact: true }).waitFor()
+  const saved = await readApi(page, `applications/${created.id}`)
+  assert.deepEqual(saved, created)
+  for (const key of ['created_at', 'updated_at']) assert.ok(Number.isFinite(Date.parse(saved[key])))
+  const scope = page.locator('.application-detail')
+  assert.equal(await scope.locator('h2').innerText(), created.service.title)
+  assert.equal(
+    await field(scope, 'Место предоставления').innerText(),
+    created.form_data.place_of_submission,
+  )
+  assert.equal(await field(scope, 'Рассмотрение').innerText(), 'Подано')
+  assert.equal(await field(scope, 'Документ').innerText(), 'Ожидает подготовки')
+  assert.equal(
+    await field(scope, 'Дата подачи').locator('time').getAttribute('datetime'),
+    created.created_at,
+  )
+}
+async function inspectMoves(page, account) {
+  const data = await readApi(page, 'schedule?date_from=2026-11-19&date_to=2026-11-23')
+  const dates =
+    account === 'demo-pz101'
+      ? ['2026-11-19', '2026-11-20', '2026-11-23']
+      : ['2026-11-19', '2026-11-21']
+  const time = (value) =>
+    new Intl.DateTimeFormat('ru-RU', {
+      timeZone: 'Europe/Moscow',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(value))
+  async function inspectCard(item) {
+    const card = page.locator(`.schedule-day.is-selected [data-lesson-id="${item.id}"]`)
+    await card.waitFor()
+    assert.ok((await card.innerText()).includes(item.course_offering.discipline.name))
+    assert.ok((await card.innerText()).includes(time(item.starts_at)))
+    if (item.status === 'moved') assert.match(await card.innerText(), /Перенесено на/)
+    else if (item.status === 'cancelled') assert.match(await card.innerText(), /Отменено/)
+    else {
+      assert.ok((await card.innerText()).includes(time(item.ends_at)))
+      for (const room of item.rooms)
+        assert.ok((await card.innerText()).includes(`${room.building.name} · ${room.name}`))
+      if (item.teacher) assert.ok((await card.innerText()).includes(item.teacher.name))
+    }
+    return card
+  }
+  for (const date of dates) {
+    await page.getByLabel('Дата', { exact: true }).fill(date)
+    const items = data.items.filter((item) => item.starts_at.slice(0, 10) === date)
+    for (const item of items) await inspectCard(item)
+    const moved = items.find((item) => item.status === 'moved')
+    if (moved) {
+      const card = await inspectCard(moved)
+      await card.getByRole('button', { name: 'Показать конечную позицию' }).click()
+      await page.waitForFunction(
+        (date) => document.querySelector('input[type=date]').value === date,
+        dates.at(-1),
+      )
+      const final = data.items.find((item) => item.id === moved.latest_lesson.id)
+      const finalCard = await inspectCard(final)
+      await page.waitForFunction(
+        (id) => document.activeElement?.getAttribute('data-lesson-id') === id,
+        final.id,
+      )
+      assert.ok(await finalCard.isVisible())
+    }
+  }
+}
+
 async function submitAndRestore(page, account, password) {
   await page.getByRole('link', { name: 'Подать заявление' }).click()
   const place = `Acceptance ${account} ${page.viewportSize().width}`
@@ -125,7 +205,9 @@ async function submitAndRestore(page, account, password) {
   students.set(account, { id: created.id, snapshots })
   await page.getByRole('link', { name: 'Открыть заявление' }).click()
   await page.getByRole('heading', { name: `Заявление № ${created.id}` }).waitFor()
+  await compareApplication(page, created)
   await page.reload()
+  await compareApplication(page, created)
   await page.getByText(place, { exact: true }).waitFor()
   await noOverflow(page, page.viewportSize().width)
   await logout(page)
@@ -138,6 +220,7 @@ async function submitAndRestore(page, account, password) {
   await page.getByRole('link', { name: 'Мои заявления', exact: true }).click()
   await page.getByRole('link', { name: new RegExp(`№ ${created.id}$`) }).click()
   await page.getByText(place, { exact: true }).waitFor()
+  await compareApplication(page, created)
   check(
     `${account}: POST submitted/pending, reload, revoked access, login, same application ${created.id}`,
   )
@@ -221,22 +304,107 @@ async function inspectStudent(
   await assertTextFitsCard(page, venue, '.schedule-day.is-selected')
   await noOverflow(page, width)
 
+  await inspectMoves(page, account)
   await navigate(page, 'Мой профиль')
   await page.getByRole('heading', { name: 'Мой профиль', exact: true }).waitFor()
-  const profile = await page.locator('.profile-page').innerText()
-  assert.ok(profile.includes(name))
-  assert.ok(profile.includes(program))
+  const profile = await readApi(page, 'users/me')
+  const isPz = account === 'demo-pz101'
+  assert.equal(profile.full_name, name)
+  assert.equal(profile.faculty.name, 'Факультет естественных наук')
+  assert.equal(profile.program.name, program)
+  assert.equal(profile.program.code, isPz ? 'ПЗ' : 'ПМ')
+  assert.equal(profile.group.name, isPz ? 'ПЗ-101' : 'ПМ-201')
+  assert.equal(profile.course_number, isPz ? 1 : 2)
+  assert.deepEqual(
+    profile.direction,
+    isPz
+      ? { code: '04.03.01', name: 'Химия' }
+      : { code: '01.03.02', name: 'Прикладная математика и информатика' },
+  )
+  const scope = page.locator('.profile-page')
+  for (const [label, value] of Object.entries({
+    ФИО: profile.full_name,
+    Факультет: profile.faculty.name,
+    Программа: `${profile.program.code} · ${profile.program.name}`,
+    Направление: `${profile.direction.code} · ${profile.direction.name}`,
+    Курс: String(profile.course_number),
+    Группа: profile.group.name,
+  }))
+    assert.equal(await field(scope, label).innerText(), value)
+  assert.equal(
+    await scope
+      .getByText(isPz ? 'Амели Викторовна Волкова' : 'Иван Сергеевич Гончаров', { exact: true })
+      .count(),
+    0,
+  )
   await noOverflow(page, width)
 
   await navigate(page, 'Успеваемость')
   await page.getByRole('heading', { name: 'Успеваемость', exact: true }).waitFor()
+  const academics = await readApi(page, 'academics')
+  assert.ok(academics.items.length > 0)
+  assert.equal(await page.locator('.academics-term').innerText(), academics.term.name)
+  await page.getByRole('heading', { name: 'Сессия', exact: true }).waitFor()
+  assert.equal(await page.locator('.academics-page h2').count(), 2)
+  for (const item of academics.items) {
+    const row = page
+      .locator('.academics-page section')
+      .filter({ has: page.getByRole('heading', { name: 'Текущие дисциплины', exact: true }) })
+      .getByRole('row')
+      .filter({ has: page.getByRole('rowheader', { name: item.discipline.name, exact: true }) })
+    assert.equal(await row.locator('strong').innerText(), `${item.total_score} / ${item.max_score}`)
+    assert.ok(
+      (await row.innerText()).includes(
+        `${item.graded_assessment_count} из ${item.assessment_count}`,
+      ),
+    )
+    assert.equal(
+      await row.locator('small').count(),
+      item.assessment_count === 0 || item.graded_assessment_count === 0 ? 1 : 0,
+    )
+    if (item.assessment_count > 0 && item.graded_assessment_count === 0)
+      assert.equal(await row.locator('small').innerText(), 'Не выставлено')
+    assert.deepEqual(item.final_result, {
+      grade_value: null,
+      passed: null,
+      has_debt: false,
+      retake_date: null,
+      retake_location: null,
+    })
+    const sessionRow = page
+      .locator('.academics-session')
+      .getByRole('row')
+      .filter({ has: page.getByRole('rowheader', { name: item.discipline.name, exact: true }) })
+    assert.equal(await sessionRow.locator('.academics-label').innerText(), 'Не выставлено')
+  }
+  if (isPz) {
+    assert.ok(
+      academics.items.some((item) => item.total_score === 0 && item.graded_assessment_count > 0),
+    )
+    assert.ok(
+      academics.items.some(
+        (item) => item.graded_assessment_count === 0 && item.assessment_count > 0,
+      ),
+    )
+  } else assert.ok(academics.items.some((item) => item.total_score > 0))
+  assert.equal(await page.locator('.academics-debt, .academics-retake').count(), 0)
   await page.getByText(grade, { exact: true }).first().waitFor()
   await noOverflow(page, width)
 
   await navigate(page, 'Новости')
   await page.getByRole('heading', { name: 'Новости', exact: true }).waitFor()
   await page.getByText('Об изменении расписания занятий 19 ноября', { exact: false }).waitFor()
+  const news = await readApi(page, 'news')
+  const announcement = news.items.find((item) => item.title.includes('19 ноября'))
+  const detail = await readApi(page, `news/${announcement.id}`)
+  await page.locator('.news-row__link').filter({ hasText: announcement.title }).click()
+  await page.getByRole('heading', { name: detail.title, exact: true }).waitFor()
+  assert.equal(await page.locator('.news-article__body').innerText(), detail.body)
+  assert.match(detail.body, /23 ноября/)
+  assert.match(detail.body, /21 ноября/)
   await noOverflow(page, width)
+  await page.getByRole('link', { name: /Назад к новостям/ }).click()
+  await page.getByRole('heading', { name: 'Новости', exact: true }).waitFor()
 
   await page.getByRole('button', { name: 'Уведомления' }).click()
   const notifications = page.getByRole('dialog', { name: 'Уведомления' })
