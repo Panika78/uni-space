@@ -2,51 +2,59 @@
   min-width: 0;
 }
 .academics-term {
-  color: var(--text-muted, #65716b);
+  color: var(--muted);
   margin-bottom: 2rem;
 }
 .academics-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
   table-layout: fixed;
-  font-size: 0.9rem;
+  font-size: 16px;
 }
 .academics-table th,
 .academics-table td {
   text-align: left;
-  padding: 1rem 0.75rem;
-  border-bottom: 1px solid #dce3de;
+  padding: 21px 25px;
+  border-bottom: 1px solid var(--line);
   overflow-wrap: anywhere;
-  vertical-align: top;
+  vertical-align: middle;
 }
 .academics-table thead th {
-  color: #58685f;
-  font-size: 0.8rem;
-  font-weight: 500;
+  background: #faf5f0;
+  color: #71656a;
+  font-size: 14px;
+  font-weight: 650;
 }
 .academics-table th:first-child {
   width: 44%;
 }
 .academics-table tbody th {
-  font-weight: 500;
+  font-size: 17px;
+  font-weight: 650;
 }
 .academics-table small {
   display: block;
-  color: #58685f;
+  color: #71656a;
   margin-top: 0.35rem;
 }
 .academics-session {
-  margin-top: 2.5rem;
+  margin-top: 46px;
 }
 .academics-label {
   display: inline-block;
-  border-radius: 0.35rem;
+  border-radius: 9px;
   padding: 0.25rem 0.5rem;
   font-size: 0.85rem;
 }
 .academics-label--pending {
-  background: #edf0ee;
-  color: #4d5c53;
+  background: #f2efeb;
+  color: #706265;
 }
 .academics-label--complete {
   background: #e5eee7;
@@ -59,7 +67,7 @@
 .academics-debt,
 .academics-retake {
   margin: 0.5rem 0 0;
-  font-size: 0.8rem;
+  font-size: 14px;
 }
 .academics-debt {
   color: #873d2a;
@@ -71,6 +79,9 @@
   .academics-table,
   .academics-table tbody {
     display: block;
+    border: 0;
+    box-shadow: none;
+    background: transparent;
   }
   .academics-table thead {
     position: absolute;
@@ -82,12 +93,17 @@
   .academics-table tr {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    padding: 1rem 0;
-    border-bottom: 1px solid #dce3de;
+    padding: 18px 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--line);
     gap: 0.65rem;
   }
   .academics-table th:first-child,
   .academics-table tbody th {
+    font-size: 17px;
     grid-column: 1 / -1;
     width: auto;
   }
@@ -102,8 +118,15 @@
   }
   .academics-mobile-label {
     display: block;
-    color: #58685f;
+    color: #71656a;
     font-size: 0.75rem;
     margin-bottom: 0.3rem;
   }
+}
+
+.academics-page h2 {
+  font-size: 23px;
+  font-weight: 740;
+  margin: 0 0 18px;
+  letter-spacing: -0.028em;
 }
