@@ -684,6 +684,7 @@ jobs:
           done
           export PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs
           node frontend/e2e/demo-data.browser.mjs | tee work/mvp1-acceptance.txt
+          node frontend/e2e/interface.browser.mjs | tee work/interface-acceptance.txt
           kill "$api_pid"
           wait "$api_pid" || test "$?" -eq 143
           (cd backend && ACCESS_TTL_SECONDS=2 exec .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000) > work/api-expiry.log 2>&1 &
@@ -701,4 +702,6 @@ jobs:
           path: |
             work/mvp1-acceptance.txt
             work/acceptance-*.png
+            work/interface-acceptance.txt
+            work/interface/*.png
           if-no-files-found: error

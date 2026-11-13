@@ -1,0 +1,226 @@
+/* global process, console, document, window, getComputedStyle */
+// Real demo seed and API. No substituted authentication or application data.
+import assert from 'node:assert/strict'
+import { mkdir } from 'node:fs/promises'
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
+const baseURL = process.env.DEMO_TEST_URL || 'http://localhost:5173'
+assert.ok(process.env.DEMO_STUDENT_A_PASSWORD, 'Provide disposable demo password')
+const artifacts = process.env.INTERFACE_ARTIFACTS || 'work/interface'
+await mkdir(artifacts, { recursive: true })
+const browser = await chromium.launch({
+  executablePath: process.env.CHROMIUM_PATH || undefined,
+  headless: true,
+  args: ['--no-sandbox'],
+})
+const page = await browser.newPage()
+const errors = []
+page.on('pageerror', (error) => errors.push(error.message))
+async function settle() {
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getTiming().iterations !== Infinity)
+        .map((a) => a.finished.catch(() => {})),
+    ),
+  )
+}
+async function inspect(name, width) {
+  await settle()
+  assert.ok(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    `${name}: overflow at ${width}`,
+  )
+  await page.screenshot({ path: `${artifacts}/${width}-${name}.png`, fullPage: true })
+}
+try {
+  await page.goto(`${baseURL}/login`)
+  await page.getByLabel('Логин', { exact: true }).fill('demo-pz101')
+  await page.getByLabel('Пароль', { exact: true }).fill(process.env.DEMO_STUDENT_A_PASSWORD)
+  // The preceding real seed scenario consumes login attempts; honor the server's window.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const pending = page.waitForResponse((response) => response.url().endsWith('/auth/login'))
+    await page.getByRole('button', { name: 'Войти', exact: true }).click()
+    const response = await pending
+    if (response.status() !== 429) {
+      assert.equal(response.status(), 200)
+      break
+    }
+    const seconds = Number(response.headers()['retry-after'])
+    assert.ok(seconds > 0 && seconds <= 60)
+    await page.waitForTimeout(seconds * 1000)
+  }
+  await page.getByRole('heading', { name: 'Расписание', exact: true }).waitFor()
+  for (const width of [360, 390, 768, 1440, 1920, 2560]) {
+    await page.setViewportSize({ width, height: width >= 1920 ? 1440 : 1000 })
+    await page.goto(`${baseURL}/schedule`)
+    await page.getByLabel('Дата', { exact: true }).fill('2026-11-19')
+    await page.locator('.schedule-list').waitFor()
+    await inspect('schedule-day', width)
+    await page.getByRole('button', { name: 'Неделя', exact: true }).click()
+    assert.equal(await page.getByRole('group', { name: 'Дни недели' }).count(), 0)
+    assert.equal(await page.locator('.schedule-day:visible').count(), 7)
+    const groups = await page.locator('.schedule-day__lessons').evaluateAll((lists) =>
+      lists.map((list) =>
+        [...list.children].map((card) => {
+          const b = card.getBoundingClientRect()
+          return { left: b.left, top: b.top, bottom: b.bottom }
+        }),
+      ),
+    )
+    for (const group of groups)
+      for (let i = 1; i < group.length; i++) {
+        assert.equal(group[i].left, group[i - 1].left)
+        assert.ok(group[i].top >= group[i - 1].bottom, 'one column without overlaps')
+      }
+    for (const card of await page.locator('.lesson-card--moved, .lesson-card--cancelled').all()) {
+      assert.match(await card.innerText(), /Перенесено|Отменено/)
+      for (const selector of ['h3', 'time'])
+        assert.match(
+          await card
+            .locator(selector)
+            .first()
+            .evaluate((e) => getComputedStyle(e).textDecorationLine),
+          /line-through/,
+        )
+    }
+    await inspect('schedule-week', width)
+    await page.locator('.schedule-open-day').nth(3).click()
+    assert.equal(
+      await page.getByRole('button', { name: 'День', exact: true }).getAttribute('aria-pressed'),
+      'true',
+    )
+    assert.equal(await page.getByLabel('Дата', { exact: true }).inputValue(), '2026-11-19')
+    await page.getByRole('button', { name: 'Неделя', exact: true }).click()
+    await page.getByRole('button', { name: 'Следующая неделя' }).click()
+    await page.getByRole('button', { name: 'День', exact: true }).click()
+    assert.equal(await page.getByLabel('Дата', { exact: true }).inputValue(), '2026-11-26')
+    for (const [route, title, name] of [
+      ['/academics', 'Успеваемость', 'academics'],
+      ['/services', 'Услуги и документы', 'catalog'],
+      ['/services?tab=applications', 'Услуги и документы', 'applications'],
+      ['/services/study_certificate', 'Справка об обучении', 'form'],
+      ['/news', 'Новости', 'news'],
+      ['/profile', 'Мой профиль', 'profile'],
+      ['/settings', 'Настройки', 'settings'],
+    ]) {
+      await page.goto(`${baseURL}${route}`)
+      await page.getByRole('heading', { name: title, exact: true, level: 1 }).waitFor()
+      await page.waitForLoadState('networkidle')
+      await inspect(name, width)
+      if (route === '/academics') assert.equal(await page.getByRole('progressbar').count(), 0)
+      if (route === '/profile') {
+        await page.locator('.profile-building').evaluate((image) => image.decode())
+        if (width >= 1440) {
+          const bottoms = await page
+            .locator('.profile-education,.profile-contacts')
+            .evaluateAll((els) => els.map((e) => e.getBoundingClientRect().bottom))
+          assert.ok(Math.abs(bottoms[0] - bottoms[1]) < 1)
+        }
+      }
+      if (route === '/services') {
+        const tabs = page.getByRole('navigation', { name: 'Разделы услуг' })
+        const top = (await tabs.boundingBox()).y
+        await tabs.getByRole('link', { name: 'Мои заявления' }).click()
+        await settle()
+        assert.ok(Math.abs((await tabs.boundingBox()).y - top) < 1)
+        await page.goBack()
+        await page.getByRole('link', { name: 'Подать заявление' }).waitFor()
+        await page.goForward()
+        await tabs.getByRole('link', { name: 'Мои заявления' }).waitFor()
+      }
+      if (route === '/news') {
+        await page.locator('.news-row__link').first().click()
+        await page.locator('.news-article').waitFor()
+        await inspect('news-detail', width)
+      }
+      if (
+        route === '/services?tab=applications' &&
+        (await page.locator('.applications-table a').count())
+      ) {
+        await page.locator('.applications-table a').first().click()
+        await page.locator('.application-detail dl').waitFor()
+        await inspect('application-detail', width)
+        assert.equal(await page.locator('.application-detail > a').count(), 1)
+      }
+    }
+    await page.getByRole('button', { name: 'Уведомления', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Уведомления', exact: true }).waitFor()
+    await page.waitForLoadState('networkidle')
+    await inspect('notifications', width)
+    await page.keyboard.press('Escape')
+    await page.waitForFunction(
+      () => document.activeElement?.getAttribute('aria-label') === 'Уведомления',
+    )
+    assert.equal(await page.getByRole('dialog', { name: 'Уведомления', exact: true }).count(), 0)
+    await page.getByRole('button', { name: 'Меню пользователя' }).click()
+    await page.getByRole('link', { name: 'Мой профиль', exact: true }).waitFor()
+    await page.keyboard.press('Escape')
+    assert.equal(
+      await page
+        .getByRole('button', { name: 'Меню пользователя' })
+        .evaluate((e) => e === document.activeElement),
+      true,
+    )
+    if (width < 721) {
+      await page.getByRole('button', { name: 'Открыть меню', exact: true }).click()
+      await page.getByRole('dialog', { name: 'Мобильная навигация' }).waitFor()
+      await inspect('mobile-menu', width)
+      await page.keyboard.press('Escape')
+      assert.equal(
+        await page
+          .getByRole('button', { name: 'Открыть меню', exact: true })
+          .evaluate((e) => e === document.activeElement),
+        true,
+      )
+    }
+    console.log(`PASS real API screens, schedule, history, overlays at ${width}`)
+  }
+  // Deliberately inject a read-only empty fixture; no POST/auth responses are replaced.
+  await page.route('**/api/v1/applications?*', (route) =>
+    route.fulfill({ json: { items: [], next_cursor: null } }),
+  )
+  for (const width of [360, 1440, 2560]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto(`${baseURL}/services?tab=applications`)
+    await page.getByText('Вы ещё не подавали заявлений', { exact: true }).waitFor()
+    await inspect('empty-applications-fixture', width)
+    await page.getByRole('link', { name: 'Перейти в каталог услуг' }).click()
+    await page.getByRole('link', { name: 'Подать заявление' }).waitFor()
+  }
+  await page.unroute('**/api/v1/applications?*')
+  console.log('PASS read-only empty application fixture and catalog transition')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto(`${baseURL}/schedule`)
+  await page.getByRole('button', { name: 'Неделя', exact: true }).click()
+  await page.getByRole('button', { name: 'Уведомления', exact: true }).click()
+  await page.keyboard.press('Escape')
+  assert.equal(await page.getByRole('dialog', { name: 'Уведомления', exact: true }).count(), 0)
+  assert.ok(
+    await page.evaluate(() =>
+      document.getAnimations().every((a) => a.effect.getTiming().duration <= 1),
+    ),
+  )
+  assert.deepEqual(errors, [])
+  console.log('PASS reduced motion and no JavaScript errors')
+  await page.getByRole('button', { name: 'Меню пользователя' }).click()
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Выйти', exact: true }).click()
+  await page.getByRole('heading', { name: 'Вход в систему' }).waitFor()
+  for (const width of [360, 390, 768, 1440, 1920, 2560]) {
+    await page.setViewportSize({ width, height: 1000 })
+    for (const [route, name, title] of [
+      ['/login', 'login', 'Вход в систему'],
+      ['/about', 'about', 'Uni Space'],
+      ['/unknown-interface-route', 'not-found', 'Страница не найдена'],
+    ]) {
+      await page.goto(`${baseURL}${route}`)
+      await page.getByRole('heading', { name: title, exact: true }).waitFor()
+      await inspect(name, width)
+    }
+  }
+  assert.deepEqual(errors, [])
+  console.log('PASS real logout and public/error screens at all six widths')
+} finally {
+  await browser.close()
+}
