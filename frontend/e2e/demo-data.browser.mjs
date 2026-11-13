@@ -346,6 +346,7 @@ async function inspectStudent(
   assert.equal(await page.locator('.academics-term').innerText(), academics.term.name)
   await page.getByRole('heading', { name: 'Сессия', exact: true }).waitFor()
   assert.equal(await page.locator('.academics-page h2').count(), 2)
+  assert.equal(await page.locator('.academics-session tbody tr').count(), academics.items.length)
   for (const item of academics.items) {
     const row = page
       .locator('.academics-page section')
@@ -375,6 +376,12 @@ async function inspectStudent(
       .locator('.academics-session')
       .getByRole('row')
       .filter({ has: page.getByRole('rowheader', { name: item.discipline.name, exact: true }) })
+    assert.equal(
+      await sessionRow.locator('td').first().innerText(),
+      { exam: 'Экзамен', pass_fail: 'Зачёт', graded_pass: 'Дифференцированный зачёт' }[
+        item.attestation_type
+      ],
+    )
     assert.equal(await sessionRow.locator('.academics-label').innerText(), 'Не выставлено')
   }
   if (isPz) {

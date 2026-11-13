@@ -62,6 +62,7 @@ const browser = await chromium.launch({
   args: ['--no-sandbox'],
 })
 const context = await browser.newContext({ viewport: { width: 360, height: 800 } })
+context.setDefaultTimeout(30000)
 const page = await context.newPage()
 const testPath = '/api/v1/task007-test-only'
 const apiError = (code) => ({ error: { code, message: 'internal server detail', details: [] } })

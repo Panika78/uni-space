@@ -492,3 +492,12 @@ push в `main`. В CI используются отдельные временн
 Отдельный `access-expiry.browser.mjs` в той же job проверяет настоящий
 `401 access_expired`, refresh после reload и единственный replay общего клиента;
 для граничного сценария API перезапускается с `ACCESS_TTL_SECONDS=2`.
+
+После независимого ревью TASK-018 обязательный `auth-browser-e2e` запускает
+`frontend/e2e/auth.browser.mjs` на собственной PostgreSQL с двумя аккаунтами из
+`seed_services_browser_test_students.py`. Vite направляет API на тестовый fault
+proxy `http://127.0.0.1:18080`, настоящий backend работает на `:8000`.
+`AUTH_TEST_LOGIN_A`, `AUTH_TEST_LOGIN_B`, `AUTH_TEST_PASSWORD` передаются через
+окружение; пароли и auth-логи не публикуются в артефактах.
+`bash scripts/test-e2e-exit.sh` проверяет, что оба конвейера `node | tee` передают
+намеренный exit 37 в CI; workflow явно использует Bash с `pipefail`.

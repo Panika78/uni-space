@@ -31,29 +31,28 @@ docker compose -p task018 -f compose.test.yaml up -d --wait
 Не запускать pytest и demo seed в одной БД: функциональные фикстуры предполагают
 чистую схему. Повторная приёмка начинается с новой выделенной БД.
 
-## Матрица PRD §5 и REQ
+## Матрица PRD §5 / REQ
 
-`passed` ниже означает фактически выполненную проверку; наличие теста отдельно
-не считается успешным результатом. Результаты CI привязаны к SHA PR в GitHub.
+Результаты относятся к review-исправлениям; CI и точный SHA указаны в PR #54.
+Ожидаемое поведение проверяется assertions, не наличием тестового файла.
 
-| Критерий PRD §5 / REQ | Существующее покрытие | Добавлено TASK-018 | Результат |
-|---|---|---|---|
-| Публичная ссылка / NF01 | production smoke | — | TASK-020 |
-| Вход и выход / A01–A05 | auth integration, auth.browser, authSession.test | Подтверждённый logout и отказ старому Bearer в общем пути | passed (demo E2E + suites ниже) |
-| Два аккаунта / NF03, NF06 | test_demo_seed, demo-data.browser | Полный путь обоих на обеих ширинах | passed (demo E2E + suites ниже) |
-| Разные профили и академические данные / G01–G03 | auth/academics integration, StudentProfile, AcademicsPage | Прямые HTTP-снимки двух студентов и отсутствие фиктивного долга | passed (demo E2E + suites ниже) |
-| Стартовое расписание / S01 | schedule.browser | После каждого login в полном пути | passed (demo E2E + suites ниже) |
-| День и неделя / S02 | SchedulePage, schedule.browser | Desktop неделя, мобильный дневной интерфейс | passed (demo E2E + suites ниже) |
-| Аудитории, преподаватели, изменения / S03–S04 | schedule integration, test_demo_seed | Цепочки 19→20→23 и 19→21, отмена, сверка новости | passed (demo E2E + suites ниже) |
-| Оценки, зачёты, сессия / G01–G03 | academics integration/browser (специальные фикстуры) | Финальный seed, разные текущие баллы, без долга | passed (demo E2E + suites ниже) |
-| Создание заявки / D01–D02 | services/application tests, services.browser | Настоящий POST обоих demo студентов | passed (demo E2E + suites ниже) |
-| Сохранение и статус / D03, NF07 | applications.browser | ID, поля, submitted/pending, reload, logout/login | passed (demo E2E + suites ниже) |
-| Официальные новости / NEW01 | news integration, NewsPages.test, news.browser | Открытие из меню и согласованность дат переноса | passed (demo E2E + suites ниже) |
-| Внутренние уведомления / N01 | auth integration, NotificationsDrawer, notifications.browser | Разные уведомления в общем пути | passed (demo E2E + suites ниже) |
-| Персональная изоляция / NF04 | auth, schedule, academics, application integration; auth UI tests | Реальный Bearer, отсутствие Bearer, запрет student_id/group_id, одинаковые чужой/отсутствующий 404, no-store | passed (demo E2E + suites ниже) |
-| Основные сценарии 360 px / NF02, NF09–NF10 | функциональные browser suites, StudentLayout, StatusStates | Полный путь через меню на 360 и desktop; overflow и screenshots | passed (demo E2E + suites ниже) |
-| Обозначение прототипа / NF05 | StudentLayout.test | Переиспользовано | passed (Vitest) |
-| Доступность из России / NF08 | — | — | TASK-020 |
+| REQ / локальный критерий | Конкретная проверка / уровень | Ожидаемый результат | Фактический результат / статус | Ограничение |
+|---|---|---|---|---|
+| A01–A05: вход/выход/сессия | auth.browser, access-expiry.browser; Browser E2E + API; auth integration | Login/reload, вкладки, true/false/unknown logout, отзыв access, независимое устройство, один replay | passed (локально и CI 43424818134) | Потери ответов моделируются fault proxy; реальные backend операции исполняются |
+| NF03, NF06: два вымышленных аккаунта | demo-data.browser; Browser E2E + test_demo_seed integration | Оба студента проходят весь путь на 1440/360 | passed, четыре заявки | Одноразовые пароли только в env |
+| G01: профиль и разные персональные данные | dt/dd профиля + /users/me; Browser E2E + API | ФИО, факультет, программа, направление, курс, группа совпадают с seed/API; прежний студент отсутствует | passed | Общий факультет ожидаем |
+| S01–S02: старт, день/неделя | login + inspectMoves, schedule.browser; Browser E2E | После login расписание; desktop day/week, мобильный выбор даты | passed (demo локально; schedule CI 43424818134) | Мобильный интерфейс показывает выбранный день |
+| S03–S04: время, преподаватели, аудитории, изменения | inspectMoves + /schedule; Browser E2E + API; schedule integration | 19→20→23 и 19→21, отмена, статусы, карточки по API, переход кнопкой и фокус | passed demo и integration | Начальные позиции компактные, аудитории проверяются на актуальных |
+| G01–G03: оценки/сессия | строки двух таблиц demo; Browser E2E + /academics; academics integration/browser | Каждая дисциплина: сумма, число оценённых работ, ноль/нет оценки, текущая сессия; нет долга и истории | passed (demo/integration локально; academics CI 43424818134) | Итоговые оценки/пересдачи/empty — только специальные фикстуры |
+| D01–D02: подача | submitAndRestore; Browser E2E + реальный POST | Услуга study_certificate, создание submitted/pending | passed | Обработка сотрудником/PDF вне MVP 1 |
+| D03, NF07: сохранность | compareApplication после POST/reload/relogin; Browser E2E + API | Полное равенство GET результату POST: ID, услуга, form_data, оба статуса, timestamps; UI соответствует | passed | updated_at проверяется API, в UI нет такого поля; created_at также проверяется datetime |
+| NEW01: новости | открытие news detail/back через UI + API | Полный заголовок/body, даты 21/23, возврат, обе ширины | passed | Отдельный news.browser с 61 новостью — not tested, нет подготовленных фикстур в этой job |
+| N01: персональные уведомления | demo drawer; Browser E2E; NotificationsDrawer Vitest; auth integration | Разные уведомления, изоляция, открытие/закрытие | passed | Автогенерация событий вне MVP 1 |
+| NF04: изоляция | реальные Bearer/anonymous, /applications/{id}, no-store, forbidden query; Browser E2E + API/integration | Разные выборки; чужой/отсутствующий ID одинаковый 404; без Bearer 401; подстановка 422 | passed | Сетевые UI-симуляции не называются серверной интеграцией |
+| NF02, NF09–NF10: 360 px, состояния, навигация | demo UI menu/overflow; Browser E2E; функциональные browser suites; Vitest | Полный путь на обеих ширинах; loading/empty/error/retry/keyboard | passed (demo/Vitest; browser schedule/academics CI 43424818134) | Полный ручной accessibility-аудит — not tested |
+| NF05: конкурсный прототип | StudentLayout.test; Vitest | Явный демостатус | passed | — |
+| NF01: публичная ссылка | — | Проверка опубликованного сайта | TASK-020 | Не заменяется локальным smoke |
+| NF08: доступ из России | — | Без VPN | TASK-020 | В этой задаче не выполняется |
 
 ## Границы свидетельств
 
@@ -72,7 +71,7 @@ docker compose -p task018 -f compose.test.yaml up -d --wait
 Его наличие не заменяет фактический прогон. Полный ручной аудит доступности,
 production TLS, реальные устройства и доступ из России НЕ ПРОВЕРЕНЫ.
 
-## Результаты запусков
+## Предыдущая приёмка до независимого ревью (история)
 
 - Backend unit/HTTPX: **328 passed**, 228 integration deselected. Два предупреждения
   устаревшего websockets API. Первый некорректный запуск с COOKIE_SECURE=false дал
@@ -113,9 +112,30 @@ F-01 PARTIALLY CONFIRMED: shell не указан, явного pipefail нет;
 | REQ / замечание | Конкретная проверка / уровень | Ожидается | Факт / статус | Ограничение |
 |---|---|---|---|---|
 | NF04 / F-01 | scripts/test-e2e-exit.sh; CI regression | Оба реальных pipeline передают exit 37 и создают protocol | passed локально | Отрицательный subprocess намеренно падает; проверяющий процесс обязан завершиться 0 только при exit 37 |
-| A01–A05, NF04 / F-02 | auth.browser.mjs; Browser E2E с FastAPI/PostgreSQL и fault proxy | Вкладки, refresh/logout true/false/unknown, потерянные/поздние ответы, независимое устройство | not tested: новый запуск ожидается | Управляемые сбои явно отделены от реальных ответов |
-| S01–S04 / F-03 | inspectMoves; Browser E2E + API | 19→20→23, 19→21, отмена, время/аудитории, кнопка конечной позиции и фокус, desktop/360 | not tested: новый запуск ожидается | Финальный seed не меняется |
-| NEW01 / F-04 | demo E2E, news detail/back; Browser E2E + API | Заголовок/полный body, даты 21/23, возврат на обеих ширинах | not tested: новый запуск ожидается | news.browser.mjs с 61 новостью — not tested |
-| D01–D03, NF07 / F-05 | compareApplication; Browser E2E + API | Полное равенство записи POST после reload/relogin, статусы/поля/time в UI | not tested: новый запуск ожидается | updated_at не отображается UI; проверяется API, created_at — также datetime в UI |
-| G01, NF06 / F-06 | подписанные dt/dd профиля; Browser E2E + API | ФИО/факультет/программа/направление/курс/группа совпадают с seed и API; чужого ФИО нет | not tested: новый запуск ожидается | Общий факультет студентов закономерно одинаковый |
-| G01–G03 / F-07 | строки текущих дисциплин и Сессии; Browser E2E + API | Суммы/счётчики, ноль/нет оценки, текущий семестр, нет фиктивного долга/истории | not tested: новый запуск ожидается | Итоги/пересдачи/empty проверяются отдельным academics.browser и integration |
+| A01–A05, NF04 / F-02 | auth.browser.mjs; Browser E2E с FastAPI/PostgreSQL и fault proxy | Вкладки, refresh/logout true/false/unknown, потерянные/поздние ответы, независимое устройство | passed (локально и CI 43424818134) | Управляемые сбои явно отделены от реальных ответов |
+| S01–S04 / F-03 | inspectMoves; Browser E2E + API | 19→20→23, 19→21, отмена, время/аудитории, кнопка конечной позиции и фокус, desktop/360 | passed (локальный demo E2E) | Финальный seed не меняется |
+| NEW01 / F-04 | demo E2E, news detail/back; Browser E2E + API | Заголовок/полный body, даты 21/23, возврат на обеих ширинах | passed (локальный demo E2E) | news.browser.mjs с 61 новостью — not tested |
+| D01–D03, NF07 / F-05 | compareApplication; Browser E2E + API | Полное равенство записи POST после reload/relogin, статусы/поля/time в UI | passed (локальный demo E2E) | updated_at не отображается UI; проверяется API, created_at — также datetime в UI |
+| G01, NF06 / F-06 | подписанные dt/dd профиля; Browser E2E + API | ФИО/факультет/программа/направление/курс/группа совпадают с seed и API; чужого ФИО нет | passed (локальный demo E2E) | Общий факультет студентов закономерно одинаковый |
+| G01–G03 / F-07 | строки текущих дисциплин и Сессии; Browser E2E + API | Суммы/счётчики, ноль/нет оценки, текущий семестр, нет фиктивного долга/истории | passed (локальный demo E2E) | Итоги/пересдачи/empty проверяются отдельным academics.browser и integration |
+
+## Повторная проверка после ревью
+
+Команды: `bash scripts/test-e2e-exit.sh`; `pytest -q`; `pytest -m integration -q`;
+`npm test`; `npm run lint`; `npm run format:check`; `npm run typecheck`;
+`npm run build`; `node frontend/e2e/demo-data.browser.mjs`;
+`node frontend/e2e/access-expiry.browser.mjs`; `node frontend/e2e/auth.browser.mjs`.
+Использованы те же locked версии и отдельные demo/expiry базы. Auth использует
+штатный seed_services_browser_test_students, Vite API_PROXY_TARGET на fault proxy
+:18080, настоящий API :8000 и uni_space_test после завершения integration suite.
+
+Фактически повторено локально: 328 unit/HTTPX passed, 228 integration passed,
+254 Vitest passed; frontend lint/format/typecheck/build passed; отрицательная
+проверка двух pipeline passed (оба intentional exit 37 обнаружены); demo passed
+на обоих студентах × обеих ширинах; expiry passed. Auth passed локально и в CI 43424818134. Полный финальный CI привязан к SHA
+и ссылке в PR; эта запись не объявляет незавершённую job успешной. Продуктовые файлы и финальный seed не менялись.
+
+Первый demo прогон после расширения остановился на точном accessible name
+ссылки новости: имя включает дату и анонс. Селектор исправлен на пользовательскую
+ссылку с заголовком внутри; повторный полный demo прогон passed без ослабления
+assertions содержимого новости.
