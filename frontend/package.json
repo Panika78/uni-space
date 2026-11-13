@@ -16,6 +16,7 @@
     "typecheck": "tsc -b --pretty false",
     "types:generate": "uv run --locked --python 3.12.16 --project ../backend python ../backend/scripts/export_openapi.py && openapi-typescript ../backend/openapi.json -o src/shared/api/schema.ts",
     "types:check": "uv run --locked --python 3.12.16 --project ../backend python ../backend/scripts/export_openapi.py --check && openapi-typescript ../backend/openapi.json -o /tmp/uni-space-openapi-types.ts && cmp src/shared/api/schema.ts /tmp/uni-space-openapi-types.ts",
+    "e2e:news": "bash ../scripts/news-browser-e2e.sh",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -482,6 +482,38 @@ GitHub Actions выполняет проверки отдельными jobs д�
 push в `main`. В CI используются отдельные временные PostgreSQL и тестовые
 учётные данные; secrets и production-конфигурация не используются.
 
+### Браузерная регрессия новостей (TASK-023)
+
+`news-browser-e2e` запускает настоящий FastAPI, Vite и Playwright Chromium с
+отдельной PostgreSQL. Фикстура требует пустую таблицу `news`, создаёт одного
+вымышленного студента и ровно 70 опубликованных новостей с разными прошедшими
+датами. ID новости для прямого открытия передаётся из фикстуры, а не задаётся
+в тесте. Локальный прогон использует тот же скрипт и отдельный Compose project;
+нужны Docker Compose, Python/uv и Node/npm из раздела «Требования».
+
+Из корня проекта выполните:
+
+```bash
+docker compose -p uni-space-test -f compose.test.yaml down --volumes --remove-orphans
+docker compose -p uni-space-test -f compose.test.yaml up -d --wait test-db
+npm install --global npm@11.19.1
+uv python install 3.12.16
+uv sync --locked --project backend --python 3.12.16
+npm ci --prefix frontend
+mkdir -p work/browser-tooling
+npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
+node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell
+PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_modules/playwright/index.mjs" npm run --prefix frontend e2e:news
+docker compose -p uni-space-test -f compose.test.yaml down --volumes --remove-orphans
+```
+
+Команда запуска мигрирует выделенную БД и подготавливает фикстуры автоматически.
+Она требует `APP_ENV=test` и базу `uni_space_test` на localhost; учётные данные
+изолированы от `.env`. Скрипт ограничивает ожидания готовности серверов 90
+секундами, браузерные ожидания — 15 секундами и завершает API/Vite при любом
+результате. При падении смотрите `work/news-browser-failure.png` и журналы
+`work/news-browser-api.log` / `work/news-browser-vite.log`.
+
 ## Сквозная приёмка MVP 1 (TASK-018)
 
 [Матрица покрытия и результаты](docs/MVP1_ACCEPTANCE.md) отделяет локальную

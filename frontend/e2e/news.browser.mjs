@@ -1,6 +1,5 @@
 /* global process, console, URL, window, document */
-// Run against Vite, the real backend and a fictional student with at least 61
-// published news rows, one unbroken long title, and long bodies for detail scroll.
+// Run against Vite, the real backend and exactly 70 isolated fictional news rows.
 import assert from 'node:assert/strict'
 
 const playwright = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
@@ -8,15 +7,22 @@ const { chromium } = playwright.default ?? playwright
 const baseURL = process.env.NEWS_TEST_URL || 'http://localhost:5173'
 const loginName = process.env.NEWS_TEST_LOGIN
 const password = process.env.NEWS_TEST_PASSWORD
+const detailId = process.env.NEWS_TEST_DETAIL_ID
 assert.ok(loginName && password, 'Provide fictional NEWS_TEST_LOGIN and NEWS_TEST_PASSWORD')
+assert.ok(detailId, 'Provide NEWS_TEST_DETAIL_ID from the news browser fixture')
 
 const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
+  ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
   headless: true,
+  timeout: 15_000,
   args: ['--no-sandbox'],
 })
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+context.setDefaultTimeout(15_000)
+context.setDefaultNavigationTimeout(15_000)
 const page = await context.newPage()
+page.setDefaultTimeout(15_000)
+page.setDefaultNavigationTimeout(15_000)
 const apiRequests = []
 page.on('request', (request) => {
   const url = new URL(request.url())
@@ -24,6 +30,8 @@ page.on('request', (request) => {
 })
 
 const check = (name) => console.log(`PASS ${name}`)
+let currentScenario = 'initialize browser'
+let releaseRefresh
 const waitForNewsRows = (count) =>
   page.waitForFunction(
     (expected) => document.querySelectorAll('.news-row').length === expected,
@@ -31,6 +39,7 @@ const waitForNewsRows = (count) =>
   )
 
 try {
+  currentScenario = 'login and load first news page'
   await page.goto(`${baseURL}/login`)
   await page.getByLabel('Логин', { exact: true }).fill(loginName)
   await page.getByLabel('Пароль', { exact: true }).fill(password)
@@ -39,9 +48,11 @@ try {
   await page.getByRole('link', { name: 'Новости', exact: true }).click()
   await page.getByRole('heading', { name: 'Новости', exact: true }).waitFor()
   await waitForNewsRows(20)
-  assert.ok(
-    (await page.locator('.news-row h2').allTextContents()).some((title) => title.length > 100),
+  const longTitle = (await page.locator('.news-row h2').allTextContents()).find(
+    (title) => title.length > 100,
   )
+  assert.ok(longTitle, 'The first page should include a title longer than 100 characters')
+  assert.ok(!/\s/.test(longTitle), 'The long title should also exercise an unbroken word')
 
   for (const width of [360, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 })
@@ -73,10 +84,18 @@ try {
   )
   check('feed rows are full links with hover, keyboard focus and an external pagination control')
 
+  currentScenario = 'load all 70 news rows and verify keyset sorting'
   await page.getByRole('button', { name: 'Показать ещё', exact: true }).click()
   await waitForNewsRows(40)
   await page.getByRole('button', { name: 'Показать ещё', exact: true }).click()
   await waitForNewsRows(60)
+  const publishedDates = await page
+    .locator('.news-row time')
+    .evaluateAll((items) => items.map((item) => Date.parse(item.dateTime)))
+  assert.ok(
+    publishedDates.every((value, index) => index === 0 || publishedDates[index - 1] > value),
+    'News pages should remain strictly sorted by publication time descending',
+  )
   check('real backend loads three keyset pages')
 
   await page.evaluate(() => window.scrollTo(0, 700))
@@ -94,6 +113,7 @@ try {
     .filter({ has: page.getByRole('heading', { name: articleTitle, exact: true }) })
   await articleLink.click()
   await page.getByRole('heading', { name: articleTitle, exact: true }).waitFor()
+  await page.waitForFunction(() => window.scrollY === 0)
   assert.equal(await page.evaluate(() => window.scrollY), 0)
   assert.ok((await page.locator('.news-article__body').evaluate((body) => body.scrollHeight)) > 900)
 
@@ -111,13 +131,19 @@ try {
   await page.waitForFunction((position) => Math.abs(window.scrollY - position) <= 2, detailPosition)
   check('detail scroll restores across Back and Forward between news and another section')
 
+  currentScenario = 'simulate 31-minute article reading and await feed refresh'
   await page.clock.install({ time: new Date() })
   await page.clock.fastForward(31 * 60 * 1000)
-  let releaseRefresh
-  let signalRefreshStarted
-  const refreshStarted = new Promise((resolve) => {
-    signalRefreshStarted = resolve
-  })
+  const refreshStarted = page.waitForRequest(
+    (request) => {
+      const url = new URL(request.url())
+      return url.pathname === '/api/v1/news' && !url.searchParams.has('cursor')
+    },
+    { timeout: 15_000 },
+  ).then(
+    () => null,
+    (error) => error,
+  )
   const refreshGate = new Promise((resolve) => {
     releaseRefresh = resolve
   })
@@ -125,10 +151,9 @@ try {
   const firstNewsPage = (url) => url.pathname === '/api/v1/news' && !url.searchParams.has('cursor')
   const firstNewsPageRoute = (url) => firstNewsPage(new URL(url))
   await context.route(firstNewsPageRoute, async (route) => {
-    const response = await route.fetch()
+    const response = await route.fetch({ timeout: 15_000 })
     if (!held && response.status() === 200) {
       held = true
-      signalRefreshStarted()
       await refreshGate
     }
     await route.fulfill({ response })
@@ -136,7 +161,8 @@ try {
 
   await page.getByRole('link', { name: '← Назад к новостям' }).click()
   await page.getByRole('heading', { name: 'Новости', exact: true }).waitFor()
-  await refreshStarted
+  const refreshError = await refreshStarted
+  if (refreshError) throw refreshError
   const updatingButton = page.getByRole('button', { name: 'Обновляем…', exact: true })
   await updatingButton.waitFor()
   assert.equal(await updatingButton.isDisabled(), true)
@@ -213,11 +239,29 @@ try {
   check('pagination control disappears after the final page')
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto(`${baseURL}/news/70`)
+  await page.goto(`${baseURL}/news/${encodeURIComponent(detailId)}`)
   await page.getByRole('heading', { level: 1 }).last().waitFor()
   await page.evaluate(() => window.scrollTo(0, 0))
-  await page.screenshot({ path: '/tmp/uni-space-news-detail.png' })
+  await page.screenshot({ path: 'work/news-browser-detail.png', timeout: 15_000 })
+  check('fixture-provided direct news ID opens without relying on sequence values')
+} catch (error) {
+  console.error(`FAIL ${currentScenario}: ${error?.message || String(error)}`)
+  console.error(`Diagnostic URL: ${new URL(page.url()).origin}${new URL(page.url()).pathname}`)
+  try {
+    await page.screenshot({ path: 'work/news-browser-failure.png', timeout: 15_000 })
+    console.error('Saved failure screenshot: work/news-browser-failure.png')
+  } catch (screenshotError) {
+    console.error(
+      `Could not save failure screenshot: ${screenshotError?.message || screenshotError}`,
+    )
+  }
+  process.exitCode = 1
+  throw error
 } finally {
-  await context.close()
-  await browser.close()
+  releaseRefresh?.()
+  try {
+    await context.close()
+  } finally {
+    await browser.close()
+  }
 }
