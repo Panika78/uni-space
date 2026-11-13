@@ -1206,14 +1206,14 @@ textarea {
 }
 .login-brand {
   display: grid;
-  justify-items: start;
+  justify-items: center;
   gap: 10px;
   margin-bottom: 24px;
-  text-align: left;
+  text-align: center;
 }
 .login-brand .brand-mark {
-  width: 57px;
-  height: 57px;
+  width: 112px;
+  height: 112px;
 }
 .login-brand p {
   margin: 0;
