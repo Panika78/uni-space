@@ -134,16 +134,18 @@ try {
   currentScenario = 'simulate 31-minute article reading and await feed refresh'
   await page.clock.install({ time: new Date() })
   await page.clock.fastForward(31 * 60 * 1000)
-  const refreshStarted = page.waitForRequest(
-    (request) => {
-      const url = new URL(request.url())
-      return url.pathname === '/api/v1/news' && !url.searchParams.has('cursor')
-    },
-    { timeout: 15_000 },
-  ).then(
-    () => null,
-    (error) => error,
-  )
+  const refreshStarted = page
+    .waitForRequest(
+      (request) => {
+        const url = new URL(request.url())
+        return url.pathname === '/api/v1/news' && !url.searchParams.has('cursor')
+      },
+      { timeout: 15_000 },
+    )
+    .then(
+      () => null,
+      (error) => error,
+    )
   const refreshGate = new Promise((resolve) => {
     releaseRefresh = resolve
   })
