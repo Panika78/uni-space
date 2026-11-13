@@ -18,7 +18,11 @@ export function useOverlayPresence(isOpen: boolean, direction: 'left' | 'right' 
       direction === 'menu'
         ? 'translateY(-5px)'
         : `translateX(${direction === 'left' ? '-105%' : '105%'})`
-    const options = { duration: 260, easing: 'cubic-bezier(.22,1,.36,1)', fill: 'forwards' as const }
+    const options = {
+      duration: 260,
+      easing: 'cubic-bezier(.22,1,.36,1)',
+      fill: 'forwards' as const,
+    }
     const animations = [
       panel.animate(
         isOpen
