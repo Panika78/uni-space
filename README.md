@@ -481,3 +481,23 @@ docker compose -p uni-space-test -f compose.test.yaml down --volumes --remove-or
 GitHub Actions выполняет проверки отдельными jobs для pull request в `main` и
 push в `main`. В CI используются отдельные временные PostgreSQL и тестовые
 учётные данные; secrets и production-конфигурация не используются.
+
+## Сквозная приёмка MVP 1 (TASK-018)
+
+[Матрица покрытия и результаты](docs/MVP1_ACCEPTANCE.md) отделяет локальную
+приёмку от публикации TASK-020. Существующий `demo-data-browser` CI теперь
+выполняет полный путь обоих студентов финального TASK-017 seed на desktop и
+360 px, включая настоящий POST, reload, logout/login и прямые проверки изоляции.
+Артефакт `mvp1-acceptance` содержит безопасный протокол и скриншоты.
+Отдельный `access-expiry.browser.mjs` в той же job проверяет настоящий
+`401 access_expired`, refresh после reload и единственный replay общего клиента;
+для граничного сценария API перезапускается с `ACCESS_TTL_SECONDS=2`.
+
+После независимого ревью TASK-018 обязательный `auth-browser-e2e` запускает
+`frontend/e2e/auth.browser.mjs` на собственной PostgreSQL с двумя аккаунтами из
+`seed_services_browser_test_students.py`. Vite направляет API на тестовый fault
+proxy `http://127.0.0.1:18080`, настоящий backend работает на `:8000`.
+`AUTH_TEST_LOGIN_A`, `AUTH_TEST_LOGIN_B`, `AUTH_TEST_PASSWORD` передаются через
+окружение; пароли и auth-логи не публикуются в артефактах.
+`bash scripts/test-e2e-exit.sh` проверяет, что оба конвейера `node | tee` передают
+намеренный exit 37 в CI; workflow явно использует Bash с `pipefail`.

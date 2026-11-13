@@ -57,11 +57,12 @@ const proxy = createServer((request, response) => {
 })
 await new Promise((resolve) => proxy.listen(18080, '127.0.0.1', resolve))
 const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
+  executablePath: process.env.CHROMIUM_PATH || undefined,
   headless: true,
   args: ['--no-sandbox'],
 })
 const context = await browser.newContext({ viewport: { width: 360, height: 800 } })
+context.setDefaultTimeout(30000)
 const page = await context.newPage()
 const testPath = '/api/v1/task007-test-only'
 const apiError = (code) => ({ error: { code, message: 'internal server detail', details: [] } })
@@ -660,6 +661,29 @@ try {
   assert.equal(refreshStatuses.filter(({ status }) => status === 401).length, 2)
   assert.ok(refreshStatuses.every(({ status }) => status === 200 || status === 401))
   check('upstream refresh has only the two expected rejections, without unexpected auth failures')
+  const firstDevice = await browser.newContext()
+  const secondDevice = await browser.newContext()
+  try {
+    const firstPage = await firstDevice.newPage()
+    const secondPage = await secondDevice.newPage()
+    await login(firstPage, loginA, true)
+    await login(secondPage, loginA, true)
+    const confirmed = firstPage.waitForResponse((r) => r.url().endsWith('/auth/logout'))
+    await clickLogout(firstPage)
+    assert.deepEqual(await (await confirmed).json(), { session_revoked: true })
+    await secondPage.reload()
+    await heading(secondPage, 'Расписание')
+    const noSession = await firstDevice.request.post(`${baseURL}/api/v1/auth/logout`, {
+      headers: { Origin: baseURL },
+    })
+    assert.deepEqual(await noSession.json(), { session_revoked: false })
+    check(
+      'real true/false logout; independent device remains authenticated after other device revocation',
+    )
+  } finally {
+    await firstDevice.close()
+    await secondDevice.close()
+  }
 } finally {
   await context.close()
   await browser.close()
