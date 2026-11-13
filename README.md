@@ -481,3 +481,11 @@ docker compose -p uni-space-test -f compose.test.yaml down --volumes --remove-or
 GitHub Actions выполняет проверки отдельными jobs для pull request в `main` и
 push в `main`. В CI используются отдельные временные PostgreSQL и тестовые
 учётные данные; secrets и production-конфигурация не используются.
+
+## Сквозная приёмка MVP 1 (TASK-018)
+
+[Матрица покрытия и результаты](docs/MVP1_ACCEPTANCE.md) отделяет локальную
+приёмку от публикации TASK-020. Существующий `demo-data-browser` CI теперь
+выполняет полный путь обоих студентов финального TASK-017 seed на desktop и
+360 px, включая настоящий POST, reload, logout/login и прямые проверки изоляции.
+Артефакт `mvp1-acceptance` содержит безопасный протокол и скриншоты.

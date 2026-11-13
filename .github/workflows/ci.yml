@@ -550,7 +550,7 @@ jobs:
           PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs SCHEDULE_TEST_PASSWORD=fictional-schedule-password node frontend/e2e/academics.browser.mjs
 
   demo-data-browser:
-    name: Reproducible demo data in Chromium
+    name: MVP1 acceptance on final demo data
     runs-on: ubuntu-24.04
     env:
       APP_ENV: test
@@ -612,4 +612,13 @@ jobs:
             if curl -fsS http://localhost:8000/api/openapi.json >/dev/null && curl -fsS http://localhost:5173 >/dev/null; then break; fi
             sleep 1
           done
-          PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs node frontend/e2e/demo-data.browser.mjs
+          PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs node frontend/e2e/demo-data.browser.mjs | tee work/mvp1-acceptance.txt
+      - name: Upload acceptance evidence without auth logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mvp1-acceptance
+          path: |
+            work/mvp1-acceptance.txt
+            work/acceptance-*.png
+          if-no-files-found: error

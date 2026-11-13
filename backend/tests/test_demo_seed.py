@@ -82,6 +82,11 @@ def test_demo_data_documentation_matches_seed_date_constants():
 
 
 def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monkeypatch):
+    from app.auth import router as auth_routes
+    from app.auth.rate_limit import LoginRateLimiter
+
+    # Each acceptance fixture owns its limiter; retain the real default limit.
+    monkeypatch.setattr(auth_routes, "login_rate_limiter", LoginRateLimiter())
     seed = load_seed_module()
     url = make_url(get_settings().database_url.get_secret_value())
     configure_seed_target(monkeypatch, url)
