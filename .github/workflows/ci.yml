@@ -354,6 +354,35 @@ jobs:
           exit 1
       - name: Run services catalog and application browser E2E
         run: node frontend/e2e/services.browser.mjs
+      - name: Restart API before application read scenarios
+        run: |
+          set -e
+          api_pid="$(cat work/services-api.pid)"
+          kill -- "-$api_pid"
+          for attempt in $(seq 1 30); do
+            if ! curl --silent --fail http://127.0.0.1:8000/api/openapi.json >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          if curl --silent --fail http://127.0.0.1:8000/api/openapi.json >/dev/null; then
+            echo 'The notification E2E API process did not stop.' >&2
+            exit 1
+          fi
+          setsid bash -c 'echo $$ > work/services-api.pid; cd backend && exec uv run --locked --python 3.12.16 uvicorn app.main:app --host 127.0.0.1 --port 8000' > work/services-api.log 2>&1 < /dev/null &
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8000/api/openapi.json >/dev/null && curl --silent --fail http://127.0.0.1:5173/login >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat work/services-api.log work/services-frontend.log
+          exit 1
+      - name: Run application list and details browser E2E
+        run: |
+          node frontend/e2e/applications.browser.mjs
+          node frontend/e2e/applications-review.browser.mjs
+          node frontend/e2e/applications-pagination.browser.mjs
       - name: Show server logs on failure
         if: failure()
         run: tail -n 80 work/services-api.log work/services-frontend.log 2>/dev/null || true

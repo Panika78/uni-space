@@ -1,5 +1,7 @@
+import { useQueryClient } from '@tanstack/react-query'
+import { ApplicationsList, applicationsKey, ServicesTabs } from './ApplicationsPages'
 import { useEffect, useRef, useState } from 'react'
-import { Link, useBlocker, useNavigate, useParams } from 'react-router-dom'
+import { Link, useBlocker, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useUnsavedChanges } from '../../app/UnsavedChangesContext'
 import { ApiClientError, apiFetch } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
@@ -63,6 +65,19 @@ function isApplicationResponse(value: unknown, placeOfSubmission: string): value
 }
 
 export function ServicesPage() {
+  const [params] = useSearchParams()
+  return params.get('tab') === 'applications' ? (
+    <section className="section-page service-page">
+      <h1>Услуги и документы</h1>
+      <ServicesTabs applications />
+      <ApplicationsList />
+    </section>
+  ) : (
+    <ServiceCatalog />
+  )
+}
+
+function ServiceCatalog() {
   const [services, setServices] = useState<Service[] | null>(null)
   const [error, setError] = useState(false)
   useEffect(() => {
@@ -84,6 +99,7 @@ export function ServicesPage() {
   return (
     <section className="section-page service-page service-catalog-page">
       <h1>Услуги и документы</h1>
+      <ServicesTabs />
       <p>Выберите доступную услугу.</p>
       {error ? (
         <div role="alert">
@@ -145,6 +161,7 @@ export function ServicesPage() {
 
 export function ApplicationFormPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { serviceCode } = useParams()
   const [value, setValue] = useState('')
   const [touched, setTouched] = useState(false)
@@ -226,8 +243,11 @@ export function ApplicationFormPage() {
           201,
         )
       }
+      queryClient.removeQueries({ queryKey: applicationsKey })
       setApplication(result)
     } catch (cause) {
+      // The shared client aborts requests from an obsolete auth generation.
+      if (cause instanceof DOMException && cause.name === 'AbortError') return
       const fieldError =
         cause instanceof ApiClientError
           ? cause.details.find(
@@ -250,7 +270,10 @@ export function ApplicationFormPage() {
         cause.code === 'invalid_response' ||
         cause.status === undefined ||
         cause.status >= 500
-      if (uncertain) setUncertain(true)
+      if (uncertain) {
+        queryClient.removeQueries({ queryKey: applicationsKey })
+        setUncertain(true)
+      }
       setError(
         uncertain
           ? 'Не удалось получить подтверждение. Заявление могло сохраниться; система не отправляла запрос повторно.'
@@ -288,7 +311,11 @@ export function ApplicationFormPage() {
           <p>
             Номер заявления: <strong>№ {application.id}</strong>
           </p>
-          <p>Заявление сохранено. Информация о дальнейшей обработке появится позже.</p>
+          <p>Заявление сохранено.</p>
+          <Link className="service-action" to={`/applications/${application.id}`}>
+            Открыть заявление
+          </Link>
+          <Link to="/services?tab=applications">Мои заявления</Link>
           <button className="service-action" onClick={() => navigate('/services')}>
             Вернуться к каталогу
           </button>
@@ -324,6 +351,9 @@ export function ApplicationFormPage() {
             <p role="alert" className="application-error">
               {error}
             </p>
+          )}
+          {uncertain && (
+            <Link to="/services?tab=applications">Проверить результат в моих заявлениях</Link>
           )}
           <button className="service-action" type="submit" disabled={pending}>
             {pending ? 'Отправляем…' : 'Отправить заявление'}

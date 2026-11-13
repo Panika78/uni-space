@@ -74,6 +74,8 @@ def test_application_http_routes_use_real_bearer_authentication(postgresql_engin
         with TestClient(app) as anonymous:
             for path, method, payload in (
                 ("/api/v1/services", "get", None),
+                ("/api/v1/applications", "get", None),
+                ("/api/v1/applications/1", "get", None),
                 (
                     "/api/v1/applications",
                     "post",
@@ -210,6 +212,37 @@ def test_application_http_routes_use_real_bearer_authentication(postgresql_engin
                         == existing_count + 1
                     )
 
+        # Re-login with a fresh session and verify persistence and cross-student isolation.
+        for index, user in enumerate(students):
+            with TestClient(app) as reader:
+                login = reader.post(
+                    "/api/v1/auth/login",
+                    headers=origin,
+                    json={"login": user.login, "password": password},
+                )
+                headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+                page = reader.get("/api/v1/applications", headers=headers)
+                assert page.status_code == 200
+                expected = created_ids[:2] if index == 0 else created_ids[2:]
+                assert {item["id"] for item in page.json()["items"]} == {str(i) for i in expected}
+                for application_id in expected:
+                    assert (
+                        reader.get(
+                            f"/api/v1/applications/{application_id}", headers=headers
+                        ).status_code
+                        == 200
+                    )
+                foreign_id = created_ids[2] if index == 0 else created_ids[0]
+                foreign = reader.get(f"/api/v1/applications/{foreign_id}", headers=headers)
+                missing = reader.get("/api/v1/applications/9223372036854775807", headers=headers)
+                assert foreign.status_code == missing.status_code == 404
+                assert foreign.json() == missing.json()
+                assert (
+                    reader.post("/api/v1/auth/logout", headers={**origin, **headers}).status_code
+                    == 200
+                )
+                assert reader.get("/api/v1/applications", headers=headers).status_code == 401
+
         with TestClient(app) as teacher_client:
             teacher_login = teacher_client.post(
                 "/api/v1/auth/login",
@@ -218,9 +251,8 @@ def test_application_http_routes_use_real_bearer_authentication(postgresql_engin
             )
             assert teacher_login.status_code == 200
             teacher_headers = {"Authorization": f"Bearer {teacher_login.json()['access_token']}"}
-            assert (
-                teacher_client.get("/api/v1/services", headers=teacher_headers).status_code == 403
-            )
+            for path in ("/api/v1/services", "/api/v1/applications", "/api/v1/applications/1"):
+                assert teacher_client.get(path, headers=teacher_headers).status_code == 403
             assert (
                 teacher_client.post(
                     "/api/v1/applications",
@@ -465,7 +497,7 @@ def test_service_catalog_seed_is_unique_and_application_indexes_exist(db_session
 def test_application_routes_work_with_minimal_postgresql_role(postgresql_engine):
     from app.main import app
 
-    role = "uni_space_api_task013"
+    role = "uni_space_api"
     password = "test-only-task013-limited-role"
     suffix = f"task013-limited-role-{uuid4().hex}"
     with postgresql_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
@@ -540,6 +572,8 @@ def test_application_routes_work_with_minimal_postgresql_role(postgresql_engine)
         )
         assert response.status_code == 201
         assert response.headers["location"] == f"/api/v1/applications/{response.json()['id']}"
+        assert client.get("/api/v1/applications").json()["items"] == [response.json()]
+        assert client.get(response.headers["location"]).json() == response.json()
         with postgresql_engine.connect() as connection:
             assert not connection.execute(
                 text("SELECT has_table_privilege(:role, 'applications', 'UPDATE')"),

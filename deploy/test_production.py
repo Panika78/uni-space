@@ -1107,6 +1107,18 @@ with SessionLocal.begin() as db:
                     )
                     assert submitted.status_code == 201
                     application_id = int(submitted.json()["id"])
+                    application_path = f"/api/v1/applications/{application_id}"
+                    assert (
+                        student_client.get(
+                            application_path, headers=student_headers
+                        ).json()
+                        == submitted.json()
+                    )
+                    application_page = student_client.get(
+                        "/api/v1/applications", headers=student_headers
+                    )
+                    assert application_page.status_code == 200
+                    assert submitted.json() in application_page.json()["items"]
                 persisted_before = sql(
                     f"SELECT to_jsonb(a) FROM applications a WHERE id={application_id}"
                 )
@@ -1127,6 +1139,18 @@ with SessionLocal.begin() as db:
                             "/api/v1/services", headers=student_headers
                         ).status_code
                         == 200
+                    )
+                    assert (
+                        after_restart.get(
+                            application_path, headers=student_headers
+                        ).json()
+                        == submitted.json()
+                    )
+                    assert (
+                        submitted.json()
+                        in after_restart.get(
+                            "/api/v1/applications", headers=student_headers
+                        ).json()["items"]
                     )
                 print(
                     "PASS: PostgreSQL application row unchanged after API and DB restart with persistent volume",
