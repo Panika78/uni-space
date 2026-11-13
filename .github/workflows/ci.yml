@@ -570,7 +570,9 @@ jobs:
           export DEMO_STUDENT_B_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
           export DEMO_SEED_ALLOWED_DATABASE=uni_space_test
           export DEMO_SEED_ALLOWED_HOST=localhost
-          export DEMO_SEED_CONFIRM=SEED_UNI_SPACE_DEMO_DATA:uni_space_test@localhost
+          export DEMO_SEED_ALLOWED_PORT=5432
+          export DEMO_SEED_ALLOWED_ROLE=uni_space_test
+          export DEMO_SEED_CONFIRM=SEED_UNI_SPACE_DEMO_DATA:uni_space_test@localhost:5432/uni_space_test
           (cd backend && uv run --locked --python 3.12.16 python scripts/seed_demo_data.py)
           (cd backend && exec .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000) > work/api.log 2>&1 &
           api_pid=$!

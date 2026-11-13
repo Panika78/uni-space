@@ -8,11 +8,12 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from secrets import token_urlsafe
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, func, select, text
+from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
@@ -47,12 +48,43 @@ def load_seed_module():
     return module
 
 
+def configure_seed_target(monkeypatch, url, *, confirmation_url=None):
+    confirmation_target = confirmation_url or url
+    target = (
+        confirmation_target.host,
+        confirmation_target.port or 5432,
+        confirmation_target.database,
+        confirmation_target.username,
+    )
+    monkeypatch.setenv("DEMO_SEED_ALLOWED_HOST", url.host)
+    monkeypatch.setenv("DEMO_SEED_ALLOWED_PORT", str(url.port or 5432))
+    monkeypatch.setenv("DEMO_SEED_ALLOWED_DATABASE", url.database)
+    monkeypatch.setenv("DEMO_SEED_ALLOWED_ROLE", url.username)
+    monkeypatch.setenv("DEMO_SEED_CONFIRM", load_seed_module().expected_confirmation(target))
+
+
+def test_demo_data_documentation_matches_seed_date_constants():
+    seed = load_seed_module()
+    documentation = Path(__file__).resolve().parents[2] / "docs" / "DEMO_DATA.md"
+    content = " ".join(documentation.read_text().split())
+    assert "## Опорная дата и окно конкурсной демонстрации" in content
+    assert "19 ноября 2026 года" in content
+    assert "8–28 ноября 2026 года" in content
+    assert "1 сентября 2026 — 31 января 2027 года" in content
+    assert "`Europe/Moscow`" in content
+    assert seed.MOSCOW.key == "Europe/Moscow"
+    assert "GET /academics" in content
+    assert seed.date(2026, 9, 1) == seed.TERM_START
+    assert seed.date(2027, 1, 31) == seed.TERM_END
+    assert "19, 20, 21 и 23 ноября" in content
+    assert "После 31 января 2027 года" in content
+    assert "временной PostgreSQL-БД" in content
+
+
 def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monkeypatch):
     seed = load_seed_module()
     url = make_url(get_settings().database_url.get_secret_value())
-    monkeypatch.setenv("DEMO_SEED_ALLOWED_DATABASE", url.database)
-    monkeypatch.setenv("DEMO_SEED_ALLOWED_HOST", url.host)
-    monkeypatch.setenv("DEMO_SEED_CONFIRM", f"SEED_UNI_SPACE_DEMO_DATA:{url.database}@{url.host}")
+    configure_seed_target(monkeypatch, url)
     student_a_password = token_urlsafe(24)
     monkeypatch.setenv("DEMO_STUDENT_A_PASSWORD", student_a_password)
     monkeypatch.setenv("DEMO_STUDENT_B_PASSWORD", token_urlsafe(24))
@@ -133,6 +165,32 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
     assert schedule_news is not None
     assert "20 ноября" in schedule_news.body
     assert "23 ноября 2026 года" in schedule_news.body
+    assert "проверка защитных контуров из-за нестабильного магического фона" in (schedule_news.body)
+
+    chemistry_cancellation = db_session.scalar(
+        select(Lesson)
+        .join(seed.CourseOffering)
+        .join(seed.Discipline)
+        .where(
+            seed.Discipline.name == "Общая и неорганическая химия",
+            Lesson.starts_at == datetime(2026, 11, 19, 9, 0, tzinfo=seed.MOSCOW),
+        )
+    )
+    assert chemistry_cancellation is not None and chemistry_cancellation.status == "cancelled"
+    divination_lessons = db_session.scalars(
+        select(Lesson)
+        .join(seed.CourseOffering)
+        .join(seed.Discipline)
+        .where(seed.Discipline.name == "Практикум по гадательным системам")
+        .order_by(Lesson.starts_at)
+    ).all()
+    divination_events = {
+        lesson.starts_at.date(): lesson
+        for lesson in divination_lessons
+        if lesson.starts_at.date() in {seed.date(2026, 11, 19), seed.date(2026, 11, 21)}
+    }
+    assert divination_events[seed.date(2026, 11, 19)].status == "moved"
+    assert divination_events[seed.date(2026, 11, 21)].status == "scheduled"
 
     def override_db_session():
         session = Session(bind=db_session.connection(), join_transaction_mode="create_savepoint")
@@ -153,6 +211,18 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
             assert login.status_code == 200
             token = login.json()["access_token"]
             headers = {"Authorization": f"Bearer {token}"}
+            news_page = client.get("/api/v1/news", headers=headers)
+            assert news_page.status_code == 200
+            visible_news = next(
+                item for item in news_page.json()["items"] if item["id"] == str(schedule_news.id)
+            )
+            assert (
+                "проверка защитных контуров из-за нестабильного магического фона"
+                in (visible_news["excerpt"])
+            )
+            news_detail = client.get(f"/api/v1/news/{schedule_news.id}", headers=headers)
+            assert news_detail.status_code == 200
+            assert "23 ноября 2026 года" in news_detail.json()["body"]
             pm_login = client.post(
                 "/api/v1/auth/login",
                 headers=origin,
@@ -170,9 +240,18 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
             )
             assert created.status_code == 201
             application_id = int(created.json()["id"])
+            schedule_news.body = seed.PREVIOUS_INTRO_NEWS_BODY
+            db_session.flush()
             pm_user.is_active = False
             db_session.flush()
             seed.seed_demo_data()
+            refreshed_news = client.get(f"/api/v1/news/{schedule_news.id}", headers=headers)
+            assert refreshed_news.status_code == 200
+            assert (
+                "проверка защитных контуров из-за нестабильного магического фона"
+                in (refreshed_news.json()["body"])
+            )
+            assert "23 ноября 2026 года" in refreshed_news.json()["body"]
             assert pm_user.is_active is False
             inactive_access = client.get(
                 "/api/v1/users/me", headers={"Authorization": f"Bearer {pm_token}"}
@@ -184,6 +263,8 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
         app.dependency_overrides.pop(get_db_session, None)
     application = db_session.get(Application, application_id)
     assert application is not None
+    db_session.refresh(schedule_news)
+    assert "проверка защитных контуров из-за нестабильного магического фона" in (schedule_news.body)
     application_snapshot = (
         application.id,
         application.student_id,
@@ -359,10 +440,101 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
 def test_demo_seed_refuses_unconfirmed_database(monkeypatch):
     seed = load_seed_module()
     url = make_url(get_settings().database_url.get_secret_value())
-    monkeypatch.setenv("DEMO_SEED_ALLOWED_DATABASE", url.database)
-    monkeypatch.setenv("DEMO_SEED_ALLOWED_HOST", url.host)
+    configure_seed_target(monkeypatch, url)
+    monkeypatch.setenv("DEMO_STUDENT_A_PASSWORD", token_urlsafe(24))
+    monkeypatch.setenv("DEMO_STUDENT_B_PASSWORD", token_urlsafe(24))
     monkeypatch.delenv("DEMO_SEED_CONFIRM", raising=False)
-    with pytest.raises(RuntimeError, match="Explicit DEMO_SEED_CONFIRM"):
+    with pytest.raises(RuntimeError, match="Explicit confirmation"):
+        seed.require_safe_target()
+
+
+def test_demo_seed_refuses_incomplete_allowed_target(monkeypatch):
+    seed = load_seed_module()
+    url = make_url(get_settings().database_url.get_secret_value())
+    configure_seed_target(monkeypatch, url)
+    monkeypatch.delenv("DEMO_SEED_ALLOWED_ROLE", raising=False)
+    monkeypatch.setenv("DEMO_STUDENT_A_PASSWORD", token_urlsafe(24))
+    monkeypatch.setenv("DEMO_STUDENT_B_PASSWORD", token_urlsafe(24))
+    with pytest.raises(RuntimeError, match=r"DEMO_SEED_ALLOWED_\* values"):
+        seed.require_safe_target()
+
+
+@pytest.mark.parametrize(
+    ("target_field", "wrong_value"),
+    (
+        ("DEMO_SEED_ALLOWED_DATABASE", "another_demo_db"),
+        ("DEMO_SEED_ALLOWED_HOST", "another-db"),
+        ("DEMO_SEED_ALLOWED_PORT", "55433"),
+        ("DEMO_SEED_ALLOWED_ROLE", "uni_space_api"),
+    ),
+)
+def test_demo_seed_requires_confirmation_of_full_target(monkeypatch, target_field, wrong_value):
+    seed = load_seed_module()
+    url = make_url(get_settings().database_url.get_secret_value())
+    configure_seed_target(monkeypatch, url)
+    monkeypatch.setenv(target_field, wrong_value)
+    with pytest.raises(RuntimeError, match=r"DEMO_SEED_ALLOWED_\* values"):
+        seed.require_safe_target()
+
+
+def test_production_seed_requires_fixed_target_and_interactive_confirmation(monkeypatch):
+    seed = load_seed_module()
+    url = make_url(get_settings().database_url.get_secret_value())
+    actual_target = (url.host, url.port or 5432, url.database, url.username)
+    monkeypatch.setattr(seed, "PRODUCTION_DEMO_TARGET", actual_target)
+    monkeypatch.setenv("DEMO_SEED_ALLOW_PRODUCTION", "YES_I_HAVE_A_BACKUP")
+    monkeypatch.setenv("DEMO_STUDENT_A_PASSWORD", token_urlsafe(24))
+    monkeypatch.setenv("DEMO_STUDENT_B_PASSWORD", token_urlsafe(24))
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+    with pytest.raises(RuntimeError, match="Explicit confirmation"):
+        seed.require_safe_target()
+
+
+@pytest.mark.parametrize(
+    "target_field",
+    ("host", "port", "database", "role"),
+)
+def test_production_seed_rejects_every_target_mismatch(monkeypatch, target_field):
+    seed = load_seed_module()
+    host, port, database, role = seed.PRODUCTION_DEMO_TARGET
+    target = {"host": host, "port": port, "database": database, "role": role}
+    target[target_field] = {
+        "host": "wrong-db",
+        "port": 55432,
+        "database": "wrong_database",
+        "role": "uni_space_api",
+    }[target_field]
+    production_url = (
+        f"postgresql+psycopg://{target['role']}@{target['host']}:{target['port']}"
+        f"/{target['database']}"
+    )
+    monkeypatch.setattr(
+        seed,
+        "get_settings",
+        lambda: SimpleNamespace(
+            app_env="test",
+            database_url=SimpleNamespace(get_secret_value=lambda: production_url),
+        ),
+    )
+    monkeypatch.setenv("DEMO_SEED_ALLOW_PRODUCTION", "YES_I_HAVE_A_BACKUP")
+    with pytest.raises(RuntimeError, match="pinned demonstration deployment"):
+        seed.require_safe_target()
+
+
+def test_production_environment_without_production_approval_is_refused(monkeypatch):
+    seed = load_seed_module()
+    host, port, database, role = seed.PRODUCTION_DEMO_TARGET
+    production_url = f"postgresql+psycopg://{role}@{host}:{port}/{database}"
+    monkeypatch.setattr(
+        seed,
+        "get_settings",
+        lambda: SimpleNamespace(
+            app_env="production",
+            database_url=SimpleNamespace(get_secret_value=lambda: production_url),
+        ),
+    )
+    monkeypatch.delenv("DEMO_SEED_ALLOW_PRODUCTION", raising=False)
+    with pytest.raises(RuntimeError, match="requires DEMO_SEED_ALLOW_PRODUCTION"):
         seed.require_safe_target()
 
 
@@ -385,7 +557,11 @@ def test_demo_seed_cli_migrates_clean_database_and_preserves_records(postgresql_
             "DATABASE_URL": database_url.render_as_string(hide_password=False),
             "DEMO_SEED_ALLOWED_DATABASE": database_name,
             "DEMO_SEED_ALLOWED_HOST": database_host,
-            "DEMO_SEED_CONFIRM": f"SEED_UNI_SPACE_DEMO_DATA:{database_name}@{database_host}",
+            "DEMO_SEED_ALLOWED_PORT": str(database_url.port or 5432),
+            "DEMO_SEED_ALLOWED_ROLE": database_url.username,
+            "DEMO_SEED_CONFIRM": load_seed_module().expected_confirmation(
+                (database_host, database_url.port or 5432, database_name, database_url.username)
+            ),
             "DEMO_STUDENT_A_PASSWORD": password_a,
             "DEMO_STUDENT_B_PASSWORD": password_b,
         }
@@ -407,6 +583,8 @@ def test_demo_seed_cli_migrates_clean_database_and_preserves_records(postgresql_
         assert migration.returncode == 0, migration.stderr
         first = run(str(seed_path))
         assert first.returncode == 0, first.stderr
+        assert password_a not in first.stdout + first.stderr
+        assert password_b not in first.stdout + first.stderr
         with Session(app_database, expire_on_commit=False) as db:
             pz = db.scalar(select(Student).join(User).where(User.login == "demo-pz101"))
             pm = db.scalar(select(Student).join(User).where(User.login == "demo-pm201"))
@@ -438,6 +616,65 @@ def test_demo_seed_cli_migrates_clean_database_and_preserves_records(postgresql_
         assert wrong_password.returncode != 0
         wrong_target = run(str(seed_path), DEMO_SEED_ALLOWED_DATABASE="wrong_database")
         assert wrong_target.returncode != 0
+        wrong_database_name = f"demo_seed_wrong_{uuid4().hex[:12]}"
+        with postgresql_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as admin:
+            admin.execute(text(f'CREATE DATABASE "{wrong_database_name}"'))
+        wrong_database_url = database_url.set(database=wrong_database_name)
+        wrong_database_engine = create_engine(wrong_database_url)
+        try:
+            wrong_migration_environment = environment | {
+                "DATABASE_URL": wrong_database_url.render_as_string(hide_password=False),
+                "DEMO_SEED_ALLOWED_DATABASE": wrong_database_name,
+                "DEMO_SEED_ALLOWED_HOST": wrong_database_url.host,
+                "DEMO_SEED_ALLOWED_PORT": str(wrong_database_url.port or 5432),
+                "DEMO_SEED_ALLOWED_ROLE": wrong_database_url.username,
+            }
+            wrong_migration = subprocess.run(
+                [sys.executable, "-m", "alembic", "upgrade", "head"],
+                cwd=backend_directory,
+                env=wrong_migration_environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            assert wrong_migration.returncode == 0, wrong_migration.stderr
+            wrong_tables = tuple(inspect(wrong_database_engine).get_table_names())
+
+            def snapshot_wrong_database():
+                with wrong_database_engine.connect() as wrong_connection:
+                    return {
+                        table: tuple(
+                            tuple(row)
+                            for row in wrong_connection.execute(text(f'SELECT * FROM "{table}"'))
+                        )
+                        for table in wrong_tables
+                    }
+
+            wrong_before = snapshot_wrong_database()
+            refused_wrong_target = subprocess.run(
+                [sys.executable, str(seed_path)],
+                cwd=backend_directory,
+                env=wrong_migration_environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            assert refused_wrong_target.returncode != 0
+            assert "Demo seed database target" in refused_wrong_target.stdout
+            assert snapshot_wrong_database() == wrong_before
+        finally:
+            wrong_database_engine.dispose()
+            with postgresql_engine.connect().execution_options(
+                isolation_level="AUTOCOMMIT"
+            ) as admin:
+                admin.execute(
+                    text(
+                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                        "WHERE datname = :database_name"
+                    ),
+                    {"database_name": wrong_database_name},
+                )
+                admin.execute(text(f'DROP DATABASE IF EXISTS "{wrong_database_name}"'))
         with Session(app_database) as db:
             assert db.get(User, pz_id).password_hash == pz_hash
             assert db.get(Student, pz_student_id).user_id == pz_id

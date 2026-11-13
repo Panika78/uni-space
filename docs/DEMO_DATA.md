@@ -7,7 +7,7 @@
 отклоняется. Пользовательские заявки, их статусы и отметки прочтения уведомлений
 не входят в управляемые seed данные.
 
-## Состав и даты
+## Состав и учебный период
 
 Вымышленный университет использует обычную структуру справочника:
 
@@ -39,6 +39,26 @@ API нет. Время задано для `Europe/Moscow`. План исклю�
 перестанет считаться текущим в `GET /academics`: для следующей демонстрации нужно
 подготовить и проверить новый набор дат. Не запускайте seed для сдвига периода.
 
+## Опорная дата и окно конкурсной демонстрации
+
+Опорная календарная дата сценариев — **19 ноября 2026 года по `Europe/Moscow`**.
+Она выбрана как дата объявленного изменения расписания; итоговый перенос
+проверяется на 23 ноября. Конкурсное окно демонстрации — **8–28 ноября 2026 года**.
+Весь интервал находится внутри учебного семестра **1 сентября 2026 — 31 января
+2027 года**, поэтому `GET /academics` на протяжении показа находит текущий семестр,
+а расписание включает дни сценария и конечные позиции переносов. Результаты —
+текущие результаты работ этого семестра; они не изображают завершённые сессии
+или историю предыдущих периодов. API определяет текущий период по фактической
+московской дате запуска, а не по этой опорной дате.
+
+Перед показом в пределах окна проверьте `GET /academics`, `GET /schedule` и
+новость об изменениях расписания; даты в ответах должны совпадать с периодом выше
+и событиями 19, 20, 21 и 23 ноября. После 31 января 2027 года текущий набор уже
+не подходит: подготовьте новый план на будущий период, пересогласуйте публикации,
+оценки и даты, проверьте его на временной PostgreSQL-БД, затем отдельно примените
+проверенный seed к демонстрационной БД после резервной копии. Не сдвигайте даты
+автоматической заменой или повторным запуском seed.
+
 ## Локальный запуск
 
 Создайте `.env` по README, поднимите PostgreSQL и примените миграции. Команды
@@ -54,16 +74,21 @@ read -r -s -p 'Пароль ПМ-201: ' DEMO_STUDENT_B_PASSWORD; printf '\n'
 export DEMO_STUDENT_A_PASSWORD DEMO_STUDENT_B_PASSWORD
 export DEMO_SEED_ALLOWED_DATABASE="$POSTGRES_DB"
 export DEMO_SEED_ALLOWED_HOST=db
-export DEMO_SEED_CONFIRM="SEED_UNI_SPACE_DEMO_DATA:$POSTGRES_DB@db"
+export DEMO_SEED_ALLOWED_PORT=5432
+export DEMO_SEED_ALLOWED_ROLE=uni_space
+export DEMO_SEED_CONFIRM="SEED_UNI_SPACE_DEMO_DATA:$POSTGRES_DB@db:5432/uni_space"
 docker compose run --rm \
   -e DEMO_STUDENT_A_PASSWORD -e DEMO_STUDENT_B_PASSWORD \
-  -e DEMO_SEED_ALLOWED_DATABASE -e DEMO_SEED_ALLOWED_HOST -e DEMO_SEED_CONFIRM \
+  -e DEMO_SEED_ALLOWED_DATABASE -e DEMO_SEED_ALLOWED_HOST \
+  -e DEMO_SEED_ALLOWED_PORT -e DEMO_SEED_ALLOWED_ROLE -e DEMO_SEED_CONFIRM \
   api python scripts/seed_demo_data.py
-unset DEMO_STUDENT_A_PASSWORD DEMO_STUDENT_B_PASSWORD DEMO_SEED_CONFIRM
+unset DEMO_STUDENT_A_PASSWORD DEMO_STUDENT_B_PASSWORD DEMO_SEED_CONFIRM \
+  DEMO_SEED_ALLOWED_DATABASE DEMO_SEED_ALLOWED_HOST DEMO_SEED_ALLOWED_PORT \
+  DEMO_SEED_ALLOWED_ROLE
 ```
 
-Подтверждение содержит точные значения базы и host из `DATABASE_URL`.
-В `development`/`test` допускается только явно выбранная отдельная БД. Первый
+В `development`/`test` подтверждение должно совпадать со всей явно выбранной
+целью (host, port, database, role). Используйте только отдельную БД; первый
 запуск откажет при наличии пользовательских записей. Пароли должны быть разными,
 не короче 12 символов и передаваться без внешних пробелов.
 
@@ -108,9 +133,18 @@ production-командой. Не запускайте seed на рабочей 
 защищённого хранилища или скрытого интерактивного ввода; не кладите их в
 `PROD_ENV_FILE`, git, CI или build args.
 
-После проверки `POSTGRES_DB` в приватном env-файле выполните из корня проекта.
-Подтверждения включают фактические database и host; укажите их точно. Флаг
-разрешения требуется только для этой явной one-off операции:
+Текущая production-конфигурация демонстрации закреплена в seed как
+`db:5432/uni_space`, роль `uni_space_migrator`. Это ожидаемая идентичность из
+версии приложения, она не вычисляется из `POSTGRES_DB` или `DATABASE_URL`. Если
+в проекте Compose настроено другое значение, seed откажет: не меняйте ожидаемую
+цель под случайную конфигурацию. Сверьте вывод проверки с тем, что это отдельное
+демонстрационное окружение, а не рабочая БД. Перед запуском обязателен backup.
+
+Запускайте команду в интерактивном терминале из корня проекта. Seed покажет
+фактические host, port, database, role и адрес сервера (без паролей/секретов),
+после чего запросит ввод фиксированной строки подтверждения ожидаемой demo-цели.
+Не подставляйте в неё значения из текущего подключения. Production-флаг
+разрешения нужен только для этой явной one-off операции:
 
 ```bash
 set -a
@@ -119,17 +153,12 @@ set +a
 read -r -s -p 'Пароль ПЗ-101: ' DEMO_STUDENT_A_PASSWORD; printf '\n'
 read -r -s -p 'Пароль ПМ-201: ' DEMO_STUDENT_B_PASSWORD; printf '\n'
 export DEMO_STUDENT_A_PASSWORD DEMO_STUDENT_B_PASSWORD
-export DEMO_SEED_ALLOWED_DATABASE="$POSTGRES_DB"
-export DEMO_SEED_ALLOWED_HOST=db
-export DEMO_SEED_CONFIRM="SEED_UNI_SPACE_DEMO_DATA:$POSTGRES_DB@db"
 export DEMO_SEED_ALLOW_PRODUCTION=YES_I_HAVE_A_BACKUP
-bash scripts/production-compose.sh run --rm -T \
+bash scripts/production-compose.sh run --rm \
   -e DEMO_STUDENT_A_PASSWORD -e DEMO_STUDENT_B_PASSWORD \
-  -e DEMO_SEED_ALLOWED_DATABASE -e DEMO_SEED_ALLOWED_HOST \
-  -e DEMO_SEED_CONFIRM -e DEMO_SEED_ALLOW_PRODUCTION \
+  -e DEMO_SEED_ALLOW_PRODUCTION \
   migrate python scripts/seed_demo_data.py
-unset DEMO_STUDENT_A_PASSWORD DEMO_STUDENT_B_PASSWORD DEMO_SEED_CONFIRM \
-  DEMO_SEED_ALLOW_PRODUCTION DEMO_SEED_ALLOWED_DATABASE DEMO_SEED_ALLOWED_HOST
+unset DEMO_STUDENT_A_PASSWORD DEMO_STUDENT_B_PASSWORD DEMO_SEED_ALLOW_PRODUCTION
 ```
 
 Это запускает seed отдельным контейнером `migrate` с ограниченной для API не

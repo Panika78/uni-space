@@ -68,6 +68,7 @@ services:
       DATABASE_PORT: '5432'
       DATABASE_USER: uni_space_migrator
       DATABASE_PASSWORD_FILE: /run/secrets/migration_db_password
+      # Keep aligned with the seed's independently pinned demo target.
       DATABASE_NAME: ${POSTGRES_DB:?Set POSTGRES_DB}
     secrets: [migration_db_password]
     networks: [database]

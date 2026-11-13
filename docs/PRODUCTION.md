@@ -179,6 +179,17 @@ Nginx (важно при замене файла через rename), прове�
 | `uni_space_migrator` | `MIGRATION_DB_PASSWORD_FILE`, только `db` и одноразовый `migrate` | LOGIN без SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS; владелец public и прикладных объектов, DDL миграций |
 | `uni_space_api` | `API_DB_PASSWORD_FILE`, только `db` и `api` | CONNECT рабочей БД, USAGE public и последовательностей auth/applications; SELECT users, students, auth_sessions, refresh_tokens, alembic_version, справочников профиля/расписания (ниже), service_types, applications, news и notifications; INSERT applications; INSERT/UPDATE auth_sessions и refresh_tokens |
 
+Явный демонстрационный seed — отдельная операторская операция, он не запускается
+миграциями, API или Compose startup. Для текущей demo-конфигурации seed закрепляет
+ожидаемую цель `db:5432/uni_space` и роль `uni_space_migrator`; эти значения не
+вычисляются из `POSTGRES_DB`/`DATABASE_URL`. Перед любой записью seed проверяет
+настройки и подключённую PostgreSQL (`current_database()`, `current_user`, адрес
+и порт сервера), показывает фактическую цель и требует интерактивного ввода
+подтверждения фиксированной demo-цели. Если production Compose настроен иначе,
+запуск отклоняется. Инструкция явного запуска и резервного копирования находится
+в [DEMO_DATA.md](DEMO_DATA.md#production). Эта операция не предназначена для
+рабочей БД.
+
 Для совместной работы TASK-009/010 явно разрешён только `SELECT` на
 `study_groups`, `programs`, `org_units`, `teachers`,
 `disciplines`, `course_offerings`, `buildings`, `rooms`, `lessons`, `lesson_groups`,

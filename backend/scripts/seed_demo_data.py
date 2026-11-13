@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import sys
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -47,7 +48,7 @@ DEMO_NEWS = (
     (
         "Об изменении расписания занятий 19 ноября в учебно-лабораторном корпусе",
         "19 ноября 2026 года в учебно-лабораторном корпусе проводится внеплановая "
-        "проверка оборудования. "
+        "проверка защитных контуров из-за нестабильного магического фона. "
         "Лабораторная работа по общей и неорганической "
         "химии отменена. Введение в зельеварение сначала переносится на 20 ноября, "
         "затем на окончательную дату — 23 ноября 2026 года — в Главный "
@@ -80,35 +81,62 @@ LEGACY_INTRO_NEWS_BODY = (
     "ноября в Северную башню. Проверьте личное расписание: исходные занятия "
     "помечены как перенесённые или отменённые, новые позиции связаны с ними."
 )
+PREVIOUS_INTRO_NEWS_BODY = (
+    "19 ноября 2026 года в учебно-лабораторном корпусе проводится внеплановая "
+    "проверка оборудования. Лабораторная работа по общей и неорганической "
+    "химии отменена. Введение в зельеварение сначала переносится на 20 ноября, "
+    "затем на окончательную дату — 23 ноября 2026 года — в Главный "
+    "учебный корпус. Практикум по гадательным системам переносится с 19 на 21 "
+    "ноября в Северную башню. Проверьте личное расписание: исходные занятия "
+    "помечены как перенесённые или отменённые, новые позиции связаны с ними."
+)
+
+# This is the versioned identity of the demonstration deployment in
+# compose.prod.yaml. It deliberately does not derive from POSTGRES_DB/DATABASE_URL.
+PRODUCTION_DEMO_TARGET = ("db", 5432, "uni_space", "uni_space_migrator")
+
+
+def expected_confirmation(target: tuple[str, int, str, str]) -> str:
+    host, port, database, role = target
+    return f"SEED_UNI_SPACE_DEMO_DATA:{database}@{host}:{port}/{role}"
 
 
 def require_safe_target() -> None:
     settings = get_settings()
     url = make_url(settings.database_url.get_secret_value())
-    database = os.getenv("DEMO_SEED_ALLOWED_DATABASE", "")
-    host = os.getenv("DEMO_SEED_ALLOWED_HOST", "")
-    confirmation = os.getenv("DEMO_SEED_CONFIRM", "")
-    if not database or database != url.database or not host or host != url.host:
-        raise RuntimeError(
-            "Seed target must match DEMO_SEED_ALLOWED_DATABASE and DEMO_SEED_ALLOWED_HOST"
-        )
-    expected_confirmation = f"SEED_UNI_SPACE_DEMO_DATA:{database}@{host}"
-    if confirmation != expected_confirmation:
-        raise RuntimeError("Explicit DEMO_SEED_CONFIRM target confirmation is required")
     production_seed = (
         settings.app_env == "production" or os.getenv("DEMO_SEED_ALLOW_PRODUCTION") is not None
     )
+    actual_port = url.port or 5432
+    configured_target = (url.host or "", actual_port, url.database or "", url.username or "")
     if production_seed:
         if os.getenv("DEMO_SEED_ALLOW_PRODUCTION") != "YES_I_HAVE_A_BACKUP":
             raise RuntimeError(
                 "Production seeding requires DEMO_SEED_ALLOW_PRODUCTION and a verified backup"
             )
-        if url.username != "uni_space_migrator":
-            raise RuntimeError("Production seed must connect as uni_space_migrator")
+        if configured_target != PRODUCTION_DEMO_TARGET:
+            raise RuntimeError(
+                "Production seed target does not match the pinned demonstration deployment"
+            )
+        expected_target = PRODUCTION_DEMO_TARGET
     elif url.username == "uni_space_migrator":
         raise RuntimeError("Migration role requires explicit production-seed confirmation")
     elif settings.app_env not in {"development", "test"}:
         raise RuntimeError("Seed is not permitted in this application environment")
+    else:
+        try:
+            allowed_port = int(os.getenv("DEMO_SEED_ALLOWED_PORT", "0") or "0")
+        except ValueError:
+            raise RuntimeError("DEMO_SEED_ALLOWED_PORT must be a valid port") from None
+        allowed_target = (
+            os.getenv("DEMO_SEED_ALLOWED_HOST", ""),
+            allowed_port,
+            os.getenv("DEMO_SEED_ALLOWED_DATABASE", ""),
+            os.getenv("DEMO_SEED_ALLOWED_ROLE", ""),
+        )
+        if not all(allowed_target) or configured_target != allowed_target:
+            raise RuntimeError("Seed target must match all DEMO_SEED_ALLOWED_* values")
+        expected_target = allowed_target
     if not url.database or "prod" in url.database.lower() and not production_seed:
         raise RuntimeError("Refusing a production-named database outside production mode")
     for variable in ("DEMO_STUDENT_A_PASSWORD", "DEMO_STUDENT_B_PASSWORD"):
@@ -119,16 +147,53 @@ def require_safe_target() -> None:
             )
     if os.environ["DEMO_STUDENT_A_PASSWORD"] == os.environ["DEMO_STUDENT_B_PASSWORD"]:
         raise RuntimeError("Each demonstration student must have a different password")
-    with SessionLocal() as session:
-        database_name, database_user = session.execute(
-            text("SELECT current_database(), current_user")
-        ).one()
+    try:
+        with SessionLocal() as session:
+            database_name, database_user, server_address, server_port = session.execute(
+                text(
+                    "SELECT current_database(), current_user, host(inet_server_addr()), "
+                    "inet_server_port()"
+                )
+            ).one()
+            connection = session.connection().connection.driver_connection
+            with socket.socket(fileno=os.dup(connection.pgconn.socket)) as database_socket:
+                peer_address, peer_port = database_socket.getpeername()[:2]
+    except Exception:
+        raise RuntimeError("Could not verify the connected seed database target") from None
+    try:
+        resolved_addresses = {
+            result[4][0]
+            for result in socket.getaddrinfo(url.host, actual_port, type=socket.SOCK_STREAM)
+        }
+    except OSError:
+        raise RuntimeError("Seed database host could not be resolved") from None
+    safe_peer = f"{peer_address}:{peer_port}"
+    safe_server = f"{server_address or 'unknown'}:{server_port or 'unknown'}"
+    print(
+        "Demo seed database target: "
+        f"host={url.host} port={actual_port} database={database_name} "
+        f"role={database_user} peer={safe_peer} server={safe_server}"
+    )
     if (
-        database_name != database
-        or database_user != url.username
+        database_name != expected_target[2]
         or database_user == "uni_space_api"
+        or database_user != url.username
+        or peer_port != actual_port
+        or peer_address not in resolved_addresses
     ):
-        raise RuntimeError("Connected database or role does not match the confirmed seed target")
+        raise RuntimeError("Connected database, host, port, or role does not match the seed target")
+    if production_seed:
+        try:
+            confirmation = input(
+                "Type the pinned demonstration target confirmation "
+                f"({expected_confirmation(PRODUCTION_DEMO_TARGET)}): "
+            )
+        except EOFError:
+            confirmation = ""
+    else:
+        confirmation = os.getenv("DEMO_SEED_CONFIRM", "")
+    if confirmation != expected_confirmation(expected_target):
+        raise RuntimeError("Explicit confirmation of the expected seed target is required")
 
 
 def one_or_create(session, model, identity: dict, values: dict, *, mutable: dict | None = None):
@@ -740,7 +805,7 @@ def seed_demo_data() -> None:
         for title, body, published_at in DEMO_NEWS:
             allowed_bodies = {body}
             if title == DEMO_NEWS[0][0]:
-                allowed_bodies.add(LEGACY_INTRO_NEWS_BODY)
+                allowed_bodies.update({LEGACY_INTRO_NEWS_BODY, PREVIOUS_INTRO_NEWS_BODY})
             existing_news = db.scalars(select(News).where(News.title == title)).all()
             if existing_news:
                 if len(existing_news) != 1:
