@@ -5,6 +5,7 @@ import { Link, useBlocker, useNavigate, useParams, useSearchParams } from 'react
 import { useUnsavedChanges } from '../../app/UnsavedChangesContext'
 import { ApiClientError, apiFetch } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
+import { AnimatedRegion } from '../../shared/ui/AnimatedRegion'
 
 type Service = components['schemas']['Service']
 type Application = components['schemas']['ApplicationResponse']
@@ -66,14 +67,20 @@ function isApplicationResponse(value: unknown, placeOfSubmission: string): value
 
 export function ServicesPage() {
   const [params] = useSearchParams()
-  return params.get('tab') === 'applications' ? (
+  const applications = params.get('tab') === 'applications'
+  return (
     <section className="section-page service-page">
+      <p className="section-eyebrow">Студенческий кабинет</p>
       <h1>Услуги и документы</h1>
-      <ServicesTabs applications />
-      <ApplicationsList />
+      <p className="service-subtitle">Оформление заявлений и отслеживание их статуса</p>
+      <ServicesTabs applications={applications} />
+      <AnimatedRegion
+        className="services-stage"
+        contentKey={applications ? 'applications' : 'catalog'}
+      >
+        {applications ? <ApplicationsList /> : <ServiceCatalog />}
+      </AnimatedRegion>
     </section>
-  ) : (
-    <ServiceCatalog />
   )
 }
 
@@ -97,9 +104,7 @@ function ServiceCatalog() {
     }
   }, [])
   return (
-    <section className="section-page service-page service-catalog-page">
-      <h1>Услуги и документы</h1>
-      <ServicesTabs />
+    <div className="service-catalog-page">
       <p>Выберите доступную услугу.</p>
       {error ? (
         <div role="alert">
@@ -155,7 +160,7 @@ function ServiceCatalog() {
           </Link>
         </article>
       )}
-    </section>
+    </div>
   )
 }
 
@@ -322,6 +327,7 @@ export function ApplicationFormPage() {
         </div>
       ) : (
         <form className="application-form" onSubmit={handleSubmit} noValidate>
+          <h2>Данные заявления</h2>
           <p>Укажите место предоставления справки.</p>
           <label htmlFor="place">
             Место предоставления <span aria-hidden="true">*</span>
@@ -347,6 +353,9 @@ export function ApplicationFormPage() {
             {fieldMessage ?? 'От 1 до 300 символов.'}
           </small>
           <small>Знак * обозначает обязательное поле.</small>
+          <small className="application-character-count" aria-live="off">
+            {characterCount} / 300
+          </small>
           {error && (
             <p role="alert" className="application-error">
               {error}

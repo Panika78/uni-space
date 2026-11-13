@@ -33,7 +33,11 @@ function formatDate(value: string) {
 }
 export function ServicesTabs({ applications = false }: { applications?: boolean }) {
   return (
-    <nav className="services-tabs" aria-label="Разделы услуг">
+    <nav
+      className="services-tabs"
+      data-selected={applications ? 'applications' : 'catalog'}
+      aria-label="Разделы услуг"
+    >
       <Link to="/services" aria-current={!applications ? 'page' : undefined}>
         Каталог услуг
       </Link>
@@ -132,10 +136,15 @@ export function ApplicationsList() {
         />
       )}
       {query.isSuccess && items.length === 0 && (
-        <EmptyState
-          title="Вы ещё не подавали заявлений"
-          description="Выберите услугу в каталоге."
-        />
+        <div className="applications-empty">
+          <EmptyState
+            title="Вы ещё не подавали заявлений"
+            description="Выберите услугу в каталоге и отправьте заявление онлайн. Здесь появится его статус."
+          />
+          <Link className="service-action" to="/services">
+            Перейти в каталог услуг
+          </Link>
+        </div>
       )}
       {items.length > 0 && (
         <table
@@ -195,7 +204,9 @@ export function ApplicationsList() {
                   <span className="application-field-label" aria-hidden="true">
                     Рассмотрение
                   </span>
-                  <span>{reviewLabels[item.review_status]}</span>
+                  <span className={`application-status application-status--${item.review_status}`}>
+                    {reviewLabels[item.review_status]}
+                  </span>
                 </td>
               </tr>
             ))}
@@ -278,7 +289,11 @@ export function ApplicationDetailPage() {
             <dt>Место предоставления</dt>
             <dd>{item.form_data.place_of_submission}</dd>
             <dt>Рассмотрение</dt>
-            <dd>{reviewLabels[item.review_status]}</dd>
+            <dd>
+              <span className={`application-status application-status--${item.review_status}`}>
+                {reviewLabels[item.review_status]}
+              </span>
+            </dd>
             <dt>Документ</dt>
             <dd>{documentLabels[item.document_status]}</dd>
             {item.feedback !== null && (

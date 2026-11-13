@@ -18,9 +18,15 @@ export function AnimatedRegion({
     if (!container || !content || !window.ResizeObserver || !container.animate) return
     let height = content.getBoundingClientRect().height
     let animation: Animation | undefined
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const handleMotionChange = () => {
+      if (media.matches) animation?.cancel()
+    }
+    media.addEventListener('change', handleMotionChange)
     const observer = new ResizeObserver(() => {
       const next = content.getBoundingClientRect().height
-      const current = container.getBoundingClientRect().height
+      const current =
+        animation?.playState === 'running' ? container.getBoundingClientRect().height : height
       if (next === height) return
       height = next
       animation?.cancel()
@@ -33,6 +39,7 @@ export function AnimatedRegion({
     observer.observe(content)
     return () => {
       observer.disconnect()
+      media.removeEventListener('change', handleMotionChange)
       animation?.cancel()
     }
   }, [])
@@ -43,7 +50,15 @@ export function AnimatedRegion({
       duration: 220,
       easing: 'ease-out',
     })
-    return () => animation.cancel()
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const handleMotionChange = () => {
+      if (media.matches) animation.cancel()
+    }
+    media.addEventListener('change', handleMotionChange)
+    return () => {
+      media.removeEventListener('change', handleMotionChange)
+      animation.cancel()
+    }
   }, [contentKey])
   return (
     <div ref={containerRef} className={`animated-region ${className}`}>
