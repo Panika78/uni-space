@@ -13,6 +13,8 @@
   --sidebar: #241a1c;
   --accent: #781f32;
   --gold: #e5ac55;
+  --focus-ring: var(--accent);
+  --focus-ring-dark: var(--gold);
   --page: #f5ebdd;
   --muted: #706467;
   --line: #e8dad1;
@@ -42,8 +44,12 @@ a {
   color: inherit;
 }
 :focus-visible {
-  outline: 3px solid #d99838;
+  outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
+}
+
+.desktop-sidebar :focus-visible {
+  outline-color: var(--focus-ring-dark);
 }
 
 .service-page > p:not(.section-eyebrow) {
@@ -931,7 +937,7 @@ textarea {
   background: #bca9a0;
 }
 .news-load-more:focus-visible {
-  outline: 3px solid #d99838;
+  outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
 }
 .news-load-more:disabled {
@@ -1962,7 +1968,7 @@ textarea {
   outline: none;
 }
 .applications-table a:focus-visible::after {
-  outline: 3px solid #d99838;
+  outline: 3px solid var(--focus-ring);
   outline-offset: -3px;
 }
 .applications-table td:last-child {
