@@ -1,4 +1,4 @@
-/* global process, console, URL, Request, Response, TextDecoder, document, window, setTimeout, requestAnimationFrame */
+/* global process, console, URL, Request, Response, TextDecoder, MessageChannel, AbortSignal, document, window, setTimeout */
 import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 
@@ -35,12 +35,39 @@ try {
         this.deliveryGate = new Promise((resolve) => {
           this.releaseDelivery = resolve
         })
-        this.delivered = new Promise((resolve) => {
-          this.resolveDelivered = resolve
+        this.clientProcessed = new Promise((resolve) => {
+          this.resolveClientProcessed = resolve
         })
+        this.responseAwaitingClient = false
+        this.clientProcessedScheduled = false
+      },
+      scheduleClientProcessed() {
+        if (this.clientProcessedScheduled) return
+        this.clientProcessedScheduled = true
+        const completionTask = new MessageChannel()
+        // The message task runs after the current promise microtask chain, so
+        // apiFetch and the submit handler have observed the response or abort.
+        completionTask.port1.onmessage = () => {
+          completionTask.port1.close()
+          completionTask.port2.close()
+          this.resolveClientProcessed()
+        }
+        completionTask.port2.postMessage(null)
       },
     }
     window.__latePostControl = control
+    const nativeThrowIfAborted = AbortSignal.prototype.throwIfAborted
+    AbortSignal.prototype.throwIfAborted = function () {
+      try {
+        return nativeThrowIfAborted.call(this)
+      } catch (error) {
+        if (control.responseAwaitingClient) {
+          control.responseAwaitingClient = false
+          control.scheduleClientProcessed()
+        }
+        throw error
+      }
+    }
     window.fetch = async (input, init) => {
       const request = input instanceof Request ? input : null
       const url = new URL(request?.url ?? String(input), window.location.href)
@@ -57,12 +84,21 @@ try {
         }
         control.resolveResponseReady()
         await control.deliveryGate
-        control.resolveDelivered()
-        return new Response(responseBytes, {
+        const deliveredResponse = new Response(responseBytes, {
           status: response.status,
           statusText: response.statusText,
           headers: response.headers,
         })
+        const readJson = deliveredResponse.json.bind(deliveredResponse)
+        deliveredResponse.json = (...args) =>
+          new Promise((resolve, reject) => {
+            readJson(...args).then((body) => {
+              resolve(body)
+              control.scheduleClientProcessed()
+            }, reject)
+          })
+        control.responseAwaitingClient = true
+        return deliveredResponse
       }
       return response
     }
@@ -350,10 +386,7 @@ try {
     }
     page.on('response', onBListResponse)
     await page.evaluate(() => window.__latePostControl.releaseDelivery())
-    await page.evaluate(() => window.__latePostControl.delivered)
-    await page.evaluate(
-      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-    )
+    await page.evaluate(() => window.__latePostControl.clientProcessed)
     assert.equal(
       await page.getByRole('heading', { name: 'Заявление создано', exact: true }).count(),
       0,
