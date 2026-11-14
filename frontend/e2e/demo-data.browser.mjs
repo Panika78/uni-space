@@ -377,7 +377,16 @@ async function inspectStudent(
       .getByRole('row')
       .filter({ has: page.getByRole('rowheader', { name: item.discipline.name, exact: true }) })
     assert.equal(
-      await sessionRow.locator('td').first().innerText(),
+      await sessionRow
+        .locator('td')
+        .first()
+        .evaluate((cell) =>
+          Array.from(cell.childNodes)
+            .filter((node) => node.nodeType === 3)
+            .map((node) => node.textContent)
+            .join('')
+            .trim(),
+        ),
       { exam: 'Экзамен', pass_fail: 'Зачёт', graded_pass: 'Дифференцированный зачёт' }[
         item.attestation_type
       ],
