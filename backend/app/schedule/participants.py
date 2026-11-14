@@ -87,6 +87,7 @@ def replace_lesson_participants(
 
     Lock the lesson to serialize cooperating writers. Direct SQL is constrained
     by FKs and unique indexes; whole-group/subgroup redundancy is a service rule.
+    A changed set increments the lesson version once; an identical set is a no-op.
     """
     lesson = db.scalars(
         select(Lesson)
@@ -97,9 +98,15 @@ def replace_lesson_participants(
     validate_lesson_participants(db, lesson, participants)
     existing = {
         Participant(row.group_id, row.subgroup_id): row
-        for row in db.scalars(select(LessonGroup).where(LessonGroup.lesson_id == lesson_id))
+        for row in db.scalars(
+            select(LessonGroup)
+            .where(LessonGroup.lesson_id == lesson_id)
+            .execution_options(populate_existing=True)
+        )
     }
     wanted = set(participants)
+    if wanted == existing.keys():
+        return
     for participant, row in existing.items():
         if participant not in wanted:
             db.delete(row)
@@ -112,4 +119,5 @@ def replace_lesson_participants(
                 subgroup_id=participant.subgroup_id,
             )
         )
+    lesson.version += 1
     db.flush()
