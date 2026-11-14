@@ -106,20 +106,30 @@ export function AcademicsPage() {
             <>
               <section aria-labelledby="disciplines-title">
                 <h2 id="disciplines-title">Текущие дисциплины</h2>
-                <table className="academics-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Дисциплина</th>
-                      <th scope="col">Баллы</th>
-                      <th scope="col">Оценено работ</th>
+                <table className="academics-table" role="table" aria-labelledby="disciplines-title">
+                  <thead role="rowgroup">
+                    <tr role="row">
+                      <th scope="col" role="columnheader">
+                        Дисциплина
+                      </th>
+                      <th scope="col" role="columnheader">
+                        Баллы
+                      </th>
+                      <th scope="col" role="columnheader">
+                        Оценено работ
+                      </th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody role="rowgroup">
                     {query.data.items.map((item) => (
-                      <tr key={item.course_offering_id}>
-                        <th scope="row">{item.discipline.name}</th>
-                        <td>
-                          <span className="academics-mobile-label">Баллы</span>
+                      <tr key={item.course_offering_id} role="row">
+                        <th scope="row" role="rowheader">
+                          {item.discipline.name}
+                        </th>
+                        <td role="cell">
+                          <span className="academics-mobile-label" aria-hidden="true">
+                            Баллы
+                          </span>
                           <strong>
                             {item.total_score} / {item.max_score}
                           </strong>
@@ -129,8 +139,10 @@ export function AcademicsPage() {
                             item.graded_assessment_count === 0 && <small>Не выставлено</small>
                           )}
                         </td>
-                        <td>
-                          <span className="academics-mobile-label">Оценено работ</span>
+                        <td role="cell">
+                          <span className="academics-mobile-label" aria-hidden="true">
+                            Оценено работ
+                          </span>
                           {item.graded_assessment_count} из {item.assessment_count}
                         </td>
                       </tr>
@@ -140,20 +152,36 @@ export function AcademicsPage() {
               </section>
               <section className="academics-session" aria-labelledby="session-title">
                 <h2 id="session-title">Сессия</h2>
-                <table className="academics-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Дисциплина</th>
-                      <th scope="col">Аттестация</th>
-                      <th scope="col">Результат</th>
+                <table className="academics-table" role="table" aria-labelledby="session-title">
+                  <thead role="rowgroup">
+                    <tr role="row">
+                      <th scope="col" role="columnheader">
+                        Дисциплина
+                      </th>
+                      <th scope="col" role="columnheader">
+                        Аттестация
+                      </th>
+                      <th scope="col" role="columnheader">
+                        Результат
+                      </th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody role="rowgroup">
                     {query.data.items.map((item) => (
-                      <tr key={item.course_offering_id}>
-                        <th scope="row">{item.discipline.name}</th>
-                        <td>{attestationLabels[item.attestation_type]}</td>
-                        <td>
+                      <tr key={item.course_offering_id} role="row">
+                        <th scope="row" role="rowheader">
+                          {item.discipline.name}
+                        </th>
+                        <td role="cell">
+                          <span className="academics-mobile-label" aria-hidden="true">
+                            Аттестация
+                          </span>
+                          {attestationLabels[item.attestation_type]}
+                        </td>
+                        <td role="cell">
+                          <span className="academics-mobile-label" aria-hidden="true">
+                            Результат
+                          </span>
                           <SessionResult item={item} />
                         </td>
                       </tr>

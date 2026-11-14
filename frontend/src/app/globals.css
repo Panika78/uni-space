@@ -576,7 +576,7 @@ textarea {
   top: 0;
   z-index: 30;
   display: flex;
-  height: 64px;
+  min-height: 64px;
   align-items: center;
   justify-content: flex-end;
   gap: 14px;
@@ -589,8 +589,9 @@ textarea {
 }
 .topbar-prototype-note {
   flex: 0 1 auto;
+  overflow-wrap: anywhere;
   color: #74696a;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.25;
   text-align: right;
 }
@@ -776,7 +777,7 @@ textarea {
 }
 .user-menu__panel span {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 .logout-dialog {
   width: min(calc(100% - 32px), 360px);
@@ -981,6 +982,7 @@ textarea {
 }
 .section-page h1,
 .welcome-card h1 {
+  overflow-wrap: break-word;
   margin: 0;
   font-size: clamp(30px, 2vw, 36px);
   font-weight: 750;
@@ -1129,7 +1131,7 @@ textarea {
 }
 .mobile-drawer .university-brand__copy small {
   max-width: 220px;
-  font-size: 9px;
+  font-size: 12px;
 }
 .drawer-close {
   color: #fff;
@@ -1161,7 +1163,7 @@ textarea {
 .public-brand span {
   margin-left: 8px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0;
 }
@@ -1184,7 +1186,7 @@ textarea {
 .public-footer {
   padding: 15px 20px;
   color: #74696a;
-  font-size: 11px;
+  font-size: 12px;
   text-align: center;
 }
 .welcome-card {
@@ -1289,7 +1291,7 @@ textarea {
 }
 .prototype-inline-note {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 @media (max-width: 720px) {
@@ -1311,13 +1313,13 @@ textarea {
     margin-left: 0;
   }
   .student-topbar {
-    height: 60px;
+    min-height: 60px;
     justify-content: flex-end;
     gap: 7px;
     padding: 0 12px;
   }
   .topbar-prototype-note {
-    font-size: 9px;
+    font-size: 12px;
   }
   .notification-label {
     position: absolute;
@@ -1484,6 +1486,8 @@ textarea {
 }
 .application-status {
   display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 5px 10px;
   border-radius: 9px;
   color: var(--accent);
@@ -1929,16 +1933,54 @@ textarea {
 .service-action--light:hover {
   background: #fdf4f0;
 }
-.applications-table a {
+.applications-table tbody tr {
   position: relative;
+  isolation: isolate;
+}
+.applications-table a {
+  position: static;
   display: flex;
   align-items: center;
   gap: 13px;
-  padding-right: 24px;
+  padding-right: 0;
+}
+.applications-table a::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+}
+.applications-table a:hover::after {
+  background: rgb(120 31 50 / 4%);
+}
+.applications-table a:active::after {
+  background: rgb(120 31 50 / 8%);
+}
+/* The single native link keeps its focus ring on the whole visual row. */
+.applications-table a:focus-visible {
+  outline: none;
+}
+.applications-table a:focus-visible::after {
+  outline: 3px solid #d99838;
+  outline-offset: -3px;
+}
+.applications-table td:last-child {
+  padding-right: 60px;
+}
+@container (max-width:700px) {
+  .applications-table tr {
+    padding-right: 52px;
+  }
+  .applications-table td:last-child {
+    padding-right: 0;
+  }
 }
 .applications-table .application-row-arrow {
   position: absolute;
-  right: 0;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
   color: var(--accent);
 }
 .applications-table .service-icon-small {
@@ -1948,12 +1990,13 @@ textarea {
 }
 .application-status::before {
   content: '';
-  display: inline-block;
+  display: block;
+  flex: 0 0 7px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: currentColor;
-  margin-right: 6px;
+  margin: 0;
 }
 .application-status--submitted {
   color: #2b6e42;
@@ -2252,4 +2295,10 @@ textarea {
 }
 .notification-item time {
   font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .notification-item__type {
+    font-size: 12px;
+  }
 }

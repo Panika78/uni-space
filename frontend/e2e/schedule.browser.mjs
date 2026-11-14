@@ -98,13 +98,16 @@ async function checkCancelledLesson(card, width) {
       await card
         .locator(selector)
         .evaluateAll(
-          (nodes) =>
+          (nodes, selector) =>
             nodes.length > 0 &&
-            nodes.every((node) =>
-              window.getComputedStyle(node).textDecorationLine.includes('line-through'),
+            nodes.every(
+              (node) =>
+                window.getComputedStyle(node).textDecorationLine.includes('line-through') ===
+                (selector === 'h3'),
             ),
+          selector,
         ),
-      `Cancelled ${selector} is struck through`,
+      `Cancelled ${selector} decoration matches the owner decision`,
     )
   }
   assert.equal(await card.locator('.lesson-card__teacher, .lesson-card__kind, li').count(), 0)
@@ -138,6 +141,13 @@ async function checkScheduleChanges(page, width) {
         await source
           .locator('time')
           .first()
+          .evaluate(
+            (node) => !window.getComputedStyle(node).textDecorationLine.includes('line-through'),
+          ),
+      )
+      assert.ok(
+        await source
+          .locator('h3')
           .evaluate((node) =>
             window.getComputedStyle(node).textDecorationLine.includes('line-through'),
           ),

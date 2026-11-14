@@ -1,5 +1,6 @@
 .academics-page {
   min-width: 0;
+  container-type: inline-size;
 }
 .academics-term {
   color: var(--muted);
@@ -22,7 +23,7 @@
   text-align: left;
   padding: 21px 25px;
   border-bottom: 1px solid var(--line);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   vertical-align: middle;
 }
 .academics-table thead th {
@@ -49,7 +50,8 @@
 .academics-label {
   display: inline-block;
   border-radius: 9px;
-  padding: 0.25rem 0.5rem;
+  padding: 4px 8px;
+  max-width: 100%;
   font-size: 0.85rem;
 }
 .academics-label--pending {
@@ -75,7 +77,7 @@
 .academics-mobile-label {
   display: none;
 }
-@media (max-width: 640px) {
+@container (max-width: 48rem) {
   .academics-table,
   .academics-table tbody {
     display: block;

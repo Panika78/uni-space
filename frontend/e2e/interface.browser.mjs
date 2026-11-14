@@ -1,6 +1,9 @@
-/* global process, console, document, window, getComputedStyle */
+/* global process, console, document, window, getComputedStyle, URL */
 // Real demo seed and API. No substituted authentication or application data.
 import assert from 'node:assert/strict'
+import { scaleVisibleText } from './academicsGeometry.mjs'
+import { assertReadableText, assertScheduleControlGeometry } from './typographyGeometry.mjs'
+import { openApplicationsHappyPath } from './interfaceAssertions.mjs'
 import { mkdir } from 'node:fs/promises'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const baseURL = process.env.DEMO_TEST_URL || 'http://localhost:5173'
@@ -23,6 +26,20 @@ async function settle() {
         .filter((a) => a.effect?.getTiming().iterations !== Infinity)
         .map((a) => a.finished.catch(() => {})),
     ),
+  )
+}
+async function assertUnstruckTime(time) {
+  assert.ok(await time.isVisible(), 'lesson time stays visible')
+  assert.equal(
+    await time.evaluate((node) => {
+      const card = node.closest('.lesson-card')
+      for (let e = node; e && card.contains(e); e = e.parentElement) {
+        if (getComputedStyle(e).textDecorationLine.includes('line-through')) return true
+      }
+      return false
+    }),
+    false,
+    'neither time nor its containing blocks are struck through',
   )
 }
 async function inspect(name, width) {
@@ -54,8 +71,31 @@ try {
   for (const width of [360, 390, 561, 600, 721, 768, 900, 1440, 2560]) {
     await page.setViewportSize({ width, height: width >= 1920 ? 1440 : 1000 })
     await page.goto(`${baseURL}/schedule`)
+    const scheduleResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === '/api/v1/schedule' &&
+        new URL(response.url()).searchParams.get('date_from') === '2026-11-16',
+    )
     await page.getByLabel('Дата', { exact: true }).fill('2026-11-19')
+    assert.equal((await scheduleResponse).status(), 200, `Schedule happy-path HTTP at ${width}`)
     await page.locator('.schedule-list').waitFor()
+    for (const card of await page.locator('.schedule-day.is-selected .lesson-card').all()) {
+      const changed = await card.evaluate((e) =>
+        e.matches('.lesson-card--cancelled, .lesson-card--moved'),
+      )
+      assert.equal(
+        await card
+          .locator('h3')
+          .evaluate((e) => getComputedStyle(e).textDecorationLine.includes('line-through')),
+        changed,
+      )
+      assert.equal(await card.locator('time').count(), 2, 'both time endpoints are rendered')
+      for (const time of await card.locator('time').all()) await assertUnstruckTime(time)
+    }
+    assert.ok(
+      (await page.locator('.schedule-day.is-selected .lesson-card--cancelled').count()) > 0,
+      'cancelled seed lesson loaded in day mode',
+    )
     await inspect('schedule-day', width)
     await page.getByRole('button', { name: 'Неделя', exact: true }).click()
     assert.equal(await page.getByRole('group', { name: 'Дни недели' }).count(), 0)
@@ -73,9 +113,20 @@ try {
         assert.equal(group[i].left, group[i - 1].left)
         assert.ok(group[i].top >= group[i - 1].bottom, 'one column without overlaps')
       }
-    for (const card of await page.locator('.lesson-card--moved, .lesson-card--cancelled').all()) {
+    assert.ok(
+      (await page.locator('.lesson-card--moved:visible').count()) > 0,
+      'seed contains moved lessons',
+    )
+    assert.ok(
+      (await page.locator('.lesson-card--cancelled:visible').count()) > 0,
+      'seed contains cancelled lessons',
+    )
+    for (const card of await page
+      .locator('.lesson-card--moved:visible, .lesson-card--cancelled:visible')
+      .all()) {
       assert.match(await card.innerText(), /Перенесено|Отменено/)
-      for (const selector of ['h3', 'time'])
+      assert.ok(await card.isVisible(), 'changed lesson is visible')
+      for (const selector of ['h3'])
         assert.match(
           await card
             .locator(selector)
@@ -84,6 +135,19 @@ try {
           /line-through/,
         )
     }
+    assert.ok(
+      (await page.locator('.lesson-card--scheduled:visible').count()) > 0,
+      'ordinary scheduled seed lessons are loaded',
+    )
+    for (const title of await page.locator('.lesson-card--scheduled:visible h3').all()) {
+      assert.doesNotMatch(
+        await title.evaluate((e) => getComputedStyle(e).textDecorationLine),
+        /line-through/,
+        'ordinary titles are not struck through',
+      )
+    }
+    for (const time of await page.locator('.lesson-card:visible time').all())
+      await assertUnstruckTime(time)
     await inspect('schedule-week', width)
     await page.locator('.schedule-open-day').nth(3).click()
     assert.equal(
@@ -113,7 +177,47 @@ try {
       ['/profile', 'Мой профиль', 'profile'],
       ['/settings', 'Настройки', 'settings'],
     ]) {
-      await page.goto(`${baseURL}${route}`)
+      const requiredReads = {
+        '/academics': ['/api/v1/academics', '.academics-table tbody tr'],
+        '/services': ['/api/v1/services', '.service-card'],
+        '/news': ['/api/v1/news', '.news-row__link'],
+      }
+      if (route === '/services?tab=applications') await openApplicationsHappyPath(page, baseURL)
+      else if (requiredReads[route]) {
+        const [endpoint, selector] = requiredReads[route]
+        const pending = page.waitForResponse(
+          (response) =>
+            response.request().method() === 'GET' && new URL(response.url()).pathname === endpoint,
+        )
+        await page.goto(`${baseURL}${route}`)
+        const response = await pending
+        assert.equal(
+          response.status(),
+          200,
+          `${name} happy-path GET at ${width}: HTTP ${response.status()}`,
+        )
+        const data = await response.json()
+        assert.ok(data.items?.length > 0, `${name} requires non-empty real demo data at ${width}`)
+        await page.locator(selector).first().waitFor()
+        assert.equal(
+          await page
+            .locator(
+              '.service-page [role="alert"],.academics-page [role="alert"],.news-page [role="alert"]',
+            )
+            .count(),
+          0,
+          `${name} must not screenshot an error as success`,
+        )
+        if (route === '/academics') {
+          assert.equal(
+            await page.getByRole('table').count(),
+            2,
+            'both discipline and session tables are ready',
+          )
+          for (const table of await page.getByRole('table').all())
+            assert.equal(await table.locator('tbody tr').count(), data.items.length)
+        }
+      } else await page.goto(`${baseURL}${route}`)
       await page.getByRole('heading', { name: title, exact: true, level: 1 }).waitFor()
       await page.waitForLoadState('networkidle')
       await inspect(name, width)
@@ -154,10 +258,7 @@ try {
         await page.locator('.news-article').waitFor()
         await inspect('news-detail', width)
       }
-      if (
-        route === '/services?tab=applications' &&
-        (await page.locator('.applications-table a').count())
-      ) {
+      if (route === '/services?tab=applications') {
         for (const row of await page.locator('.applications-table tbody tr').all()) {
           const cells = await row.locator('td').evaluateAll((els) =>
             els.map((e) => {
@@ -196,7 +297,17 @@ try {
     await page.getByRole('link', { name: 'Вернуться к расписанию', exact: true }).click()
     await page.getByRole('heading', { name: 'Расписание', exact: true }).waitFor()
     await page.locator('.schedule-list').waitFor()
+    const notificationsResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname === '/api/v1/notifications',
+    )
     await page.getByRole('button', { name: 'Уведомления', exact: true }).click()
+    const notifications = await notificationsResponse
+    assert.equal(notifications.status(), 200, 'notification happy-path GET must succeed')
+    const notificationData = await notifications.json()
+    assert.ok(notificationData.items?.length > 0, 'real seeded notifications must exist')
+    await page.locator('.notification-item').first().waitFor()
     await page.getByRole('dialog', { name: 'Уведомления', exact: true }).waitFor()
     await page.waitForLoadState('networkidle')
     await inspect('notifications', width)
@@ -235,6 +346,75 @@ try {
     }
     console.log(`PASS real API screens, schedule, history, overlays at ${width}`)
   }
+  for (const width of [360, 390, 600, 721, 768, 900, 1440, 2560]) {
+    await page.setViewportSize({ width, height: width === 2560 ? 1440 : 1000 })
+    for (const factor of [1, 1.5, 2]) {
+      await page.goto(`${baseURL}/schedule`)
+      const read = page.waitForResponse(
+        (r) =>
+          new URL(r.url()).pathname === '/api/v1/schedule' &&
+          new URL(r.url()).searchParams.get('date_from') === '2026-11-16',
+      )
+      await page.getByLabel('Дата', { exact: true }).fill('2026-11-19')
+      assert.equal((await read).status(), 200)
+      await page.locator('.schedule-list').waitFor()
+      await scaleVisibleText(page, factor)
+      await settle()
+      await assertReadableText(
+        page,
+        [
+          '.topbar-prototype-note',
+          '.schedule-timezone',
+          '.schedule-modes button',
+          '.schedule-days button',
+        ],
+        `${width}/${factor}/day`,
+        12 * factor,
+      )
+      await assertScheduleControlGeometry(page, `${width}/${factor}/day`)
+      await inspect(`typography-day-${factor}`, width)
+      await page.getByRole('button', { name: 'Неделя', exact: true }).click()
+      await settle()
+      await assertReadableText(
+        page,
+        ['.lesson-card__tag', '.lesson-card__time time'],
+        `${width}/${factor}/week`,
+        12 * factor,
+      )
+      await inspect(`typography-week-${factor}`, width)
+      if (width <= 720) {
+        await page.getByRole('button', { name: 'Открыть меню', exact: true }).click()
+        await page.getByRole('dialog', { name: 'Мобильная навигация' }).waitFor()
+        await scaleVisibleText(page, factor, '.mobile-drawer', false)
+        await assertReadableText(
+          page,
+          ['.mobile-drawer .university-brand__copy small', '.mobile-drawer .navigation-label'],
+          `${width}/${factor}/drawer`,
+          12 * factor,
+        )
+        await inspect(`typography-menu-${factor}`, width)
+        await page.keyboard.press('Escape')
+      }
+    }
+  }
+  console.log(
+    'PASS actual computed typography and unclipped controls at 100/150/200% text across eight widths',
+  )
+  // Negative control uses the exact same happy-path assertion, not an alternative check.
+  await page.route('**/api/v1/applications?*', (request) =>
+    request.fulfill({
+      status: 500,
+      json: { error: { code: 'internal_error', message: 'Negative control' } },
+    }),
+  )
+  await assert.rejects(
+    () => openApplicationsHappyPath(page, baseURL),
+    /Applications happy-path GET: HTTP 500/,
+  )
+  await page.getByRole('alert').waitFor()
+  await inspect('applications-happy-path-negative-control', 2560)
+  await page.unroute('**/api/v1/applications?*')
+  console.log('PASS negative control: HTTP 500 rejects the mandatory applications happy-path')
   // Explicit read-only fault fixtures exercise loading, error, and real retry recovery.
   // Neither authentication nor POST responses are substituted.
   for (const width of [360, 1440, 2560]) {
@@ -279,11 +459,17 @@ try {
       await page.getByRole('alert').first().waitFor()
       await inspect(`${name}-error-fixture`, width)
       await page.unroute(api)
+      const documentOrigin = await page.evaluate(() => window.performance.timeOrigin)
       await page
         .getByRole('button', { name: /Повторить/ })
         .first()
         .click()
       await page.locator(recovered).first().waitFor()
+      assert.equal(
+        await page.evaluate(() => window.performance.timeOrigin),
+        documentOrigin,
+        `${name} retry must not reload the document`,
+      )
     }
   }
   console.log(

@@ -270,9 +270,7 @@
   border-left: 3px solid #bd8551;
 }
 .lesson-card--cancelled h3,
-.lesson-card--moved h3,
-.lesson-card--cancelled time,
-.lesson-card--moved time {
+.lesson-card--moved h3 {
   text-decoration: line-through;
 }
 .lesson-card .lesson-card__status {
@@ -349,14 +347,14 @@
     top: 0;
   }
   .schedule-toolbar {
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     gap: 7px;
     padding: 9px;
     margin-bottom: 12px;
   }
   .schedule-modes {
     flex: 1;
-    min-width: 0;
+    min-width: max-content;
     padding: 4px;
   }
   .schedule-modes::before {
@@ -418,7 +416,7 @@
     outline-offset: 3px;
   }
   .schedule-timezone {
-    font-size: 11px;
+    font-size: 12px;
   }
   .schedule-days {
     gap: 5px;
@@ -426,7 +424,7 @@
   }
   .schedule-days button {
     min-height: 59px;
-    font-size: 10px;
+    font-size: 12px;
   }
   .schedule-days span {
     font-size: 16px;
@@ -512,7 +510,7 @@
     grid-row: 1;
     max-width: none;
     white-space: nowrap;
-    font-size: 11px;
+    font-size: 12px;
     text-align: right;
   }
   .lesson-card--scheduled .lesson-card__details {
@@ -545,7 +543,7 @@
   }
 }
 .schedule-day {
-  scroll-margin-top: 88px;
+  scroll-margin-top: calc(3rem + 40px);
 }
 .lesson-card__tag {
   color: #706265;
@@ -616,7 +614,7 @@
 @media (max-width: 760px) {
   .lesson-card__tag {
     padding: 5px 7px;
-    font-size: 11px;
+    font-size: 12px;
   }
   .lesson-card--cancelled,
   .lesson-card--moved {
@@ -637,4 +635,46 @@
 .lesson-card--moved:hover {
   border-color: #e6bd82;
   border-left-color: #b96c1c;
+}
+
+/* Let enlarged text reflow instead of squeezing lesson time and status together. */
+@media (max-width: 760px) {
+  .lesson-card {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .lesson-card__time {
+    order: 0;
+    flex: 1 1 120px;
+    min-width: 0;
+  }
+  .lesson-card__tag {
+    order: 1;
+    flex: 0 1 auto;
+    max-width: 100%;
+    white-space: normal;
+  }
+  .lesson-card__details {
+    order: 2;
+    flex: 1 0 100%;
+  }
+  .lesson-card--scheduled .lesson-card__tag {
+    white-space: normal;
+  }
+}
+
+.schedule-page {
+  container-type: inline-size;
+}
+/* Preserve the normal v5 placement; enlarged text can move Today into the wrapping toolbar. */
+@container (max-width:18rem) {
+  .schedule-heading {
+    padding-right: 0;
+  }
+  .schedule-page .schedule-today {
+    position: static;
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
 }
