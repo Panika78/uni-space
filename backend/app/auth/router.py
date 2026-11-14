@@ -15,8 +15,12 @@ from app.core.schemas import ApiError, RequestModel
 from app.dependencies.auth import bearer
 from app.dependencies.database import get_db_session
 
-COOKIE_NAME = "uni_space_refresh"
+COOKIE_NAME = "__Host-uni_space_refresh"
 COOKIE_PATH = "/api/v1/auth"
+COOKIE_SCOPE = "/"
+LEGACY_COOKIE_NAME = "uni_space_refresh"
+LEGACY_COOKIE_PATH = "/api/v1/auth"
+INSECURE_COOKIE_NAME = "uni_space_refresh_dev"
 login_rate_limiter = LoginRateLimiter()
 
 
@@ -76,16 +80,55 @@ def set_refresh_cookie(
     response: Response, token: str, expires: datetime, settings: Settings
 ) -> None:
     remaining = max(0, int((expires - datetime.now(UTC)).total_seconds()))
+    cookie_name = COOKIE_NAME if settings.cookie_secure else INSECURE_COOKIE_NAME
     response.set_cookie(
-        COOKIE_NAME,
+        cookie_name,
         token,
         max_age=remaining,
         expires=expires.astimezone(UTC),
-        path=COOKIE_PATH,
+        path=COOKIE_SCOPE if settings.cookie_secure else COOKIE_PATH,
         secure=settings.cookie_secure,
         httponly=True,
         samesite="lax",
     )
+
+
+def get_unique_cookie(request: Request, name: str) -> str | None:
+    """Return a cookie only when exactly one matching pair was sent."""
+    values = []
+    for header in request.headers.getlist("cookie"):
+        for pair in header.split(";"):
+            key, separator, value = pair.strip().partition("=")
+            if separator and key.strip() == name:
+                values.append(value.strip())
+    return values[0] if len(values) == 1 else None
+
+
+def clear_legacy_cookie(response: Response, settings: Settings) -> None:
+    response.delete_cookie(
+        LEGACY_COOKIE_NAME,
+        path=LEGACY_COOKIE_PATH,
+        secure=settings.cookie_secure,
+        httponly=True,
+        samesite="lax",
+    )
+
+
+def get_active_cookie(request: Request, settings: Settings) -> str | None:
+    return get_unique_cookie(
+        request, COOKIE_NAME if settings.cookie_secure else INSECURE_COOKIE_NAME
+    )
+
+
+def clear_insecure_cookie(response: Response, settings: Settings) -> None:
+    if not settings.cookie_secure:
+        response.delete_cookie(
+            INSECURE_COOKIE_NAME,
+            path=COOKIE_PATH,
+            secure=False,
+            httponly=True,
+            samesite="lax",
+        )
 
 
 @router.post(
@@ -111,20 +154,25 @@ def login_user(
         body.login,
         body.password,
         settings,
-        previous_refresh_token=request.cookies.get(COOKIE_NAME),
+        previous_refresh_token=get_active_cookie(request, settings),
     )
     access = create_access_token(session, settings)
     set_refresh_cookie(response, token, session.expires_at, settings)
+    clear_legacy_cookie(response, settings)
     return access
 
 
 @router.post("/refresh", response_model=TokenResponse, dependencies=[Depends(require_empty_body)])
 def refresh_session(
+    request: Request,
     response: Response,
     db: Database,
     settings: AuthSettings,
     refresh_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
 ) -> dict:
+    refresh_cookie = get_active_cookie(request, settings)
+    if refresh_cookie is None:
+        raise HTTPException(401, "invalid_refresh")
     session, token = rotate_refresh_token(db, refresh_cookie)
     access = create_access_token(session, settings)
     set_refresh_cookie(response, token, session.expires_at, settings)
@@ -143,6 +191,7 @@ def refresh_session(
     ),
 )
 def logout_session(
+    request: Request,
     db: Database,
     settings: AuthSettings,
     response: Response,
@@ -150,9 +199,14 @@ def logout_session(
     refresh_cookie: Annotated[str | None, Cookie(alias=COOKIE_NAME)] = None,
 ) -> dict:
     session_revoked = revoke_logout_session(
-        db, refresh_cookie, settings, credentials.credentials if credentials else None
+        db,
+        get_active_cookie(request, settings),
+        settings,
+        credentials.credentials if credentials else None,
     )
     response.delete_cookie(
-        COOKIE_NAME, path=COOKIE_PATH, secure=settings.cookie_secure, httponly=True, samesite="lax"
+        COOKIE_NAME, path=COOKIE_SCOPE, secure=settings.cookie_secure, httponly=True, samesite="lax"
     )
+    clear_legacy_cookie(response, settings)
+    clear_insecure_cookie(response, settings)
     return {"session_revoked": session_revoked}

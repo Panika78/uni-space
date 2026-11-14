@@ -120,10 +120,18 @@ entrypoint или без флага. HTTP-заголовки/IP для опре�
 - Все три маршрута требуют ровно один `Origin`, точно совпадающий с разрешённым.
   Отсутствующий, повторный, `null` и запрещённый заголовок дают
   `403 origin_not_allowed`, включая logout. CLI также передаёт Origin.
-- Cookie `uni_space_refresh`: `HttpOnly`, `SameSite=Lax`, `Path=/api/v1/auth`,
-  без `Domain`, `Secure` по конфигурации. `Expires` и округлённый вниз `Max-Age`
+- Cookie `__Host-uni_space_refresh`: `HttpOnly`, `SameSite=Lax`, `Path=/`,
+  без `Domain`, `Secure` обязательно. Префикс `__Host-` обеспечивает host-only
+  область и требует HTTPS в браузере. `Expires` и округлённый вниз `Max-Age`
   не превышают абсолютный срок сессии. Удаление использует те же атрибуты.
   Origin и SameSite защищают cookie-маршруты от CSRF.
+- Старое имя `uni_space_refresh` больше не принимается. Login и logout посылают
+  очистку legacy host-only cookie с прежним `Path=/api/v1/auth`; cookie с
+  parent-domain scope не может быть очищена без знания домена и игнорируется.
+  Пользователь проходит login заново; существующие старые сессии истекают по
+  исходному TTL. В development/test с `COOKIE_SECURE=false` используется
+  отдельное имя `uni_space_refresh_dev` с прежним ограниченным Path для работы
+  локального HTTP; такой режим не предназначен для публикации.
 - Access использует только HS256, обязательные типизированные claims,
   стандартные проверки PyJWT и явные проверки значений. `sub`/`sid` — строки
   положительных BIGINT; claims роли не предоставляют права.
