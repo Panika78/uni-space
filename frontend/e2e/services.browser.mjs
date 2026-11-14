@@ -1,5 +1,6 @@
 /* global process, console, URL, document, window, setTimeout */
 import assert from 'node:assert/strict'
+import { mkdir } from 'node:fs/promises'
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const baseURL = process.env.SERVICES_TEST_URL || 'http://localhost:5173'
@@ -128,6 +129,32 @@ try {
   assert.equal(saved.form_data.place_of_submission, 'Канцелярия\nкорпус № 2 — 東京')
   await page.unroute('**/api/v1/applications')
   assert.equal(postResponses.length, 1, 'The form dispatches a single POST')
+  await mkdir('work/services-review', { recursive: true })
+  for (const width of [360, 390, 561, 600, 721, 768, 900, 1440, 2560]) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.getByRole('heading', { name: 'Заявление создано', exact: true }).waitFor()
+    await page.waitForFunction(
+      () =>
+        !document
+          .getAnimations()
+          .some((a) => a.playState === 'running' && a.effect?.getTiming().iterations !== Infinity),
+    )
+    assert.ok((await page.locator('.application-success').boundingBox()).width >= 300)
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    const buttons = await page.locator('.application-success .form-actions a').evaluateAll((els) =>
+      els.map((e) => {
+        const b = e.getBoundingClientRect()
+        return { x: b.x, y: b.y, right: b.right, bottom: b.bottom }
+      }),
+    )
+    assert.equal(buttons.length, 2)
+    assert.ok(
+      buttons[1].x >= buttons[0].right || buttons[1].y >= buttons[0].bottom,
+      'success actions do not overlap',
+    )
+    await page.screenshot({ path: `work/services-review/${width}-success.png`, fullPage: true })
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
   console.log('PASS: desktop catalog, form validation, navigation warning and real PostgreSQL save')
 
   {
@@ -243,7 +270,7 @@ try {
     )
   }
 
-  await page.getByRole('button', { name: 'Вернуться к каталогу' }).click()
+  await page.getByRole('link', { name: 'К каталогу услуг' }).click()
   await page.getByRole('link', { name: 'Подать заявление' }).click()
   const maxField = page.getByLabel(/Место предоставления/)
   const maxValue = 'А'.repeat(299) + '😀'
@@ -257,7 +284,7 @@ try {
   const maxResponse = await maxResponseWaiter
   assert.equal(maxResponse.status(), 201)
   assert.equal(Array.from((await maxResponse.json()).form_data.place_of_submission).length, 300)
-  await page.getByRole('button', { name: 'Вернуться к каталогу' }).click()
+  await page.getByRole('link', { name: 'К каталогу услуг' }).click()
   await page.getByRole('link', { name: 'Подать заявление' }).click()
   const overLimitField = page.getByLabel(/Место предоставления/)
   await overLimitField.fill('А'.repeat(300) + '😀')
@@ -266,9 +293,11 @@ try {
   assert.equal(await overLimitField.getAttribute('aria-invalid'), 'true')
   assert.equal(postResponses.length, 2, 'A 301-code-point value is rejected before POST')
 
+  let uncertainRequests = 0
   const timeoutField = page.getByLabel(/Место предоставления/)
   await timeoutField.fill('Зависший запрос')
   await page.route('**/api/v1/applications', async (route) => {
+    uncertainRequests += 1
     await new Promise((resolve) => setTimeout(resolve, 35_000))
     await route.abort()
   })
@@ -277,7 +306,15 @@ try {
     timeout: 34_000,
   })
   await page.getByRole('button', { name: 'Отправить заявление' }).waitFor({ state: 'visible' })
-  assert.equal(await page.getByRole('button', { name: 'Отправить заявление' }).isDisabled(), false)
+  assert.equal(await page.getByRole('button', { name: 'Отправить заявление' }).isDisabled(), true)
+  await page.waitForFunction(
+    () => document.activeElement?.textContent === 'Проверить результат в моих заявлениях',
+  )
+  await page.locator('.application-form').evaluate((form) => {
+    form.requestSubmit()
+    form.requestSubmit()
+  })
+  assert.equal(uncertainRequests, 1, 'Unknown outcome cannot accidentally submit again')
   assert.equal(postResponses.length, 2, 'Timed out request was not retried')
   await page.unrouteAll({ behavior: 'ignoreErrors' })
   console.log(

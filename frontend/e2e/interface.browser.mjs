@@ -51,7 +51,7 @@ try {
     await page.waitForTimeout(seconds * 1000)
   }
   await page.getByRole('heading', { name: 'Расписание', exact: true }).waitFor()
-  for (const width of [360, 390, 768, 1440, 1920, 2560]) {
+  for (const width of [360, 390, 561, 600, 721, 768, 900, 1440, 2560]) {
     await page.setViewportSize({ width, height: width >= 1920 ? 1440 : 1000 })
     await page.goto(`${baseURL}/schedule`)
     await page.getByLabel('Дата', { exact: true }).fill('2026-11-19')
@@ -95,6 +95,15 @@ try {
     await page.getByRole('button', { name: 'Следующая неделя' }).click()
     await page.getByRole('button', { name: 'День', exact: true }).click()
     assert.equal(await page.getByLabel('Дата', { exact: true }).inputValue(), '2026-11-26')
+    await page.getByRole('button', { name: 'Неделя', exact: true }).click()
+    for (let repeat = 0; repeat < 2; repeat++) {
+      await page.evaluate(() => window.scrollTo(0, 0))
+      await page.getByRole('button', { name: 'Сегодня', exact: true }).click()
+      await page.waitForFunction(() => {
+        const box = document.querySelector('.schedule-day.is-selected')?.getBoundingClientRect()
+        return box && box.top >= 64 && box.top < window.innerHeight - 50
+      })
+    }
     for (const [route, title, name] of [
       ['/academics', 'Успеваемость', 'academics'],
       ['/services', 'Услуги и документы', 'catalog'],
@@ -108,7 +117,13 @@ try {
       await page.getByRole('heading', { name: title, exact: true, level: 1 }).waitFor()
       await page.waitForLoadState('networkidle')
       await inspect(name, width)
-      if (route === '/academics') assert.equal(await page.getByRole('progressbar').count(), 0)
+      if (route === '/academics') {
+        assert.equal(await page.getByRole('progressbar').count(), 0)
+        assert.ok(
+          (await page.locator('.academics-table tbody tr').count()) > 0,
+          'real academic disciplines loaded',
+        )
+      }
       if (route === '/profile') {
         await page.locator('.profile-building').evaluate((image) => image.decode())
         if (width >= 1440) {
@@ -119,6 +134,11 @@ try {
         }
       }
       if (route === '/services') {
+        const icon = await page.locator('.service-card__icon-box').boundingBox()
+        const text = await page.locator('.service-card__content').boundingBox()
+        if (icon.y < text.y + text.height && text.y < icon.y + icon.height)
+          assert.ok(icon.x + icon.width <= text.x, 'service icon does not overlap text')
+
         const tabs = page.getByRole('navigation', { name: 'Разделы услуг' })
         const top = (await tabs.boundingBox()).y
         await tabs.getByRole('link', { name: 'Мои заявления' }).click()
@@ -138,6 +158,31 @@ try {
         route === '/services?tab=applications' &&
         (await page.locator('.applications-table a').count())
       ) {
+        for (const row of await page.locator('.applications-table tbody tr').all()) {
+          const cells = await row.locator('td').evaluateAll((els) =>
+            els.map((e) => {
+              const b = e.getBoundingClientRect()
+              return {
+                x: b.x,
+                y: b.y,
+                right: b.right,
+                bottom: b.bottom,
+                width: b.width,
+                scroll: e.scrollWidth,
+                client: e.clientWidth,
+              }
+            }),
+          )
+          for (const cell of cells) {
+            assert.ok(cell.width >= 140, `readable application cell at ${width}`)
+            assert.ok(cell.scroll <= cell.client, `no clipped application content at ${width}`)
+          }
+          for (let i = 1; i < cells.length; i++) {
+            const a = cells[i - 1],
+              b = cells[i]
+            assert.ok(b.x >= a.right - 1 || b.y >= a.bottom - 1, 'application cells do not overlap')
+          }
+        }
         await page.locator('.applications-table a').first().click()
         await page.locator('.application-detail dl').waitFor()
         await inspect('application-detail', width)
@@ -166,6 +211,13 @@ try {
       await page.getByRole('button', { name: 'Открыть меню', exact: true }).click()
       await page.getByRole('dialog', { name: 'Мобильная навигация' }).waitFor()
       await inspect('mobile-menu', width)
+      assert.equal(await page.locator('.student-main-column').evaluate((e) => e.inert), true)
+      assert.equal(await page.locator('.desktop-sidebar').evaluate((e) => e.inert), true)
+      const drawer = page.getByRole('dialog', { name: 'Мобильная навигация' })
+      for (let tab = 0; tab < 10; tab++) {
+        await page.keyboard.press('Tab')
+        assert.equal(await drawer.evaluate((e) => e.contains(document.activeElement)), true)
+      }
       await page.keyboard.press('Escape')
       assert.equal(
         await page
@@ -176,6 +228,60 @@ try {
     }
     console.log(`PASS real API screens, schedule, history, overlays at ${width}`)
   }
+  // Explicit read-only fault fixtures exercise loading, error, and real retry recovery.
+  // Neither authentication nor POST responses are substituted.
+  for (const width of [360, 1440, 2560]) {
+    await page.setViewportSize({ width, height: 1000 })
+    for (const [route, api, name, recovered] of [
+      ['/schedule', '**/api/v1/schedule?*', 'schedule', '.schedule-list'],
+      ['/academics', '**/api/v1/academics', 'academics', '.academics-table'],
+      ['/services', '**/api/v1/services', 'catalog', '.service-card'],
+      [
+        '/services?tab=applications',
+        '**/api/v1/applications?*',
+        'applications',
+        '.applications-table',
+      ],
+      ['/news', '**/api/v1/news?*', 'news', '.news-feed'],
+    ]) {
+      let release
+      let entered
+      const gate = new Promise((resolve) => {
+        release = resolve
+      })
+      const requested = new Promise((resolve) => {
+        entered = resolve
+      })
+      await page.route(api, async (request) => {
+        entered()
+        await gate
+        await request.fulfill({
+          status: 500,
+          json: { error: { code: 'internal_error', message: 'Explicit read-only E2E fault' } },
+        })
+      })
+      await page.goto(`${baseURL}${route}`)
+      await requested
+      await page
+        .getByRole('status')
+        .filter({ hasText: /Загружаем/ })
+        .first()
+        .waitFor()
+      await inspect(`${name}-loading-fixture`, width)
+      release()
+      await page.getByRole('alert').first().waitFor()
+      await inspect(`${name}-error-fixture`, width)
+      await page.unroute(api)
+      await page
+        .getByRole('button', { name: /Повторить/ })
+        .first()
+        .click()
+      await page.locator(recovered).first().waitFor()
+    }
+  }
+  console.log(
+    'PASS explicit read-only loading/error fixtures and real retry recovery at 360/1440/2560',
+  )
   // Deliberately inject a read-only empty fixture; no POST/auth responses are replaced.
   await page.route('**/api/v1/applications?*', (route) =>
     route.fulfill({ json: { items: [], next_cursor: null } }),
@@ -193,6 +299,15 @@ try {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto(`${baseURL}/schedule`)
   await page.getByRole('button', { name: 'Неделя', exact: true }).click()
+  await page.getByRole('button', { name: 'Следующая неделя' }).click()
+  for (let repeat = 0; repeat < 2; repeat++) {
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await page.getByRole('button', { name: 'Сегодня', exact: true }).click()
+    await page.waitForFunction(() => {
+      const box = document.querySelector('.schedule-day.is-selected')?.getBoundingClientRect()
+      return box && box.top >= 64 && box.top < window.innerHeight - 50
+    })
+  }
   await page.getByRole('button', { name: 'Уведомления', exact: true }).click()
   await page.keyboard.press('Escape')
   assert.equal(await page.getByRole('dialog', { name: 'Уведомления', exact: true }).count(), 0)
@@ -207,7 +322,7 @@ try {
   await page.getByRole('button', { name: 'Выйти', exact: true }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Выйти', exact: true }).click()
   await page.getByRole('heading', { name: 'Вход в систему' }).waitFor()
-  for (const width of [360, 390, 768, 1440, 1920, 2560]) {
+  for (const width of [360, 390, 561, 600, 721, 768, 900, 1440, 2560]) {
     await page.setViewportSize({ width, height: 1000 })
     for (const [route, name, title] of [
       ['/login', 'login', 'Вход в систему'],
@@ -220,7 +335,7 @@ try {
     }
   }
   assert.deepEqual(errors, [])
-  console.log('PASS real logout and public/error screens at all six widths')
+  console.log('PASS real logout and public/error screens at all nine widths')
 } finally {
   await browser.close()
 }
