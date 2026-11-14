@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import {
+  act,
   cleanup,
   fireEvent,
   render as testingRender,
@@ -73,7 +74,10 @@ it('loads the real service catalog and offers the separate application form', as
     'href',
     '/services/study_certificate',
   )
-  expect(apiFetch).toHaveBeenCalledWith('/api/v1/services', { authenticated: true })
+  expect(apiFetch).toHaveBeenCalledWith('/api/v1/services', {
+    authenticated: true,
+    signal: expect.any(AbortSignal),
+  })
 })
 
 it('does not open the study certificate form for an unknown service path', () => {
@@ -364,4 +368,127 @@ it('does not clear the new account cache when an old POST is aborted', async () 
   reject(new DOMException('Obsolete session', 'AbortError'))
   await new Promise((resolve) => setTimeout(resolve, 0))
   expect(client.getQueryData(['applications'])).toEqual({ items: [{ id: 'new-account' }] })
+})
+
+function mountCatalog(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
+  const router = createMemoryRouter(
+    [
+      { path: '/services', element: <ServicesPage /> },
+      { path: '/elsewhere', element: <p>Другой раздел</p> },
+    ],
+    { initialEntries: ['/services'] },
+  )
+  const view = testingRender(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
+  return { ...view, router, client }
+}
+
+it('shows the shared accessible skeleton while the catalog request is pending', async () => {
+  let finish!: (value: unknown) => void
+  apiFetch.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+  )
+  mountCatalog()
+  const loading = screen.getByRole('status')
+  expect(loading).toHaveClass('ui-state--loading', 'ui-state--skeleton')
+  expect(loading).toHaveAttribute('aria-busy', 'true')
+  expect(screen.queryByRole('article')).not.toBeInTheDocument()
+  finish({ items: [] })
+  expect(await screen.findByText('Сейчас нет доступных услуг.')).toBeInTheDocument()
+  expect(screen.queryByText('Загружаем каталог…')).not.toBeInTheDocument()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+})
+
+it.each([
+  ['HTTP 500', new ApiClientError('Unavailable', 'internal_error', 500)],
+  ['network failure', new TypeError('Network error')],
+])(
+  'shows the shared error state for %s without treating it as an empty catalog',
+  async (_name, cause) => {
+    apiFetch.mockRejectedValueOnce(cause)
+    mountCatalog()
+    expect(await screen.findByRole('alert')).toHaveClass('ui-state--error')
+    expect(screen.getByRole('button', { name: 'Повторить' })).toBeEnabled()
+    expect(screen.queryByText('Сейчас нет доступных услуг.')).not.toBeInTheDocument()
+    expect(apiFetch).toHaveBeenCalledTimes(1)
+  },
+)
+
+it('retries a catalog GET through loading and success without reloading the document', async () => {
+  let finish!: (value: unknown) => void
+  apiFetch.mockRejectedValueOnce(new TypeError('Network error')).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+  )
+  mountCatalog()
+  fireEvent.click(await screen.findByRole('button', { name: 'Повторить' }))
+  expect(await screen.findByText('Загружаем каталог…')).toBeInTheDocument()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  finish({ items: [{ id: '1', code: 'study_certificate', title: 'Справка об обучении' }] })
+  expect(await screen.findByRole('link', { name: 'Подать заявление' })).toHaveAttribute(
+    'href',
+    '/services/study_certificate',
+  )
+  expect(apiFetch).toHaveBeenCalledTimes(2)
+  expect(apiFetch.mock.calls.every(([url]) => url === '/api/v1/services')).toBe(true)
+})
+
+it('allows another safe catalog retry after the retried GET also fails', async () => {
+  apiFetch.mockRejectedValue(new TypeError('Offline'))
+  mountCatalog()
+  fireEvent.click(await screen.findByRole('button', { name: 'Повторить' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Не удалось загрузить каталог')
+  expect(apiFetch).toHaveBeenCalledTimes(2)
+  expect(screen.getByRole('button', { name: 'Повторить' })).toBeEnabled()
+})
+
+it('cancels the catalog request on route change and does not render a late response', async () => {
+  let finish!: (value: unknown) => void
+  apiFetch.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+  )
+  const { router } = mountCatalog()
+  const signal = apiFetch.mock.calls[0][1].signal as AbortSignal
+  await act(() => router.navigate('/elsewhere'))
+  expect(signal.aborted).toBe(true)
+  await act(async () =>
+    finish({ items: [{ id: '1', code: 'study_certificate', title: 'Поздний каталог' }] }),
+  )
+  expect(screen.getByText('Другой раздел')).toBeInTheDocument()
+  expect(screen.queryByText('Поздний каталог')).not.toBeInTheDocument()
+})
+
+it('isolates the next student catalog when a cleared query receives an old response', async () => {
+  let finishOld!: (value: unknown) => void
+  apiFetch.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishOld = resolve
+      }),
+  )
+  const first = mountCatalog()
+  first.unmount()
+  first.client.clear() // AuthSession clears this same query cache on account changes.
+  const next = { items: [{ id: '2', code: 'study_certificate', title: 'Каталог нового студента' }] }
+  apiFetch.mockResolvedValueOnce(next)
+  mountCatalog(first.client)
+  expect(
+    await screen.findByRole('article', { name: 'Каталог нового студента' }),
+  ).toBeInTheDocument()
+  await act(async () =>
+    finishOld({ items: [{ id: '1', code: 'study_certificate', title: 'Старый каталог' }] }),
+  )
+  expect(screen.queryByText('Старый каталог')).not.toBeInTheDocument()
+  expect(first.client.getQueryData(['services'])).toEqual(next)
 })

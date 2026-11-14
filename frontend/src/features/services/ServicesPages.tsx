@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApplicationsList, applicationsKey, ServicesTabs } from './ApplicationsPages'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useBlocker, useParams, useSearchParams } from 'react-router-dom'
@@ -7,8 +7,8 @@ import { ApiClientError, apiFetch } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { Icon } from '../../shared/ui/Icon'
 import { AnimatedRegion } from '../../shared/ui/AnimatedRegion'
+import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 
-type Service = components['schemas']['Service']
 type Application = components['schemas']['ApplicationResponse']
 type CreateApplicationRequest = components['schemas']['CreateApplicationRequest']
 
@@ -86,36 +86,30 @@ export function ServicesPage() {
 }
 
 function ServiceCatalog() {
-  const [services, setServices] = useState<Service[] | null>(null)
-  const [error, setError] = useState(false)
-  useEffect(() => {
-    let active = true
-    apiFetch<components['schemas']['ServiceList']>('/api/v1/services', {
-      authenticated: true,
-    }).then(
-      (data) => {
-        if (active) setServices(data.items)
-      },
-      () => {
-        if (active) setError(true)
-      },
-    )
-    return () => {
-      active = false
-    }
-  }, [])
+  const query = useQuery({
+    queryKey: ['services'],
+    queryFn: ({ signal }) =>
+      apiFetch<components['schemas']['ServiceList']>('/api/v1/services', {
+        authenticated: true,
+        signal,
+      }),
+    refetchOnMount: 'always',
+    retryOnMount: true,
+  })
+  const services = query.data?.items ?? []
   return (
     <div className="service-catalog-page">
       <p>Выберите доступную услугу.</p>
-      {error ? (
-        <div role="alert">
-          <p>Не удалось загрузить каталог.</p>
-          <button onClick={() => location.reload()}>Повторить загрузку</button>
-        </div>
-      ) : services === null ? (
-        <p role="status">Загружаем каталог…</p>
+      {query.isPending || (query.isFetching && query.isError) ? (
+        <LoadingState title="Загружаем каталог…" />
+      ) : query.isError ? (
+        <ErrorState
+          title="Не удалось загрузить каталог"
+          description="Проверьте соединение и повторите попытку."
+          onRetry={() => void query.refetch()}
+        />
       ) : services.length === 0 ? (
-        <p>Сейчас нет доступных услуг.</p>
+        <EmptyState title="Сейчас нет доступных услуг." />
       ) : (
         <article className="service-card" aria-labelledby="study-certificate-title">
           <div className="service-card__icon-box" aria-hidden="true">
