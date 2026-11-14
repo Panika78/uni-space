@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Outlet } from 'react-router-dom'
 import { UserMenu } from '../../app/StudentLayout'
 import { ApiClientError, apiFetch } from '../../shared/api/client'
+import { Icon } from '../../shared/ui/Icon'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 
 import { ProfileContext, useStudentProfile, getStudentInitials } from './profileContext'
@@ -59,6 +60,7 @@ export function StudentProfilePage() {
   const initials = getStudentInitials(profile.full_name)
   return (
     <article className="section-page profile-page">
+      <p className="section-eyebrow">Студенческий кабинет</p>
       <h1>Мой профиль</h1>
       <p className="profile-subtitle">Личная информация и сведения об обучении</p>
       <header className="profile-heading">
@@ -70,13 +72,18 @@ export function StudentProfilePage() {
           <h2>{profile.full_name}</h2>
           <p className="profile-meta">
             {profile.group.name}
-            <span className="profile-status">{statuses[profile.academic_status]}</span>
+            <span className="profile-status" data-status={profile.academic_status}>
+              {statuses[profile.academic_status]}
+            </span>
           </p>
         </div>
       </header>
       <div className="profile-grid">
         <section className="profile-personal">
-          <h2>Личные данные</h2>
+          <h2>
+            <Icon name="user" />
+            Личные данные
+          </h2>
           <dl>
             <dt>ФИО</dt>
             <dd>{profile.full_name}</dd>
@@ -85,7 +92,10 @@ export function StudentProfilePage() {
           </dl>
         </section>
         <section className="profile-education">
-          <h2>Обучение</h2>
+          <h2>
+            <Icon name="graduation" />
+            Обучение
+          </h2>
           <dl>
             <dt>Факультет</dt>
             <dd>{profile.faculty.name}</dd>
@@ -106,7 +116,10 @@ export function StudentProfilePage() {
           </dl>
         </section>
         <section className="profile-contacts">
-          <h2>Контакты</h2>
+          <h2>
+            <Icon name="info" />
+            Контакты
+          </h2>
           <p>Контактные данные не предоставлены.</p>
         </section>
       </div>

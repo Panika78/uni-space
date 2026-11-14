@@ -215,7 +215,7 @@ it('uses Python whitespace and Unicode code point boundaries in the form', async
   )
 })
 
-it('returns from a timed out POST to the editable form without retrying or claiming failure', async () => {
+it('blocks resubmission after a timed out POST without claiming failure', async () => {
   const timeoutController = new AbortController()
   vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal)
   apiFetch.mockImplementationOnce(
@@ -239,9 +239,15 @@ it('returns from a timed out POST to the editable form without retrying or claim
   expect(apiFetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal)
   timeoutController.abort(new DOMException('Timed out', 'TimeoutError'))
   await waitFor(() => {
-    expect(screen.getByRole('button', { name: 'Отправить заявление' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Отправить заявление' })).toBeDisabled()
   })
   expect(screen.getByRole('alert')).toHaveTextContent(/могло сохраниться/i)
+  await waitFor(() =>
+    expect(
+      screen.getByRole('link', { name: 'Проверить результат в моих заявлениях' }),
+    ).toHaveFocus(),
+  )
+  fireEvent.submit(screen.getByRole('button', { name: 'Отправить заявление' }).closest('form')!)
   expect(apiFetch).toHaveBeenCalledTimes(1)
   vi.restoreAllMocks()
 })

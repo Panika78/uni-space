@@ -270,3 +270,14 @@ it.each([
   renderStudentLayout(path)
   expect(screen.getByRole('link', { name: label })).toHaveAttribute('aria-current', 'page')
 })
+
+it('isolates background while mobile navigation is open and restores it on Escape', async () => {
+  renderStudentLayout()
+  fireEvent.click(screen.getByRole('button', { name: 'Открыть меню' }))
+  const background = document.querySelector('.student-main-column') as HTMLElement
+  expect(background.inert).toBe(true)
+  expect(document.querySelector('.desktop-sidebar')).toHaveProperty('inert', true)
+  fireEvent.keyDown(document, { key: 'Escape' })
+  expect(background.inert).toBe(false)
+  expect(screen.getByRole('button', { name: 'Открыть меню' })).toHaveFocus()
+})

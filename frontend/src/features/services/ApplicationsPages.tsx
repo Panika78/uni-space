@@ -3,6 +3,7 @@ import { useEffect, useId, useRef } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
+import { Icon } from '../../shared/ui/Icon'
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 
 type Application = components['schemas']['ApplicationResponse']
@@ -109,7 +110,7 @@ export function ApplicationsList() {
   }, [location.key, query.data, query.isFetching, queryClient])
   return (
     <div>
-      <h2 ref={heading} tabIndex={-1}>
+      <h2 className="applications-list-heading" ref={heading} tabIndex={-1}>
         Мои заявления
       </h2>
       {query.isPending && <LoadingState title="Загружаем заявления…" />}
@@ -138,6 +139,7 @@ export function ApplicationsList() {
       {query.isSuccess && items.length === 0 && (
         <div className="applications-empty">
           <EmptyState
+            icon={<Icon name="file" />}
             title="Вы ещё не подавали заявлений"
             description="Выберите услугу в каталоге и отправьте заявление онлайн. Здесь появится его статус."
           />
@@ -191,7 +193,15 @@ export function ApplicationsList() {
                       })
                     }}
                   >
-                    {item.service.title} · № {item.id}
+                    <span className="service-icon-small" aria-hidden="true">
+                      <Icon name="file" />
+                    </span>
+                    <span>
+                      {item.service.title} · № {item.id}
+                    </span>
+                    <span className="application-row-arrow" aria-hidden="true">
+                      <Icon name="right" />
+                    </span>
                   </Link>
                 </td>
                 <td role="cell" headers={`${tableId}-date`}>
@@ -259,7 +269,7 @@ export function ApplicationDetailPage() {
           }
         }}
       >
-        ← К моим заявлениям
+        <Icon name="left" /> К моим заявлениям
       </Link>
       {query.isPending && <LoadingState title="Загружаем заявление…" />}
       {query.isError && (
@@ -276,34 +286,46 @@ export function ApplicationDetailPage() {
         />
       )}
       {item && (
-        <article>
+        <div>
+          <p className="section-eyebrow">Услуги и документы</p>
           <h1 ref={title} tabIndex={-1}>
             Заявление № {item.id}
           </h1>
-          <h2>{item.service.title}</h2>
-          <dl>
-            <dt>Дата подачи</dt>
-            <dd>
-              <time dateTime={item.created_at}>{formatDate(item.created_at)}</time>
-            </dd>
-            <dt>Место предоставления</dt>
-            <dd>{item.form_data.place_of_submission}</dd>
-            <dt>Рассмотрение</dt>
-            <dd>
-              <span className={`application-status application-status--${item.review_status}`}>
-                {reviewLabels[item.review_status]}
+          <p className="service-subtitle">{item.service.title}</p>
+          <article className="application-detail-card">
+            <div className="service-card-heading">
+              <span className="service-icon-small" aria-hidden="true">
+                <Icon name="file" />
               </span>
-            </dd>
-            <dt>Документ</dt>
-            <dd>{documentLabels[item.document_status]}</dd>
-            {item.feedback !== null && (
-              <>
-                <dt>Обратная связь</dt>
-                <dd>{item.feedback}</dd>
-              </>
-            )}
-          </dl>
-        </article>
+              <div>
+                <h2>{item.service.title}</h2>
+                <p>Данные поданного заявления</p>
+              </div>
+            </div>
+            <dl>
+              <dt>Дата подачи</dt>
+              <dd>
+                <time dateTime={item.created_at}>{formatDate(item.created_at)}</time>
+              </dd>
+              <dt>Место предоставления</dt>
+              <dd>{item.form_data.place_of_submission}</dd>
+              <dt>Рассмотрение</dt>
+              <dd>
+                <span className={`application-status application-status--${item.review_status}`}>
+                  {reviewLabels[item.review_status]}
+                </span>
+              </dd>
+              <dt>Документ</dt>
+              <dd>{documentLabels[item.document_status]}</dd>
+              {item.feedback !== null && (
+                <>
+                  <dt>Обратная связь</dt>
+                  <dd>{item.feedback}</dd>
+                </>
+              )}
+            </dl>
+          </article>
+        </div>
       )}
     </section>
   )

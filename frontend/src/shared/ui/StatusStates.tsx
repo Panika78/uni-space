@@ -34,11 +34,16 @@ export function LoadingState({
   )
 }
 
-export function EmptyState({ title, description, children }: StateProps) {
+export function EmptyState({
+  title,
+  description,
+  children,
+  icon,
+}: StateProps & { icon?: ReactNode }) {
   return (
     <section className="ui-state ui-state--empty" role="status" aria-live="polite">
       <span className="ui-state__icon" aria-hidden="true">
-        ○
+        {icon ?? '○'}
       </span>
       <div className="ui-state__copy">
         <p className="ui-state__title">{title}</p>
@@ -89,16 +94,22 @@ export function SuccessState({ title, description, children }: StateProps) {
   )
 }
 
-export function UnavailableState({ title, description }: StateProps) {
+export function UnavailableState({
+  title,
+  description,
+  children,
+  icon,
+}: StateProps & { icon?: ReactNode }) {
   return (
     <section className="ui-state ui-state--unavailable" role="status" aria-live="polite">
       <span className="ui-state__icon" aria-hidden="true">
-        ○
+        {icon ?? '○'}
       </span>
       <div className="ui-state__copy">
         <p className="ui-state__title">{title}</p>
         {description && <p className="ui-state__description">{description}</p>}
       </div>
+      {children}
     </section>
   )
 }

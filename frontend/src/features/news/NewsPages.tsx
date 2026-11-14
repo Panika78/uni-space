@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import type { MouseEvent } from 'react'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
+import { Icon } from '../../shared/ui/Icon'
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 import type { components } from '../../shared/api/schema'
 
@@ -56,7 +57,7 @@ function NewsRow({ item }: { item: NewsPreview }) {
         <h2>{item.title}</h2>
         <p>{item.excerpt}</p>
         <span className="news-row__arrow" aria-hidden="true">
-          →
+          <Icon name="right" />
         </span>
       </Link>
     </article>
@@ -141,6 +142,7 @@ export function NewsFeedPage() {
     <section className="section-page news-page" aria-labelledby="news-title">
       <p className="section-eyebrow">Студенческий кабинет</p>
       <h1 id="news-title">Новости</h1>
+      <p className="service-subtitle">Университетские объявления и важная информация</p>
       {query.isPending && <LoadingState title="Загружаем новости…" />}
       {query.isError && !query.data && (
         <ErrorState
@@ -234,7 +236,7 @@ export function NewsDetailPage() {
   return (
     <section className="section-page news-page" aria-labelledby="news-detail-title">
       <Link className="news-back-link" to="/news" onClick={handleBack}>
-        ← Назад к новостям
+        <Icon name="left" /> Назад к новостям
       </Link>
       {query.isPending && <LoadingState title="Загружаем новость…" />}
       {query.isError && (

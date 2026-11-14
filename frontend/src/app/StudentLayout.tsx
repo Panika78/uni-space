@@ -12,9 +12,9 @@ import { useOverlayPresence } from '../shared/ui/useOverlayPresence'
 
 const navigation = [
   { to: '/schedule', label: 'Расписание', icon: 'calendar' },
-  { to: '/academics', label: 'Успеваемость', icon: 'book' },
+  { to: '/academics', label: 'Успеваемость', icon: 'graduation' },
   { to: '/services', label: 'Услуги и документы', icon: 'file' },
-  { to: '/news', label: 'Новости', icon: 'news' },
+  { to: '/news', label: 'Новости', icon: 'book' },
 ] as const
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
@@ -233,6 +233,11 @@ function MobileDrawer({ onClose, isOpen }: { onClose: () => void; isOpen: boolea
 
   useEffect(() => {
     if (!isOpen) return
+    const background = document.querySelector<HTMLElement>('.student-main-column')
+    const sidebar = document.querySelector<HTMLElement>('.desktop-sidebar')
+    const previousInert = [background?.inert, sidebar?.inert]
+    if (background) background.inert = true
+    if (sidebar) sidebar.inert = true
     closeRef.current?.focus()
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -250,7 +255,10 @@ function MobileDrawer({ onClose, isOpen }: { onClose: () => void; isOpen: boolea
       const first = focusable[0]
       const last = focusable.at(-1)
       if (!first || !last) return
-      if (event.shiftKey && document.activeElement === first) {
+      if (!document.querySelector('.mobile-drawer')?.contains(document.activeElement)) {
+        event.preventDefault()
+        first.focus()
+      } else if (event.shiftKey && document.activeElement === first) {
         event.preventDefault()
         last.focus()
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -261,6 +269,8 @@ function MobileDrawer({ onClose, isOpen }: { onClose: () => void; isOpen: boolea
     document.addEventListener('keydown', handleKeyDown)
     return () => {
       document.body.style.overflow = previousOverflow
+      if (background) background.inert = previousInert[0] ?? false
+      if (sidebar) sidebar.inert = previousInert[1] ?? false
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [onClose, isOpen])
@@ -426,13 +436,19 @@ export function StudentLayout() {
 
 export function UnavailableSection({ title }: { title: string }) {
   return (
-    <section className="section-page" aria-labelledby="section-title">
+    <section className="section-page unavailable-page" aria-labelledby="section-title">
       <p className="section-eyebrow">Студенческий кабинет</p>
       <h1 id="section-title">{title}</h1>
+      <p className="service-subtitle">Раздел появится в одном из следующих этапов</p>
       <UnavailableState
+        icon={<Icon name="settings" />}
         title="Функция пока недоступна"
-        description="Содержимое этого раздела появится в следующих задачах."
-      />
+        description="Сейчас этот раздел ещё не реализован."
+      >
+        <Link className="service-action service-action--light" to="/profile">
+          Вернуться к профилю
+        </Link>
+      </UnavailableState>
     </section>
   )
 }

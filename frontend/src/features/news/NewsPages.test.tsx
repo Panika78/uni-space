@@ -107,7 +107,7 @@ describe('university news pages', () => {
     renderNews()
     fireEvent.click(await screen.findByRole('link', { name: /onerror=alert\(1\)/ }))
     await screen.findByRole('heading', { name: '<img src=x onerror=alert(1)>' })
-    const backLink = screen.getByRole('link', { name: '← Назад к новостям' })
+    const backLink = screen.getByRole('link', { name: 'Назад к новостям' })
 
     for (const modifiers of [
       { ctrlKey: true },
@@ -151,7 +151,7 @@ describe('university news pages', () => {
     const articleLink = await screen.findByRole('link', { name: /Страница вторая/ })
     fireEvent.click(articleLink)
     expect(await screen.findByRole('heading', { name: 'Страница вторая' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('link', { name: '← Назад к новостям' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Назад к новостям' }))
 
     expect(await screen.findByRole('link', { name: /Страница первая/ })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Страница вторая/ })).toBeInTheDocument()

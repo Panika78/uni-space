@@ -188,3 +188,47 @@
     border: 0;
   }
 }
+.profile-status[data-status='enrolled'] {
+  color: #2b6e42;
+  background: #eaf4e9;
+  border: 1px solid transparent;
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
+.profile-status[data-status='enrolled']::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: 6px;
+}
+.profile-status {
+  align-items: center;
+}
+@media (min-width: 761px) {
+  .profile-avatar {
+    width: 76px;
+    height: 76px;
+    flex-basis: 76px;
+    font-size: 21px;
+  }
+}
+@media (min-width: 1051px) and (max-width: 1450px) {
+  .profile-grid {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  }
+}
+
+.profile-grid h2 {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.profile-grid h2 svg {
+  color: var(--accent);
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
