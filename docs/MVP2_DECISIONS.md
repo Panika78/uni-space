@@ -1,40 +1,61 @@
-# MVP2-00 — Approved cross-module decisions
+# MVP2-00 — Реестр утверждённых решений
 
-Decision record for issue #59; approved by the product owner on 2026-11-14. This is a documentation-only contract. Implementation belongs to separate feature issues. Existing MVP1 REST/JSON, OpenAPI, DB schema and working service flow remain compatible.
+**Статус:** продуктовые решения согласованы владельцем 14 ноября 2026 года, см. [issue #59](https://github.com/Panika78/uni-space/issues/59) и [PR #107](https://github.com/Panika78/uni-space/pull/107). Этот документ фиксирует контракты и границы, но не реализует новые API, миграции или продуктовые модули. Контракты MVP 1 сохраняются.
 
-## Academic assessment
+## Оценивание
 
-- An assessment plan is approved outside Uni Space before the academic term for each course offering and study group. The plan fixes the assessment list, number of works, kinds and maxima. For the contest MVP2, the initial plan comes from fictional seed data. There is no planning/approval editor in MVP2.
-- The teacher may enter or correct individual whole-number scores, mark attendance, set the final exam/pass result manually and reschedule an assessment or associate it with a lesson for assigned groups only. Rescheduling an assessment never changes the official lesson schedule.
-- The teacher may not create, delete, archive or edit the shared definition of an assessment (title, kind, description or maximum). There is no teacher-facing or staff-facing API for altering the approved assessment structure in MVP2.
-- Two groups may have different approved work sets and semester maxima. Sharing one assessment record between groups is allowed only if its shared parameters and maximum match; otherwise prepare separate assessment records. Dates may differ by group.
-- Display the sum of recorded points and available maximum, preserving zero versus ungraded semantics, but never automatically derive the final grade from points. Final exam/graded pass is manually recorded on the existing 2–5 scale; pass/fail is manual.
-- Approved codes for new seed data and UI: test (control/test, legacy MVP1 code), laboratory, practical, seminar, independent, extended_homework (substantial long-duration homework), exam (scored exam component, if in the plan), other. Existing test rows stay valid. A scored exam component does not replace the separate manually set final result.
-- No new max_score_locked column or first-score-versus-maximum-edit race in MVP2: there is no API to edit maxima. Existing PostgreSQL rules rejecting invalid scores or destructive reassignment remain in place; do not rewrite MVP1 migrations.
+- План оценивания (работы, количество, типы, максимумы) утверждается **вне Uni Space** до семестра для конкретного проведения дисциплины, учебного периода и группы. В MVP 2 он задаётся заранее вымышленными демонстрационными данными, без пользовательского конструктора или workflow согласования.
+- Преподаватель видит заранее утверждённые работы, выставляет/исправляет целочисленные баллы, посещаемость и **вручную** итог аттестации. Он вправе менять даты и необязательную связь с занятием для назначенных ему групп. Перенос даты работы не переносит официальное занятие.
+- Создание, удаление, архивирование работ и изменение их названия, типа, описания, количества и максимума преподавателю в MVP 2 **недоступны**; сотруднического редактора учебного плана тоже нет.
+- У разных групп могут различаться заранее утверждённые наборы работ и сумма максимумов. Одну запись работы можно назначить нескольким группам при одинаковых общих параметрах и максимуме; при разных максимумах нужны отдельные записи. Даты каждой группы могут различаться.
+- Арифметическая сумма полученных и максимальных баллов отображается как в MVP 1, но **не преобразуется автоматически** в оценку. Ноль отличается от отсутствующего результата. Для экзамена/дифференцированного зачёта преподаватель вводит 2–5, для обычного зачёта — «зачтено/не зачтено».
+- Балльная экзаменационная работа, если предусмотрена планом, участвует в сумме, но не заменяет ручную итоговую запись в final_results.
+- Не добавлять max_score_locked и сценарий гонки первого балла с изменением максимума: через API MVP 2 максимумы **вообще не редактируются**. Существующие ограничения PostgreSQL из MVP 1 сохраняются, старые миграции не переписываются.
 
-## MVP2 university service forms
+**Утверждённые коды и типы:**
 
-| Service | Inputs | Attachment policy |
+| Код | Название |
+|---|---|
+| `test` | Контрольная работа / тест; существующий код MVP 1 |
+| `laboratory` | Лабораторная работа |
+| `practical` | Практическая работа |
+| `seminar` | Оцениваемая семинарская работа |
+| `independent` | Самостоятельная работа |
+| `extended_homework` | Крупное домашнее задание на длительный срок, не повседневная домашка |
+| `exam` | Балльная экзаменационная работа, если предусмотрена планом |
+| `other` | Другое |
+
+## Услуги и формы MVP 2
+
+| Услуга | Данные формы | Вложения и обработка |
 |---|---|---|
-| Study certificate | Keep existing required place_of_submission from MVP1 exactly as is | No attachments; automatic template PDF |
-| Grade transcript | Current available academic period, resolved from authenticated student's data; no extra period selector in MVP2 | No attachments; automatic PDF |
-| Academic leave | Reason: medical / family / other; requested start and end dates; additional explanation for other | At least one proof document required, according to reason; staff reviews |
-| Accounting certificate | Optional purpose; demo: absence of tuition-payment debt | No attachments; staff approval before PDF |
+| Справка об обучении | Существующее обязательное `place_of_submission` без изменения контракта MVP 1 | Без вложений, автоматический PDF |
+| Выписка об успеваемости | Текущий доступный учебный период определяется по данным студента; выбор периода отдельно не нужен | Без вложений, автоматический PDF |
+| Академический отпуск | Основание `medical`, `family` или `other`; дата начала и окончания; пояснение для `other` | Не менее одного подтверждения по основанию; решение сотрудника |
+| Справка из бухгалтерии | Необязательная цель | Без вложений, PDF после одобрения сотрудника, только вымышленные финансовые сведения |
 
-Academic-leave requirements visible before submission: medical → medical certificate/opinion; family → document supporting family circumstances; other → document supporting the described circumstances. This is a **fictional demonstration policy**, not an exhaustive legal list of acceptable university documents. Client and backend validate presence and safe format; employee checks the content, not an automated authenticity classifier. Never use participants' genuine identity or medical files. A submission requiring files must not be shown as successful until the attachment backend is implemented.
+Для академического отпуска после выбора основания интерфейс прямо указывает, какой документ необходим: `medical` — медицинская справка/заключение, `family` — документ о семейных обстоятельствах, `other` — документ, подтверждающий изложенное обстоятельство. Это **демонстрационные требования**, а не универсальная юридическая инструкция для всех вузов. Клиент и сервер проверяют наличие, размеры и формат; содержание оценивает сотрудник. Настоящие медицинские или паспортные документы участников конкурса не использовать.
 
-Personal-data changes, dismissal, financial aid and other extra services remain Extended. Approval of academic leave does not change student academic status automatically; an authorized staff member updates it separately after the external order.
+Если backend загрузки обязательных файлов ещё не работает, форму академического отпуска нельзя выдавать за готовую к успешной отправке. Одобрение не меняет академический статус автоматически: оформление приказа происходит вне системы, затем статус отдельно меняет уполномоченный сотрудник.
 
-## Private file storage
+Изменение персональных данных и другие дополнительные услуги остаются в Extended. Существующая форма справки об обучении MVP 1 должна работать без регрессий.
 
-- MVP2 storage is a private persistent Docker volume, never an ephemeral container layer. The API owns authorization and serves private blobs using opaque storage keys; no public direct links.
-- A small save/read/delete abstraction allows later replacement with S3, without implementing an S3 adapter as part of MVP2. Reconsider the underlying storage only before deployment if the actual host lacks a persistent disk.
-- Accepted file contents: PDF, JPEG/JPG, PNG with server-side signature/content verification. Maximum 5 current attachments per application, 10 MiB per file, 50 MiB total. Both count and sizes enforced server-side.
-- Replacements are supported when an application is returned for correction. Secure cleanup of abandoned uploads, finite I/O timeouts, private backup and restore of both DB and blobs are required. Issued PDF is immutable, and downloading it cannot trigger regeneration.
-- Business decisions and service fields are feature-specific; MVP2-00 does not attempt to design every endpoint in advance.
+## Частное хранение файлов и лимиты
 
-## Scope / follow-up
+- Физический backend MVP 2: **приватный постоянный Docker volume**, не эфемерный слой контейнера и не публичный web-root. Хранить непрозрачный `storage_key`, выдавать через backend после проверки полномочий.
+- Обособленный интерфейс `save/read/delete` позволяет заменить backend на S3 позднее, но **S3-адаптер в MVP 2 не нужен**. Если целевой хостинг не имеет постоянного диска, выбрать другое физическое хранение перед развёртыванием.
+- Допускаются PDF/JPG/PNG только с серверной проверкой типа по содержимому. Максимум **5 текущих файлов на заявление**, **10 МБ на файл**, **50 МБ суммарно**. Проверять ограничения на сервере; клиентские ограничения не заменяют серверные.
+- Вложения могут заменяться при возврате заявления на доработку. Необходимы конечные тайм-ауты операций, очистка прерванных загрузок и осиротевших файлов, резервное копирование/восстановление **БД и файлов вместе**.
+- Выданный PDF неизменяем: повторное скачивание его не пересоздаёт, изменение профиля студента не переписывает готовый документ.
 
-- Keep MVP1 functionality unchanged. Update product documents PRD.md, DB.md, ARCHITECTURE.md, UI_UX_SPEC.md consistently.
-- #69: score writes/audit without a maximum-editor lock. #71: assessment-group date/lesson changes, without CRUD of approved works. #72: manual final result, unchanged. #80: journal without an assessment definition editor. #88: update E2E acceptance. #67 / #75 / #83: service forms, uploads and generated documents. #89: update whole-issue dependency gates.
-- #63 does not logically need #59: existing user_preferences data model already covers its setting.
+## Зависимые задачи
+
+- **#69:** запись баллов и аудит, без API изменения максимумов и max lock.
+- **#71:** изменение групповых дат/привязок, без создания или редактирования определений работ; может разрабатываться параллельно #69 после своих предпосылок.
+- **#72:** ручные итоги уже предусмотрены, остаются без изменений.
+- **#80:** журнал без кнопки создания/редактирования утверждённых работ.
+- **#67 / #75 / #83:** формы услуг, вложения и приватные PDF на согласованных правилах.
+- **#88:** сквозные тесты вместо устаревшего сценария гонки максимума.
+- **#89:** запуск целых issues после merge их зависимостей; #63 не зависит от #59, так как `user_preferences` уже предусмотрена в DB.
+
+**За пределами #59:** продуктовый код, изменение действующего API MVP 1, миграции, редактор учебного плана, S3-адаптер и деплой. Все изменения реализуются в соответствующих функциональных issues.
