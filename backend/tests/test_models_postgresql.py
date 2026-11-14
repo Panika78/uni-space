@@ -56,7 +56,11 @@ EXPECTED_FOREIGN_KEYS = {
     "org_units": {("parent_id", "org_units", "id")},
     "programs": {("faculty_id", "org_units", "id")},
     "study_groups": {("program_id", "programs", "id")},
-    "students": {("user_id", "users", "id"), ("group_id", "study_groups", "id")},
+    "students": {
+        ("user_id", "users", "id"),
+        ("group_id", "study_groups", "id"),
+        ("group_id", "subgroups", "group_id"),
+    },
     "teachers": {("user_id", "users", "id"), ("department_id", "org_units", "id")},
 }
 FIXTURE_PASSWORD_HASH = "argon2id$fixture-only$not-a-secret"
@@ -146,7 +150,7 @@ def test_migration_creates_task_005_tables_without_premature_extended_tables(
     table_names = set(inspect(postgresql_engine).get_table_names(schema="public"))
 
     assert table_names >= EXPECTED_MODEL_TABLES
-    assert not {"staff_profiles", "staff_permissions", "subgroups"} & table_names
+    assert not {"staff_profiles", "staff_permissions"} & table_names
 
 
 def test_postgresql_ids_are_bigint_by_default_identity(postgresql_engine) -> None:

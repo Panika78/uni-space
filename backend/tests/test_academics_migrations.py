@@ -4,12 +4,13 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import MetaData, Table, create_engine, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, registry
 from test_academics_integration import academics as academics_fixture
 
 pytestmark = pytest.mark.integration
@@ -18,7 +19,7 @@ SNAPSHOT = """SELECT jsonb_build_array(
   (SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM assessments a),
   (SELECT jsonb_agg(to_jsonb(g) ORDER BY id) FROM assessment_groups g),
   (SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM assessment_results r),
-  (SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM students s))"""
+  (SELECT jsonb_agg(to_jsonb(s) - 'subgroup_id' ORDER BY id) FROM students s))"""
 
 
 @pytest.fixture
@@ -48,9 +49,22 @@ def run_migration(engine, action, revision=None, *, success=True):
     return result
 
 
+def seed_old_academics(db):
+    # Frozen mapper reflects the pre-subgroup schema instead of inserting new
+    # ORM columns into an intentionally old migration database.
+    mapper = registry()
+
+    class LegacyStudent:
+        pass
+
+    mapper.map_imperatively(LegacyStudent, Table("students", MetaData(), autoload_with=db.bind))
+    with patch("test_academics_integration.Student", LegacyStudent):
+        return academics_fixture.__wrapped__(db)
+
+
 def seed_old_results(engine):
     with Session(engine, expire_on_commit=False) as db:
-        s = academics_fixture.__wrapped__(db)
+        s = seed_old_academics(db)
         course = s.offering()
         assignment = s.assignment(course)
         s.result(assignment, 8)
@@ -129,7 +143,7 @@ def test_upgrade_invalidates_old_repeatable_read_snapshot(migration_database, ch
     engine = migration_database
     run_migration(engine, "upgrade", "20261112_02")
     with Session(engine, expire_on_commit=False) as db:
-        s = academics_fixture.__wrapped__(db)
+        s = seed_old_academics(db)
         course = s.offering()
         assignment = s.assignment(course)
         replacement = s.add(
@@ -176,7 +190,8 @@ def test_alembic_graph_preserves_notifications_and_has_one_academic_head():
     from alembic.script import ScriptDirectory
 
     graph = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert graph.get_heads() == ["20261112_03"]
+    assert graph.get_heads() == ["20261114_01"]
+    assert graph.get_revision("20261114_01").down_revision == "20261112_03"
     assert graph.get_revision("20261112_03").down_revision == "20261112_02"
     assert graph.get_revision("20261112_02").down_revision == "20261112_01"
     notification = graph.get_revision("20261112_01")
@@ -220,7 +235,7 @@ def test_upgrade_main_notifications_preserves_rows_and_creates_academics(migrati
     run_migration(engine, "check")
     with engine.connect() as db:
         assert db.scalar(notification_snapshot) == before
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261112_03"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261114_01"
         for table in ("assessments", "assessment_groups", "assessment_results", "final_results"):
             assert (
                 db.scalar(text("SELECT to_regclass(:table)"), {"table": f"public.{table}"})

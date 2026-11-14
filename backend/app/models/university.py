@@ -2,6 +2,7 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     PrimaryKeyConstraint,
@@ -65,6 +66,21 @@ class StudyGroup(Base):
     course_number: Mapped[int] = mapped_column(nullable=False)
 
 
+class Subgroup(Base):
+    __tablename__ = "subgroups"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_subgroups"),
+        UniqueConstraint("group_id", "id", name="uq_subgroups_group_id_id"),
+        Index("ix_subgroups_group_id", "group_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("study_groups.id", name="fk_subgroups_group_id_study_groups"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+
+
 class Student(Base):
     __tablename__ = "students"
     __table_args__ = (
@@ -75,6 +91,11 @@ class Student(Base):
             name="ck_students_academic_status",
         ),
         Index("ix_students_group_id", "group_id"),
+        ForeignKeyConstraint(
+            ["group_id", "subgroup_id"],
+            ["subgroups.group_id", "subgroups.id"],
+            name="fk_students_group_subgroup",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
@@ -84,6 +105,7 @@ class Student(Base):
     group_id: Mapped[int] = mapped_column(
         ForeignKey("study_groups.id", name="fk_students_group_id_study_groups"), nullable=False
     )
+    subgroup_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     academic_status: Mapped[str] = mapped_column(String, nullable=False)
 
 
