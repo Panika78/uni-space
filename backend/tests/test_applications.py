@@ -99,6 +99,7 @@ def test_application_http_routes_use_real_bearer_authentication(postgresql_engin
                     ).status_code
                     == 401
                 )
+            assert anonymous.get("/api/v1/services?unexpected=1").status_code == 401
 
         for index, user in enumerate(students):
             with TestClient(app) as client:
@@ -109,6 +110,22 @@ def test_application_http_routes_use_real_bearer_authentication(postgresql_engin
                 )
                 assert login.status_code == 200
                 token = login.json()["access_token"]
+                catalog_headers = {"Authorization": f"Bearer {token}"}
+                catalog = client.get("/api/v1/services", headers=catalog_headers)
+                assert catalog.status_code == 200
+                assert [item["code"] for item in catalog.json()["items"]] == ["study_certificate"]
+                for query, field in (
+                    ("unexpected=1", "unexpected"),
+                    ("student_id=999", "student_id"),
+                    ("unexpected=1&unexpected=2", "unexpected"),
+                ):
+                    rejected = client.get(f"/api/v1/services?{query}", headers=catalog_headers)
+                    assert rejected.status_code == 422, query
+                    assert rejected.json()["error"] == {
+                        "code": "validation_error",
+                        "message": "Проверьте введённые данные",
+                        "details": [{"field": field, "code": "invalid_value"}],
+                    }
                 response = client.post(
                     "/api/v1/applications",
                     headers={"Authorization": f"Bearer {token}"},
@@ -253,6 +270,12 @@ def test_application_http_routes_use_real_bearer_authentication(postgresql_engin
             teacher_headers = {"Authorization": f"Bearer {teacher_login.json()['access_token']}"}
             for path in ("/api/v1/services", "/api/v1/applications", "/api/v1/applications/1"):
                 assert teacher_client.get(path, headers=teacher_headers).status_code == 403
+            assert (
+                teacher_client.get(
+                    "/api/v1/services?unexpected=1", headers=teacher_headers
+                ).status_code
+                == 403
+            )
             assert (
                 teacher_client.post(
                     "/api/v1/applications",
