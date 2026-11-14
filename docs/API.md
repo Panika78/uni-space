@@ -259,7 +259,9 @@ points, включая завершающий символ `…` только п
 
 ## 6. Авторизация и клиентское поведение
 
-- Refresh cookie: `uni_space_refresh`, `HttpOnly`, `Secure` в production, `SameSite=Lax`, `Path=/api/v1/auth`, без `Domain`.
+- Refresh cookie: `__Host-uni_space_refresh`, `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, без `Domain`. Сервер принимает только ровно одну cookie нового имени; повторяющиеся значения отклоняются как `401 invalid_refresh`.
+- При переходе с `uni_space_refresh` старое значение не используется для refresh, login-ротации или logout-идентификации. Login/logout очищают старую host-only cookie с прежним `Path=/api/v1/auth`; оставшаяся parent-domain cookie игнорируется. После обновления пользователь входит заново, старая refresh-сессия истекает по обычному TTL.
+- Для `development`/`test` при `COOKIE_SECURE=false` применяется отдельная cookie `uni_space_refresh_dev` с `Path=/api/v1/auth`, чтобы сохранить локальную работу по HTTP; production всегда требует Secure и `__Host-`.
 - Login, refresh и logout ограничивают тело 16384 байтами до разбора JSON, включая потоковую передачу без `Content-Length`; превышение — `413 request_too_large`. Небольшое непустое тело refresh/logout — `422 validation_error`.
 - Auth проверяет `Origin`; ответы с токенами и персональные ответы имеют `Cache-Control: no-store`.
 - Успешный login отзывает только существующую сессию, которую идентифицирует текущая refresh-cookie, затем создаёт новую. Неверные credentials старую сессию не отзывают; независимые устройства не затрагиваются.

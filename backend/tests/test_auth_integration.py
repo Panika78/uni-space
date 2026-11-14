@@ -14,7 +14,13 @@ from sqlalchemy.orm import Session
 
 from app.auth import router as auth_routes
 from app.auth.rate_limit import LoginRateLimiter
-from app.auth.router import COOKIE_NAME, COOKIE_PATH, router
+from app.auth.router import (
+    COOKIE_NAME,
+    COOKIE_PATH,
+    INSECURE_COOKIE_NAME,
+    LEGACY_COOKIE_NAME,
+    router,
+)
 from app.auth.security import PASSWORD_HASHER
 from app.auth.service import hash_refresh_token
 from app.core.config import Settings, get_settings
@@ -50,6 +56,8 @@ class AuthClient:
             headers["Origin"] = origin
         if token is not None:
             headers["Cookie"] = f"{COOKIE_NAME}={token}"
+        if "cookie_header" in kwargs:
+            headers["Cookie"] = kwargs.pop("cookie_header")
         if access is not None:
             headers["Authorization"] = f"Bearer {access}"
 
@@ -187,8 +195,9 @@ def test_login_rotation_cookie_and_logout_revoke_access(auth):
     assert response.headers["x-request-id"]
     assert response.json()["token_type"] == "bearer"
     cookie = response.headers["set-cookie"]
-    for value in ["HttpOnly", "Secure", "SameSite=lax", f"Path={COOKIE_PATH}"]:
+    for value in ["HttpOnly", "Secure", "SameSite=lax", "Path=/"]:
         assert value in cookie
+    assert COOKIE_NAME.startswith("__Host-")
     assert "Domain=" not in cookie
     assert client.request("GET", "/api/v1/test/user", access=access).json()["id"] == str(ids[0])
     assert client.request("GET", "/api/v1/test/student?student_id=999", access=access).json() == {
@@ -379,6 +388,90 @@ def test_login_as_another_account_replaces_only_the_presented_cookie_session(aut
         assert sum(session.revoked_at is None for session in sessions) == 1
 
 
+def test_refresh_rejects_duplicate_host_cookie_without_rotating_either_session(auth):
+    client = auth[0]
+    _response, token_a, _access_a = login(auth)
+    _response, token_b, _access_b = login(auth, 1)
+
+    response = client.request(
+        "POST",
+        COOKIE_PATH + "/refresh",
+        cookie_header=f"{COOKIE_NAME}={token_a}; {COOKIE_NAME}={token_b}",
+    )
+
+    assert_error(response, 401, "invalid_refresh")
+    assert "set-cookie" not in response.headers
+    assert client.refresh(token_a).status_code == 200
+    assert client.refresh(token_b).status_code == 200
+
+
+def test_logout_does_not_choose_between_duplicate_refresh_cookies(auth):
+    client = auth[0]
+    _response, token_a, _access_a = login(auth)
+    _response, token_b, _access_b = login(auth, 1)
+
+    response = client.request(
+        "POST",
+        COOKIE_PATH + "/logout",
+        cookie_header=f"{COOKIE_NAME}={token_a}; {COOKIE_NAME}={token_b}",
+    )
+
+    assert_logout(response, False)
+    assert client.refresh(token_a).status_code == 200
+    assert client.refresh(token_b).status_code == 200
+
+
+def test_refresh_ignores_legacy_cookie_name(auth):
+    client = auth[0]
+    _response, token, _access = login(auth)
+
+    response = client.request(
+        "POST", COOKIE_PATH + "/refresh", cookie_header=f"{LEGACY_COOKIE_NAME}={token}"
+    )
+
+    assert_error(response, 401, "invalid_refresh")
+    assert client.refresh(token).status_code == 200
+
+
+def test_insecure_development_cookie_keeps_http_local_flow(auth):
+    client = auth[0]
+    settings = client.app.dependency_overrides[get_settings]()
+    settings.cookie_secure = False
+
+    response = client.login(json={"login": auth[3][0], "password": PASSWORD})
+
+    assert response.status_code == 200
+    cookie = next(
+        value
+        for value in response.headers.get_list("set-cookie")
+        if value.startswith(f"{INSECURE_COOKIE_NAME}=")
+    )
+    assert f"Path={COOKIE_PATH}" in cookie
+    assert "Secure" not in cookie
+    token = response.cookies[INSECURE_COOKIE_NAME]
+    refreshed = client.request(
+        "POST", COOKIE_PATH + "/refresh", cookie_header=f"{INSECURE_COOKIE_NAME}={token}"
+    )
+    assert refreshed.status_code == 200
+
+
+def test_login_ignores_ambiguous_refresh_cookie_and_clears_legacy_cookie(auth):
+    client = auth[0]
+    _response, token_a, access_a = login(auth)
+    _response, token_b, _access_b = login(auth, 1)
+    response = client.login(
+        cookie_header=f"{COOKIE_NAME}={token_a}; {COOKIE_NAME}={token_b}",
+        json={"login": auth[3][0], "password": PASSWORD},
+    )
+
+    assert response.status_code == 200
+    assert client.request("GET", "/api/v1/test/user", access=access_a).status_code == 200
+    set_cookies = response.headers.get_list("set-cookie")
+    assert any(
+        value.startswith(f"{LEGACY_COOKIE_NAME}=") and "Max-Age=0" in value for value in set_cookies
+    )
+
+
 def test_reuse_commits_revocation_and_keeps_other_session_independent(auth):
     client, engine, _ids, _logins, _student_ids = auth
     _response, old, access = login(auth)
@@ -477,10 +570,19 @@ def test_logout_without_valid_cookie_is_idempotent_and_clears_cookie(auth, token
     client = auth[0]
     response = client.logout(token)
     assert_logout(response, False)
-    cookie = response.headers["set-cookie"]
-    assert "Max-Age=0" in cookie and f"Path={COOKIE_PATH}" in cookie
-    assert "HttpOnly" in cookie and "Secure" in cookie and "SameSite=lax" in cookie
-    assert "Domain=" not in cookie
+    cookies = response.headers.get_list("set-cookie")
+    assert any("Max-Age=0" in cookie and "Path=/" in cookie for cookie in cookies)
+    assert any(
+        cookie.startswith(f"{LEGACY_COOKIE_NAME}=")
+        and "Max-Age=0" in cookie
+        and f"Path={COOKIE_PATH}" in cookie
+        for cookie in cookies
+    )
+    assert all(
+        "HttpOnly" in cookie and "Secure" in cookie and "SameSite=lax" in cookie
+        for cookie in cookies
+    )
+    assert all("Domain=" not in cookie for cookie in cookies)
 
 
 @pytest.mark.parametrize("path", ["login", "refresh", "logout"])

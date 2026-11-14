@@ -1520,7 +1520,7 @@
           },
           {
             "in": "cookie",
-            "name": "uni_space_refresh",
+            "name": "__Host-uni_space_refresh",
             "required": false,
             "schema": {
               "anyOf": [
@@ -1531,7 +1531,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Uni Space Refresh"
+              "title": "  Host-Uni Space Refresh"
             }
           }
         ],
@@ -1633,7 +1633,7 @@
           },
           {
             "in": "cookie",
-            "name": "uni_space_refresh",
+            "name": "__Host-uni_space_refresh",
             "required": false,
             "schema": {
               "anyOf": [
@@ -1644,7 +1644,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Uni Space Refresh"
+              "title": "  Host-Uni Space Refresh"
             }
           }
         ],

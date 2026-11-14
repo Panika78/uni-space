@@ -890,17 +890,36 @@ RETURNING id;""")
                             domain="uni.test",
                             path="/api/v1/auth",
                         )
+                        denied_legacy_refresh = previous.post(
+                            "/api/v1/auth/refresh", headers=origin
+                        )
+                        assert denied_legacy_refresh.status_code == 401
                         assert (
-                            previous.post(
-                                "/api/v1/auth/refresh", headers=origin
-                            ).status_code
-                            == 200
+                            denied_legacy_refresh.json()["error"]["code"]
+                            == "invalid_refresh"
                         )
                         logout = previous.post("/api/v1/auth/logout", headers=origin)
                         assert logout.status_code == 200
-                        assert logout.json() == {"session_revoked": True}
+                        assert logout.json() == {"session_revoked": False}
+                        assert any(
+                            value.startswith("uni_space_refresh=")
+                            and "Max-Age=0" in value
+                            and "Path=/api/v1/auth" in value
+                            and "Domain=" not in value
+                            for value in logout.headers.get_list("set-cookie")
+                        )
+                    assert (
+                        sql("SELECT revoked_at IS NULL FROM auth_sessions WHERE id=900")
+                        == "t"
+                    )
+                    assert (
+                        sql(
+                            "SELECT revoked_at IS NULL FROM refresh_tokens WHERE id=900"
+                        )
+                        == "t"
+                    )
                     print(
-                        "PASS: pre-transition refresh token remains usable with restricted API",
+                        "PASS: pre-transition cookie is rejected, cleared host-only, and does not select a session",
                         flush=True,
                     )
                 student_login = client.post(
@@ -1109,10 +1128,21 @@ RETURNING id;""")
                     json={"login": "deployment-check", "password": password},
                 )
                 assert login.status_code == 200
-                cookie = login.headers["set-cookie"].lower()
-                for flag in ("secure", "httponly", "samesite=lax", "path=/api/v1/auth"):
+                set_cookies = login.headers.get_list("set-cookie")
+                cookie = next(
+                    value
+                    for value in set_cookies
+                    if value.startswith("__Host-uni_space_refresh=")
+                ).lower()
+                for flag in ("secure", "httponly", "samesite=lax", "path=/"):
                     assert flag in cookie
                 assert "domain=" not in cookie
+                assert any(
+                    value.startswith("uni_space_refresh=")
+                    and "max-age=0" in value.lower()
+                    and "path=/api/v1/auth" in value.lower()
+                    for value in set_cookies
+                )
                 assert login.headers["cache-control"] == "no-store"
                 assert (
                     client.post("/api/v1/auth/refresh", headers=origin).status_code
@@ -1449,7 +1479,7 @@ for index in range(6):
             expected = sql(snapshot)
             assert sql(
                 "SELECT count(*) FROM users u JOIN auth_sessions s ON s.user_id=u.id JOIN refresh_tokens r ON r.session_id=s.id WHERE u.login IN ('deployment-check','legacy-fixture');"
-            ) == ("4" if legacy else "2")
+            ) == ("3" if legacy else "2")
             backup = temp / "backup.dump"
             run(["bash", "scripts/backup-postgres.sh", str(backup)], env=env)
             assert backup.stat().st_mode & 0o777 == 0o600

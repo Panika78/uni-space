@@ -316,7 +316,10 @@ TLS verification оставьте включённой. Сама production-ко
 При unhealthy API проверьте миграции и доступ к DB; при 502 — API/DNS в сети proxy.
 Origin должен включать схему и порт (если нестандартный), без пути; refresh/logout
 из CLI также требуют Origin. Проверяйте HTTPS cookie, ошибки Origin и rate limiter
-снаружи. В production launcher явно передаёт `--no-access-log` Uvicorn
+снаружи. Refresh-cookie production использует `__Host-uni_space_refresh`, `Secure`
+и `Path=/` без `Domain`; при переходе со старого имени пользователям потребуется
+повторный login. Перед rollout сообщите об этом клиентам и убедитесь, что SPA и API
+обслуживаются через HTTPS. В production launcher явно передаёт `--no-access-log` Uvicorn
 (SEC-03, PR #31), включая защиту от внешнего `UVICORN_ACCESS_LOG=true`.
 Единственный access log ведёт Nginx: IP, метод, `$uri` **без query string**, статус.
 Он задан в публичных `server`-блоках: второй `access_log` на уровне `http`
