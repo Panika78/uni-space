@@ -1,4 +1,4 @@
-/* global process, console, URL, document, window, setTimeout */
+/* global process, console, URL, Request, Response, TextDecoder, document, window, setTimeout, requestAnimationFrame */
 import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 
@@ -22,6 +22,51 @@ const browser = await chromium.launch({
 try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const page = await context.newPage()
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window)
+    const control = {
+      armed: false,
+      response: null,
+      arm() {
+        this.armed = true
+        this.responseReady = new Promise((resolve) => {
+          this.resolveResponseReady = resolve
+        })
+        this.deliveryGate = new Promise((resolve) => {
+          this.releaseDelivery = resolve
+        })
+        this.delivered = new Promise((resolve) => {
+          this.resolveDelivered = resolve
+        })
+      },
+    }
+    window.__latePostControl = control
+    window.fetch = async (input, init) => {
+      const request = input instanceof Request ? input : null
+      const url = new URL(request?.url ?? String(input), window.location.href)
+      const method = init?.method ?? request?.method ?? 'GET'
+      const response = await nativeFetch(input, init)
+      if (control.armed && method === 'POST' && url.pathname === '/api/v1/applications') {
+        control.armed = false
+        const responseBytes = await response.clone().arrayBuffer()
+        control.response = {
+          status: response.status,
+          statusText: response.statusText,
+          body: JSON.parse(new TextDecoder().decode(responseBytes)),
+          headers: Object.fromEntries(response.headers.entries()),
+        }
+        control.resolveResponseReady()
+        await control.deliveryGate
+        control.resolveDelivered()
+        return new Response(responseBytes, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers,
+        })
+      }
+      return response
+    }
+  })
   const postResponses = []
   page.on('response', (response) => {
     if (
@@ -160,36 +205,7 @@ try {
   {
     const savedId = String(saved.id)
     const firstStudentData = saved.form_data.place_of_submission
-    await page.getByRole('button', { name: 'Меню пользователя' }).click()
-    await page.getByRole('button', { name: 'Выйти', exact: true }).click()
-    await page
-      .getByRole('dialog', { name: 'Выйти из аккаунта?' })
-      .getByRole('button', { name: 'Выйти', exact: true })
-      .click()
-    await page.waitForURL(`${baseURL}/login`)
-    await page.getByLabel('Логин').fill(loginB)
-    await page.getByLabel('Пароль').fill(passwordB)
-    await page.getByRole('button', { name: 'Войти' }).click()
-    await page.waitForURL(`${baseURL}/schedule`)
-    await page.goto(`${baseURL}/services/study_certificate`)
-    const fieldB = page.getByLabel(/Место предоставления/)
-    await fieldB.waitFor()
-    assert.equal(await fieldB.inputValue(), '')
-    assert.equal(await page.getByText(`№ ${savedId}`, { exact: false }).count(), 0)
-    assert.equal(await page.getByText(firstStudentData, { exact: true }).count(), 0)
-
     // Hold the real server response after it has committed, then switch accounts.
-    await page.getByRole('button', { name: 'Меню пользователя' }).click()
-    await page.getByRole('button', { name: 'Выйти', exact: true }).click()
-    await page
-      .getByRole('dialog', { name: 'Выйти из аккаунта?' })
-      .getByRole('button', { name: 'Выйти', exact: true })
-      .click()
-    await page.waitForURL(`${baseURL}/login`)
-    await page.getByLabel('Логин').fill(login)
-    await page.getByLabel('Пароль').fill(password)
-    await page.getByRole('button', { name: 'Войти' }).click()
-    await page.waitForURL(`${baseURL}/schedule`)
     await page.goto(`${baseURL}/services/study_certificate`)
     const fieldA = page.getByLabel(/Место предоставления/)
     await fieldA.fill('Delayed response private A')
@@ -201,14 +217,33 @@ try {
     const responseGate = new Promise((resolve) => {
       releaseResponse = resolve
     })
+    let fulfillResult
+    const fulfillFinished = new Promise((resolve) => {
+      fulfillResult = resolve
+    })
+    let canceledRequestFailure
+    const requestFailure = new Promise((resolve) => {
+      canceledRequestFailure = resolve
+    })
+    const onRequestFailed = (request) => {
+      if (
+        request.method() === 'POST' &&
+        new URL(request.url()).pathname === '/api/v1/applications'
+      ) {
+        canceledRequestFailure(request.failure())
+        page.off('requestfailed', onRequestFailed)
+      }
+    }
+    page.on('requestfailed', onRequestFailed)
     await page.route('**/api/v1/applications', async (route) => {
       const upstream = await route.fetch()
       notifySaved(upstream)
       await responseGate
       try {
         await route.fulfill({ response: upstream })
-      } catch {
-        // Logout aborts the browser request; the upstream POST has already committed.
+        fulfillResult({ fulfilled: true })
+      } catch (error) {
+        fulfillResult({ fulfilled: false, message: String(error) })
       }
     })
     await page.getByRole('button', { name: 'Отправить заявление' }).click()
@@ -231,6 +266,10 @@ try {
       .getByRole('button', { name: 'Выйти без подтверждения' })
       .click()
     await page.waitForURL(`${baseURL}/login`)
+    releaseResponse()
+    const [fulfillment, failure] = await Promise.all([fulfillFinished, requestFailure])
+    assert.match(failure?.errorText ?? '', /ERR_ABORTED|aborted/i)
+    if (!fulfillment.fulfilled) assert.match(fulfillment.message, /abort|cancel/i)
     await page.getByLabel('Логин').fill(loginB)
     await page.getByLabel('Пароль').fill(passwordB)
     await page.getByRole('button', { name: 'Войти' }).click()
@@ -238,12 +277,24 @@ try {
     await page.goto(`${baseURL}/services/study_certificate`)
     const latestField = page.getByLabel(/Место предоставления/)
     await latestField.waitFor()
-    releaseResponse()
-    await page.waitForTimeout(100)
     assert.equal(await latestField.inputValue(), '')
+    assert.equal(await page.getByText(`№ ${savedId}`, { exact: false }).count(), 0)
+    assert.equal(await page.getByText(firstStudentData, { exact: true }).count(), 0)
     assert.equal(await page.getByText(`№ ${delayedBody.id}`, { exact: false }).count(), 0)
     assert.equal(await page.getByText('Delayed response private A', { exact: true }).count(), 0)
     await page.unroute('**/api/v1/applications')
+    await latestField.fill('Private B application cache sentinel')
+    const bApplicationResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/v1/applications',
+    )
+    await page.getByRole('button', { name: 'Отправить заявление' }).click()
+    assert.equal((await bApplicationResponse).status(), 201)
+    await page.getByRole('heading', { name: 'Заявление создано', exact: true }).waitFor()
+
+    // This request completes against the real API. Hold its genuine Response
+    // after fetch resolves, change auth generation, then deliver it to apiFetch.
     await page.getByRole('button', { name: 'Меню пользователя' }).click()
     await page.getByRole('button', { name: 'Выйти', exact: true }).click()
     await page
@@ -256,21 +307,124 @@ try {
     await page.getByRole('button', { name: 'Войти' }).click()
     await page.waitForURL(`${baseURL}/schedule`)
     await page.goto(`${baseURL}/services/study_certificate`)
-    await page.getByLabel(/Место предоставления/).fill('Restore remaining service checks')
-    const restoreWaiter = page.waitForResponse(
+    await page.getByLabel(/Место предоставления/).fill('Late successful response private A')
+    await page.evaluate(() => window.__latePostControl.arm())
+    await page.getByRole('button', { name: 'Отправить заявление' }).click()
+    const lateResponse = await page.evaluate(async () => {
+      await window.__latePostControl.responseReady
+      return window.__latePostControl.response
+    })
+    assert.equal(lateResponse.status, 201)
+    assert.match(lateResponse.headers.location, /^\/api\/v1\/applications\/[1-9][0-9]*$/)
+    assert.equal(
+      lateResponse.body.form_data.place_of_submission,
+      'Late successful response private A',
+    )
+    await page.getByRole('button', { name: 'Меню пользователя' }).click()
+    await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+    await page
+      .getByRole('dialog', { name: 'Выйти без подтверждения результата?' })
+      .getByRole('button', { name: 'Выйти без подтверждения' })
+      .click()
+    await page.waitForURL(`${baseURL}/login`)
+    await page.getByLabel('Логин').fill(loginB)
+    await page.getByLabel('Пароль').fill(passwordB)
+    await page.getByRole('button', { name: 'Войти' }).click()
+    await page.waitForURL(`${baseURL}/schedule`)
+    await page
+      .locator('.desktop-sidebar')
+      .getByRole('link', { name: 'Услуги и документы', exact: true })
+      .click()
+    await page.getByRole('link', { name: 'Мои заявления' }).click()
+    await page.getByRole('heading', { name: 'Услуги и документы' }).waitFor()
+    const bList = page.locator('.applications-table,.applications-empty')
+    await bList.waitFor()
+    const bListBeforeLateResponse = await bList.innerText()
+    const bListResponses = []
+    const onBListResponse = (response) => {
+      if (
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname === '/api/v1/applications'
+      )
+        bListResponses.push(response)
+    }
+    page.on('response', onBListResponse)
+    await page.evaluate(() => window.__latePostControl.releaseDelivery())
+    await page.evaluate(() => window.__latePostControl.delivered)
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    )
+    assert.equal(
+      await page.getByRole('heading', { name: 'Заявление создано', exact: true }).count(),
+      0,
+      'Account B must not receive A application confirmation',
+    )
+    assert.deepEqual(
+      await bList.innerText(),
+      bListBeforeLateResponse,
+      'Late A response must not change account B application list/cache',
+    )
+    assert.equal(
+      bListResponses.length,
+      0,
+      'Late A response must not invalidate B application cache',
+    )
+    assert.equal(await page.getByText(`№ ${lateResponse.body.id}`, { exact: false }).count(), 0)
+    assert.equal(
+      await page.getByText('Late successful response private A', { exact: true }).count(),
+      0,
+    )
+
+    // Observe the cache across a remount while a real B refetch is held. A
+    // destroyed cache shows the loading state; a retained cache keeps its data.
+    await page.getByRole('link', { name: 'Каталог услуг', exact: true }).click()
+    let notifyBRefresh
+    const bRefreshStarted = new Promise((resolve) => {
+      notifyBRefresh = resolve
+    })
+    let releaseBRefresh
+    const bRefreshGate = new Promise((resolve) => {
+      releaseBRefresh = resolve
+    })
+    let finishBRefresh
+    const bRefreshFinished = new Promise((resolve) => {
+      finishBRefresh = resolve
+    })
+    await page.route('**/api/v1/applications?*', async (route) => {
+      const upstream = await route.fetch()
+      notifyBRefresh()
+      await bRefreshGate
+      await route.fulfill({ response: upstream })
+      finishBRefresh()
+    })
+    const bRefreshResponse = page.waitForResponse(
       (response) =>
-        response.request().method() === 'POST' &&
+        response.request().method() === 'GET' &&
         new URL(response.url()).pathname === '/api/v1/applications',
     )
-    await page.getByRole('button', { name: 'Отправить заявление' }).click()
-    assert.equal((await restoreWaiter).status(), 201)
+    await page.getByRole('link', { name: 'Мои заявления' }).click()
+    await bRefreshStarted
+    const bCacheRetainedWhileRefreshing = await page.locator('.applications-table').isVisible()
+    const bCacheContentWhileRefreshing = bCacheRetainedWhileRefreshing
+      ? await page.locator('.applications-table').innerText()
+      : ''
+    releaseBRefresh()
+    await Promise.all([bRefreshFinished, bRefreshResponse])
+    await page.unroute('**/api/v1/applications?*')
+    assert.equal(
+      bCacheRetainedWhileRefreshing,
+      true,
+      'Account B cached application rows remain available during a background refresh',
+    )
+    assert.equal(bCacheContentWhileRefreshing, bListBeforeLateResponse)
+    page.off('response', onBListResponse)
     postResponses.splice(1)
     console.log(
-      'PASS: student switch clears prior confirmation; delayed A POST response cannot affect B',
+      'PASS: browser cancellation and a delivered late successful A response are distinct; B stays isolated',
     )
   }
 
-  await page.getByRole('link', { name: 'К каталогу услуг' }).click()
+  await page.getByRole('link', { name: 'Каталог услуг', exact: true }).click()
   await page.getByRole('link', { name: 'Подать заявление' }).click()
   const maxField = page.getByLabel(/Место предоставления/)
   const maxValue = 'А'.repeat(299) + '😀'
