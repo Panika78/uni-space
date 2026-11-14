@@ -18,6 +18,7 @@ function NotificationRow({ item }: { item: Notification }) {
   const date = new Intl.DateTimeFormat('ru-RU', {
     dateStyle: 'medium',
     timeStyle: 'short',
+    timeZone: 'Europe/Moscow',
   }).format(new Date(item.created_at))
   return (
     <article className="notification-item">

@@ -296,7 +296,7 @@ export function ApplicationFormPage() {
   }
   const fieldMessage =
     serverFieldError ??
-    (invalid ? 'Введите от 1 до 300 символов после удаления пробелов по краям.' : null)
+    (touched && invalid ? 'Введите от 1 до 300 символов после удаления пробелов по краям.' : null)
   const hasFieldError = Boolean(serverFieldError || (touched && invalid))
   if (serviceCode !== 'study_certificate') {
     return (

@@ -412,7 +412,7 @@
     cursor: pointer;
   }
   .schedule-date:focus-within {
-    outline: 3px solid #d99838;
+    outline: 3px solid var(--focus-ring);
     outline-offset: 3px;
   }
   .schedule-timezone {

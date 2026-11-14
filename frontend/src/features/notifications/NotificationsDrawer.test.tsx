@@ -68,6 +68,41 @@ describe('NotificationsDrawer', () => {
     expect(await screen.findByText('Пока нет уведомлений.')).toBeInTheDocument()
   })
 
+  it.each(['UTC', 'Asia/Tokyo'])(
+    'shows Moscow time when the browser timezone is %s',
+    async (timezone) => {
+      const originalTimezone = process.env.TZ
+      process.env.TZ = timezone
+      const createdAt = '2026-11-19T23:30:00Z'
+      vi.mocked(apiFetch).mockResolvedValueOnce({
+        items: [{ ...notification, created_at: createdAt }],
+        next_cursor: null,
+      })
+
+      try {
+        render(<NotificationsDrawer onClose={() => undefined} />)
+        const timestamp = await screen.findByText(
+          new Intl.DateTimeFormat('ru-RU', {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+            timeZone: 'Europe/Moscow',
+          }).format(new Date(createdAt)),
+        )
+        expect(timestamp).toHaveAttribute('dateTime', createdAt)
+        expect(timestamp).toHaveTextContent('20 нояб. 2026 г., 02:30')
+
+        const localTime = new Intl.DateTimeFormat('ru-RU', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        }).format(new Date(createdAt))
+        expect(localTime).not.toBe(timestamp.textContent)
+      } finally {
+        if (originalTimezone === undefined) delete process.env.TZ
+        else process.env.TZ = originalTimezone
+      }
+    },
+  )
+
   it('aborts a delayed response when the drawer is unmounted', async () => {
     let resolveFirst!: (page: { items: (typeof notification)[]; next_cursor: null }) => void
     let resolveSecond!: (page: { items: (typeof notification)[]; next_cursor: null }) => void

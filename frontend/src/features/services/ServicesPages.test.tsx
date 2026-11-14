@@ -93,6 +93,33 @@ it('does not open the study certificate form for an unknown service path', () =>
   )
 })
 
+it('shows neutral help until an invalid field is blurred, then restores help after correction', () => {
+  const router = createMemoryRouter(
+    [{ path: '/services/:serviceCode', element: <ApplicationFormPage /> }],
+    { initialEntries: ['/services/study_certificate'] },
+  )
+  render(<RouterProvider router={router} />)
+  const field = screen.getByLabelText(/Место предоставления/)
+  const help = screen.getByText('От 1 до 300 символов.')
+
+  expect(field).toHaveAttribute('aria-invalid', 'false')
+  expect(field).toHaveAttribute('aria-describedby', 'place-help')
+  expect(help).toBeInTheDocument()
+  expect(screen.queryByText(/Введите от 1 до 300 символов/)).not.toBeInTheDocument()
+
+  fireEvent.blur(field)
+  expect(field).toHaveAttribute('aria-invalid', 'true')
+  expect(field).toHaveAttribute('aria-describedby', 'place-error')
+  expect(
+    screen.getByText('Введите от 1 до 300 символов после удаления пробелов по краям.'),
+  ).toBeInTheDocument()
+
+  fireEvent.change(field, { target: { value: 'Деканат' } })
+  expect(field).toHaveAttribute('aria-invalid', 'false')
+  expect(field).toHaveAttribute('aria-describedby', 'place-help')
+  expect(screen.getByText('От 1 до 300 символов.')).toBeInTheDocument()
+})
+
 it('focuses the required field and submits once with trimmed Unicode text', async () => {
   apiFetch.mockResolvedValueOnce({
     id: '73',
