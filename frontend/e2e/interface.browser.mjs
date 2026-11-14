@@ -189,6 +189,13 @@ try {
         assert.equal(await page.locator('.application-detail > a').count(), 1)
       }
     }
+    await page.goto(`${baseURL}/unknown-interface-route`)
+    await page.getByRole('heading', { name: 'Страница не найдена', exact: true }).waitFor()
+    assert.equal(await page.getByRole('navigation', { name: 'Разделы кабинета' }).count(), 0)
+    await inspect('not-found-authenticated', width)
+    await page.getByRole('link', { name: 'Вернуться к расписанию', exact: true }).click()
+    await page.getByRole('heading', { name: 'Расписание', exact: true }).waitFor()
+    await page.locator('.schedule-list').waitFor()
     await page.getByRole('button', { name: 'Уведомления', exact: true }).click()
     await page.getByRole('dialog', { name: 'Уведомления', exact: true }).waitFor()
     await page.waitForLoadState('networkidle')

@@ -5,6 +5,7 @@ import { LoginPage, ProtectedRoute } from '../features/auth/AuthPages'
 import { AcademicsPage } from '../features/academics/AcademicsPage'
 import { SchedulePage } from '../features/schedule/SchedulePage'
 import { useAuth } from '../features/auth/AuthProvider'
+import { Icon } from '../shared/ui/Icon'
 import { LoadingState } from '../shared/ui/StatusStates'
 import { StudentLayout, UnavailableSection } from './StudentLayout'
 import { ApplicationDetailPage } from '../features/services/ApplicationsPages'
@@ -65,8 +66,17 @@ function RouteIssuePage({ notFound = false }: { notFound?: boolean }) {
 
   const destination = status === 'authenticated' ? '/schedule' : '/login'
   return (
-    <section className="welcome-card route-issue-card" aria-labelledby="route-issue-title">
-      <p className="section-eyebrow">Студенческий кабинет</p>
+    <section
+      className={`welcome-card route-issue-card${notFound ? ' route-issue-card--not-found' : ''}`}
+      aria-labelledby="route-issue-title"
+    >
+      {notFound ? (
+        <span className="route-issue-icon" aria-hidden="true">
+          <Icon name="info" />
+        </span>
+      ) : (
+        <p className="section-eyebrow">Студенческий кабинет</p>
+      )}
       <h1 id="route-issue-title">
         {notFound ? 'Страница не найдена' : 'Не удалось открыть страницу'}
       </h1>

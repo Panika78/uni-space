@@ -2142,3 +2142,43 @@ textarea {
 .news-feed {
   margin-top: 32px;
 }
+
+.route-issue-card--not-found {
+  text-align: center;
+  padding: 54px 32px;
+}
+.route-issue-icon {
+  display: grid;
+  place-items: center;
+  margin: 0 auto 16px;
+  width: 70px;
+  height: 70px;
+  border-radius: 19px;
+  background: #f6e9e5;
+  color: var(--accent);
+}
+.route-issue-icon svg {
+  width: 29px;
+  height: 29px;
+}
+.route-issue-card--not-found h1 {
+  font-size: 25px;
+  font-weight: 740;
+}
+.route-issue-card--not-found > p {
+  max-width: 430px;
+  margin-inline: auto !important;
+  font-size: 16px !important;
+}
+.route-issue-card--not-found .route-recovery-link {
+  min-height: 48px;
+  padding: 12px 22px;
+  border-radius: 11px;
+  font-size: 15px;
+  font-weight: 700;
+}
+@media (max-width: 480px) {
+  .route-issue-card--not-found {
+    padding: 38px 22px;
+  }
+}
