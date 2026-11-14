@@ -806,17 +806,36 @@ RETURNING id;""")
                             domain="uni.test",
                             path="/api/v1/auth",
                         )
+                        denied_legacy_refresh = previous.post(
+                            "/api/v1/auth/refresh", headers=origin
+                        )
+                        assert denied_legacy_refresh.status_code == 401
                         assert (
-                            previous.post(
-                                "/api/v1/auth/refresh", headers=origin
-                            ).status_code
-                            == 200
+                            denied_legacy_refresh.json()["error"]["code"]
+                            == "invalid_refresh"
                         )
                         logout = previous.post("/api/v1/auth/logout", headers=origin)
                         assert logout.status_code == 200
-                        assert logout.json() == {"session_revoked": True}
+                        assert logout.json() == {"session_revoked": False}
+                        assert any(
+                            value.startswith("uni_space_refresh=")
+                            and "Max-Age=0" in value
+                            and "Path=/api/v1/auth" in value
+                            and "Domain=" not in value
+                            for value in logout.headers.get_list("set-cookie")
+                        )
+                    assert (
+                        sql("SELECT revoked_at IS NULL FROM auth_sessions WHERE id=900")
+                        == "t"
+                    )
+                    assert (
+                        sql(
+                            "SELECT revoked_at IS NULL FROM refresh_tokens WHERE id=900"
+                        )
+                        == "t"
+                    )
                     print(
-                        "PASS: pre-transition refresh token remains usable with restricted API",
+                        "PASS: pre-transition cookie is rejected, cleared host-only, and does not select a session",
                         flush=True,
                     )
                 student_login = client.post(
