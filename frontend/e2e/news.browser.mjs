@@ -98,6 +98,7 @@ try {
   assert.ok(longTitle, 'The first page should include a title longer than 100 characters')
   assert.ok(!/\s/.test(longTitle), 'The long title should also exercise an unbroken word')
 
+  currentScenario = 'check responsive widths before feed assertions'
   for (const width of [360, 768, 1440]) {
     await page.setViewportSize({ width, height: 900 })
     await page.waitForFunction(() => document.documentElement.scrollWidth <= window.innerWidth)
