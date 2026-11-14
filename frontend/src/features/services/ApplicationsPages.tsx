@@ -94,21 +94,30 @@ export function ApplicationsList() {
     const link = Array.from(
       table.current?.querySelectorAll<HTMLAnchorElement>('a[data-application-id]') ?? [],
     ).find((link) => link.dataset.applicationId === target.id)
-    if (link) {
-      // An asynchronous list refresh can lose the restored focus. Retry only
-      // when focus falls back to the body, without overriding user navigation.
-      const focusWasLost = document.activeElement === document.body
-      if (!restoredLink.current || (!query.isFetching && focusWasLost)) {
-        link.focus({ preventScroll: true })
-        restoredLink.current = link
-      }
-    } else if (!query.isFetching) {
-      const shouldFocusHeading = !restoredLink.current || document.activeElement === document.body
-      if (shouldFocusHeading) heading.current?.focus({ preventScroll: true })
-    }
+    // History navigation can reset focus to BODY after React commits the list.
+    // Wait through that browser restoration, then repair focus only if it was lost.
+    let secondFrame = 0
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        const focusWasLost = document.activeElement === document.body
+        if (link) {
+          if (!restoredLink.current || (!query.isFetching && focusWasLost)) {
+            link.focus({ preventScroll: true })
+            restoredLink.current = link
+          }
+        } else if (!query.isFetching) {
+          const shouldFocusHeading = !restoredLink.current || focusWasLost
+          if (shouldFocusHeading) heading.current?.focus({ preventScroll: true })
+        }
+      })
+    })
     if (!query.isFetching) {
       returnFocus.current = undefined
       queryClient.removeQueries({ queryKey: returnFocusKey, exact: true })
+    }
+    return () => {
+      window.cancelAnimationFrame(firstFrame)
+      if (secondFrame) window.cancelAnimationFrame(secondFrame)
     }
   }, [location.key, query.data, query.isFetching, isDenied, queryClient])
   useEffect(() => {
