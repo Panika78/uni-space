@@ -570,13 +570,14 @@ with engine.connect() as c:
     for table in ('users','students','study_groups','programs','org_units','teachers',
                   'disciplines','course_offerings','buildings','rooms','lessons','lesson_groups',
                   'lesson_rooms','news','notifications','academic_terms','course_groups',
-                  'assessments','assessment_groups','assessment_results','final_results'):
+                  'assessments','assessment_groups','assessment_results','final_results',
+                  'staff_profiles','staff_permissions'):
         assert c.execute(text("SELECT has_table_privilege(current_user, :table, 'SELECT')"), {'table': table}).scalar_one()
         c.execute(text(f"SELECT * FROM public.{table} LIMIT 1")).all()
     for table in ('study_groups','programs','org_units','teachers','disciplines','course_offerings',
                   'buildings','rooms','lessons','lesson_groups','lesson_rooms',
                   'academic_terms','course_groups','assessments','assessment_groups',
-                  'assessment_results','final_results'):
+                  'assessment_results','final_results','staff_profiles','staff_permissions'):
         for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
             assert not c.execute(text("SELECT has_table_privilege(current_user, :table, :privilege)"),
                                  {'table': table, 'privilege': privilege}).scalar_one()
@@ -608,6 +609,12 @@ for statement in (
     "UPDATE final_results SET grade_value=5", "SELECT nextval('public.final_results_id_seq')",
     "SELECT nextval('public.lessons_id_seq')",
     "SELECT nextval('public.users_id_seq')",
+    "INSERT INTO staff_profiles (user_id,org_unit_id) VALUES (1,1)",
+    "UPDATE staff_profiles SET org_unit_id=1", "DELETE FROM staff_profiles",
+    "INSERT INTO staff_permissions (staff_profile_id,permission_code) VALUES (1,'grades.edit')",
+    "UPDATE staff_permissions SET permission_code='grades.edit'", "DELETE FROM staff_permissions",
+    "SELECT nextval('public.staff_profiles_id_seq')",
+    "SELECT nextval('public.staff_permissions_id_seq')",
     "SELECT setval('public.auth_sessions_id_seq', 9999)",
 ):
     try:
@@ -717,10 +724,24 @@ DROP FUNCTION public.existing_function_fixture(), public.future_function_fixture
 import sys
 from argon2 import PasswordHasher
 from app.core.database import SessionLocal
-from app.models.accounts import User
+from app.models import OrgUnit, StaffPermission, StaffProfile, User
+password_hash = PasswordHasher().hash(sys.stdin.read())
 with SessionLocal.begin() as db:
     db.add(User(login="deployment-check", full_name="Deployment Check", role="admin",
-                is_active=True, password_hash=PasswordHasher().hash(sys.stdin.read())))
+                is_active=True, password_hash=password_hash))
+    unit = OrgUnit(name="Fictional RBAC Dean", type="dean_office")
+    user = User(login="rbac-deployment-check", full_name="Fictional RBAC Staff", role="staff",
+                is_active=True, password_hash=password_hash)
+    db.add_all([unit, user])
+    db.flush()
+    profile = StaffProfile(user_id=user.id, org_unit_id=unit.id)
+    db.add(profile)
+    db.flush()
+    db.add_all([
+        StaffPermission(staff_profile_id=profile.id, permission_code="grades.edit"),
+        StaffPermission(staff_profile_id=profile.id, permission_code="applications.review",
+                        scope_org_unit_id=unit.id),
+    ])
 """,
                 input=password,
             )
@@ -745,6 +766,48 @@ with SessionLocal.begin() as db:
             )
             # ACL reapplication must retain schedule reads and all existing auth permissions.
             run(["bash", "scripts/configure-postgres.sh"], env=env)
+            staff_user_id, staff_unit_id = (
+                sql("""SELECT u.id, p.org_unit_id FROM users u
+JOIN staff_profiles p ON p.user_id=u.id WHERE u.login='rbac-deployment-check';""").split(
+                    "|"
+                )
+            )
+            with httpx.Client(
+                base_url=public_origin, verify=context, trust_env=False, timeout=10
+            ) as staff_client:
+                staff_login = staff_client.post(
+                    "/api/v1/auth/login",
+                    headers={"Origin": public_origin},
+                    json={"login": "rbac-deployment-check", "password": password},
+                )
+                assert staff_login.status_code == 200
+                staff_context = staff_client.get(
+                    "/api/v1/auth/context",
+                    headers={
+                        "Authorization": "Bearer " + staff_login.json()["access_token"]
+                    },
+                )
+                assert staff_context.status_code == 200
+                assert staff_context.headers["cache-control"] == "no-store"
+                assert staff_context.json() == {
+                    "user_id": staff_user_id,
+                    "role": "staff",
+                    "org_unit_id": staff_unit_id,
+                    "permissions": [
+                        {
+                            "permission_code": "applications.review",
+                            "scope_org_unit_id": staff_unit_id,
+                        },
+                        {"permission_code": "grades.edit", "scope_org_unit_id": None},
+                    ],
+                }
+                assert staff_client.post(
+                    "/api/v1/auth/logout", headers={"Origin": public_origin}
+                ).json() == {"session_revoked": True}
+            print(
+                "PASS: staff login and exact RBAC context under production ACL after reapplication",
+                flush=True,
+            )
             published_news_id = sql("""INSERT INTO news (title, body, published_at, is_published)
 VALUES ('Production ACL fixture', 'Fictional published news', now(), true)
 RETURNING id;""")
@@ -1474,6 +1537,8 @@ for index in range(6):
             )
             snapshot = """SELECT jsonb_build_object(
 'users', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM users t),
+'staff_profiles', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM staff_profiles t),
+'staff_permissions', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM staff_permissions t),
 'sessions', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM auth_sessions t),
 'refresh', (SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM refresh_tokens t),
 'revisions', (SELECT jsonb_agg(to_jsonb(t)) FROM alembic_version t),

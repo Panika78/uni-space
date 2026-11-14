@@ -241,6 +241,53 @@
         "title": "ApplicationResponse",
         "type": "object"
       },
+      "AuthorizationContext": {
+        "additionalProperties": false,
+        "properties": {
+          "org_unit_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org Unit Id"
+          },
+          "permissions": {
+            "items": {
+              "$ref": "#/components/schemas/EffectivePermission"
+            },
+            "title": "Permissions",
+            "type": "array"
+          },
+          "role": {
+            "enum": [
+              "student",
+              "teacher",
+              "staff",
+              "admin"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "user_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "role",
+          "org_unit_id",
+          "permissions"
+        ],
+        "title": "AuthorizationContext",
+        "type": "object"
+      },
       "CourseOfferingRef": {
         "additionalProperties": false,
         "properties": {
@@ -304,6 +351,32 @@
           "name"
         ],
         "title": "Direction",
+        "type": "object"
+      },
+      "EffectivePermission": {
+        "additionalProperties": false,
+        "properties": {
+          "permission_code": {
+            "$ref": "#/components/schemas/PermissionCode"
+          },
+          "scope_org_unit_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Org Unit Id"
+          }
+        },
+        "required": [
+          "permission_code",
+          "scope_org_unit_id"
+        ],
+        "title": "EffectivePermission",
         "type": "object"
       },
       "ErrorBody": {
@@ -823,6 +896,21 @@
         },
         "title": "PaginationParams",
         "type": "object"
+      },
+      "PermissionCode": {
+        "enum": [
+          "schedule.edit",
+          "grades.edit",
+          "attendance.edit",
+          "students.read",
+          "students.edit",
+          "students.status.edit",
+          "groups.manage",
+          "applications.review",
+          "news.publish"
+        ],
+        "title": "PermissionCode",
+        "type": "string"
       },
       "ProgramRef": {
         "additionalProperties": false,
@@ -1373,6 +1461,72 @@
         "tags": [
           "services",
           "applications"
+        ]
+      }
+    },
+    "/api/v1/auth/context": {
+      "get": {
+        "operationId": "get_current_authorization_context_api_v1_auth_context_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationContext"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Current Authorization Context",
+        "tags": [
+          "auth"
         ]
       }
     },

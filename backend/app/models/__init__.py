@@ -3,6 +3,7 @@ from app.models.accounts import AuthSession, Notification, RefreshToken, User
 from app.models.applications import Application, ServiceType
 from app.models.base import Base
 from app.models.news import News
+from app.models.permissions import StaffPermission, StaffProfile
 from app.models.schedule import (
     AcademicTerm,
     Building,
@@ -43,4 +44,6 @@ __all__ = [
     "StudyGroup",
     "Teacher",
     "User",
+    "StaffPermission",
+    "StaffProfile",
 ]

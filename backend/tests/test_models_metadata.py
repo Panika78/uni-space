@@ -3,6 +3,8 @@ from sqlalchemy import BigInteger
 from app.models import Base
 
 EXPECTED_TABLES = {
+    "staff_profiles",
+    "staff_permissions",
     "users",
     "auth_sessions",
     "refresh_tokens",
@@ -29,5 +31,5 @@ def test_mvp_model_ids_and_foreign_keys_use_bigint() -> None:
         assert table.c.id.identity is not None
         assert table.c.id.identity.always is False
         for column in table.columns:
-            if column.foreign_keys:
+            if column.foreign_keys and column.name != "profile_role":
                 assert isinstance(column.type, BigInteger)
