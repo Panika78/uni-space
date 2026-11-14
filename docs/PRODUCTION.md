@@ -479,6 +479,14 @@ HTTPX строго проверяет CA, hostname `uni.test` и срок дей
 Не запускайте тест параллельно с другим стендом на том же proxy subnet.
 GitHub Actions выполняет этот прогон отдельным job; остальные проверки — в README.
 
+RBAC smoke после миграций и повторного применения ACL входит в тот же прогон:
+мигратор создаёт вымышленного сотрудника деканата с `grades.edit` и scoped
+`applications.review`, затем настоящий HTTPS login и `/api/v1/auth/context`
+проверяют точный контекст под `uni_space_api`. Из подключения API проверяются
+SELECT и отсутствие INSERT/UPDATE/DELETE для обеих RBAC-таблиц; реальные
+запросы записи и обращения к их sequences должны завершаться `42501`.
+Существующие студенческие, auth и recovery-сценарии сохраняются.
+
 Регрессии security-review F-02/F-03 намеренно выдают мигратору небезопасные
 глобальные и schema-level defaults TABLES/SEQUENCES/FUNCTIONS для PUBLIC/API,
 создают старые объекты, повторяют bootstrap при работающем API и создают новые.
