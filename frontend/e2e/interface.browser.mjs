@@ -381,6 +381,7 @@ try {
         `${width}/${factor}/week`,
         12 * factor,
       )
+      await assertScheduleControlGeometry(page, `${width}/${factor}/week`)
       await inspect(`typography-week-${factor}`, width)
       if (width <= 720) {
         await page.getByRole('button', { name: 'Открыть меню', exact: true }).click()

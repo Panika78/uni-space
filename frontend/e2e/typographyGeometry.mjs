@@ -55,6 +55,19 @@ export async function assertReadableText(page, selectors, label, minimum) {
 }
 
 export async function assertScheduleControlGeometry(page, label) {
+  const lessons = await page.locator('.lesson-card').evaluateAll((cards) =>
+    cards.map((card) => ({
+      card: card.getBoundingClientRect().width,
+      details: card.querySelector('.lesson-card__details').getBoundingClientRect().width,
+      title: card.querySelector('h3').textContent,
+    })),
+  )
+  assert.ok(lessons.length > 0, `${label}: loaded lessons required before geometry checks`)
+  for (const lesson of lessons)
+    assert.ok(
+      lesson.details >= Math.min(220, lesson.card - 60),
+      `${label}: lesson title has readable width ${JSON.stringify(lesson)}`,
+    )
   const boxes = await page
     .locator('.schedule-heading > div,.schedule-toolbar > *')
     .evaluateAll((els) =>

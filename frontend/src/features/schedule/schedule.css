@@ -637,8 +637,8 @@
   border-left-color: #b96c1c;
 }
 
-/* Let enlarged text reflow instead of squeezing lesson time and status together. */
-@media (max-width: 760px) {
+/* Account for the sidebar as well as enlarged text when laying out lesson content. */
+@container (max-width: 48rem) {
   .lesson-card {
     display: flex;
     flex-wrap: wrap;
