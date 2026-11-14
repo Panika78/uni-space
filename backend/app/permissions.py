@@ -120,8 +120,14 @@ def require_permission(code: PermissionCode):
 
 
 def get_application_scope():
-    """Shared SQL expression for object checks and future queue filtering."""
-    return func.coalesce(Application.assigned_org_unit_id, ServiceType.responsible_org_unit_id)
+    """Resolve each application's scope without requiring a caller-supplied join."""
+    responsible_scope = (
+        select(ServiceType.responsible_org_unit_id)
+        .where(ServiceType.id == Application.service_type_id)
+        .correlate(Application)
+        .scalar_subquery()
+    )
+    return func.coalesce(Application.assigned_org_unit_id, responsible_scope)
 
 
 def require_application_review(db: Session, user: User, application_id: int) -> Application:
