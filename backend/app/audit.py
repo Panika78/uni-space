@@ -114,8 +114,10 @@ def write_audit_event(
     """Add and flush an event in the caller's transaction; propagate every error.
 
     Pass the User returned by get_current_user, never a request actor ID.
-    The caller must roll back the whole operation on ANY exception, including
-    validation errors. No commit, rollback, session, or savepoint is created here.
+    Require an active caller transaction; this does not prove that the business
+    change belongs to it. Call before the business commit. The caller must roll
+    back the whole operation on ANY exception, including validation errors.
+    No commit, rollback, session, or savepoint is created here.
     """
     fields = _EVENT_FIELDS.get((entity_type, action))
     if fields is None:
@@ -126,6 +128,11 @@ def write_audit_event(
         or inspect(actor).session is not db
     ):
         raise ValueError("Audit actor must be the authenticated User in the supplied session")
+    # Avoid starting a transaction through Session.add() after commit/rollback.
+    # A SELECT or a new mutation can already have triggered autobegin, so this
+    # guard cannot detect an earlier, incorrectly committed business operation.
+    if not db.in_transaction():
+        raise ValueError("Audit requires an active caller transaction before business commit")
     if _integer(entity_id) <= 0:
         raise ValueError("Audit entity ID must be positive; flush new entities first")
     before = _serialize_snapshot(before_data, fields)

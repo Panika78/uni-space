@@ -32,7 +32,7 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("CURRENT_TIMESTAMP"),
+            server_default=sa.text("statement_timestamp()"),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(

@@ -26,5 +26,5 @@ class AuditEvent(Base):
     after_data: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.statement_timestamp()
     )

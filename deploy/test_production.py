@@ -562,6 +562,9 @@ with engine.connect() as c:
     for privilege in ('INSERT','UPDATE','DELETE'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'notifications',:privilege)"), {'privilege': privilege}).scalar_one()
     assert not c.execute(text("SELECT has_sequence_privilege(current_user,'notifications_id_seq','USAGE')")).scalar_one()
+    for privilege in ('SELECT','INSERT','UPDATE','DELETE','TRUNCATE'):
+        assert not c.execute(text("SELECT has_table_privilege(current_user,'audit_events',:privilege)"), {'privilege': privilege}).scalar_one()
+    assert not c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
     for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'news',:privilege)"), {'privilege': privilege}).scalar_one()
     assert not c.execute(text("SELECT has_table_privilege(current_user,'applications','UPDATE')")).scalar_one()
@@ -601,6 +604,9 @@ for statement in (
     "INSERT INTO notifications (user_id,type,title,body) VALUES (1,'forbidden','forbidden','forbidden')",
     "UPDATE notifications SET title='forbidden'", "DELETE FROM notifications",
     "SELECT nextval('public.notifications_id_seq')",
+    "INSERT INTO audit_events (entity_type,entity_id,action) VALUES ('user',1,'set_active')",
+    "UPDATE audit_events SET reason='correction'", "DELETE FROM audit_events",
+    "SELECT * FROM audit_events", "SELECT nextval('public.audit_events_id_seq')",
     "SELECT nextval('public.org_units_id_seq')", "SELECT nextval('public.programs_id_seq')",
     "UPDATE lessons SET status='cancelled'", "DELETE FROM lesson_groups",
     "INSERT INTO assessments (course_offering_id,title,type,max_score) VALUES (1,'forbidden','test',10)",
