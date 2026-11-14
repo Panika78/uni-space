@@ -8,6 +8,7 @@ const baseURL = process.env.AUTH_TEST_URL || 'http://localhost:5173'
 const loginA = process.env.AUTH_TEST_LOGIN_A
 const loginB = process.env.AUTH_TEST_LOGIN_B
 const password = process.env.AUTH_TEST_PASSWORD
+const refreshCookieName = 'uni_space_refresh_dev'
 assert.ok(
   loginA && loginB && password,
   'Provide fictional AUTH_TEST_LOGIN_A/B and AUTH_TEST_PASSWORD',
@@ -287,7 +288,7 @@ try {
   await heading(page, 'Расписание')
   await assertNotificationFocusRestored(page, notificationBell, 'auth E2E Escape')
   check('notification bell opens the protected drawer and restores focus after Escape')
-  const cookie = (await context.cookies()).find((value) => value.name === 'uni_space_refresh')
+  const cookie = (await context.cookies()).find((value) => value.name === refreshCookieName)
   assert.ok(cookie?.httpOnly && cookie.path === '/api/v1/auth' && cookie.sameSite === 'Lax')
   await page.reload()
   await heading(page, 'Расписание')
@@ -384,9 +385,7 @@ try {
   await context.unroute(`**${testPath}`)
   check('account change in another tab hides old UI and rejects delayed data')
 
-  const fallbackCookie = (await context.cookies()).find(
-    (value) => value.name === 'uni_space_refresh',
-  )
+  const fallbackCookie = (await context.cookies()).find((value) => value.name === refreshCookieName)
   assert.ok(fallbackCookie)
   await context.clearCookies()
   const fallbackRequest = page.waitForRequest(
@@ -398,7 +397,7 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   const sentLogout = await fallbackRequest
   assert.ok((await sentLogout.headerValue('authorization'))?.startsWith('Bearer '))
-  assert.ok(!(await sentLogout.headerValue('cookie'))?.includes('uni_space_refresh='))
+  assert.ok(!(await sentLogout.headerValue('cookie'))?.includes(`${refreshCookieName}=`))
   const beforeReload = requests.length
   await page.reload()
   await loginHeading(page)
@@ -411,7 +410,7 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Повторить выход', exact: true }).count(), 0)
   check('lost logout response is not retried on reload or online; ordinary login restores access')
   const replacementCookie = (await context.cookies()).find(
-    (value) => value.name === 'uni_space_refresh',
+    (value) => value.name === refreshCookieName,
   )
   assert.ok(replacementCookie)
   // This refresh was current and unused when the cookie was removed.

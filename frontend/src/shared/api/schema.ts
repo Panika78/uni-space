@@ -918,7 +918,7 @@ export interface operations {
             };
             path?: never;
             cookie?: {
-                uni_space_refresh?: string | null;
+                "__Host-uni_space_refresh"?: string | null;
             };
         };
         requestBody?: never;
@@ -988,7 +988,7 @@ export interface operations {
             };
             path?: never;
             cookie?: {
-                uni_space_refresh?: string | null;
+                "__Host-uni_space_refresh"?: string | null;
             };
         };
         requestBody?: never;
