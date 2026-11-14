@@ -510,8 +510,8 @@ NEWS_TEST_MANAGE_COMPOSE=1 PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_mod
 только выделенный Compose project `uni-space-test`, а затем удаляет его с volume
 при успехе, ошибке и прерывании; exit code браузерного теста сохраняется.
 Перед миграциями он проверяет, что порты 8000 и 5173 свободны. Vite использует
-`--strictPort`, readiness сверяет журналы запуска своих процессов, а runner
-контролирует API/Vite до завершения браузера. Uvicorn access-log отключён;
+`--strictPort`, readiness подтверждается доступностью API/Vite endpoints и
+runner контролирует собственные процессы до завершения браузера. Uvicorn access-log отключён;
 серверные логи не содержат auth-запросов/заголовков. Браузерные ожидания ограничены
 15 секундами. При падении смотрите `work/news-browser-failure.png` и журналы
 `work/news-browser-api.log` / `work/news-browser-vite.log`.

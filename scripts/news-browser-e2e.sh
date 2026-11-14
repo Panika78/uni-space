@@ -141,9 +141,7 @@ for attempt in $(seq 1 90); do
     echo 'The Vite process exited before readiness.' >&2
     break
   fi
-  if grep -Fq 'Uvicorn running on http://127.0.0.1:8000' "$API_LOG" \
-    && grep -Fq 'http://127.0.0.1:5173/' "$VITE_LOG" \
-    && curl --silent --fail --max-time 2 http://127.0.0.1:8000/api/openapi.json >/dev/null \
+  if curl --silent --fail --max-time 2 http://127.0.0.1:8000/api/openapi.json >/dev/null \
     && curl --silent --fail --max-time 2 http://127.0.0.1:5173/login >/dev/null; then
     ready=true
     break
