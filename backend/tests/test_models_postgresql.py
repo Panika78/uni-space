@@ -146,7 +146,8 @@ def test_migration_creates_task_005_tables_without_premature_extended_tables(
     table_names = set(inspect(postgresql_engine).get_table_names(schema="public"))
 
     assert table_names >= EXPECTED_MODEL_TABLES
-    assert not {"staff_profiles", "staff_permissions", "subgroups"} & table_names
+    assert {"staff_profiles", "staff_permissions"} <= table_names
+    assert "subgroups" not in table_names
 
 
 def test_postgresql_ids_are_bigint_by_default_identity(postgresql_engine) -> None:
