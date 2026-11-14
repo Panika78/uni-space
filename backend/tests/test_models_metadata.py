@@ -3,6 +3,7 @@ from sqlalchemy import BigInteger
 from app.models import Base
 
 EXPECTED_TABLES = {
+    "audit_events",
     "users",
     "auth_sessions",
     "refresh_tokens",
