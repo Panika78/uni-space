@@ -164,6 +164,9 @@ jobs:
       - name: Build production frontend
         working-directory: frontend
         run: npm run build
+      - name: Verify production license notices
+        working-directory: frontend
+        run: npm run check:licenses
 
   api-types:
     name: Generated API types current
