@@ -70,7 +70,24 @@ export async function assertApplicationInteractions(page, context, id, width) {
   async function returnToList() {
     await page.getByRole('heading', { name: `Заявление № ${id}`, exact: true }).waitFor()
     await page.getByRole('link', { name: /К моим заявлениям/ }).click()
-    await page.waitForFunction((id) => document.activeElement?.dataset.applicationId === id, id)
+    try {
+      await page.waitForFunction((id) => document.activeElement?.dataset.applicationId === id, id)
+    } catch (error) {
+      const state = await page.evaluate(
+        (id) => ({
+          path: window.location.pathname + window.location.search,
+          activeTag: document.activeElement?.tagName ?? null,
+          activeApplicationId: document.activeElement?.getAttribute('data-application-id'),
+          targetPresent: Array.from(
+            document.querySelectorAll('.applications-table a[data-application-id]'),
+          ).some((link) => link.dataset.applicationId === id),
+        }),
+        id,
+      )
+      throw new Error(`Return focus failed at ${width}px: ${JSON.stringify(state)}`, {
+        cause: error,
+      })
+    }
     assert.equal(await row.getByRole('link').count(), 1, 'one tab stop per row/card')
   }
   for (const part of ['title', 'date', 'status', 'space']) {
