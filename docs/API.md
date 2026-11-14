@@ -282,3 +282,35 @@ points, включая завершающий символ `…` только п
 - [Google AIP-158: Pagination](https://google.aip.dev/158).
 - [Microsoft Graph: Error responses](https://learn.microsoft.com/en-us/graph/errors).
 - [OpenAPI Specification](https://spec.openapis.org/oas/).
+
+## Контекст авторизации MVP2-01
+
+`GET /api/v1/auth/context` — защищённый read-only API для всех четырёх ролей.
+Без query-параметров (неизвестные — 422), без выбора чужого пользователя.
+Ответ `200`, `Cache-Control: no-store`:
+
+```ts
+type AuthorizationContext = {
+  user_id: Id;
+  role: "student" | "teacher" | "staff" | "admin";
+  org_unit_id: Id | null;
+  permissions: {
+    permission_code: PermissionCode;
+    scope_org_unit_id: Id | null;
+  }[];
+};
+```
+
+`PermissionCode` — перечисление из [AUTH.md](AUTH.md#основа-rbac-mvp2-01-60),
+также представленное в OpenAPI. `permissions` — эффективные явно выданные
+полномочия сотрудника после проверки роли, типа подразделения и области;
+не исходные строки БД. Student/teacher/admin возвращают `[]` и `org_unit_id=null`;
+их собственные предметные операции определяются существующими студенческими
+проверками / преподавательскими назначениями (#61) / административными API (#78).
+Пустой список не отменяет студенческий доступ к собственным данным.
+Список отсортирован по коду и ID разрешения. Ответ не содержит JWT, сведений
+о других пользователях, заявлений или полного справочника подразделений.
+Каждый вызов читает текущую БД: отзыв, смена роли/подразделения или блокировка
+действуют при следующем запросе со старым JWT. Ошибки 401/422/500 используют
+общий `ApiError`. UI не может использовать этот ответ вместо серверной проверки.
+`GET /users/me` и login/refresh/logout сохраняют прежние контракты.

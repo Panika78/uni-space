@@ -56,6 +56,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Current Authorization Context */
+        get: operations["get_current_authorization_context_api_v1_auth_context_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -304,6 +321,20 @@ export interface components {
              */
             updated_at: string;
         };
+        /** AuthorizationContext */
+        AuthorizationContext: {
+            /** Org Unit Id */
+            org_unit_id: string | null;
+            /** Permissions */
+            permissions: components["schemas"]["EffectivePermission"][];
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "student" | "teacher" | "staff" | "admin";
+            /** User Id */
+            user_id: string;
+        };
         /** CourseOfferingRef */
         CourseOfferingRef: {
             discipline: components["schemas"]["Ref"];
@@ -329,6 +360,12 @@ export interface components {
             code: string;
             /** Name */
             name: string;
+        };
+        /** EffectivePermission */
+        EffectivePermission: {
+            permission_code: components["schemas"]["PermissionCode"];
+            /** Scope Org Unit Id */
+            scope_org_unit_id: string | null;
         };
         /** ErrorBody */
         ErrorBody: {
@@ -507,6 +544,11 @@ export interface components {
              */
             limit: number;
         };
+        /**
+         * PermissionCode
+         * @enum {string}
+         */
+        PermissionCode: "schedule.edit" | "grades.edit" | "attendance.edit" | "students.read" | "students.edit" | "students.status.edit" | "groups.manage" | "applications.review" | "news.publish";
         /** ProgramRef */
         ProgramRef: {
             /** Code */
@@ -818,6 +860,62 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    get_current_authorization_context_api_v1_auth_context_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthorizationContext"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
