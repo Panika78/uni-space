@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiClientError, apiFetch, configureApiAuth } from './client'
+import { ApiClientError, apiFetch, AUTHENTICATED_GET_DEADLINE_MS, configureApiAuth } from './client'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
 
 describe('apiFetch', () => {
   it('returns JSON and adds the shared request headers', async () => {
@@ -239,5 +242,133 @@ describe('authenticated API destination policy', () => {
       expect(input).toBe(new URL('/api/v1/example', window.location.href).href)
       expect(init.redirect).toBe('error')
     }
+  })
+})
+
+describe('authenticated GET deadline', () => {
+  function configureTimedSession() {
+    const authController = new AbortController()
+    const assertCurrent = vi.fn()
+    const refresh = vi.fn().mockResolvedValue('fictional-refreshed-token')
+    configureApiAuth(() => ({
+      token: 'fictional-token',
+      signal: authController.signal,
+      assertCurrent,
+      refresh,
+      invalidate: vi.fn(),
+    }))
+    return { authController, assertCurrent, refresh }
+  }
+
+  it('times out while waiting for response headers, then permits a manual request to recover', async () => {
+    vi.useFakeTimers()
+    configureTimedSession()
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce(Response.json({ recovered: true }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const pending = apiFetch('/api/v1/schedule', { authenticated: true })
+    const result = expect(pending).rejects.toMatchObject({
+      code: 'request_timeout',
+      message: expect.stringContaining('попробуйте ещё раз'),
+    })
+    await vi.advanceTimersByTimeAsync(AUTHENTICATED_GET_DEADLINE_MS)
+    await result
+    await expect(apiFetch('/api/v1/schedule', { authenticated: true })).resolves.toEqual({
+      recovered: true,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
+  it('aborts and times out an open response body after HTTP 200 headers', async () => {
+    vi.useFakeTimers()
+    configureTimedSession()
+    let chunks = 0
+    let cancelled = false
+    const fetchMock = vi.fn().mockImplementation((_input, init: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const sendChunk = () => {
+            chunks += 1
+            controller.enqueue(new TextEncoder().encode(' '))
+          }
+          sendChunk()
+          const interval = setInterval(sendChunk, 10_000)
+          init.signal?.addEventListener('abort', () => {
+            cancelled = true
+            clearInterval(interval)
+            controller.error(init.signal?.reason)
+          })
+        },
+      })
+      return Promise.resolve(new Response(body, { status: 200 }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const pending = apiFetch('/api/v1/notifications', { authenticated: true })
+    const result = expect(pending).rejects.toMatchObject({ code: 'request_timeout' })
+    await vi.advanceTimersByTimeAsync(AUTHENTICATED_GET_DEADLINE_MS)
+    await result
+    expect(chunks).toBeGreaterThan(1)
+    expect(cancelled).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('uses one deadline for access_expired refresh and replay', async () => {
+    vi.useFakeTimers()
+    const { refresh } = configureTimedSession()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { code: 'access_expired', message: 'expired', details: [] } },
+          { status: 401 },
+        ),
+      )
+      .mockImplementationOnce(() => new Promise(() => {}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const pending = apiFetch('/api/v1/academics', { authenticated: true })
+    const result = expect(pending).rejects.toMatchObject({ code: 'request_timeout' })
+    await Promise.resolve()
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(AUTHENTICATED_GET_DEADLINE_MS)
+    await result
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
+  it('keeps auth-generation cancellation distinct and does not add a deadline to POST', async () => {
+    vi.useFakeTimers()
+    const { authController } = configureTimedSession()
+    const fetchMock = vi.fn((_input, init: RequestInit) => {
+      if (init.method === 'POST') return new Promise(() => {})
+      return new Promise<never>((_, reject) => {
+        init.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const get = apiFetch('/api/v1/applications', { authenticated: true })
+    const getResult = expect(get).rejects.toMatchObject({ name: 'AbortError' })
+    authController.abort(new DOMException('account changed', 'AbortError'))
+    await getResult
+
+    configureTimedSession()
+    const post = apiFetch('/api/v1/applications', {
+      authenticated: true,
+      method: 'POST',
+      body: JSON.stringify({}),
+    })
+    await Promise.resolve()
+    expect(vi.getTimerCount()).toBe(0)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+    // The deliberately pending POST is outside this API deadline and has no retry.
+    void post.catch(() => {})
   })
 })
