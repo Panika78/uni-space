@@ -97,10 +97,16 @@ function ServiceCatalog() {
     retryOnMount: true,
   })
   const services = query.data?.items ?? []
+  const isDenied = query.error instanceof ApiClientError && query.error.status === 403
   return (
     <div className="service-catalog-page">
       <p>Выберите доступную услугу.</p>
-      {query.isPending || (query.isFetching && query.isError) ? (
+      {isDenied ? (
+        <ErrorState
+          title="Доступ к каталогу услуг запрещён"
+          description="У вас нет доступа к каталогу услуг. Обратитесь к администратору."
+        />
+      ) : query.isPending || (query.isFetching && query.isError) ? (
         <LoadingState title="Загружаем каталог…" />
       ) : query.isError ? (
         <ErrorState

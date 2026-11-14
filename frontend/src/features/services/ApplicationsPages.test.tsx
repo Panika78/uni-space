@@ -41,6 +41,101 @@ function mount(path = '/services') {
   )
   return { client, router }
 }
+
+function expectDeniedList() {
+  expect(screen.getByRole('alert')).toHaveTextContent('Доступ к заявлениям запрещён')
+  expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: /№ / })).not.toBeInTheDocument()
+  expect(screen.queryByText(/Загружено заявлений/)).not.toBeInTheDocument()
+  expect(screen.queryByText('Подано')).not.toBeInTheDocument()
+  expect(document.querySelector('time')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Показать ещё' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Повторить' })).not.toBeInTheDocument()
+}
+
+it('shows denied without data or retry on the first list request returning 403', async () => {
+  apiFetch.mockRejectedValueOnce(new ApiClientError('forbidden', 'forbidden', 403))
+  mount()
+  await screen.findByRole('alert')
+  expectDeniedList()
+})
+
+it('hides cached rows after a forbidden refetch and restores them only after a successful GET', async () => {
+  apiFetch
+    .mockResolvedValueOnce({ items: [item], next_cursor: 'next' })
+    .mockRejectedValueOnce(new ApiClientError('forbidden', 'forbidden', 403))
+  const { client } = mount()
+  const link = await screen.findByRole('link', { name: /№ 27/ })
+  link.focus()
+  client.setQueryData(['unrelated'], 'preserved')
+  await act(async () => {
+    await client.refetchQueries({ queryKey: ['applications'], exact: true })
+  })
+  await screen.findByRole('alert')
+  expectDeniedList()
+  expect(screen.getByRole('heading', { name: 'Мои заявления' })).toHaveFocus()
+  expect(client.getQueryData(['applications'])).toBeUndefined()
+  expect(client.getQueryData(['unrelated'])).toBe('preserved')
+  apiFetch.mockRejectedValueOnce(new ApiClientError('server', 'server_error', 500))
+  await act(async () => {
+    await client.refetchQueries({ queryKey: ['applications'], exact: true })
+  })
+  await screen.findByText('Не удалось загрузить заявления')
+  expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  expect(client.getQueryData(['applications'])).toBeUndefined()
+  let finish!: (value: unknown) => void
+  apiFetch.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)))
+  let refetch!: Promise<void>
+  await act(async () => {
+    refetch = client.refetchQueries({ queryKey: ['applications'], exact: true })
+  })
+  expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  await act(async () => {
+    finish({ items: [item], next_cursor: null })
+    await refetch
+  })
+  await screen.findByRole('link', { name: /№ 27/ })
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+})
+
+it('hides all cached pages when appending a third page is forbidden', async () => {
+  apiFetch
+    .mockResolvedValueOnce({ items: [item], next_cursor: 'second' })
+    .mockResolvedValueOnce({ items: [{ ...item, id: '26' }], next_cursor: 'third' })
+    .mockRejectedValueOnce(new ApiClientError('forbidden', 'forbidden', 403))
+  const { client } = mount()
+  fireEvent.click(await screen.findByRole('button', { name: 'Показать ещё' }))
+  await screen.findByRole('link', { name: /№ 26/ })
+  const more = screen.getByRole('button', { name: 'Показать ещё' })
+  more.focus()
+  fireEvent.click(more)
+  await screen.findByRole('alert')
+  expectDeniedList()
+  expect(screen.getByRole('heading', { name: 'Мои заявления' })).toHaveFocus()
+  expect(client.getQueryData(['applications'])).toBeUndefined()
+})
+
+it.each([
+  new ApiClientError('server', 'server_error', 500),
+  new ApiClientError('offline', 'network_error'),
+])('retains the complete stale snapshot and retry after $code', async (failure) => {
+  apiFetch
+    .mockResolvedValueOnce({ items: [item], next_cursor: 'next' })
+    .mockRejectedValueOnce(failure)
+    .mockResolvedValueOnce({ items: [{ ...item, review_status: 'approved' }], next_cursor: null })
+  const { client } = mount()
+  await screen.findByRole('link', { name: /№ 27/ })
+  await act(async () => {
+    await client.refetchQueries({ queryKey: ['applications'], exact: true })
+  })
+  await screen.findByRole('alert')
+  expect(screen.getByRole('link', { name: /№ 27/ })).toBeInTheDocument()
+  expect(screen.getByText(/Их данные могут быть неактуальны/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Показать ещё' })).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: 'Повторить' }))
+  await screen.findByText('Одобрено')
+})
+
 it('appends pages and retains the list when returning from separate details', async () => {
   apiFetch
     .mockResolvedValueOnce({ items: [item], next_cursor: 'next' })
@@ -413,7 +508,7 @@ it('retries only the failed next page once without losing the valid first page',
   await screen.findByRole('alert')
   expect(getVisibleApplicationIds()).toEqual(rows.slice(0, 20).map((row) => row.id))
   expect(screen.getByText('Не удалось загрузить следующую страницу')).toBeInTheDocument()
-  expect(screen.queryByText(/Их данные могут быть неактуальны/)).not.toBeInTheDocument()
+  expect(screen.getByText(/Их данные могут быть неактуальны/)).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Показать ещё' })).toBeEnabled()
   act(() => {
     fireEvent.click(screen.getByRole('button', { name: 'Повторить' }))

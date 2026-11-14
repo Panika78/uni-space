@@ -386,6 +386,23 @@ function mountCatalog(client = new QueryClient({ defaultOptions: { queries: { re
   return { ...view, router, client }
 }
 
+it('shows catalog access denial without cached services or a network retry', async () => {
+  apiFetch.mockResolvedValueOnce({
+    items: [{ id: '4', code: 'study_certificate', title: 'Справка об обучении' }],
+  })
+  const { client } = mountCatalog()
+  await screen.findByRole('heading', { name: 'Справка об обучении' })
+  apiFetch.mockRejectedValueOnce(new ApiClientError('forbidden', 'forbidden', 403))
+  await act(async () => {
+    await client.refetchQueries({ queryKey: ['services'], exact: true })
+  })
+  expect(await screen.findByRole('alert')).toHaveTextContent('Доступ к каталогу услуг запрещён')
+  expect(screen.queryByText(/Проверьте соединение/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Повторить' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('article')).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Подать заявление' })).not.toBeInTheDocument()
+})
+
 it('shows the shared accessible skeleton while the catalog request is pending', async () => {
   let finish!: (value: unknown) => void
   apiFetch.mockImplementationOnce(

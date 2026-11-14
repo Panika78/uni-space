@@ -74,16 +74,17 @@ export function ApplicationsList() {
     retryOnMount: true,
     gcTime: Infinity,
   })
-  const items = query.data?.pages.flatMap((page) => page.items) ?? []
+  const isDenied = query.error instanceof ApiClientError && query.error.status === 403
+  const items = isDenied ? [] : (query.data?.pages.flatMap((page) => page.items) ?? [])
   // A failed refresh leaves the old snapshot/cursors intact. Only a complete
   // refetch can make that snapshot eligible for further pagination again.
-  const canLoadMore = query.hasNextPage && !query.isFetching && !query.isRefetchError
+  const canLoadMore = !isDenied && query.hasNextPage && !query.isFetching && !query.isRefetchError
   function handleLoadMore() {
     if (!canLoadMore) return
     void query.fetchNextPage({ cancelRefetch: false })
   }
   function handleRetry() {
-    if (query.isFetching) return
+    if (isDenied || query.isFetching) return
     if (query.isFetchNextPageError) handleLoadMore()
     else void query.refetch({ cancelRefetch: false })
   }
@@ -107,34 +108,56 @@ export function ApplicationsList() {
       returnFocus.current = undefined
       queryClient.removeQueries({ queryKey: returnFocusKey, exact: true })
     }
-  }, [location.key, query.data, query.isFetching, queryClient])
+  }, [location.key, query.data, query.isFetching, isDenied, queryClient])
+  useEffect(() => {
+    // Discard only this forbidden snapshot, retaining the 403 error state.
+    // A later 500 (including after remount) must not reveal the old rows again.
+    if (isDenied)
+      queryClient
+        .getQueryCache()
+        .find({ queryKey: applicationsKey, exact: true })
+        ?.setState({ data: undefined, dataUpdatedAt: 0 })
+    if (
+      isDenied &&
+      (document.activeElement === document.body ||
+        heading.current?.parentElement?.contains(document.activeElement))
+    )
+      heading.current?.focus({ preventScroll: true })
+  }, [isDenied, queryClient])
   return (
     <div>
       <h2 className="applications-list-heading" ref={heading} tabIndex={-1}>
         Мои заявления
       </h2>
       {query.isPending && <LoadingState title="Загружаем заявления…" />}
-      {query.isRefetching && (
+      {!isDenied && query.isRefetching && (
         <p role="status" className="sr-only">
           Обновляем заявления…
         </p>
       )}
-      {query.isError && (
+      {isDenied ? (
         <ErrorState
-          title={
-            query.isFetchNextPageError
-              ? 'Не удалось загрузить следующую страницу'
-              : 'Не удалось загрузить заявления'
-          }
-          description={
-            query.isFetchNextPageError
-              ? 'Ранее загруженные заявления сохранены. Повторите загрузку следующей страницы.'
-              : query.data
-                ? 'Показаны ранее загруженные заявления. Их данные могут быть неактуальны; повторите загрузку.'
-                : 'Проверьте соединение и повторите попытку.'
-          }
-          onRetry={handleRetry}
+          title="Доступ к заявлениям запрещён"
+          description="У вас нет доступа к списку заявлений. Обратитесь к администратору."
         />
+      ) : (
+        query.isError && (
+          <ErrorState
+            title={
+              query.isFetchNextPageError
+                ? 'Не удалось загрузить следующую страницу'
+                : 'Не удалось загрузить заявления'
+            }
+            description={
+              query.isFetchNextPageError
+                ? 'Ранее загруженные заявления сохранены. Их данные могут быть неактуальны; повторите загрузку следующей страницы.'
+                : query.data
+                  ? 'Показаны ранее загруженные заявления. Их данные могут быть неактуальны; повторите загрузку.'
+                  : 'Проверьте соединение и повторите попытку.'
+            }
+            onRetry={handleRetry}
+          />
+        )
       )}
       {query.isSuccess && items.length === 0 && (
         <div className="applications-empty">
@@ -223,14 +246,16 @@ export function ApplicationsList() {
           </tbody>
         </table>
       )}
-      {query.hasNextPage && (
+      {!isDenied && query.hasNextPage && (
         <button className="service-action" disabled={!canLoadMore} onClick={handleLoadMore}>
           {query.isFetchingNextPage ? 'Загружаем…' : 'Показать ещё'}
         </button>
       )}
-      <p role="status" className="sr-only">
-        Загружено заявлений: {items.length}
-      </p>
+      {!isDenied && (
+        <p role="status" className="sr-only">
+          Загружено заявлений: {items.length}
+        </p>
+      )}
     </div>
   )
 }
