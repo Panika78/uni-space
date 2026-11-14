@@ -271,6 +271,7 @@ jobs:
       DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
       COOKIE_SECURE: 'false'
       ALLOWED_ORIGINS: '["http://localhost:5173"]'
+      JWT_SIGNING_KEY: ''
     services:
       postgres:
         image: postgres:17.11-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994

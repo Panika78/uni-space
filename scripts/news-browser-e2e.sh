@@ -18,6 +18,12 @@ MANAGE_COMPOSE="${NEWS_TEST_MANAGE_COMPOSE:-0}"
 COMPOSE_CLEANUP_REQUIRED=0
 COMPOSE_FILE=compose.test.yaml
 COMPOSE_PROJECT=uni-space-test
+: "${APP_ENV:=test}"
+: "${DATABASE_URL:=postgresql+psycopg://uni_space_test:test-only-password@127.0.0.1:55432/uni_space_test}"
+: "${JWT_SIGNING_KEY:=test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ}"
+: "${COOKIE_SECURE:=false}"
+: "${ALLOWED_ORIGINS:=[\"http://localhost:5173\"]}"
+export APP_ENV DATABASE_URL JWT_SIGNING_KEY COOKIE_SECURE ALLOWED_ORIGINS
 
 cleanup() {
   local status=$?
@@ -68,12 +74,6 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-: "${APP_ENV:=test}"
-: "${DATABASE_URL:=postgresql+psycopg://uni_space_test:test-only-password@127.0.0.1:55432/uni_space_test}"
-: "${JWT_SIGNING_KEY:=test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ}"
-: "${COOKIE_SECURE:=false}"
-: "${ALLOWED_ORIGINS:=[\"http://localhost:5173\"]}"
-export APP_ENV DATABASE_URL JWT_SIGNING_KEY COOKIE_SECURE ALLOWED_ORIGINS
 if [[ "$APP_ENV" != test || ! "$DATABASE_URL" =~ ^postgresql\+psycopg://uni_space_test:test-only-password@(localhost|127\.0\.0\.1):[0-9]+/uni_space_test$ ]]; then
   echo 'Refusing to run news browser E2E outside a localhost uni_space_test database.' >&2
   exit 2
