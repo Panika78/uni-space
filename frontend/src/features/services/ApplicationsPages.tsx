@@ -94,12 +94,18 @@ export function ApplicationsList() {
     const link = Array.from(
       table.current?.querySelectorAll<HTMLAnchorElement>('a[data-application-id]') ?? [],
     ).find((link) => link.dataset.applicationId === target.id)
-    if (!restoredLink.current && link) {
-      link.focus({ preventScroll: true })
-      restoredLink.current = link
+    if (link) {
+      // An asynchronous list refresh can lose the restored focus. Retry only
+      // when focus falls back to the body, without overriding user navigation.
+      const needsFocus =
+        !restoredLink.current ||
+        (!query.isFetching && document.activeElement === document.body)
+      if (needsFocus) {
+        link.focus({ preventScroll: true })
+        restoredLink.current = link
+      }
     } else if (
       !query.isFetching &&
-      !link &&
       (!restoredLink.current || document.activeElement === document.body)
     ) {
       heading.current?.focus({ preventScroll: true })

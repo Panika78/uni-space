@@ -160,6 +160,29 @@ it('appends pages and retains the list when returning from separate details', as
   await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(5))
   expect(screen.getByRole('link', { name: /№ 27/ })).toHaveFocus()
 })
+it('restores source row focus if a background list refresh loses it', async () => {
+  const refresh = createDeferred<{ items: (typeof item)[]; next_cursor: null }>()
+  apiFetch
+    .mockResolvedValueOnce({ items: [item], next_cursor: null })
+    .mockResolvedValueOnce(item)
+    .mockImplementationOnce(() => refresh.promise)
+  mount()
+  fireEvent.click(await screen.findByRole('link', { name: /№ 27/ }))
+  await screen.findByRole('heading', { name: 'Заявление № 27' })
+  fireEvent.click(screen.getByRole('link', { name: /К моим заявлениям/ }))
+  const link = await screen.findByRole('link', { name: /№ 27/ })
+  await waitFor(() => expect(link).toHaveFocus())
+
+  // Model a browser focus reset while React Query refetches cached rows.
+  link.blur()
+  expect(document.body).toHaveFocus()
+  await act(async () => {
+    refresh.resolve({ items: [item], next_cursor: null })
+    await refresh.promise
+  })
+  await waitFor(() => expect(screen.getByRole('link', { name: /№ 27/ })).toHaveFocus())
+})
+
 it('offers retry after an error and shows an empty list', async () => {
   apiFetch
     .mockRejectedValueOnce(new Error('offline'))
