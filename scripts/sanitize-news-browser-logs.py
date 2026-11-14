@@ -1,26 +1,140 @@
 """Write redacted copies of the dedicated news E2E server logs."""
 
 import argparse
+import json
 import os
 import re
 import stat
 import tempfile
 from pathlib import Path
+from typing import Any
 
 
-HEADER_VALUE = re.compile(
-    r"(?i)\b(authorization|proxy-authorization|cookie|set-cookie)\b\s*:\s*[^\r\n]*"
+SECRET_FIELDS = frozenset(
+    {
+        "accesskey",
+        "accesstoken",
+        "apikey",
+        "authenticationinfo",
+        "authorization",
+        "clientsecret",
+        "cookie",
+        "csrftoken",
+        "idtoken",
+        "password",
+        "passwd",
+        "passphrase",
+        "proxyauthenticate",
+        "proxyauthenticationinfo",
+        "proxyauthorization",
+        "proxycookie",
+        "refreshtoken",
+        "secret",
+        "secretaccesskey",
+        "sessionid",
+        "sessiontoken",
+        "setcookie",
+        "setcookie2",
+        "token",
+        "wwwauthenticate",
+        "xapikey",
+        "xauthtoken",
+        "xcsrftoken",
+        "xidtoken",
+        "xrefreshtoken",
+        "xsrftoken",
+    }
 )
-SECRET_FIELD = re.compile(
-    r"(?i)([\"']?(?:password|passwd|passphrase|token|access_token|refresh_token|"
-    r"id_token|secret|client_secret|api_key|apikey)[\"']?\s*[:=]\s*)"
-    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\s,;&\]}]+)"
+COOKIE_FIELDS = frozenset({"cookie", "proxycookie", "setcookie", "setcookie2"})
+HEADER_FIELDS = frozenset(
+    {
+        "authenticationinfo",
+        "authorization",
+        "proxyauthenticate",
+        "proxyauthenticationinfo",
+        "proxyauthorization",
+        "wwwauthenticate",
+        "xapikey",
+        "xauthtoken",
+    }
 )
+ASSIGNMENT = re.compile(
+    r"(?P<prefix>(?<![\w.-])(?P<quote>['\"]?)(?P<key>[a-z][a-z0-9_.-]*)"
+    r"(?P=quote)\s*[:=]\s*)"
+    r"(?P<value>['\"](?:\\.|[^'\"\\])*['\"]|(?:bearer|basic)\s+\S+|"
+    r"[^\s,;&{}\[\]]+)",
+    re.IGNORECASE,
+)
+
+
+def normalize_key(key: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", key.casefold())
+
+
+def is_secret_key(key: str) -> bool:
+    normalized = normalize_key(key)
+    return normalized in SECRET_FIELDS or (
+        normalized.startswith("x") and normalized[1:] in SECRET_FIELDS
+    )
+
+
+def redact_json(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: "[REDACTED]" if is_secret_key(str(key)) else redact_json(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_json(item) for item in value]
+    return value
+
+
+def redact_assignment(match: re.Match[str]) -> str:
+    key = match.group("key")
+    if not is_secret_key(key):
+        return match.group(0)
+
+    value = match.group("value")
+    quote = value[0] if value[0] in {'"', "'"} and value[-1] == value[0] else ""
+    replacement = f"{quote}[REDACTED]{quote}" if quote else "[REDACTED]"
+    return f"{match.group('prefix')}{replacement}"
+
+
+def redact_line(line: str) -> str:
+    content = line.rstrip("\r\n")
+    newline = line[len(content) :]
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        pass
+    else:
+        return f"{json.dumps(redact_json(parsed), ensure_ascii=False)}{newline}"
+
+    for match in ASSIGNMENT.finditer(content):
+        key = match.group("key")
+        value = match.group("value")
+        quote = value[0] if value[0] in {'"', "'"} and value[-1] == value[0] else ""
+        if (
+            is_secret_key(key)
+            and normalize_key(key) in COOKIE_FIELDS | HEADER_FIELDS
+            and not quote
+        ):
+            # Header values can contain multiple space-separated fields or attributes.
+            return f"{content[: match.start('value')]}[REDACTED]{newline}"
+
+    return f"{ASSIGNMENT.sub(redact_assignment, content)}{newline}"
 
 
 def sanitize(text: str) -> str:
-    text = HEADER_VALUE.sub(lambda match: f"{match.group(1)}: [REDACTED]", text)
-    return SECRET_FIELD.sub(r"\1[REDACTED]", text)
+    """Redact sensitive JSON keys and common text header/key-value forms."""
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    else:
+        return json.dumps(redact_json(parsed), ensure_ascii=False)
+
+    return "".join(redact_line(line) for line in text.splitlines(keepends=True))
 
 
 def read_log(path: Path) -> str:
