@@ -2182,3 +2182,74 @@ textarea {
     padding: 38px 22px;
   }
 }
+
+/* Complete the v5 hierarchy in the real login form and notification drawer. */
+.login-card h1 {
+  font-size: 32px;
+  font-weight: 750;
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+  margin: 0 0 10px;
+  color: var(--ink, #292326);
+}
+.login-intro {
+  margin: 0 0 26px;
+  color: #5e5255;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.login-card label {
+  font-weight: 700;
+}
+.login-card input {
+  min-height: 50px;
+  padding: 12px 14px;
+  border-radius: 11px;
+}
+.login-card form button {
+  min-height: 48px;
+  border-radius: 11px;
+  font-size: 16px;
+}
+@media (max-width: 760px) {
+  .login-card {
+    padding: 29px 24px;
+  }
+}
+.notification-drawer {
+  background: #fffdfa;
+}
+.notification-drawer__header {
+  padding: 25px 24px 20px;
+}
+.notification-drawer__header h2 {
+  font-size: 24px;
+  font-weight: 740;
+  line-height: 1.22;
+  letter-spacing: -0.028em;
+}
+.notification-item {
+  padding: 20px 0;
+}
+.notification-item h3 {
+  font-size: 17px;
+  font-weight: 730;
+  line-height: 1.22;
+  margin: 6px 0;
+  letter-spacing: -0.028em;
+}
+.notification-item__type {
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+.notification-item__body {
+  font-size: 14px;
+  color: #62575a;
+  line-height: 1.65;
+  margin-bottom: 8px;
+}
+.notification-item time {
+  font-size: 12px;
+}
