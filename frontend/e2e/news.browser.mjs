@@ -438,6 +438,36 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0))
   await page.screenshot({ path: 'work/news-browser-detail.png', timeout: 15_000 })
   check('fixture-provided direct news ID opens without relying on sequence values')
+
+  currentScenario = 'hide a cached article after an access-denied refetch'
+  await page.getByRole('link', { name: 'Расписание', exact: true }).click()
+  await page.getByRole('heading', { name: 'Расписание', exact: true }).waitFor()
+  await page.clock.install({ time: new Date(Date.now() + 31_000) })
+  await context.route(
+    (url) => url.pathname === `/api/v1/news/${encodeURIComponent(detailId)}`,
+    (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { code: 'forbidden', message: 'Read-only access-denial fixture', details: [] },
+        }),
+      }),
+  )
+  await page.goBack()
+  await page.getByText('Доступ к новости запрещён', { exact: true }).waitFor()
+  assert.equal(
+    await page.locator('.news-article').count(),
+    0,
+    'An access-denied refetch must hide the previously loaded article',
+  )
+  assert.equal(
+    await page.getByRole('button', { name: 'Повторить' }).count(),
+    0,
+    'An access-denied article must not offer an ordinary retry',
+  )
+  await context.unroute((url) => url.pathname === `/api/v1/news/${encodeURIComponent(detailId)}`)
+  check('a cached article is hidden after a read-only HTTP 403 refetch')
 } catch (error) {
   console.error(`FAIL ${currentScenario}: ${error?.message || String(error)}`)
   console.error(`Diagnostic URL: ${new URL(page.url()).origin}${new URL(page.url()).pathname}`)

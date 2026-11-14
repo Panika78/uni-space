@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NewsDetailPage, NewsFeedPage } from './NewsPages'
@@ -38,12 +38,17 @@ function renderNews(
     pageParams: (string | null)[]
     updatedAt?: number
   },
+  initialDetail?: { newsId?: string; news: typeof item },
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   if (initialFeed) {
     const { updatedAt, ...data } = initialFeed
     queryClient.setQueryData(['news', 'feed'], data, { updatedAt })
   }
+  if (initialDetail)
+    queryClient.setQueryData(['news', 'item', initialDetail.newsId ?? '21'], initialDetail.news, {
+      updatedAt: Date.now() - 60_000,
+    })
   render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[path]}>
@@ -59,7 +64,7 @@ function renderNews(
 
 afterEach(() => {
   cleanup()
-  vi.clearAllMocks()
+  vi.resetAllMocks()
 })
 
 describe('university news pages', () => {
@@ -85,12 +90,81 @@ describe('university news pages', () => {
     expect(document.querySelector('script')).not.toBeInTheDocument()
   })
 
-  it('shows a clear not-found state for an unavailable direct link', async () => {
+  it('shows unavailable without retry or article for a first GET returning 404', async () => {
     const error = new ApiClientError('not found', 'not_found', 404)
     vi.mocked(apiFetch).mockRejectedValueOnce(error)
     renderNews('/news/404')
-    expect(await screen.findByText('Не удалось открыть новость')).toBeInTheDocument()
-    expect(screen.getByText('Эта новость не найдена или уже недоступна.')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Новость не найдена или больше недоступна',
+    )
+    expect(screen.queryByRole('article')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Повторить' })).not.toBeInTheDocument()
+  })
+
+  it('shows denied without retry or article for a first GET returning 403', async () => {
+    vi.mocked(apiFetch).mockRejectedValueOnce(new ApiClientError('forbidden', 'forbidden', 403))
+    renderNews('/news/403')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Доступ к новости запрещён')
+    expect(screen.queryByRole('article')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Повторить' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    [403, 'Доступ к новости запрещён'],
+    [404, 'Новость не найдена или больше недоступна'],
+  ])('hides and removes a cached article after HTTP %i', async (status, title) => {
+    const httpStatus = Number(status)
+    vi.mocked(apiFetch).mockRejectedValueOnce(
+      new ApiClientError('unavailable', httpStatus === 403 ? 'forbidden' : 'not_found', httpStatus),
+    )
+    const queryClient = renderNews('/news/21', undefined, { news: item })
+    expect(await screen.findByText(title)).toBeInTheDocument()
+    expect(screen.queryByRole('article')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: item.title })).not.toBeInTheDocument()
+    expect(screen.queryByText(item.body)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Повторить' })).not.toBeInTheDocument()
+    await waitFor(() => expect(queryClient.getQueryData(['news', 'item', '21'])).toBeUndefined())
+  })
+
+  it('hides a cached article after 401 and leaves logout to the central session handler', async () => {
+    vi.mocked(apiFetch).mockRejectedValueOnce(
+      new ApiClientError('session invalid', 'session_invalid', 401),
+    )
+    renderNews('/news/21', undefined, { news: item })
+    expect(await screen.findByText('Сессия завершена')).toBeInTheDocument()
+    expect(screen.queryByRole('article')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Повторить' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    [500, new ApiClientError('server', 'server_error', 500)],
+    ['network', new Error('offline')],
+  ])('keeps a cached article with a stale-data warning after %s', async (_failure, error) => {
+    const queryClient = renderNews('/news/21', undefined, { news: item })
+    vi.mocked(apiFetch).mockRejectedValueOnce(error)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Не удалось открыть новость')
+    expect(screen.getByRole('article')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: item.title })).toBeInTheDocument()
+    expect(
+      screen.getByText(/Показана ранее загруженная версия; её данные могут быть неактуальны/),
+    ).toBeInTheDocument()
+    expect(queryClient.getQueryState(['news', 'item', '21'])?.status).toBe('error')
+    expect(queryClient.getQueryData(['news', 'item', '21'])).toEqual(item)
+    expect(screen.getByRole('button', { name: 'Повторить' })).toBeInTheDocument()
+  })
+
+  it('shows an updated article after availability is restored and retry succeeds', async () => {
+    const updated = { ...item, title: 'Актуальная публикация', body: 'Новый текст' }
+    vi.mocked(apiFetch).mockRejectedValueOnce(new ApiClientError('gone', 'not_found', 404))
+    const queryClient = renderNews('/news/21', undefined, { news: item })
+    expect(await screen.findByText('Новость не найдена или больше недоступна')).toBeInTheDocument()
+    vi.mocked(apiFetch).mockResolvedValueOnce(updated)
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ['news', 'item', '21'], exact: true })
+    })
+    expect(await screen.findByRole('heading', { name: updated.title })).toBeInTheDocument()
+    expect(await screen.findByText(updated.body)).toBeInTheDocument()
+    expect(queryClient.getQueryData(['news', 'item', '21'])).toEqual(updated)
   })
 
   it('allows retrying a temporary detail request failure', async () => {
@@ -101,6 +175,20 @@ describe('university news pages', () => {
     expect(await screen.findByRole('heading', { name: item.title })).toBeInTheDocument()
     expect(apiFetch).toHaveBeenCalledTimes(2)
   })
+
+  it.each([
+    ['HTTP 500', new ApiClientError('server', 'server_error', 500)],
+    ['network error', new Error('offline')],
+  ])(
+    'shows a retryable error without an article when the first GET has a %s',
+    async (_kind, error) => {
+      vi.mocked(apiFetch).mockRejectedValueOnce(error)
+      renderNews('/news/21')
+      expect(await screen.findByRole('alert')).toHaveTextContent('Не удалось открыть новость')
+      expect(screen.queryByRole('article')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Повторить' })).toBeInTheDocument()
+    },
+  )
 
   it('keeps modified and non-primary return clicks under native browser handling', async () => {
     vi.mocked(apiFetch).mockResolvedValueOnce(page).mockResolvedValueOnce(item)
