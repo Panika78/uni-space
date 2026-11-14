@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
+    "check:licenses": "node scripts/check-production-licenses.mjs",
     "lint": "eslint .",
     "format:check": "prettier --check .",
     "typecheck": "tsc -b --pretty false",

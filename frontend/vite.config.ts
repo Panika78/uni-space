@@ -9,6 +9,10 @@ export function createViteConfig(mode: string, envDirectory = process.cwd()) {
 
   return {
     plugins: [react(), tailwindcss()],
+    build: {
+      // Vite 7.3 collects licenses only for dependencies present in emitted chunks.
+      license: { fileName: 'licenses.md' },
+    },
     resolve: {
       alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
     },
