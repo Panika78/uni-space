@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import DateTime, cast, exists, func, literal, select
+from sqlalchemy import DateTime, cast, func, literal, select
 from sqlalchemy.orm import Session, aliased
 
 from app.models import (
@@ -17,13 +17,10 @@ from app.models import (
     Teacher,
     User,
 )
+from app.schedule.participants import get_student_lesson_condition
 from app.schedule.schemas import LessonPosition, LessonResponse, ScheduleParams, ScheduleResponse
 
 MOSCOW = ZoneInfo("Europe/Moscow")
-
-
-def get_lesson_group_condition(lesson_id, group_id: int):
-    return exists().where(LessonGroup.lesson_id == lesson_id, LessonGroup.group_id == group_id)
 
 
 def get_lesson_position(lesson) -> LessonPosition:
@@ -32,7 +29,9 @@ def get_lesson_position(lesson) -> LessonPosition:
     )
 
 
-def list_student_schedule(db: Session, group_id: int, params: ScheduleParams) -> ScheduleResponse:
+def list_student_schedule(
+    db: Session, group_id: int, params: ScheduleParams, subgroup_id: int | None = None
+) -> ScheduleResponse:
     range_start = datetime.combine(params.date_from, time.min, MOSCOW)
     range_end = (
         cast(literal("10000-01-01 00:00:00+03"), DateTime(timezone=True))
@@ -54,7 +53,7 @@ def list_student_schedule(db: Session, group_id: int, params: ScheduleParams) ->
         .outerjoin(Teacher, Lesson.teacher_id == Teacher.id)
         .outerjoin(User, Teacher.user_id == User.id)
         .where(
-            get_lesson_group_condition(Lesson.id, group_id),
+            get_student_lesson_condition(Lesson.id, group_id, subgroup_id),
             Lesson.starts_at < range_end,
             Lesson.ends_at > range_start,
         )
@@ -70,6 +69,7 @@ def list_student_schedule(db: Session, group_id: int, params: ScheduleParams) ->
         select(LessonGroup.lesson_id, StudyGroup)
         .join(StudyGroup, LessonGroup.group_id == StudyGroup.id)
         .where(LessonGroup.lesson_id.in_(ids))
+        .distinct()
         .order_by(StudyGroup.name, StudyGroup.id)
     ):
         groups[lesson_id].append({"id": str(group.id), "name": group.name})
@@ -94,7 +94,8 @@ def list_student_schedule(db: Session, group_id: int, params: ScheduleParams) ->
             lesson.id: get_lesson_position(lesson)
             for lesson in db.scalars(
                 select(Lesson).where(
-                    Lesson.id.in_(previous_ids), get_lesson_group_condition(Lesson.id, group_id)
+                    Lesson.id.in_(previous_ids),
+                    get_student_lesson_condition(Lesson.id, group_id, subgroup_id),
                 )
             )
         }
@@ -126,7 +127,8 @@ def list_student_schedule(db: Session, group_id: int, params: ScheduleParams) ->
         # An intermediate reassignment must not hide a later return to this group.
         for position in db.execute(
             select(chain).where(
-                chain.c.status != "moved", get_lesson_group_condition(chain.c.id, group_id)
+                chain.c.status != "moved",
+                get_student_lesson_condition(chain.c.id, group_id, subgroup_id),
             )
         ):
             latest[position.root_id] = get_lesson_position(position)

@@ -9,6 +9,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     String,
@@ -114,13 +115,33 @@ class Lesson(Base):
 class LessonGroup(Base):
     __tablename__ = "lesson_groups"
     __table_args__ = (
-        UniqueConstraint("lesson_id", "group_id", name="uq_lesson_groups_lesson_group"),
+        Index(
+            "uq_lesson_groups_whole_group",
+            "lesson_id",
+            "group_id",
+            unique=True,
+            postgresql_where=text("subgroup_id IS NULL"),
+        ),
+        Index(
+            "uq_lesson_groups_subgroup",
+            "lesson_id",
+            "group_id",
+            "subgroup_id",
+            unique=True,
+            postgresql_where=text("subgroup_id IS NOT NULL"),
+        ),
+        ForeignKeyConstraint(
+            ["group_id", "subgroup_id"],
+            ["subgroups.group_id", "subgroups.id"],
+            name="fk_lesson_groups_group_subgroup",
+        ),
         Index("ix_lesson_groups_group_lesson", "group_id", "lesson_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
     lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"))
     group_id: Mapped[int] = mapped_column(ForeignKey("study_groups.id"))
+    subgroup_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 class LessonRoom(Base):

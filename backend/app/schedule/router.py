@@ -23,4 +23,4 @@ def get_student_schedule(
     student: Annotated[Student, Depends(get_current_student)],
     db: Annotated[Session, Depends(get_db_session)],
 ) -> ScheduleResponse:
-    return list_student_schedule(db, student.group_id, params)
+    return list_student_schedule(db, student.group_id, params, student.subgroup_id)
