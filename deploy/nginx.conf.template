@@ -1,6 +1,14 @@
 # Do not log request bodies, cookies, Authorization or query strings.
 log_format safe '$remote_addr $request_method $uri $status';
 server_tokens off;
+# Only successful Vite fingerprinted assets are immutable. Use the final URI
+# (including SPA internal redirects); never add a static cache policy to API.
+map "$status:$uri" $static_cache_control {
+    default '';
+    ~^[0-9]+:/api(?:/|$) '';
+    "~^(200|206|304):/assets/[^/]+-[A-Za-z0-9_-]{8,}\.[a-zA-Z0-9]+$" 'public, max-age=31536000, immutable';
+    ~^[0-9]+: 'no-cache';
+}
 # String keys in map are case-insensitive. HTTPS requires the canonical authority;
 # HTTP may arrive on another port, but must still name the same hostname.
 map $http_host $trusted_https_host {
@@ -31,6 +39,11 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     add_header Strict-Transport-Security 'max-age=31536000' always;
     add_header X-Content-Type-Options nosniff always;
+    add_header Content-Security-Policy "frame-ancestors 'none'" always;
+    add_header X-Frame-Options DENY always;
+    # Keep all add_header directives here: location-level add_header would drop
+    # inherited security headers on Nginx 1.30.
+    add_header Cache-Control $static_cache_control always;
     root /usr/share/nginx/html;
     index index.html;
 
@@ -50,11 +63,15 @@ server {
         proxy_redirect off;
     }
     location /assets/ {
+        gzip on;
+        gzip_vary on;
+        gzip_min_length 1024;
+        gzip_comp_level 5;
+        gzip_types text/css application/javascript;
         try_files $uri =404;
     }
     location / {
         try_files $uri $uri/ /index.html;
-        expires -1;
     }
 }
 # Container-local healthcheck only; proves proxy -> API, not just nginx -t.
