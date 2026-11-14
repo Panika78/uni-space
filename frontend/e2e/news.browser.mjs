@@ -442,7 +442,8 @@ try {
   currentScenario = 'hide a cached article after an access-denied refetch'
   await page.getByRole('link', { name: 'Расписание', exact: true }).click()
   await page.getByRole('heading', { name: 'Расписание', exact: true }).waitFor()
-  await page.clock.install({ time: new Date(Date.now() + 31_000) })
+  const browserTime = await page.evaluate(() => Date.now())
+  await page.clock.install({ time: new Date(browserTime + 31_000) })
   await context.route(
     (url) => url.pathname === `/api/v1/news/${encodeURIComponent(detailId)}`,
     (route) =>
@@ -454,7 +455,17 @@ try {
         }),
       }),
   )
+  const deniedResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/api/v1/news/${encodeURIComponent(detailId)}`) &&
+      response.status() === 403,
+  )
   await page.goBack()
+  assert.equal(
+    (await deniedResponse).status(),
+    403,
+    'The stale detail query should issue a read-only request and receive HTTP 403',
+  )
   await page.getByText('Доступ к новости запрещён', { exact: true }).waitFor()
   assert.equal(
     await page.locator('.news-article').count(),
