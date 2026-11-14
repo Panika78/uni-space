@@ -482,6 +482,51 @@ GitHub Actions выполняет проверки отдельными jobs д�
 push в `main`. В CI используются отдельные временные PostgreSQL и тестовые
 учётные данные; secrets и production-конфигурация не используются.
 
+### Браузерная регрессия новостей (TASK-023)
+
+`news-browser-e2e` запускает настоящий FastAPI, Vite и Playwright Chromium с
+отдельной PostgreSQL. Фикстура требует пустую таблицу `news`, создаёт одного
+вымышленного студента и ровно 70 опубликованных новостей с разными прошедшими
+датами. ID новости для прямого открытия передаётся из фикстуры, а не задаётся
+в тесте. Локальный прогон использует тот же скрипт и отдельный Compose project;
+нужны Docker Compose, Python/uv и Node/npm из раздела «Требования».
+
+Из корня проекта выполните:
+
+```bash
+npm install --global npm@11.19.1
+uv python install 3.12.16
+uv sync --locked --project backend --python 3.12.16
+npm ci --prefix frontend
+mkdir -p work/browser-tooling
+npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
+node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell
+NEWS_TEST_MANAGE_COMPOSE=1 PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_modules/playwright/index.mjs" npm run --prefix frontend e2e:news
+```
+
+Команда запуска мигрирует выделенную БД и подготавливает фикстуры автоматически.
+Она требует `APP_ENV=test` и базу `uni_space_test` на localhost; учётные данные
+изолированы от `.env`. При `NEWS_TEST_MANAGE_COMPOSE=1` runner очищает и поднимает
+только выделенный Compose project `uni-space-test`, а затем удаляет его с volume
+при успехе, ошибке и прерывании; exit code браузерного теста сохраняется.
+Файл с фиктивными credentials создаётся уникальным `mktemp` с правами `600`,
+проверяется до генерации и удаляется cleanup trap.
+Перед миграциями он проверяет, что порты 8000 и 5173 свободны. Vite использует
+`--strictPort`, readiness подтверждается доступностью API/Vite endpoints и
+runner контролирует собственные процессы до завершения браузера. Uvicorn access-log
+отключён; исходные API/Vite журналы создаются с правами владельца и не печатаются
+и не загружаются напрямую. При падении runner создаёт редактированные копии
+`work/news-browser-api.safe.log` / `work/news-browser-vite.safe.log`; в CI вместе
+со скриншотом загружаются только эти копии. Санитайзер рекурсивно обрабатывает
+чувствительные ключи JSON, HTTP-заголовки и распространённые формы `key=value`
+без учёта регистра; его regression-тесты проверяют редактирование и сохранение
+безопасной диагностики. Это не универсальная гарантия для произвольных форматов.
+Стандартные системные логи
+GitHub Actions находятся вне этой обработки и могут показывать фиктивный
+`POSTGRES_PASSWORD=test-only-password` для временного PostgreSQL service; это
+публичные тестовые данные, не production-секрет. Браузерные ожидания ограничены
+15 секундами.
+
 ## Сквозная приёмка MVP 1 (TASK-018)
 
 [Матрица покрытия и результаты](docs/MVP1_ACCEPTANCE.md) отделяет локальную
