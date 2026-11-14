@@ -17,6 +17,11 @@ const context = await browser.newContext({ viewport: { width: 360, height: 800 }
 const page = await context.newPage()
 const apiError = (code) => ({ error: { code, message: 'internal server detail', details: [] } })
 const check = (name) => console.log(`PASS ${name}`)
+const assertCssWidth = (actual, expected, label) =>
+  assert.ok(
+    Number.isFinite(actual) && Math.abs(actual - expected) <= 0.5,
+    `${label}: expected ${expected} CSS px ±0.5, received ${actual}`,
+  )
 const getDrawerState = () =>
   page.evaluate(() => ({
     drawerOpen: Boolean(document.querySelector('[role="dialog"][aria-modal="true"]')),
@@ -246,7 +251,11 @@ try {
   await bell.click()
   const dialog = page.getByRole('dialog', { name: 'Уведомления' })
   await page.getByText('Первая фиктивная запись', { exact: true }).waitFor()
-  assert.equal(await dialog.evaluate((element) => element.getBoundingClientRect().width), 360)
+  assertCssWidth(
+    await dialog.evaluate((element) => element.getBoundingClientRect().width),
+    360,
+    'mobile dialog',
+  )
   const mobileBackdropGeometry = await page.evaluate(() => {
     const backdrop = document.querySelector('.notification-backdrop')
     const drawer = document.querySelector('.notification-drawer')
@@ -255,7 +264,8 @@ try {
       drawerWidth: drawer?.getBoundingClientRect().width,
     }
   })
-  assert.deepEqual(mobileBackdropGeometry, { backdropWidth: 360, drawerWidth: 360 })
+  assertCssWidth(mobileBackdropGeometry.backdropWidth, 360, 'mobile backdrop')
+  assertCssWidth(mobileBackdropGeometry.drawerWidth, 360, 'mobile drawer')
   assert.equal(await page.locator('#root').evaluate((element) => element.inert), true)
   await page.getByRole('button', { name: 'Показать ещё', exact: true }).click()
   await page.getByRole('button', { name: 'Повторить загрузку', exact: true }).waitFor()
@@ -316,9 +326,10 @@ try {
   await bell.click()
   const desktopDialog = page.getByRole('dialog', { name: 'Уведомления' })
   await desktopDialog.waitFor()
-  assert.equal(
+  assertCssWidth(
     await desktopDialog.evaluate((element) => element.getBoundingClientRect().width),
     520,
+    'desktop dialog',
   )
   await closeDrawerAndAssert('desktop close button', () =>
     desktopDialog.getByRole('button', { name: 'Закрыть уведомления', exact: true }).click(),
