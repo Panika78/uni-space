@@ -46,7 +46,7 @@ docker compose -p task018 -f compose.test.yaml up -d --wait
 | G01–G03: оценки/сессия | строки двух таблиц demo; Browser E2E + /academics; academics integration/browser | Каждая дисциплина: сумма, число оценённых работ, ноль/нет оценки, текущая сессия; нет долга и истории | passed (demo/integration локально; academics CI 43424818134) | Итоговые оценки/пересдачи/empty — только специальные фикстуры |
 | D01–D02: подача | submitAndRestore; Browser E2E + реальный POST | Услуга study_certificate, создание submitted/pending | passed | Обработка сотрудником/PDF вне MVP 1 |
 | D03, NF07: сохранность | compareApplication после POST/reload/relogin; Browser E2E + API | Полное равенство GET результату POST: ID, услуга, form_data, оба статуса, timestamps; UI соответствует | passed | updated_at проверяется API, в UI нет такого поля; created_at также проверяется datetime |
-| NEW01: новости | открытие news detail/back через UI + API | Полный заголовок/body, даты 21/23, возврат, обе ширины | passed | Отдельный news.browser с 61 новостью — not tested, нет подготовленных фикстур в этой job |
+| NEW01: новости | demo UI/API и специализированный `news.browser.mjs` | Полный заголовок/body, детали и возврат; отдельный suite покрывает 70 строк, keyset-страницы, историю и адаптивность | passed demo; специализированный suite подключён задачей TASK-023 | Итоги полного прогона и CI указаны в PR TASK-023 |
 | N01: персональные уведомления | demo drawer; Browser E2E; NotificationsDrawer Vitest; auth integration | Разные уведомления, изоляция, открытие/закрытие | passed | Автогенерация событий вне MVP 1 |
 | NF04: изоляция | реальные Bearer/anonymous, /applications/{id}, no-store, forbidden query; Browser E2E + API/integration | Разные выборки; чужой/отсутствующий ID одинаковый 404; без Bearer 401; подстановка 422 | passed | Сетевые UI-симуляции не называются серверной интеграцией |
 | NF02, NF09–NF10: 360 px, состояния, навигация | demo UI menu/overflow; Browser E2E; функциональные browser suites; Vitest | Полный путь на обеих ширинах; loading/empty/error/retry/keyboard | passed (demo/Vitest; browser schedule/academics CI 43424818134) | Полный ручной accessibility-аудит — not tested |
@@ -66,9 +66,8 @@ docker compose -p task018 -f compose.test.yaml up -d --wait
 серверных 5xx. Специальные фикстуры отдельно от финального демонабора проверяют
 пустые состояния, результаты сессии, пересдачи и длинный контент.
 
-`news.browser.mjs` требует отдельного набора из 61 новости и пока не включён в CI
-(существующий TASK-023); этот самостоятельный browser suite локально НЕ ПРОВЕРЕН.
-Его наличие не заменяет фактический прогон. Полный ручной аудит доступности,
+`news.browser.mjs` запускается отдельным обязательным `news-browser-e2e` job
+(TASK-023) на изолированной PostgreSQL с 70 новостями. Полный ручной аудит доступности,
 production TLS, реальные устройства и доступ из России НЕ ПРОВЕРЕНЫ.
 
 ## Предыдущая приёмка до независимого ревью (история)
@@ -114,7 +113,7 @@ F-01 PARTIALLY CONFIRMED: shell не указан, явного pipefail нет;
 | NF04 / F-01 | scripts/test-e2e-exit.sh; CI regression | Оба реальных pipeline передают exit 37 и создают protocol | passed локально | Отрицательный subprocess намеренно падает; проверяющий процесс обязан завершиться 0 только при exit 37 |
 | A01–A05, NF04 / F-02 | auth.browser.mjs; Browser E2E с FastAPI/PostgreSQL и fault proxy | Вкладки, refresh/logout true/false/unknown, потерянные/поздние ответы, независимое устройство | passed (локально и CI 43424818134) | Управляемые сбои явно отделены от реальных ответов |
 | S01–S04 / F-03 | inspectMoves; Browser E2E + API | 19→20→23, 19→21, отмена, время/аудитории, кнопка конечной позиции и фокус, desktop/360 | passed (локальный demo E2E) | Финальный seed не меняется |
-| NEW01 / F-04 | demo E2E, news detail/back; Browser E2E + API | Заголовок/полный body, даты 21/23, возврат на обеих ширинах | passed (локальный demo E2E) | news.browser.mjs с 61 новостью — not tested |
+| NEW01 / F-04 | demo E2E и отдельный `news.browser.mjs`; Browser E2E + API | Заголовок/полный body, даты 21/23; keyset-пагинация, 31-минутное чтение, Back/Forward, прямые ссылки, Ctrl+Click и адаптивность | demo E2E passed; специализированный suite запускается job TASK-023 | См. фактические повторы и результат CI в PR TASK-023 |
 | D01–D03, NF07 / F-05 | compareApplication; Browser E2E + API | Полное равенство записи POST после reload/relogin, статусы/поля/time в UI | passed (локальный demo E2E) | updated_at не отображается UI; проверяется API, created_at — также datetime в UI |
 | G01, NF06 / F-06 | подписанные dt/dd профиля; Browser E2E + API | ФИО/факультет/программа/направление/курс/группа совпадают с seed и API; чужого ФИО нет | passed (локальный demo E2E) | Общий факультет студентов закономерно одинаковый |
 | G01–G03 / F-07 | строки текущих дисциплин и Сессии; Browser E2E + API | Суммы/счётчики, ноль/нет оценки, текущий семестр, нет фиктивного долга/истории | passed (локальный demo E2E) | Итоги/пересдачи/empty проверяются отдельным academics.browser и integration |
