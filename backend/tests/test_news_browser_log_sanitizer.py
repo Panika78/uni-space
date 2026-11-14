@@ -131,3 +131,33 @@ def test_sanitize_keeps_json_valid_and_redacts_nested_values() -> None:
 
     assert result["headers"]["Authorization"] == "[REDACTED]"
     assert result["port"] == 8000
+
+
+def test_sanitize_redacts_sensitive_values_inside_json_strings() -> None:
+    source = json.dumps(
+        {
+            "message": "Authorization: Bearer sentinel-auth",
+            "error": "password=sentinel-password",
+            "details": ["Request failed", "Cookie: session=sentinel-cookie"],
+            "nested": {"message": "X-API-Key: sentinel-api"},
+            "combined": "Authorization: Bearer sentinel-a; password=sentinel-b",
+            "normal": "API process failed on port 8000",
+        }
+    )
+
+    result = json.loads(SANITIZER.sanitize(source))
+
+    for marker in (
+        "sentinel-auth",
+        "sentinel-password",
+        "sentinel-cookie",
+        "sentinel-api",
+        "sentinel-a",
+        "sentinel-b",
+    ):
+        assert marker not in json.dumps(result)
+    assert result["details"][0] == "Request failed"
+    assert result["normal"] == "API process failed on port 8000"
+    assert isinstance(result["details"], list)
+    assert isinstance(result["nested"], dict)
+    assert json.loads(SANITIZER.sanitize(json.dumps(result))) == result

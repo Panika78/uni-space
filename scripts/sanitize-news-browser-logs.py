@@ -86,6 +86,8 @@ def redact_json(value: Any) -> Any:
         }
     if isinstance(value, list):
         return [redact_json(item) for item in value]
+    if isinstance(value, str):
+        return sanitize_text(value)
     return value
 
 
@@ -125,6 +127,10 @@ def redact_line(line: str) -> str:
     return f"{ASSIGNMENT.sub(redact_assignment, content)}{newline}"
 
 
+def sanitize_text(text: str) -> str:
+    return "".join(redact_line(line) for line in text.splitlines(keepends=True))
+
+
 def sanitize(text: str) -> str:
     """Redact sensitive JSON keys and common text header/key-value forms."""
     try:
@@ -134,7 +140,7 @@ def sanitize(text: str) -> str:
     else:
         return json.dumps(redact_json(parsed), ensure_ascii=False)
 
-    return "".join(redact_line(line) for line in text.splitlines(keepends=True))
+    return sanitize_text(text)
 
 
 def read_log(path: Path) -> str:
