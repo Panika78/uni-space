@@ -141,6 +141,7 @@ def test_sanitize_redacts_sensitive_values_inside_json_strings() -> None:
             "details": ["Request failed", "Cookie: session=sentinel-cookie"],
             "nested": {"message": "X-API-Key: sentinel-api"},
             "combined": "Authorization: Bearer sentinel-a; password=sentinel-b",
+            "quoted": 'Request had "Authorization: Bearer sentinel-quoted" and then failed',
             "normal": "API process failed on port 8000",
         }
     )
@@ -154,10 +155,64 @@ def test_sanitize_redacts_sensitive_values_inside_json_strings() -> None:
         "sentinel-api",
         "sentinel-a",
         "sentinel-b",
+        "sentinel-quoted",
     ):
         assert marker not in json.dumps(result)
     assert result["details"][0] == "Request failed"
+    assert result["quoted"] == 'Request had "Authorization: [REDACTED]" and then failed'
     assert result["normal"] == "API process failed on port 8000"
     assert isinstance(result["details"], list)
     assert isinstance(result["nested"], dict)
     assert json.loads(SANITIZER.sanitize(json.dumps(result))) == result
+
+
+@pytest.mark.parametrize(
+    ("source", "prefix", "markers"),
+    [
+        (
+            'INFO {"message":"Authorization: Bearer sentinel-auth"}',
+            "INFO ",
+            ("sentinel-auth",),
+        ),
+        (
+            'ERROR {"error":"password=sentinel-password"}',
+            "ERROR ",
+            ("sentinel-password",),
+        ),
+        (
+            '2026-11-14 12:00:00 INFO {"message":"Cookie: session=sentinel-cookie"}',
+            "2026-11-14 12:00:00 INFO ",
+            ("sentinel-cookie",),
+        ),
+        (
+            'INFO {"details":["Request failed","X-API-Key: sentinel-api"]}',
+            "INFO ",
+            ("sentinel-api",),
+        ),
+        (
+            'WARN {"nested":{"message":"Authorization: Bearer sentinel-nested"}}',
+            "WARN ",
+            ("sentinel-nested",),
+        ),
+        ('INFO {"message":"API started successfully"}', "INFO ", ()),
+        (
+            'ERROR {"message":"Connection refused on port 8000"}',
+            "ERROR ",
+            (),
+        ),
+    ],
+)
+def test_sanitize_redacts_json_after_logger_prefix(
+    source: str, prefix: str, markers: tuple[str, ...]
+) -> None:
+    result = SANITIZER.sanitize(source)
+
+    assert result.startswith(prefix)
+    safe_payload = json.loads(result[len(prefix) :])
+    for marker in markers:
+        assert marker not in result
+    assert SANITIZER.sanitize(result) == result
+    if "API started successfully" in source:
+        assert safe_payload["message"] == "API started successfully"
+    if "Connection refused" in source:
+        assert safe_payload["message"] == "Connection refused on port 8000"

@@ -61,8 +61,13 @@ HEADER_FIELDS = frozenset(
 ASSIGNMENT = re.compile(
     r"(?P<prefix>(?<![\w.-])(?P<quote>['\"]?)(?P<key>[a-z][a-z0-9_.-]*)"
     r"(?P=quote)\s*[:=]\s*)"
-    r"(?P<value>['\"](?:\\.|[^'\"\\])*['\"]|(?:bearer|basic)\s+\S+|"
+    r"(?P<value>['\"](?:\\.|[^'\"\\])*['\"]|(?:bearer|basic)\s+[^\s,;'\"{}\[\]]+|"
     r"[^\s,;&{}\[\]]+)",
+    re.IGNORECASE,
+)
+LOGGER_PREFIXED_JSON = re.compile(
+    r"^(?P<prefix>.*?\b(?:TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|CRITICAL)\s*:?[ \t]+)"
+    r"(?P<json>[\[{].*)$",
     re.IGNORECASE,
 )
 
@@ -112,6 +117,18 @@ def redact_line(line: str) -> str:
     else:
         return f"{json.dumps(redact_json(parsed), ensure_ascii=False)}{newline}"
 
+    prefixed_json = LOGGER_PREFIXED_JSON.match(content)
+    if prefixed_json:
+        json_fragment = prefixed_json.group("json")
+        try:
+            parsed, end = json.JSONDecoder().raw_decode(json_fragment)
+        except json.JSONDecodeError:
+            pass
+        else:
+            if not json_fragment[end:].strip():
+                safe_json = json.dumps(redact_json(parsed), ensure_ascii=False)
+                return f"{prefixed_json.group('prefix')}{safe_json}{newline}"
+
     for match in ASSIGNMENT.finditer(content):
         key = match.group("key")
         value = match.group("value")
@@ -121,10 +138,34 @@ def redact_line(line: str) -> str:
             and normalize_key(key) in COOKIE_FIELDS | HEADER_FIELDS
             and not quote
         ):
-            # Header values can contain multiple space-separated fields or attributes.
-            return f"{content[: match.start('value')]}[REDACTED]{newline}"
+            before_key = content[: match.start("key")]
+            if not before_key.strip():
+                # A standalone header line can have multi-part values or attributes.
+                return f"{content[: match.start('value')]}[REDACTED]{newline}"
+            if before_key.endswith(('"', "'")):
+                quote_character = before_key[-1]
+                quote_end = find_closing_quote(content, match.end(), quote_character)
+                if quote_end >= 0:
+                    return (
+                        f"{content[: match.start('value')]}[REDACTED]"
+                        f"{content[quote_end:]}{newline}"
+                    )
 
     return f"{ASSIGNMENT.sub(redact_assignment, content)}{newline}"
+
+
+def find_closing_quote(text: str, start: int, quote: str) -> int:
+    for index in range(start, len(text)):
+        if text[index] != quote:
+            continue
+        backslashes = 0
+        previous = index - 1
+        while previous >= 0 and text[previous] == "\\":
+            backslashes += 1
+            previous -= 1
+        if backslashes % 2 == 0:
+            return index
+    return -1
 
 
 def sanitize_text(text: str) -> str:
