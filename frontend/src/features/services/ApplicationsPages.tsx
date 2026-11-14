@@ -97,18 +97,14 @@ export function ApplicationsList() {
     if (link) {
       // An asynchronous list refresh can lose the restored focus. Retry only
       // when focus falls back to the body, without overriding user navigation.
-      const needsFocus =
-        !restoredLink.current ||
-        (!query.isFetching && document.activeElement === document.body)
-      if (needsFocus) {
+      const focusWasLost = document.activeElement === document.body
+      if (!restoredLink.current || (!query.isFetching && focusWasLost)) {
         link.focus({ preventScroll: true })
         restoredLink.current = link
       }
-    } else if (
-      !query.isFetching &&
-      (!restoredLink.current || document.activeElement === document.body)
-    ) {
-      heading.current?.focus({ preventScroll: true })
+    } else if (!query.isFetching) {
+      const shouldFocusHeading = !restoredLink.current || document.activeElement === document.body
+      if (shouldFocusHeading) heading.current?.focus({ preventScroll: true })
     }
     if (!query.isFetching) {
       returnFocus.current = undefined
