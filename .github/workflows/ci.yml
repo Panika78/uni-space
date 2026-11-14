@@ -386,6 +386,13 @@ jobs:
       - name: Show server logs on failure
         if: failure()
         run: tail -n 80 work/services-api.log work/services-frontend.log 2>/dev/null || true
+      - name: Upload application geometry evidence without auth logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: application-review-evidence
+          path: work/application-status-*.png
+          if-no-files-found: warn
 
   auth-browser-e2e:
     name: Auth lifecycle in Chromium
@@ -614,6 +621,13 @@ jobs:
             sleep 1
           done
           PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs SCHEDULE_TEST_PASSWORD=fictional-schedule-password node frontend/e2e/academics.browser.mjs
+      - name: Upload academic layout evidence without auth logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: academics-review-evidence
+          path: work/academics-*.png
+          if-no-files-found: warn
 
   demo-data-browser:
     name: MVP1 acceptance on final demo data
