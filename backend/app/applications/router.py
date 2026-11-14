@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy import select, tuple_
 from sqlalchemy.orm import Session
 
@@ -21,14 +22,23 @@ from app.models import Application, ServiceType, Student
 router = APIRouter(prefix="/api/v1", tags=["services", "applications"])
 
 
+def validate_services_query(request: Request) -> None:
+    invalid_names = list(request.query_params)
+    if invalid_names:
+        raise RequestValidationError(
+            [{"type": "extra_forbidden", "loc": ("query", name)} for name in invalid_names]
+        )
+
+
 @router.get(
     "/services",
     response_model=ServiceList,
-    responses={401: {"model": ApiError}, 403: {"model": ApiError}},
+    responses={code: {"model": ApiError} for code in (401, 403, 422)},
 )
 def list_services(
     _student: Annotated[Student, Depends(get_current_student)],
     db: Annotated[Session, Depends(get_db_session)],
+    _validated_query: Annotated[None, Depends(validate_services_query)],
 ) -> ServiceList:
     services = db.scalars(
         select(ServiceType)

@@ -158,7 +158,7 @@ it('appends pages and retains the list when returning from separate details', as
   fireEvent.click(screen.getByRole('link', { name: /К моим заявлениям/ }))
   await screen.findByRole('link', { name: /№ 26/ })
   await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(5))
-  expect(screen.getByRole('link', { name: /№ 27/ })).toHaveFocus()
+  await waitFor(() => expect(screen.getByRole('link', { name: /№ 27/ })).toHaveFocus())
 })
 it('restores source row focus if a background list refresh loses it', async () => {
   const refresh = createDeferred<{ items: (typeof item)[]; next_cursor: null }>()
@@ -318,7 +318,7 @@ it('returns focus to the list heading when the source record disappears after re
   await screen.findByRole('heading', { name: 'Заявление № 27' })
   fireEvent.click(screen.getByRole('link', { name: /К моим заявлениям/ }))
   await screen.findByText('Вы ещё не подавали заявлений')
-  expect(screen.getByRole('heading', { name: 'Мои заявления' })).toHaveFocus()
+  await waitFor(() => expect(screen.getByRole('heading', { name: 'Мои заявления' })).toHaveFocus())
   expect(screen.queryByRole('link', { name: /№ 27/ })).not.toBeInTheDocument()
   expect(client.getQueryData(['applications', 'return-focus'])).toBeUndefined()
 })
