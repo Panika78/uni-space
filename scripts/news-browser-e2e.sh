@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+set -m
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+umask 077
 mkdir -p work
 rm -f work/news-browser-failure.png work/news-browser-detail.png
-FIXTURE_ENV="$ROOT_DIR/work/news-browser.env"
+rm -f "$ROOT_DIR/work/news-browser.env"
+FIXTURE_ENV=""
 API_LOG="$ROOT_DIR/work/news-browser-api.log"
 VITE_LOG="$ROOT_DIR/work/news-browser-vite.log"
-rm -f "$API_LOG" "$VITE_LOG"
+SAFE_API_LOG="$ROOT_DIR/work/news-browser-api.safe.log"
+SAFE_VITE_LOG="$ROOT_DIR/work/news-browser-vite.safe.log"
+rm -f "$API_LOG" "$VITE_LOG" "$SAFE_API_LOG" "$SAFE_VITE_LOG"
+: > "$API_LOG"
+: > "$VITE_LOG"
 PYTHON_VERSION="${NEWS_TEST_PYTHON_VERSION:-3.12.16}"
 export NEWS_TEST_PYTHON_VERSION="$PYTHON_VERSION"
 API_PID=""
@@ -30,7 +37,9 @@ cleanup() {
   local cleanup_status=0
   local attempt
   trap - EXIT INT TERM
-  rm -f "$FIXTURE_ENV"
+  if [[ -n "$FIXTURE_ENV" ]]; then
+    rm -f "$FIXTURE_ENV"
+  fi
   for pid in "$TEST_PID" "$API_PID" "$VITE_PID"; do
     if [[ -n "$pid" ]] && kill -0 -- "-$pid" 2>/dev/null; then
       kill -- "-$pid" 2>/dev/null || true
@@ -59,8 +68,14 @@ cleanup() {
       || cleanup_status=$?
   fi
   if (( status != 0 )); then
-    echo "News browser E2E failed (exit $status). Recent server logs:"
-    tail -n 60 "$API_LOG" "$VITE_LOG" 2>/dev/null || true
+    echo "News browser E2E failed (exit $status). Recent sanitized server logs:"
+    if python3 "$ROOT_DIR/scripts/sanitize-news-browser-logs.py" \
+      --api-log "$API_LOG" --vite-log "$VITE_LOG" --output-dir "$ROOT_DIR/work"; then
+      tail -n 60 "$SAFE_API_LOG" "$SAFE_VITE_LOG" 2>/dev/null || true
+    else
+      echo 'Could not prepare sanitized news E2E server logs.' >&2
+      cleanup_status=1
+    fi
   fi
   if (( cleanup_status != 0 )); then
     echo "News E2E Compose cleanup failed (exit $cleanup_status)." >&2
@@ -95,6 +110,8 @@ conflicts = []
 for port in (8000, 5173):
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            # Reuse TIME_WAIT sockets left by a previous local run; active listeners
+            # still make bind fail, so an already-running API/Vite cannot be reused.
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listener.bind(("127.0.0.1", port))
     except OSError:
@@ -115,19 +132,28 @@ if [[ "$MANAGE_COMPOSE" == 1 ]]; then
 fi
 
 uv run --locked --python "$PYTHON_VERSION" --project backend alembic -c backend/alembic.ini upgrade head
+FIXTURE_ENV="$(mktemp "$ROOT_DIR/work/news-browser.env.XXXXXXXX")"
+python3 - "$FIXTURE_ENV" <<'PY'
+import os
+import stat
+import sys
+
+mode = stat.S_IMODE(os.stat(sys.argv[1]).st_mode)
+if mode != 0o600:
+    raise SystemExit(f"News browser credential file must start at mode 600, got {mode:o}")
+PY
 PYTHONPATH=backend uv run --locked --python "$PYTHON_VERSION" --project backend \
   python backend/scripts/seed_news_browser_fixtures.py > "$FIXTURE_ENV"
-chmod 600 "$FIXTURE_ENV"
 # The file contains only short-lived, fictional test credentials and is removed by cleanup.
 set -a
 source "$FIXTURE_ENV"
 set +a
 export NEWS_TEST_URL=http://localhost:5173
 
-setsid bash -c 'cd backend && exec uv run --locked --python "$NEWS_TEST_PYTHON_VERSION" uvicorn app.main:app --no-access-log --host 127.0.0.1 --port 8000' \
+(cd backend && exec uv run --locked --python "$NEWS_TEST_PYTHON_VERSION" uvicorn app.main:app --no-access-log --host 127.0.0.1 --port 8000) \
   > "$API_LOG" 2>&1 < /dev/null &
 API_PID=$!
-setsid bash -c 'cd frontend && exec npm run dev -- --host 127.0.0.1 --strictPort' \
+(cd frontend && exec npm run dev -- --host 127.0.0.1 --strictPort) \
   > "$VITE_LOG" 2>&1 < /dev/null &
 VITE_PID=$!
 
@@ -153,7 +179,7 @@ if [[ "$ready" != true ]]; then
   exit 1
 fi
 
-setsid env PLAYWRIGHT_MODULE="$PLAYWRIGHT_MODULE" node frontend/e2e/news.browser.mjs &
+env PLAYWRIGHT_MODULE="$PLAYWRIGHT_MODULE" node frontend/e2e/news.browser.mjs &
 TEST_PID=$!
 set +e
 completed_pid=""

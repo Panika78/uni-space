@@ -1,5 +1,7 @@
 """Create isolated fictional student/news data for the dedicated browser E2E."""
 
+import os
+import stat
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -13,6 +15,10 @@ from app.models import News, OrgUnit, Program, Student, StudyGroup, User
 
 
 def main() -> None:
+    output_mode = stat.S_IMODE(os.fstat(1).st_mode)
+    if not stat.S_ISREG(os.fstat(1).st_mode) or output_mode != 0o600:
+        raise SystemExit("Fixture credentials require a regular 0600 output file")
+
     settings = get_settings()
     url = make_url(settings.database_url.get_secret_value())
     if (

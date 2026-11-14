@@ -318,8 +318,8 @@ jobs:
           name: news-browser-failure
           path: |
             work/news-browser-failure.png
-            work/news-browser-api.log
-            work/news-browser-vite.log
+            work/news-browser-api.safe.log
+            work/news-browser-vite.safe.log
           if-no-files-found: ignore
           retention-days: 7
 

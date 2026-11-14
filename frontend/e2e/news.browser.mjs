@@ -1,6 +1,7 @@
-/* global process, console, URL, window, document */
+/* global process, console, URL, URLSearchParams, window, document */
 // Run against Vite, the real backend and exactly 70 isolated fictional news rows.
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { clearTimeout, setTimeout } from 'node:timers'
 
 const playwright = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
@@ -89,6 +90,7 @@ try {
   await page.getByLabel('Пароль', { exact: true }).fill(password)
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
   await page.getByRole('heading', { name: 'Расписание', exact: true }).waitFor()
+  const initialPageRequestStart = apiRequests.length
   await page.getByRole('link', { name: 'Новости', exact: true }).click()
   await page.getByRole('heading', { name: 'Новости', exact: true }).waitFor()
   await waitForNewsRows(20)
@@ -142,7 +144,82 @@ try {
     publishedDates.every((value, index) => index === 0 || publishedDates[index - 1] > value),
     'News pages should remain strictly sorted by publication time descending',
   )
-  check('real backend loads three keyset pages')
+  const initialPageQueries = apiRequests.slice(initialPageRequestStart).map((query) => {
+    const params = new URLSearchParams(query)
+    return { limit: params.get('limit'), cursor: params.get('cursor') }
+  })
+  assert.ok(initialPageQueries.length >= 3, 'Initial feed should request its three pages')
+  assert.equal(
+    new Set(initialPageQueries.map((query) => query.cursor)).size,
+    3,
+    'Initial feed should request exactly three distinct keyset pages',
+  )
+  for (const [index, query] of initialPageQueries.entries()) {
+    assert.equal(query.limit, '20', `Initial page ${index + 1} should request limit=20`)
+    if (query.cursor !== null)
+      assert.ok(query.cursor, `Initial page ${index + 1} cursor is invalid`)
+  }
+  assert.equal(initialPageQueries[0].cursor, null, 'Initial page should not send a cursor')
+  assert.equal(
+    new Set(
+      await page
+        .locator('.news-row__link')
+        .evaluateAll((links) => links.map((link) => link.getAttribute('href'))),
+    ).size,
+    60,
+    'Three initial pages should render 60 unique publications',
+  )
+
+  currentScenario = 'update a second-page publication in isolated PostgreSQL'
+  const targetRowIndex = 24
+  assert.ok(targetRowIndex >= 20 && targetRowIndex < 40, 'Target must be on page two')
+  const targetLink = page.locator('.news-row__link').nth(targetRowIndex)
+  const targetHref = await targetLink.getAttribute('href')
+  assert.ok(targetHref, 'Second-page fixture publication should have a direct URL')
+  const targetURL = new URL(targetHref, baseURL)
+  const targetNewsId = decodeURIComponent(targetURL.pathname.split('/').at(-1) || '')
+  assert.match(targetNewsId, /^\d+$/, 'Target publication ID should come from the API link')
+  const originalTargetTitle = (await targetLink.locator('h2').textContent())?.trim()
+  assert.ok(originalTargetTitle, 'Second-page fixture publication should have a title')
+  const targetLinkById = page.locator(`.news-row__link[href="/news/${targetNewsId}"]`)
+  assert.equal(
+    await targetLinkById.getByRole('heading', { name: originalTargetTitle, exact: true }).count(),
+    1,
+    'DOM should show the original title before changing the database fixture',
+  )
+  const updateRequestCount = apiRequests.length
+  const updatedTargetTitle = `${originalTargetTitle} — ОБНОВЛЕНО`
+  execFileSync(
+    'uv',
+    [
+      'run',
+      '--locked',
+      '--python',
+      process.env.NEWS_TEST_PYTHON_VERSION || '3.12.16',
+      '--project',
+      'backend',
+      'python',
+      'backend/scripts/update_news_browser_fixture.py',
+      '--news-id',
+      targetNewsId,
+      '--title',
+      updatedTargetTitle,
+    ],
+    { cwd: process.cwd(), encoding: 'utf8', timeout: 15_000 },
+  )
+  assert.equal(
+    apiRequests.length,
+    updateRequestCount,
+    'Direct PostgreSQL fixture update must not issue an API request or refresh the cache',
+  )
+  assert.equal(
+    await targetLinkById.getByRole('heading', { name: originalTargetTitle, exact: true }).count(),
+    1,
+    'DOM should remain unchanged until the 31-minute refresh',
+  )
+  check(
+    'three pages of 20 loaded; a page-two publication changed in PostgreSQL while DOM stayed stale',
+  )
 
   currentScenario = 'open an article and verify detail scroll behavior'
   await page.evaluate(() => window.scrollTo(0, 700))
@@ -246,6 +323,36 @@ try {
   await page.getByRole('button', { name: 'Показать ещё', exact: true }).waitFor()
   await waitForThreeRefreshPages(threeRefreshPages, refreshPageRecords)
   assertThreePageCursorChain(refreshPageRecords, '31-minute feed refresh')
+  const updatedResponseItems = refreshPageRecords.flatMap((pageRecord) =>
+    pageRecord.items.filter((item) => String(item.id) === targetNewsId),
+  )
+  assert.equal(
+    updatedResponseItems.length,
+    1,
+    'Refresh response should include the changed publication',
+  )
+  assert.equal(
+    updatedResponseItems[0].title,
+    updatedTargetTitle,
+    'Refresh HTTP response should contain the PostgreSQL title update',
+  )
+  try {
+    await targetLinkById
+      .getByRole('heading', { name: updatedTargetTitle, exact: true })
+      .waitFor({ timeout: 15_000 })
+  } catch {
+    const actualTitle = (await targetLinkById.locator('h2').textContent())?.trim()
+    assert.equal(
+      actualTitle,
+      updatedTargetTitle,
+      `Refreshed publication is not displayed. Expected: ${updatedTargetTitle}; Actual: ${actualTitle}`,
+    )
+  }
+  assert.equal(
+    await targetLinkById.getByRole('heading', { name: originalTargetTitle, exact: true }).count(),
+    0,
+    'Old publication title should disappear from the refreshed DOM',
+  )
   await waitForNewsRows(60)
   await context.unroute(newsListPageRoute)
   assert.equal(
