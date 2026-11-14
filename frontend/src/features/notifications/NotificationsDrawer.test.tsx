@@ -105,4 +105,28 @@ describe('NotificationsDrawer', () => {
     expect(await screen.findByText('Current account')).toBeInTheDocument()
     expect(screen.queryByText('Old account')).not.toBeInTheDocument()
   })
+
+  it('ignores an aborted response after closing and reopening the mounted drawer', async () => {
+    let resolveOld!: (page: { items: (typeof notification)[]; next_cursor: null }) => void
+    vi.mocked(apiFetch)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve
+          }),
+      )
+      .mockResolvedValueOnce({
+        items: [{ ...notification, title: 'Свежие уведомления' }],
+        next_cursor: null,
+      })
+    const view = render(<NotificationsDrawer isOpen onClose={() => undefined} />)
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1))
+    view.rerender(<NotificationsDrawer isOpen={false} onClose={() => undefined} />)
+    expect(vi.mocked(apiFetch).mock.calls[0][1]?.signal?.aborted).toBe(true)
+    view.rerender(<NotificationsDrawer isOpen onClose={() => undefined} />)
+    expect(await screen.findByText('Свежие уведомления')).toBeInTheDocument()
+    resolveOld({ items: [{ ...notification, title: 'Старый ответ' }], next_cursor: null })
+    await waitFor(() => expect(screen.queryByText('Старый ответ')).not.toBeInTheDocument())
+    expect(screen.getByText('Свежие уведомления')).toBeInTheDocument()
+  })
 })

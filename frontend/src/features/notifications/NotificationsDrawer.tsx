@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createPortal } from 'react-dom'
 import { apiFetch } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
+import { useOverlayPresence } from '../../shared/ui/useOverlayPresence'
 
 type Notification = components['schemas']['NotificationResponse']
 type Page = components['schemas']['NotificationPage']
@@ -28,7 +29,14 @@ function NotificationRow({ item }: { item: Notification }) {
   )
 }
 
-export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
+export function NotificationsDrawer({
+  onClose,
+  isOpen = true,
+}: {
+  onClose: () => void
+  isOpen?: boolean
+}) {
+  const { present, rootRef } = useOverlayPresence(isOpen, 'right')
   const panelRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const lastFocusedRef = useRef<HTMLElement | null>(null)
@@ -41,6 +49,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
   const [moreError, setMoreError] = useState(false)
 
   useLayoutEffect(() => {
+    if (!isOpen) return
     closeRef.current?.focus()
     const previousOverflow = document.body.style.overflow
     const root = document.getElementById('root')
@@ -95,7 +104,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
       if (root) root.inert = wasRootInert
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [onClose])
+  }, [onClose, isOpen])
 
   const load = useCallback(async (nextCursor?: string) => {
     requestRef.current?.abort()
@@ -112,6 +121,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
         authenticated: true,
         signal: controller.signal,
       })
+      if (controller.signal.aborted || requestRef.current !== controller) return
       setItems((previous) =>
         nextCursor
           ? [
@@ -130,21 +140,35 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
       if (nextCursor) setMoreError(true)
       else setError(true)
     } finally {
-      setIsLoading(false)
-      setIsLoadingMore(false)
+      if (!controller.signal.aborted && requestRef.current === controller) {
+        setIsLoading(false)
+        setIsLoadingMore(false)
+      }
     }
   }, [])
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void load(), 0)
+    if (!isOpen) return
+    const timer = window.setTimeout(() => {
+      setItems([])
+      setCursor(null)
+      void load()
+    }, 0)
     return () => {
       window.clearTimeout(timer)
       requestRef.current?.abort()
     }
-  }, [load])
+  }, [load, isOpen])
+
+  if (!present) return null
 
   return createPortal(
-    <div className="notification-drawer-layer">
+    <div
+      ref={rootRef}
+      className="notification-drawer-layer"
+      inert={!isOpen}
+      aria-hidden={!isOpen || undefined}
+    >
       <button
         className="notification-backdrop"
         aria-label="Закрыть уведомления"
@@ -152,6 +176,7 @@ export function NotificationsDrawer({ onClose }: { onClose: () => void }) {
         onClick={onClose}
       />
       <aside
+        data-motion-panel
         ref={panelRef}
         onFocusCapture={(event) => {
           lastFocusedRef.current = event.target as HTMLElement

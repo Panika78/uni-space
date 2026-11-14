@@ -39,6 +39,13 @@ it('shows loading then exact numeric scores and a separate session below discipl
   expect(screen.getByText('Не выставлено')).toBeInTheDocument()
   const headings = screen.getAllByRole('heading', { level: 2 }).map((el) => el.textContent)
   expect(headings).toEqual(['Текущие дисциплины', 'Сессия'])
+  for (const name of headings) {
+    const table = screen.getByRole('table', { name })
+    expect(within(table).getAllByRole('columnheader')).toHaveLength(3)
+    expect(
+      within(table).getByRole('rowheader', { name: 'Вымышленная дисциплина' }),
+    ).toBeInTheDocument()
+  }
   expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
   expect(screen.queryByRole('link')).not.toBeInTheDocument()
   expect(apiFetch).toHaveBeenCalledWith(

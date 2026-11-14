@@ -1,38 +1,47 @@
 import { useStudentProfile, getStudentInitials } from '../features/profile/profileContext'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FocusEvent } from 'react'
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../features/auth/AuthProvider'
 import { UnsavedChangesProvider, type ExitProtectionStatus } from './UnsavedChangesContext'
 import { UnavailableState } from '../shared/ui/StatusStates'
 import { UniversityBrand } from '../shared/ui/UniversityBrand'
 import { NotificationsDrawer } from '../features/notifications/NotificationsDrawer'
+import { Icon } from '../shared/ui/Icon'
+import { useOverlayPresence } from '../shared/ui/useOverlayPresence'
 
 const navigation = [
-  { to: '/schedule', label: 'Расписание', icon: '▦' },
-  { to: '/academics', label: 'Успеваемость', icon: '▤' },
-  { to: '/services', label: 'Услуги и документы', icon: '▧' },
-  { to: '/news', label: 'Новости', icon: '▣' },
-]
+  { to: '/schedule', label: 'Расписание', icon: 'calendar' },
+  { to: '/academics', label: 'Успеваемость', icon: 'graduation' },
+  { to: '/services', label: 'Услуги и документы', icon: 'file' },
+  { to: '/news', label: 'Новости', icon: 'book' },
+] as const
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
+  const { pathname } = useLocation()
   return (
     <nav className="student-navigation" aria-label="Разделы кабинета">
-      {navigation.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          onClick={onNavigate}
-          className={({ isActive }) => `student-navigation__link${isActive ? ' is-active' : ''}`}
-          end
-          title={item.label}
-        >
-          <span className="navigation-icon" aria-hidden="true">
-            {item.icon}
-          </span>
-          <span className="navigation-label">{item.label}</span>
-        </NavLink>
-      ))}
+      {navigation.map((item) => {
+        const isActive =
+          pathname === item.to ||
+          pathname.startsWith(`${item.to}/`) ||
+          (item.to === '/services' && pathname.startsWith('/applications/'))
+        return (
+          <Link
+            key={item.to}
+            to={item.to}
+            onClick={onNavigate}
+            className={`student-navigation__link${isActive ? ' is-active' : ''}`}
+            aria-current={isActive ? 'page' : undefined}
+            title={item.label}
+          >
+            <span className="navigation-icon" aria-hidden="true">
+              <Icon name={item.icon} />
+            </span>
+            <span className="navigation-label">{item.label}</span>
+          </Link>
+        )
+      })}
     </nav>
   )
 }
@@ -47,6 +56,7 @@ export function UserMenu({
   const profile = useStudentProfile()
   const { logout } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
+  const { present: isMenuPresent, rootRef: menuPanelRef } = useOverlayPresence(isOpen, 'menu')
   const [confirmLogout, setConfirmLogout] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -114,8 +124,14 @@ export function UserMenu({
           <span aria-hidden="true">{getStudentInitials(profile?.full_name)}</span>
         </button>
       )}
-      {isOpen && (
-        <div className="user-menu__panel" id="user-menu-panel">
+      {isMenuPresent && (
+        <div
+          ref={menuPanelRef}
+          inert={!isOpen}
+          aria-hidden={!isOpen || undefined}
+          className="user-menu__panel"
+          id="user-menu-panel"
+        >
           <Link to="/profile" onClick={() => setIsOpen(false)}>
             Мой профиль
           </Link>
@@ -211,10 +227,17 @@ export function UserMenu({
   )
 }
 
-function MobileDrawer({ onClose }: { onClose: () => void }) {
+function MobileDrawer({ onClose, isOpen }: { onClose: () => void; isOpen: boolean }) {
+  const { present, rootRef } = useOverlayPresence(isOpen, 'left')
   const closeRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
+    if (!isOpen) return
+    const background = document.querySelector<HTMLElement>('.student-main-column')
+    const sidebar = document.querySelector<HTMLElement>('.desktop-sidebar')
+    const previousInert = [background?.inert, sidebar?.inert]
+    if (background) background.inert = true
+    if (sidebar) sidebar.inert = true
     closeRef.current?.focus()
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -232,7 +255,10 @@ function MobileDrawer({ onClose }: { onClose: () => void }) {
       const first = focusable[0]
       const last = focusable.at(-1)
       if (!first || !last) return
-      if (event.shiftKey && document.activeElement === first) {
+      if (!document.querySelector('.mobile-drawer')?.contains(document.activeElement)) {
+        event.preventDefault()
+        first.focus()
+      } else if (event.shiftKey && document.activeElement === first) {
         event.preventDefault()
         last.focus()
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -243,14 +269,24 @@ function MobileDrawer({ onClose }: { onClose: () => void }) {
     document.addEventListener('keydown', handleKeyDown)
     return () => {
       document.body.style.overflow = previousOverflow
+      if (background) background.inert = previousInert[0] ?? false
+      if (sidebar) sidebar.inert = previousInert[1] ?? false
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [onClose])
+  }, [onClose, isOpen])
+
+  if (!present) return null
 
   return (
-    <div className="mobile-drawer-layer">
+    <div
+      ref={rootRef}
+      className="mobile-drawer-layer"
+      inert={!isOpen}
+      aria-hidden={!isOpen || undefined}
+    >
       <button className="drawer-backdrop" aria-label="Закрыть меню" onClick={onClose} />
       <aside
+        data-motion-panel
         className="mobile-drawer"
         role="dialog"
         aria-modal="true"
@@ -331,12 +367,15 @@ export function StudentLayout() {
           aria-label={isCollapsed ? 'Развернуть меню' : 'Свернуть меню'}
           aria-expanded={!isCollapsed}
         >
-          <span aria-hidden="true">{isCollapsed ? '»' : '«'}</span>
+          <Icon name={isCollapsed ? 'right' : 'left'} />
           <span className="navigation-label">Свернуть меню</span>
         </button>
       </aside>
 
       <div className="student-main-column">
+        <div className="ambient-canvas" aria-hidden="true">
+          <span className="ambient-orbit" />
+        </div>
         <header className="student-topbar">
           <button
             ref={menuButtonRef}
@@ -345,7 +384,7 @@ export function StudentLayout() {
             aria-expanded={isDrawerOpen}
             onClick={() => setIsDrawerOpen(true)}
           >
-            <span aria-hidden="true">☰</span>
+            <Icon name="menu" />
           </button>
           <span className="topbar-spacer" />
           <span className="topbar-prototype-note" data-testid="prototype-disclaimer">
@@ -389,21 +428,27 @@ export function StudentLayout() {
           </UnsavedChangesProvider>
         </main>
       </div>
-      {isDrawerOpen && <MobileDrawer onClose={closeDrawer} />}
-      {showNotifications && <NotificationsDrawer onClose={closeNotifications} />}
+      <MobileDrawer isOpen={isDrawerOpen} onClose={closeDrawer} />
+      <NotificationsDrawer isOpen={showNotifications} onClose={closeNotifications} />
     </div>
   )
 }
 
 export function UnavailableSection({ title }: { title: string }) {
   return (
-    <section className="section-page" aria-labelledby="section-title">
+    <section className="section-page unavailable-page" aria-labelledby="section-title">
       <p className="section-eyebrow">Студенческий кабинет</p>
       <h1 id="section-title">{title}</h1>
+      <p className="service-subtitle">Раздел появится в одном из следующих этапов</p>
       <UnavailableState
+        icon={<Icon name="settings" />}
         title="Функция пока недоступна"
-        description="Содержимое этого раздела появится в следующих задачах."
-      />
+        description="Сейчас этот раздел ещё не реализован."
+      >
+        <Link className="service-action service-action--light" to="/profile">
+          Вернуться к профилю
+        </Link>
+      </UnavailableState>
     </section>
   )
 }

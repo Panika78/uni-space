@@ -115,7 +115,7 @@ async function inspectMoves(page, account) {
     const moved = items.find((item) => item.status === 'moved')
     if (moved) {
       const card = await inspectCard(moved)
-      await card.getByRole('button', { name: 'Показать конечную позицию' }).click()
+      await card.getByRole('button', { name: /Перенесено на/ }).click()
       await page.waitForFunction(
         (date) => document.querySelector('input[type=date]').value === date,
         dates.at(-1),
@@ -377,7 +377,16 @@ async function inspectStudent(
       .getByRole('row')
       .filter({ has: page.getByRole('rowheader', { name: item.discipline.name, exact: true }) })
     assert.equal(
-      await sessionRow.locator('td').first().innerText(),
+      await sessionRow
+        .locator('td')
+        .first()
+        .evaluate((cell) =>
+          Array.from(cell.childNodes)
+            .filter((node) => node.nodeType === 3)
+            .map((node) => node.textContent)
+            .join('')
+            .trim(),
+        ),
       { exam: 'Экзамен', pass_fail: 'Зачёт', graded_pass: 'Дифференцированный зачёт' }[
         item.attestation_type
       ],

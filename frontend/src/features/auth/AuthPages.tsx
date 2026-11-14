@@ -24,6 +24,7 @@ export function LoginPage() {
         <p>РГУЧВ им. А. М. Кашпировского</p>
       </div>
       <h1 id="login-title">Вход в систему</h1>
+      <p className="login-intro">Добро пожаловать в студенческий кабинет</p>
       <form
         onSubmit={(event) => {
           event.preventDefault()

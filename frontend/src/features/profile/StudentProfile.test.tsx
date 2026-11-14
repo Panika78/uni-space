@@ -65,7 +65,10 @@ it.each([403, 500])('hides student UI on HTTP %s', async (status) => {
 it('renders academic status, initials and read-only fields', async () => {
   vi.mocked(apiFetch).mockResolvedValue(profile)
   mount()
-  expect(await screen.findByText('Академический отпуск')).toBeInTheDocument()
+  expect(await screen.findByText('Академический отпуск', { selector: 'dd' })).toBeInTheDocument()
+  expect(
+    screen.getByText('Академический отпуск', { selector: '.profile-status' }),
+  ).toBeInTheDocument()
   expect(screen.getByText('ТС')).toBeInTheDocument()
   for (const [label, value] of Object.entries({
     ФИО: profile.full_name,

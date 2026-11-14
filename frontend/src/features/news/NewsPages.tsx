@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import type { MouseEvent } from 'react'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
+import { Icon } from '../../shared/ui/Icon'
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 import type { components } from '../../shared/api/schema'
 
@@ -15,6 +16,12 @@ type FeedData = InfiniteData<NewsPage, string | null>
 const NEWS_FEED_KEY = ['news', 'feed'] as const
 const NEWS_FRESH_MS = 30_000
 const NEWS_ITEM_GC_MS = 30 * 60_000
+
+function getErrorMessage(error: unknown) {
+  return error instanceof ApiClientError && error.status === 404
+    ? 'Эта новость не найдена или уже недоступна.'
+    : 'Не удалось загрузить новости. Проверьте соединение и попробуйте ещё раз.'
+}
 
 function formatNewsDate(value: string) {
   return new Intl.DateTimeFormat('ru-RU', {
@@ -36,10 +43,19 @@ async function getNews(id: string, signal: AbortSignal): Promise<News> {
   })
 }
 
-function getErrorMessage(error: unknown) {
-  return error instanceof ApiClientError && error.status === 404
-    ? 'Эта новость не найдена или уже недоступна.'
-    : 'Не удалось загрузить новости. Проверьте соединение и попробуйте ещё раз.'
+function getDetailErrorMessage(error: unknown, hasCachedArticle: boolean) {
+  if (error instanceof ApiClientError) {
+    if (error.status === 401) return 'Сессия завершена. Войдите в аккаунт снова.'
+    if (error.status === 403) return 'У вас нет доступа к этой новости.'
+    if (error.status === 404) return 'Новость не найдена или больше недоступна.'
+    if (error.status === 500)
+      return hasCachedArticle
+        ? 'Сервер временно недоступен. Показана ранее загруженная версия; её данные могут быть неактуальны.'
+        : 'Сервер временно не может загрузить новость. Попробуйте ещё раз.'
+  }
+  return hasCachedArticle
+    ? 'Не удалось связаться с сервером. Показана ранее загруженная версия; её данные могут быть неактуальны.'
+    : 'Не удалось загрузить новость. Проверьте соединение и попробуйте ещё раз.'
 }
 
 function NewsRow({ item }: { item: NewsPreview }) {
@@ -56,7 +72,7 @@ function NewsRow({ item }: { item: NewsPreview }) {
         <h2>{item.title}</h2>
         <p>{item.excerpt}</p>
         <span className="news-row__arrow" aria-hidden="true">
-          →
+          <Icon name="right" />
         </span>
       </Link>
     </article>
@@ -141,6 +157,7 @@ export function NewsFeedPage() {
     <section className="section-page news-page" aria-labelledby="news-title">
       <p className="section-eyebrow">Студенческий кабинет</p>
       <h1 id="news-title">Новости</h1>
+      <p className="service-subtitle">Университетские объявления и важная информация</p>
       {query.isPending && <LoadingState title="Загружаем новости…" />}
       {query.isError && !query.data && (
         <ErrorState
@@ -209,6 +226,7 @@ export function NewsDetailPage() {
   const { id = '' } = useParams()
   const location = useLocation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const query = useQuery({
     queryKey: ['news', 'item', id],
     queryFn: ({ signal }) => getNews(id, signal),
@@ -216,6 +234,15 @@ export function NewsDetailPage() {
     gcTime: NEWS_ITEM_GC_MS,
     refetchOnMount: true,
   })
+  const status = query.error instanceof ApiClientError ? query.error.status : undefined
+  const isUnavailable = status === 401 || status === 403 || status === 404
+  useEffect(() => {
+    if (isUnavailable)
+      queryClient
+        .getQueryCache()
+        .find({ queryKey: ['news', 'item', id], exact: true })
+        ?.setState({ data: undefined, dataUpdatedAt: 0 })
+  }, [id, isUnavailable, queryClient])
 
   function handleBack(event: MouseEvent<HTMLAnchorElement>) {
     if (
@@ -234,17 +261,25 @@ export function NewsDetailPage() {
   return (
     <section className="section-page news-page" aria-labelledby="news-detail-title">
       <Link className="news-back-link" to="/news" onClick={handleBack}>
-        ← Назад к новостям
+        <Icon name="left" /> Назад к новостям
       </Link>
       {query.isPending && <LoadingState title="Загружаем новость…" />}
       {query.isError && (
         <ErrorState
-          title="Не удалось открыть новость"
-          description={getErrorMessage(query.error)}
-          onRetry={() => void query.refetch()}
+          title={
+            status === 404
+              ? 'Новость не найдена или больше недоступна'
+              : status === 403
+                ? 'Доступ к новости запрещён'
+                : status === 401
+                  ? 'Сессия завершена'
+                  : 'Не удалось открыть новость'
+          }
+          description={getDetailErrorMessage(query.error, Boolean(query.data && !isUnavailable))}
+          onRetry={isUnavailable ? undefined : () => void query.refetch()}
         />
       )}
-      {query.data && <NewsArticle news={query.data} />}
+      {query.data && !isUnavailable && <NewsArticle news={query.data} />}
     </section>
   )
 }

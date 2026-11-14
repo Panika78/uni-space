@@ -1,12 +1,14 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApplicationsList, applicationsKey, ServicesTabs } from './ApplicationsPages'
 import { useEffect, useRef, useState } from 'react'
-import { Link, useBlocker, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useBlocker, useParams, useSearchParams } from 'react-router-dom'
 import { useUnsavedChanges } from '../../app/UnsavedChangesContext'
 import { ApiClientError, apiFetch } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
+import { Icon } from '../../shared/ui/Icon'
+import { AnimatedRegion } from '../../shared/ui/AnimatedRegion'
+import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 
-type Service = components['schemas']['Service']
 type Application = components['schemas']['ApplicationResponse']
 type CreateApplicationRequest = components['schemas']['CreateApplicationRequest']
 
@@ -66,50 +68,54 @@ function isApplicationResponse(value: unknown, placeOfSubmission: string): value
 
 export function ServicesPage() {
   const [params] = useSearchParams()
-  return params.get('tab') === 'applications' ? (
+  const applications = params.get('tab') === 'applications'
+  return (
     <section className="section-page service-page">
+      <p className="section-eyebrow">Студенческий кабинет</p>
       <h1>Услуги и документы</h1>
-      <ServicesTabs applications />
-      <ApplicationsList />
+      <p className="service-subtitle">Оформление заявлений и отслеживание их статуса</p>
+      <ServicesTabs applications={applications} />
+      <AnimatedRegion
+        className="services-stage"
+        contentKey={applications ? 'applications' : 'catalog'}
+      >
+        {applications ? <ApplicationsList /> : <ServiceCatalog />}
+      </AnimatedRegion>
     </section>
-  ) : (
-    <ServiceCatalog />
   )
 }
 
 function ServiceCatalog() {
-  const [services, setServices] = useState<Service[] | null>(null)
-  const [error, setError] = useState(false)
-  useEffect(() => {
-    let active = true
-    apiFetch<components['schemas']['ServiceList']>('/api/v1/services', {
-      authenticated: true,
-    }).then(
-      (data) => {
-        if (active) setServices(data.items)
-      },
-      () => {
-        if (active) setError(true)
-      },
-    )
-    return () => {
-      active = false
-    }
-  }, [])
+  const query = useQuery({
+    queryKey: ['services'],
+    queryFn: ({ signal }) =>
+      apiFetch<components['schemas']['ServiceList']>('/api/v1/services', {
+        authenticated: true,
+        signal,
+      }),
+    refetchOnMount: 'always',
+    retryOnMount: true,
+  })
+  const services = query.data?.items ?? []
+  const isDenied = query.error instanceof ApiClientError && query.error.status === 403
   return (
-    <section className="section-page service-page service-catalog-page">
-      <h1>Услуги и документы</h1>
-      <ServicesTabs />
+    <div className="service-catalog-page">
       <p>Выберите доступную услугу.</p>
-      {error ? (
-        <div role="alert">
-          <p>Не удалось загрузить каталог.</p>
-          <button onClick={() => location.reload()}>Повторить загрузку</button>
-        </div>
-      ) : services === null ? (
-        <p role="status">Загружаем каталог…</p>
+      {isDenied ? (
+        <ErrorState
+          title="Доступ к каталогу услуг запрещён"
+          description="У вас нет доступа к каталогу услуг. Обратитесь к администратору."
+        />
+      ) : query.isPending || (query.isFetching && query.isError) ? (
+        <LoadingState title="Загружаем каталог…" />
+      ) : query.isError ? (
+        <ErrorState
+          title="Не удалось загрузить каталог"
+          description="Проверьте соединение и повторите попытку."
+          onRetry={() => void query.refetch()}
+        />
       ) : services.length === 0 ? (
-        <p>Сейчас нет доступных услуг.</p>
+        <EmptyState title="Сейчас нет доступных услуг." />
       ) : (
         <article className="service-card" aria-labelledby="study-certificate-title">
           <div className="service-card__icon-box" aria-hidden="true">
@@ -151,16 +157,15 @@ function ServiceCatalog() {
             </ul>
           </div>
           <Link className="service-action" to={`/services/${services[0].code}`}>
-            Подать заявление
+            Подать заявление <Icon name="arrow" />
           </Link>
         </article>
       )}
-    </section>
+    </div>
   )
 }
 
 export function ApplicationFormPage() {
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { serviceCode } = useParams()
   const [value, setValue] = useState('')
@@ -175,6 +180,7 @@ export function ApplicationFormPage() {
   const leaveDialog = useRef<HTMLDialogElement>(null)
   const continueButton = useRef<HTMLButtonElement>(null)
   const inFlight = useRef(false)
+  const checkResult = useRef<HTMLAnchorElement>(null)
   const dirty = value.length > 0 && !application
   const exitStatus = application
     ? 'none'
@@ -211,11 +217,15 @@ export function ApplicationFormPage() {
     window.addEventListener('beforeunload', handle)
     return () => window.removeEventListener('beforeunload', handle)
   }, [exitStatus])
+  useEffect(() => {
+    if (uncertain) checkResult.current?.focus({ preventScroll: true })
+  }, [uncertain])
   const normalized = trimPythonWhitespace(value)
   const characterCount = Array.from(normalized).length
   const invalid = characterCount < 1 || characterCount > 300
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (uncertain || inFlight.current) return
     setTouched(true)
     setError('')
     setServerFieldError(null)
@@ -301,28 +311,44 @@ export function ApplicationFormPage() {
   return (
     <section className="section-page service-page">
       <Link to="/services" className="service-back">
-        ← К каталогу услуг
+        <Icon name="left" /> К каталогу услуг
       </Link>
-      <p className="section-eyebrow">Заявление</p>
-      <h1>Справка об обучении</h1>
+      <p className="section-eyebrow">{application ? 'Услуги и документы' : 'Новое заявление'}</p>
+      <h1>{application ? 'Заявление создано' : 'Справка об обучении'}</h1>
+      <p className="service-subtitle">
+        {application
+          ? 'Заявление сохранено.'
+          : 'Заполните короткую форму — это займёт меньше минуты'}
+      </p>
       {application ? (
         <div className="application-success" role="status">
-          <h2>Заявление создано</h2>
-          <p>
-            Номер заявления: <strong>№ {application.id}</strong>
-          </p>
-          <p>Заявление сохранено.</p>
-          <Link className="service-action" to={`/applications/${application.id}`}>
-            Открыть заявление
-          </Link>
-          <Link to="/services?tab=applications">Мои заявления</Link>
-          <button className="service-action" onClick={() => navigate('/services')}>
-            Вернуться к каталогу
-          </button>
+          <span className="success-mark" aria-hidden="true">
+            <Icon name="check" />
+          </span>
+          <h2>
+            Готово! Заявление <span>№ {application.id}</span>
+          </h2>
+          <p>Вы можете посмотреть детали заявления или вернуться в каталог услуг.</p>
+          <div className="form-actions">
+            <Link className="service-action" to={`/applications/${application.id}`}>
+              Открыть заявление
+            </Link>
+            <Link className="service-action service-action--light" to="/services?tab=applications">
+              Мои заявления
+            </Link>
+          </div>
         </div>
       ) : (
         <form className="application-form" onSubmit={handleSubmit} noValidate>
-          <p>Укажите место предоставления справки.</p>
+          <div className="service-card-heading">
+            <span className="service-icon-small" aria-hidden="true">
+              <Icon name="file" />
+            </span>
+            <div>
+              <h2>Данные заявления</h2>
+              <p>Знак * обозначает обязательное поле.</p>
+            </div>
+          </div>
           <label htmlFor="place">
             Место предоставления <span aria-hidden="true">*</span>
           </label>
@@ -331,6 +357,7 @@ export function ApplicationFormPage() {
             id="place"
             name="place_of_submission"
             rows={3}
+            placeholder="Например, для предоставления по месту требования"
             value={value}
             onChange={(event) => {
               setValue(event.target.value)
@@ -341,23 +368,34 @@ export function ApplicationFormPage() {
             aria-required="true"
             aria-invalid={hasFieldError}
             aria-describedby={hasFieldError ? 'place-error' : 'place-help'}
-            disabled={pending}
+            disabled={pending || uncertain}
           />
-          <small id={hasFieldError ? 'place-error' : 'place-help'}>
-            {fieldMessage ?? 'От 1 до 300 символов.'}
-          </small>
-          <small>Знак * обозначает обязательное поле.</small>
+          <div className="application-field-help">
+            <small id={hasFieldError ? 'place-error' : 'place-help'}>
+              {fieldMessage ?? 'От 1 до 300 символов.'}
+            </small>
+            <small className="application-character-count" aria-live="off">
+              {characterCount} / 300
+            </small>
+          </div>
           {error && (
             <p role="alert" className="application-error">
               {error}
             </p>
           )}
           {uncertain && (
-            <Link to="/services?tab=applications">Проверить результат в моих заявлениях</Link>
+            <Link ref={checkResult} to="/services?tab=applications">
+              Проверить результат в моих заявлениях
+            </Link>
           )}
-          <button className="service-action" type="submit" disabled={pending}>
-            {pending ? 'Отправляем…' : 'Отправить заявление'}
-          </button>
+          <div className="form-actions">
+            <button className="service-action" type="submit" disabled={pending || uncertain}>
+              {pending ? 'Отправляем…' : 'Отправить заявление'} <Icon name="arrow" />
+            </button>
+            <Link className="service-action service-action--light" to="/services">
+              Отмена
+            </Link>
+          </div>
         </form>
       )}
       {blocker.state === 'blocked' && (

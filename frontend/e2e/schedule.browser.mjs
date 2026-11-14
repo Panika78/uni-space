@@ -98,13 +98,16 @@ async function checkCancelledLesson(card, width) {
       await card
         .locator(selector)
         .evaluateAll(
-          (nodes) =>
+          (nodes, selector) =>
             nodes.length > 0 &&
-            nodes.every((node) =>
-              window.getComputedStyle(node).textDecorationLine.includes('line-through'),
+            nodes.every(
+              (node) =>
+                window.getComputedStyle(node).textDecorationLine.includes('line-through') ===
+                (selector === 'h3'),
             ),
+          selector,
         ),
-      `Cancelled ${selector} is struck through`,
+      `Cancelled ${selector} decoration matches the owner decision`,
     )
   }
   assert.equal(await card.locator('.lesson-card__teacher, .lesson-card__kind, li').count(), 0)
@@ -120,8 +123,8 @@ async function checkCancelledLesson(card, width) {
 }
 
 async function checkScheduleChanges(page, width) {
-  for (const mode of width === 1440 ? ['День', 'Неделя'] : ['День']) {
-    if (width === 1440) await page.getByRole('button', { name: mode, exact: true }).click()
+  for (const mode of ['День', 'Неделя']) {
+    await page.getByRole('button', { name: mode, exact: true }).click()
     for (const [sourceName, sourceDate, targetDate, targetStatus] of [
       ['Одиночный перенос', '2026-11-12', '2026-11-13', 'scheduled'],
       ['Первая позиция переноса', '2026-11-10', '2026-12-20', 'scheduled'],
@@ -138,6 +141,13 @@ async function checkScheduleChanges(page, width) {
         await source
           .locator('time')
           .first()
+          .evaluate(
+            (node) => !window.getComputedStyle(node).textDecorationLine.includes('line-through'),
+          ),
+      )
+      assert.ok(
+        await source
+          .locator('h3')
           .evaluate((node) =>
             window.getComputedStyle(node).textDecorationLine.includes('line-through'),
           ),
@@ -148,7 +158,7 @@ async function checkScheduleChanges(page, width) {
       assert.equal(text.includes('Отменено'), targetStatus === 'cancelled')
       if (targetStatus === 'cancelled') assert.ok(text.includes('00:30'))
       await noOverflow(page)
-      const action = source.getByRole('button', { name: 'Показать конечную позицию' })
+      const action = source.getByRole('button', { name: /Перенесено на/ })
       await action.focus()
       await page.keyboard.press('Enter')
       await page.waitForFunction(
@@ -162,11 +172,10 @@ async function checkScheduleChanges(page, width) {
       assert.equal(await target.getByText(/Перенесено/).count(), 0)
       if (targetStatus === 'cancelled') await checkCancelledLesson(target, width)
       else assert.equal(await target.locator('.lesson-card__teacher').count(), 1)
-      if (width === 1440)
-        assert.equal(
-          await page.getByRole('button', { name: mode, exact: true }).getAttribute('aria-pressed'),
-          'true',
-        )
+      assert.equal(
+        await page.getByRole('button', { name: mode, exact: true }).getAttribute('aria-pressed'),
+        'true',
+      )
       await noOverflow(page)
     }
   }
@@ -183,7 +192,7 @@ async function checkScheduleChanges(page, width) {
   assert.equal(await page.getByText('Неактуально', { exact: true }).count(), 0)
   await noOverflow(page)
   await page.screenshot({ path: `work/schedule-changes-${width}.png`, fullPage: true })
-  if (width === 1440) await page.getByRole('button', { name: 'День', exact: true }).click()
+  await page.getByRole('button', { name: 'День', exact: true }).click()
   await page.getByLabel('Дата', { exact: true }).fill('2026-11-10')
   await page.locator('.schedule-list').waitFor()
   check(
@@ -299,13 +308,14 @@ try {
       assert.equal(await page.getByText('Занятие через полночь', { exact: true }).count(), 2)
       assert.ok(await page.getByText('Воскресное занятие', { exact: true }).isVisible())
       await page.setViewportSize({ width: 360, height: 1000 })
-      assert.equal(await page.locator('.schedule-day:visible').count(), 1)
+      assert.equal(await page.locator('.schedule-day:visible').count(), 7)
+      assert.equal(await page.getByRole('group', { name: 'Дни недели' }).count(), 0)
       assert.ok(await page.locator('.schedule-day.is-selected').isVisible())
       await page.setViewportSize({ width: 1440, height: 1000 })
       assert.equal(await page.locator('.schedule-day:visible').count(), 7)
       assert.equal(await week.getAttribute('aria-pressed'), 'true')
       await page.getByRole('button', { name: 'День', exact: true }).click()
-      await page.getByRole('button', { name: 'Следующий день' }).click()
+      await page.getByLabel('Дата', { exact: true }).fill('2026-11-11')
       assert.equal(await page.getByLabel('Дата', { exact: true }).inputValue(), '2026-11-11')
       assert.ok(await page.getByText('Занятие через полночь', { exact: true }).last().isVisible())
       check('Desktop keyboard day/week; vertical seven days; midnight lesson appears on both days')

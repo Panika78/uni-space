@@ -307,7 +307,7 @@ try {
     await route.fulfill({ response })
   })
 
-  await page.getByRole('link', { name: '← Назад к новостям' }).click()
+  await page.getByRole('link', { name: 'Назад к новостям', exact: true }).click()
   await page.getByRole('heading', { name: 'Новости', exact: true }).waitFor()
   const refreshError = await refreshStarted
   if (refreshError) throw refreshError
@@ -387,7 +387,7 @@ try {
   await directPage.goto(`${baseURL}${directHref}`)
   await directPage.getByRole('heading', { level: 1 }).last().waitFor()
   assert.equal(await directPage.evaluate(() => window.scrollY), 0)
-  await directPage.getByRole('link', { name: '← Назад к новостям' }).click()
+  await directPage.getByRole('link', { name: 'Назад к новостям', exact: true }).click()
   await directPage.getByRole('heading', { name: 'Новости', exact: true }).waitFor()
   await directPage.locator('.news-row__link h2').first().waitFor()
   check('direct article URL opens at the top and its fallback link returns to the feed')
@@ -398,7 +398,9 @@ try {
   const originalArticleURL = page.url()
   const [newTab] = await Promise.all([
     context.waitForEvent('page'),
-    page.getByRole('link', { name: '← Назад к новостям' }).click({ modifiers: ['Control'] }),
+    page
+      .getByRole('link', { name: 'Назад к новостям', exact: true })
+      .click({ modifiers: ['Control'] }),
   ])
   await newTab.getByRole('heading', { name: 'Новости', exact: true }).waitFor()
   await newTab.locator('.news-row__link').first().waitFor()
@@ -416,7 +418,7 @@ try {
   check('news browser flow fits 360px, 768px and 1440px viewports')
 
   currentScenario = 'load the final news page'
-  await page.getByRole('link', { name: '← Назад к новостям' }).click()
+  await page.getByRole('link', { name: 'Назад к новостям', exact: true }).click()
   await page.getByRole('heading', { name: 'Новости', exact: true }).waitFor()
   await page.getByRole('button', { name: 'Показать ещё', exact: true }).click()
   await waitForNewsRows(70)
@@ -436,6 +438,47 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0))
   await page.screenshot({ path: 'work/news-browser-detail.png', timeout: 15_000 })
   check('fixture-provided direct news ID opens without relying on sequence values')
+
+  currentScenario = 'hide a cached article after an access-denied refetch'
+  await page.getByRole('link', { name: 'Расписание', exact: true }).click()
+  await page.getByRole('heading', { name: 'Расписание', exact: true }).waitFor()
+  const browserTime = await page.evaluate(() => Date.now())
+  await page.clock.install({ time: new Date(browserTime + 31_000) })
+  await context.route(
+    (url) => url.pathname === `/api/v1/news/${encodeURIComponent(detailId)}`,
+    (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { code: 'forbidden', message: 'Read-only access-denial fixture', details: [] },
+        }),
+      }),
+  )
+  const deniedResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/api/v1/news/${encodeURIComponent(detailId)}`) &&
+      response.status() === 403,
+  )
+  await page.goBack()
+  assert.equal(
+    (await deniedResponse).status(),
+    403,
+    'The stale detail query should issue a read-only request and receive HTTP 403',
+  )
+  await page.getByText('Доступ к новости запрещён', { exact: true }).waitFor()
+  assert.equal(
+    await page.locator('.news-article').count(),
+    0,
+    'An access-denied refetch must hide the previously loaded article',
+  )
+  assert.equal(
+    await page.getByRole('button', { name: 'Повторить' }).count(),
+    0,
+    'An access-denied article must not offer an ordinary retry',
+  )
+  await context.unroute((url) => url.pathname === `/api/v1/news/${encodeURIComponent(detailId)}`)
+  check('a cached article is hidden after a read-only HTTP 403 refetch')
 } catch (error) {
   console.error(`FAIL ${currentScenario}: ${error?.message || String(error)}`)
   console.error(`Diagnostic URL: ${new URL(page.url()).origin}${new URL(page.url()).pathname}`)

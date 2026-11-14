@@ -318,7 +318,7 @@ try {
   await desktopDialog.waitFor()
   assert.equal(
     await desktopDialog.evaluate((element) => element.getBoundingClientRect().width),
-    480,
+    520,
   )
   await closeDrawerAndAssert('desktop close button', () =>
     desktopDialog.getByRole('button', { name: 'Закрыть уведомления', exact: true }).click(),

@@ -3,6 +3,7 @@ import { useEffect, useId, useRef } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
+import { Icon } from '../../shared/ui/Icon'
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 
 type Application = components['schemas']['ApplicationResponse']
@@ -33,7 +34,11 @@ function formatDate(value: string) {
 }
 export function ServicesTabs({ applications = false }: { applications?: boolean }) {
   return (
-    <nav className="services-tabs" aria-label="Разделы услуг">
+    <nav
+      className="services-tabs"
+      data-selected={applications ? 'applications' : 'catalog'}
+      aria-label="Разделы услуг"
+    >
       <Link to="/services" aria-current={!applications ? 'page' : undefined}>
         Каталог услуг
       </Link>
@@ -69,16 +74,17 @@ export function ApplicationsList() {
     retryOnMount: true,
     gcTime: Infinity,
   })
-  const items = query.data?.pages.flatMap((page) => page.items) ?? []
+  const isDenied = query.error instanceof ApiClientError && query.error.status === 403
+  const items = isDenied ? [] : (query.data?.pages.flatMap((page) => page.items) ?? [])
   // A failed refresh leaves the old snapshot/cursors intact. Only a complete
   // refetch can make that snapshot eligible for further pagination again.
-  const canLoadMore = query.hasNextPage && !query.isFetching && !query.isRefetchError
+  const canLoadMore = !isDenied && query.hasNextPage && !query.isFetching && !query.isRefetchError
   function handleLoadMore() {
     if (!canLoadMore) return
     void query.fetchNextPage({ cancelRefetch: false })
   }
   function handleRetry() {
-    if (query.isFetching) return
+    if (isDenied || query.isFetching) return
     if (query.isFetchNextPageError) handleLoadMore()
     else void query.refetch({ cancelRefetch: false })
   }
@@ -102,40 +108,68 @@ export function ApplicationsList() {
       returnFocus.current = undefined
       queryClient.removeQueries({ queryKey: returnFocusKey, exact: true })
     }
-  }, [location.key, query.data, query.isFetching, queryClient])
+  }, [location.key, query.data, query.isFetching, isDenied, queryClient])
+  useEffect(() => {
+    // Discard only this forbidden snapshot, retaining the 403 error state.
+    // A later 500 (including after remount) must not reveal the old rows again.
+    if (isDenied)
+      queryClient
+        .getQueryCache()
+        .find({ queryKey: applicationsKey, exact: true })
+        ?.setState({ data: undefined, dataUpdatedAt: 0 })
+    if (
+      isDenied &&
+      (document.activeElement === document.body ||
+        heading.current?.parentElement?.contains(document.activeElement))
+    )
+      heading.current?.focus({ preventScroll: true })
+  }, [isDenied, queryClient])
   return (
     <div>
-      <h2 ref={heading} tabIndex={-1}>
+      <h2 className="applications-list-heading" ref={heading} tabIndex={-1}>
         Мои заявления
       </h2>
       {query.isPending && <LoadingState title="Загружаем заявления…" />}
-      {query.isRefetching && (
+      {!isDenied && query.isRefetching && (
         <p role="status" className="sr-only">
           Обновляем заявления…
         </p>
       )}
-      {query.isError && (
+      {isDenied ? (
         <ErrorState
-          title={
-            query.isFetchNextPageError
-              ? 'Не удалось загрузить следующую страницу'
-              : 'Не удалось загрузить заявления'
-          }
-          description={
-            query.isFetchNextPageError
-              ? 'Ранее загруженные заявления сохранены. Повторите загрузку следующей страницы.'
-              : query.data
-                ? 'Показаны ранее загруженные заявления. Их данные могут быть неактуальны; повторите загрузку.'
-                : 'Проверьте соединение и повторите попытку.'
-          }
-          onRetry={handleRetry}
+          title="Доступ к заявлениям запрещён"
+          description="У вас нет доступа к списку заявлений. Обратитесь к администратору."
         />
+      ) : (
+        query.isError && (
+          <ErrorState
+            title={
+              query.isFetchNextPageError
+                ? 'Не удалось загрузить следующую страницу'
+                : 'Не удалось загрузить заявления'
+            }
+            description={
+              query.isFetchNextPageError
+                ? 'Ранее загруженные заявления сохранены. Их данные могут быть неактуальны; повторите загрузку следующей страницы.'
+                : query.data
+                  ? 'Показаны ранее загруженные заявления. Их данные могут быть неактуальны; повторите загрузку.'
+                  : 'Проверьте соединение и повторите попытку.'
+            }
+            onRetry={handleRetry}
+          />
+        )
       )}
       {query.isSuccess && items.length === 0 && (
-        <EmptyState
-          title="Вы ещё не подавали заявлений"
-          description="Выберите услугу в каталоге."
-        />
+        <div className="applications-empty">
+          <EmptyState
+            icon={<Icon name="file" />}
+            title="Вы ещё не подавали заявлений"
+            description="Выберите услугу в каталоге и отправьте заявление онлайн. Здесь появится его статус."
+          />
+          <Link className="service-action" to="/services">
+            Перейти в каталог услуг
+          </Link>
+        </div>
       )}
       {items.length > 0 && (
         <table
@@ -182,7 +216,15 @@ export function ApplicationsList() {
                       })
                     }}
                   >
-                    {item.service.title} · № {item.id}
+                    <span className="service-icon-small" aria-hidden="true">
+                      <Icon name="file" />
+                    </span>
+                    <span>
+                      {item.service.title} · № {item.id}
+                    </span>
+                    <span className="application-row-arrow" aria-hidden="true">
+                      <Icon name="right" />
+                    </span>
                   </Link>
                 </td>
                 <td role="cell" headers={`${tableId}-date`}>
@@ -195,21 +237,25 @@ export function ApplicationsList() {
                   <span className="application-field-label" aria-hidden="true">
                     Рассмотрение
                   </span>
-                  <span>{reviewLabels[item.review_status]}</span>
+                  <span className={`application-status application-status--${item.review_status}`}>
+                    {reviewLabels[item.review_status]}
+                  </span>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      {query.hasNextPage && (
+      {!isDenied && query.hasNextPage && (
         <button className="service-action" disabled={!canLoadMore} onClick={handleLoadMore}>
           {query.isFetchingNextPage ? 'Загружаем…' : 'Показать ещё'}
         </button>
       )}
-      <p role="status" className="sr-only">
-        Загружено заявлений: {items.length}
-      </p>
+      {!isDenied && (
+        <p role="status" className="sr-only">
+          Загружено заявлений: {items.length}
+        </p>
+      )}
     </div>
   )
 }
@@ -248,7 +294,7 @@ export function ApplicationDetailPage() {
           }
         }}
       >
-        ← К моим заявлениям
+        <Icon name="left" /> К моим заявлениям
       </Link>
       {query.isPending && <LoadingState title="Загружаем заявление…" />}
       {query.isError && (
@@ -265,30 +311,46 @@ export function ApplicationDetailPage() {
         />
       )}
       {item && (
-        <article>
+        <div>
+          <p className="section-eyebrow">Услуги и документы</p>
           <h1 ref={title} tabIndex={-1}>
             Заявление № {item.id}
           </h1>
-          <h2>{item.service.title}</h2>
-          <dl>
-            <dt>Дата подачи</dt>
-            <dd>
-              <time dateTime={item.created_at}>{formatDate(item.created_at)}</time>
-            </dd>
-            <dt>Место предоставления</dt>
-            <dd>{item.form_data.place_of_submission}</dd>
-            <dt>Рассмотрение</dt>
-            <dd>{reviewLabels[item.review_status]}</dd>
-            <dt>Документ</dt>
-            <dd>{documentLabels[item.document_status]}</dd>
-            {item.feedback !== null && (
-              <>
-                <dt>Обратная связь</dt>
-                <dd>{item.feedback}</dd>
-              </>
-            )}
-          </dl>
-        </article>
+          <p className="service-subtitle">{item.service.title}</p>
+          <article className="application-detail-card">
+            <div className="service-card-heading">
+              <span className="service-icon-small" aria-hidden="true">
+                <Icon name="file" />
+              </span>
+              <div>
+                <h2>{item.service.title}</h2>
+                <p>Данные поданного заявления</p>
+              </div>
+            </div>
+            <dl>
+              <dt>Дата подачи</dt>
+              <dd>
+                <time dateTime={item.created_at}>{formatDate(item.created_at)}</time>
+              </dd>
+              <dt>Место предоставления</dt>
+              <dd>{item.form_data.place_of_submission}</dd>
+              <dt>Рассмотрение</dt>
+              <dd>
+                <span className={`application-status application-status--${item.review_status}`}>
+                  {reviewLabels[item.review_status]}
+                </span>
+              </dd>
+              <dt>Документ</dt>
+              <dd>{documentLabels[item.document_status]}</dd>
+              {item.feedback !== null && (
+                <>
+                  <dt>Обратная связь</dt>
+                  <dd>{item.feedback}</dd>
+                </>
+              )}
+            </dl>
+          </article>
+        </div>
       )}
     </section>
   )

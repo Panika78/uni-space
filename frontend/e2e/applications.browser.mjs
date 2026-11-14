@@ -1,5 +1,10 @@
 /* global process, console, URL, document, window */
 import assert from 'node:assert/strict'
+import {
+  assertApplicationInteractions,
+  assertStatusChipGeometry,
+} from './applicationInteractions.mjs'
+import { scaleVisibleText } from './academicsGeometry.mjs'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const base = process.env.SERVICES_TEST_URL || 'http://localhost:5173'
 const browser = await chromium.launch({
@@ -8,7 +13,7 @@ const browser = await chromium.launch({
   ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
 })
 try {
-  for (const width of [1440, 360]) {
+  for (const width of [1440, 768, 360]) {
     const context = await browser.newContext({ viewport: { width, height: 800 } })
     const page = await context.newPage()
     let currentAuthorization
@@ -71,6 +76,57 @@ try {
     assert.equal(await page.getByText(/История обработки|Скачать PDF/).count(), 0)
     await page.getByRole('link', { name: /К моим заявлениям/ }).click()
     await page.getByRole('link', { name: new RegExp(`№ ${created.id}$`) }).waitFor()
+    await assertApplicationInteractions(page, context, String(created.id), width)
+    console.log(
+      `PASS ${width}px: real title/date/status/padding hit-testing; keyboard/focus, Ctrl+new tab and native context link`,
+    )
+
+    const statuses = [
+      'submitted',
+      'in_review',
+      'needs_correction',
+      'resubmitted',
+      'approved',
+      'rejected',
+    ]
+    await page.route('**/api/v1/applications?*', (r) =>
+      r.fulfill({
+        json: {
+          items: statuses.map((status, i) => ({
+            ...created,
+            id: String(90000 + i),
+            review_status: status,
+          })),
+          next_cursor: null,
+        },
+      }),
+    )
+    await page.route('**/api/v1/applications/90000', (r) =>
+      r.fulfill({ json: { ...created, id: '90000', review_status: 'submitted' } }),
+    )
+    for (const factor of [1, 1.5, 2]) {
+      await page.goto(`${base}/services?tab=applications`)
+      await page.locator('.application-status--rejected').waitFor()
+      await scaleVisibleText(page, factor)
+      await assertStatusChipGeometry(page)
+      await page.screenshot({
+        path: `work/application-status-list-${width}-${factor}-fixture.png`,
+        fullPage: true,
+      })
+      await page.goto(`${base}/applications/90000`)
+      await page.locator('.application-detail .application-status').waitFor()
+      await scaleVisibleText(page, factor)
+      await assertStatusChipGeometry(page)
+      await page.screenshot({
+        path: `work/application-status-detail-${width}-${factor}-fixture.png`,
+        fullPage: true,
+      })
+    }
+    await page.unroute('**/api/v1/applications?*')
+    await page.unroute('**/api/v1/applications/90000')
+    console.log(
+      `PASS ${width}px: explicit status-chip fixture at 100/150/200%, list and detail, all review statuses`,
+    )
     await logout()
     await login()
     await page.goto(`${base}/services?tab=applications`)
