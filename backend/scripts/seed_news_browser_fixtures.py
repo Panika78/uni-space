@@ -80,6 +80,7 @@ def main() -> None:
     print(f"NEWS_TEST_LOGIN={login}")
     print(f"NEWS_TEST_PASSWORD={password}")
     print(f"NEWS_TEST_DETAIL_ID={detail_id}")
+    print(f"NEWS_TEST_DETAIL_TITLE={news[0].title}")
 
 
 if __name__ == "__main__":

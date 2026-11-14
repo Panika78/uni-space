@@ -494,8 +494,6 @@ push в `main`. В CI используются отдельные временн
 Из корня проекта выполните:
 
 ```bash
-docker compose -p uni-space-test -f compose.test.yaml down --volumes --remove-orphans
-docker compose -p uni-space-test -f compose.test.yaml up -d --wait test-db
 npm install --global npm@11.19.1
 uv python install 3.12.16
 uv sync --locked --project backend --python 3.12.16
@@ -503,15 +501,19 @@ npm ci --prefix frontend
 mkdir -p work/browser-tooling
 npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
 node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell
-PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_modules/playwright/index.mjs" npm run --prefix frontend e2e:news
-docker compose -p uni-space-test -f compose.test.yaml down --volumes --remove-orphans
+NEWS_TEST_MANAGE_COMPOSE=1 PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_modules/playwright/index.mjs" npm run --prefix frontend e2e:news
 ```
 
 Команда запуска мигрирует выделенную БД и подготавливает фикстуры автоматически.
 Она требует `APP_ENV=test` и базу `uni_space_test` на localhost; учётные данные
-изолированы от `.env`. Скрипт ограничивает ожидания готовности серверов 90
-секундами, браузерные ожидания — 15 секундами и завершает API/Vite при любом
-результате. При падении смотрите `work/news-browser-failure.png` и журналы
+изолированы от `.env`. При `NEWS_TEST_MANAGE_COMPOSE=1` runner очищает и поднимает
+только выделенный Compose project `uni-space-test`, а затем удаляет его с volume
+при успехе, ошибке и прерывании; exit code браузерного теста сохраняется.
+Перед миграциями он проверяет, что порты 8000 и 5173 свободны. Vite использует
+`--strictPort`, readiness сверяет журналы запуска своих процессов, а runner
+контролирует API/Vite до завершения браузера. Uvicorn access-log отключён;
+серверные логи не содержат auth-запросов/заголовков. Браузерные ожидания ограничены
+15 секундами. При падении смотрите `work/news-browser-failure.png` и журналы
 `work/news-browser-api.log` / `work/news-browser-vite.log`.
 
 ## Сквозная приёмка MVP 1 (TASK-018)
