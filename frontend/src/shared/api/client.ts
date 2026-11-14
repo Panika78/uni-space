@@ -55,16 +55,27 @@ export function configureApiAuth(begin: () => AuthRequest) {
 
 export type ApiRequestInit = RequestInit & { authenticated?: boolean }
 
+// Bounded API pages still need room for slow mobile connections and an auth
+// refresh. This is one wall-clock budget for the initial GET and any replay.
+export const AUTHENTICATED_GET_DEADLINE_MS = 90_000
+
 export async function apiFetch<T>(input: RequestInfo | URL, init: ApiRequestInit = {}): Promise<T> {
   const { authenticated, ...requestInit } = init
   if (!authenticated) return sendRequest<T>(input, requestInit)
   const target = requireApiDestination(input)
   if (!beginAuthRequest) throw new Error('Auth provider is unavailable')
   const auth = beginAuthRequest()
+  const callerSignal = init.signal ?? (input instanceof Request ? input.signal : undefined)
+  const method = (
+    requestInit.method ?? (input instanceof Request ? input.method : 'GET')
+  ).toUpperCase()
+  const timeoutController = method === 'GET' ? new AbortController() : undefined
   const signal = AbortSignal.any([
     auth.signal,
-    ...(init.signal ? [init.signal] : input instanceof Request ? [input.signal] : []),
+    ...(callerSignal ? [callerSignal] : []),
+    ...(timeoutController ? [timeoutController.signal] : []),
   ])
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
   // Clone before dispatch so a consumed Request body can be replayed once.
   const replay = target instanceof Request ? target.clone() : target
   const send = (target: RequestInfo | URL, token: string) => {
@@ -74,13 +85,21 @@ export async function apiFetch<T>(input: RequestInfo | URL, init: ApiRequestInit
     headers.set('Authorization', `Bearer ${token}`)
     return sendRequest<T>(target, { ...requestInit, headers, signal, redirect: 'error' })
   }
-  try {
+  const assertBaseRequestCurrent = () => {
+    auth.signal.throwIfAborted()
+    callerSignal?.throwIfAborted()
+    auth.assertCurrent()
+  }
+  const assertRequestCurrent = () => {
+    assertBaseRequestCurrent()
+    if (timeoutController?.signal.aborted) throw createRequestTimeoutError()
+  }
+  const perform = async () => {
     let result: T
     try {
       result = await send(target, auth.token)
     } catch (error) {
-      signal.throwIfAborted()
-      auth.assertCurrent()
+      assertRequestCurrent()
       if (
         !(error instanceof ApiClientError) ||
         error.status !== 401 ||
@@ -103,19 +122,41 @@ export async function apiFetch<T>(input: RequestInfo | URL, init: ApiRequestInit
           },
         )
       })
-      signal.throwIfAborted()
-      auth.assertCurrent()
+      assertRequestCurrent()
       result = await send(replay, token)
     }
-    signal.throwIfAborted()
-    auth.assertCurrent()
+    assertRequestCurrent()
     return result
+  }
+  try {
+    if (!timeoutController) return await perform()
+    const timedOut = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        timeoutController.abort(new DOMException('Request deadline exceeded', 'TimeoutError'))
+        try {
+          assertBaseRequestCurrent()
+          reject(createRequestTimeoutError())
+        } catch (error) {
+          reject(error)
+        }
+      }, AUTHENTICATED_GET_DEADLINE_MS)
+    })
+    return await Promise.race([perform(), timedOut])
   } catch (error) {
-    signal.throwIfAborted()
-    auth.assertCurrent()
+    assertBaseRequestCurrent()
+    if (timeoutController?.signal.aborted) throw createRequestTimeoutError()
     if (error instanceof ApiClientError && error.status === 401) auth.invalidate()
     throw error
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId)
   }
+}
+
+function createRequestTimeoutError() {
+  return new ApiClientError(
+    'Не удалось загрузить данные за отведённое время. Проверьте соединение и попробуйте ещё раз.',
+    'request_timeout',
+  )
 }
 
 async function sendRequest<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {

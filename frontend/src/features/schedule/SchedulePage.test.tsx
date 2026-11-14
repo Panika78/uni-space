@@ -167,6 +167,7 @@ it.each([
   [new ApiClientError('private', 'forbidden', 403), 'Нет доступа к расписанию', false],
   [new ApiClientError('private', 'invalid_access', 401), 'Сессия завершена', false],
   [new ApiClientError('private', 'network_error'), 'Не удалось загрузить расписание', true],
+  [new ApiClientError('private', 'request_timeout'), 'Не удалось загрузить расписание', true],
   [new ApiClientError('private', 'internal_error', 500), 'Не удалось загрузить расписание', true],
   [new ApiClientError('private', 'validation_error', 422), 'Не удалось загрузить расписание', true],
 ])('distinguishes errors and never shows an empty result: %s', async (error, title, retry) => {
