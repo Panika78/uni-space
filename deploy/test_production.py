@@ -1,6 +1,8 @@
 """Run real isolated deployment checks using existing project HTTPX; see PRODUCTION.md."""
 
 import json
+import gzip
+import re
 import hashlib
 import os
 import secrets
@@ -162,6 +164,84 @@ def assert_tls_verification_error(url, context, expected_code):
             "Expected an actual certificate verification failure"
         ) from error
     raise AssertionError("Invalid TLS certificate was accepted")
+
+
+def assert_security_headers(response):
+    assert response.headers["strict-transport-security"] == "max-age=31536000"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["content-security-policy"] == "frame-ancestors 'none'"
+    assert response.headers["x-frame-options"] == "DENY"
+
+
+def assert_static_delivery(client, page):
+    for path in (
+        "/",
+        "/index.html",
+        "/login",
+        "/schedule",
+        "/services",
+        "/schedule/deep/link",
+        "/unknown-frontend-route",
+    ):
+        response = client.get(path)
+        assert response.status_code == 200 and response.text == page.text
+        assert_security_headers(response)
+        assert response.headers["cache-control"] == "no-cache"
+    assets = re.findall(r'(?:src|href)="(/assets/[^"?]+\.(?:js|css))"', page.text)
+    assert any(path.endswith(".js") for path in assets)
+    assert any(path.endswith(".css") for path in assets)
+    for path in assets:
+        identity = client.get(path, headers={"Accept-Encoding": "identity"})
+        assert identity.status_code == 200
+        assert "content-encoding" not in identity.headers
+        assert_security_headers(identity)
+        assert (
+            identity.headers["cache-control"] == "public, max-age=31536000, immutable"
+        )
+        with client.stream(
+            "GET", path, headers={"Accept-Encoding": "gzip"}
+        ) as response:
+            assert response.status_code == 200
+            assert_security_headers(response)
+            assert response.headers["content-encoding"] == "gzip"
+            assert "accept-encoding" in response.headers["vary"].lower()
+            assert (
+                response.headers["cache-control"] == identity.headers["cache-control"]
+            )
+            compressed = b"".join(response.iter_raw())
+        assert gzip.decompress(compressed) == identity.content
+        assert len(compressed) < len(identity.content)
+        cached = client.get(
+            path,
+            headers={
+                "If-None-Match": identity.headers["etag"],
+                "Accept-Encoding": "identity",
+            },
+        )
+        assert cached.status_code == 304
+        assert_security_headers(cached)
+        assert cached.headers["cache-control"] == identity.headers["cache-control"]
+        print(
+            f"PASS: {path}: identity={len(identity.content)}, gzip={len(compressed)}, conditional=304",
+            flush=True,
+        )
+    emblem = client.get("/assets/university-emblem.png")
+    assert emblem.status_code == 200
+    assert emblem.headers["cache-control"] == "no-cache"
+    assert_security_headers(emblem)
+    for path in ("/assets/missing.js", "/assets/missing-abcdefgh.js"):
+        response = client.get(path)
+        assert response.status_code == 404
+        assert_security_headers(response)
+        assert response.headers["cache-control"] == "no-cache"
+    for path in ("/api", "/api/missing-abcdefgh.js", "/api/v1/users/me"):
+        response = client.get(path)
+        assert response.status_code in (401, 404)
+        assert "application/json" in response.headers["content-type"]
+        assert_security_headers(response)
+        assert "public" not in response.headers.get("cache-control", "")
+        assert "immutable" not in response.headers.get("cache-control", "")
+    print("PASS: HTTPS static cache/compression, SPA and security headers", flush=True)
 
 
 def main(*, legacy=False):
@@ -600,6 +680,10 @@ DROP FUNCTION public.existing_function_fixture(), public.future_function_fixture
                 "PASS: TLS uni.test URL/SNI; wrong hostname, IP SAN and expired certificate rejected",
                 flush=True,
             )
+            with httpx.Client(
+                base_url=public_origin, verify=context, trust_env=False, timeout=5
+            ) as static_client:
+                assert_static_delivery(static_client, static_client.get("/"))
             browser_env = env | {
                 "PRODUCTION_TEST_URL": public_origin,
                 "PRODUCTION_TEST_CERT_FILE": str(temp / "tls.pem"),
