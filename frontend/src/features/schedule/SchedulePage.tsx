@@ -101,25 +101,37 @@ function LessonCard({
             )}
           </>
         )}
-        {lesson.status === 'cancelled' && (
-          <p className="lesson-card__status lesson-card__status--cancelled">Отменено</p>
-        )}
-        {lesson.status === 'moved' && (
-          <>
-            <p className="lesson-card__status lesson-card__status--moved">
-              {latest
-                ? `Перенесено на ${formatDate(getMoscowDate(new Date(latest.starts_at)), true)}, ${formatTime(latest.starts_at)}${latest.status === 'cancelled' ? ' · Отменено' : ''}`
-                : 'Перенесено'}
-            </p>
-            {latest && (
-              <button className="lesson-card__navigate" onClick={() => onNavigate(latest)}>
-                Показать конечную позицию
-              </button>
-            )}
-          </>
-        )}
+        {lesson.status === 'moved' &&
+          (latest ? (
+            <button
+              className="lesson-card__navigate lesson-card__status--moved"
+              onClick={() => onNavigate(latest)}
+            >
+              Перенесено на{' '}
+              {formatDate(getMoscowDate(new Date(latest.starts_at)), true)
+                .split(', ')
+                .slice(1)
+                .join(', ')}
+              , {formatTime(latest.starts_at)}
+              {latest.status === 'cancelled' ? ' · Отменено' : ''}
+            </button>
+          ) : (
+            <p className="lesson-card__status">Перенесено</p>
+          ))}
       </div>
-      {isCurrent && <span className="lesson-card__tag">{kinds[lesson.kind]}</span>}
+      {lesson.status === 'cancelled' && (
+        <span className="lesson-card__status lesson-card__status--cancelled lesson-card__tag">
+          Отменено
+        </span>
+      )}
+      {lesson.status === 'moved' && latest && (
+        <span className="lesson-card__tag lesson-card__tag--moved">Перенесено</span>
+      )}
+      {isCurrent && (
+        <span className={`lesson-card__tag lesson-card__tag--${lesson.kind}`}>
+          {kinds[lesson.kind]}
+        </span>
+      )}
     </article>
   )
 }
@@ -129,6 +141,8 @@ export function SchedulePage() {
   const [mode, setMode] = useState<'day' | 'week'>('day')
   const [navigation, setNavigation] = useState<Lesson['latest_lesson']>(null)
   const pageRef = useRef<HTMLElement>(null)
+  const [todayRequest, setTodayRequest] = useState(0)
+  const pendingToday = useRef(false)
   const pendingPosition = useRef<string | null>(null)
   function navigateToLesson(position: NonNullable<Lesson['latest_lesson']>) {
     pendingPosition.current = position.id
@@ -168,6 +182,58 @@ export function SchedulePage() {
       pendingPosition.current = null
     }
   }, [date, navigation, query.data, query.isSuccess, query.isFetching])
+  useEffect(() => {
+    if (!pendingToday.current || mode !== 'week' || !query.isSuccess || query.isFetching) return
+    const target = pageRef.current?.querySelector<HTMLElement>('.schedule-day.is-selected')
+    if (!target) return
+    if (date !== getMoscowDate()) {
+      pendingToday.current = false
+      return
+    }
+    let cancelled = false
+    let frame = 0
+    // ResizeObserver can start the height animation after this effect. Recheck
+    // on the next frame so scrolling uses the final layout, including cached data.
+    function settleLayout() {
+      if (cancelled) return
+      const animations = (pageRef.current?.getAnimations?.({ subtree: true }) ?? []).filter(
+        (animation) =>
+          animation.playState === 'running' &&
+          animation.effect?.getTiming().iterations !== Infinity,
+      )
+      if (animations.length) {
+        void Promise.all(animations.map((animation) => animation.finished.catch(() => {}))).then(
+          () => {
+            if (!cancelled) frame = requestAnimationFrame(settleLayout)
+          },
+        )
+        return
+      }
+      frame = requestAnimationFrame(() => {
+        if (cancelled) return
+        const running = pageRef.current
+          ?.getAnimations?.({ subtree: true })
+          .some(
+            (animation) =>
+              animation.playState === 'running' &&
+              animation.effect?.getTiming().iterations !== Infinity,
+          )
+        if (running) return settleLayout()
+        target?.scrollIntoView({
+          block: 'start',
+          behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+            ? 'instant'
+            : 'smooth',
+        })
+        pendingToday.current = false
+      })
+    }
+    settleLayout()
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(frame)
+    }
+  }, [todayRequest, mode, date, query.isSuccess, query.isFetching, query.data])
   const isPositionUnavailable =
     navigation !== null &&
     getMoscowDate(new Date(navigation.starts_at)) === date &&
@@ -203,27 +269,16 @@ export function SchedulePage() {
             Неделя
           </button>
         </div>
-        <button className="schedule-today" onClick={() => setDate(getMoscowDate())}>
+        <button
+          className="schedule-today"
+          onClick={() => {
+            pendingToday.current = mode === 'week'
+            setDate(getMoscowDate())
+            setTodayRequest((request) => request + 1)
+          }}
+        >
           Сегодня
         </button>
-        {mode === 'day' && (
-          <div className="schedule-day-arrows" role="group" aria-label="Переключение даты">
-            <button
-              aria-label="Предыдущий день"
-              disabled={date === '0001-01-01'}
-              onClick={() => setDate(addDays(date, -1))}
-            >
-              ‹
-            </button>
-            <button
-              aria-label="Следующий день"
-              disabled={date === '9999-12-31'}
-              onClick={() => setDate(addDays(date, 1))}
-            >
-              ›
-            </button>
-          </div>
-        )}
         <div className="schedule-week-arrows" role="group" aria-label="Переключение недели">
           <button
             aria-label="Предыдущая неделя"

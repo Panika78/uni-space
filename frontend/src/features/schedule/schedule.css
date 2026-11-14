@@ -510,7 +510,8 @@
   .lesson-card--scheduled .lesson-card__tag {
     grid-column: 2;
     grid-row: 1;
-    max-width: 130px;
+    max-width: none;
+    white-space: nowrap;
     font-size: 11px;
     text-align: right;
   }
@@ -542,4 +543,98 @@
     font-size: 12px;
     padding: 3px 8px;
   }
+}
+.schedule-day {
+  scroll-margin-top: 88px;
+}
+.lesson-card__tag {
+  color: #706265;
+  background: #f2efeb;
+  border: 1px solid transparent;
+  padding: 6px 11px;
+  font-size: 13px;
+  font-weight: 650;
+}
+.lesson-card--cancelled {
+  border: 1px solid #d9a8ac;
+  border-left: 5px solid #b33849;
+  background: #fff6f5;
+}
+.lesson-card--moved {
+  border: 1px solid #e6bd82;
+  border-left: 5px solid #b96c1c;
+  background: #fffbf2;
+}
+.lesson-card .lesson-card__status--cancelled {
+  color: #8f1b32;
+  background: #f8dfe2;
+  border: 1px solid #eec1c9;
+}
+.schedule-page .lesson-card__navigate {
+  color: #8c4c05;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  margin: 0;
+  text-align: left;
+}
+.lesson-card--moved,
+.lesson-card--cancelled {
+  grid-template-columns: minmax(160px, 195px) minmax(0, 1fr) auto;
+}
+.lesson-card__tag--moved {
+  color: #8c4c05;
+  background: #fff0cf;
+  border: 1px solid #edd098;
+}
+@media (max-width: 760px) {
+  .lesson-card--moved,
+  .lesson-card--cancelled {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .lesson-card--moved .lesson-card__time,
+  .lesson-card--cancelled .lesson-card__time {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .lesson-card--moved .lesson-card__tag,
+  .lesson-card--cancelled .lesson-card__tag {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .lesson-card--moved .lesson-card__details,
+  .lesson-card--cancelled .lesson-card__details {
+    grid-column: 1/-1;
+    grid-row: 2;
+  }
+}
+
+.lesson-card__tag {
+  padding: 7px 11px;
+  font-size: 14px;
+  line-height: 1.35;
+}
+@media (max-width: 760px) {
+  .lesson-card__tag {
+    padding: 5px 7px;
+    font-size: 11px;
+  }
+  .lesson-card--cancelled,
+  .lesson-card--moved {
+    padding: 17px 18px;
+    min-height: 112px;
+  }
+  .lesson-card--cancelled h3,
+  .lesson-card--moved h3 {
+    font-size: 16px;
+    margin-bottom: 5px;
+  }
+}
+
+.lesson-card--cancelled:hover {
+  border-color: #d9a8ac;
+  border-left-color: #b33849;
+}
+.lesson-card--moved:hover {
+  border-color: #e6bd82;
+  border-left-color: #b96c1c;
 }

@@ -148,7 +148,7 @@ async function checkScheduleChanges(page, width) {
       assert.equal(text.includes('Отменено'), targetStatus === 'cancelled')
       if (targetStatus === 'cancelled') assert.ok(text.includes('00:30'))
       await noOverflow(page)
-      const action = source.getByRole('button', { name: 'Показать конечную позицию' })
+      const action = source.getByRole('button', { name: /Перенесено на/ })
       await action.focus()
       await page.keyboard.press('Enter')
       await page.waitForFunction(
@@ -305,7 +305,7 @@ try {
       assert.equal(await page.locator('.schedule-day:visible').count(), 7)
       assert.equal(await week.getAttribute('aria-pressed'), 'true')
       await page.getByRole('button', { name: 'День', exact: true }).click()
-      await page.getByRole('button', { name: 'Следующий день' }).click()
+      await page.getByLabel('Дата', { exact: true }).fill('2026-11-11')
       assert.equal(await page.getByLabel('Дата', { exact: true }).inputValue(), '2026-11-11')
       assert.ok(await page.getByText('Занятие через полночь', { exact: true }).last().isVisible())
       check('Desktop keyboard day/week; vertical seven days; midnight lesson appears on both days')

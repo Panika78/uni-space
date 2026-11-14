@@ -275,7 +275,7 @@ it.each(['day', 'week'] as const)(
       await userEvent.setup().click(screen.getByRole('button', { name: 'Неделя' }))
     const source = screen.getAllByRole('article')[0]!
     expect(within(source).getByText(/Перенесено на/)).toHaveTextContent('3 января 2027 г., 00:30')
-    const action = within(source).getByRole('button', { name: 'Показать конечную позицию' })
+    const action = within(source).getByRole('button', { name: /Перенесено на/ })
     action.focus()
     await userEvent.setup().keyboard('{Enter}')
     await waitFor(() => expect(screen.getByLabelText('Дата')).toHaveValue('2027-01-03'))
@@ -329,9 +329,9 @@ it('focuses a single move target within the same day without reloading the week'
   request.mockResolvedValue(response([a, b]))
   renderSchedule()
   await screen.findAllByRole('article')
-  await userEvent.setup().click(screen.getByRole('button', { name: 'Показать конечную позицию' }))
+  await userEvent.setup().click(screen.getByRole('button', { name: /Перенесено на/ }))
   expect(screen.getAllByRole('article')[1]).toHaveFocus()
-  await userEvent.setup().click(screen.getByRole('button', { name: 'Показать конечную позицию' }))
+  await userEvent.setup().click(screen.getByRole('button', { name: /Перенесено на/ }))
   expect(screen.getAllByRole('article')[1]).toHaveFocus()
   expect(request).toHaveBeenCalledTimes(1)
 })
@@ -362,7 +362,7 @@ it.each([false, true])(
       )
     const { queryClient, container } = renderSchedule()
     await screen.findByRole('article')
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Показать конечную позицию' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: /Перенесено на/ }))
     expect(await screen.findByRole('status')).toHaveTextContent(
       'Не удалось найти выбранную позицию в расписании. Возможно, расписание изменилось.',
     )
@@ -410,7 +410,7 @@ it('restores target focus and scroll after a failed week request is retried succ
   try {
     renderSchedule()
     await screen.findByRole('article')
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Показать конечную позицию' }))
+    await userEvent.setup().click(screen.getByRole('button', { name: /Перенесено на/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Не удалось загрузить расписание')
     expect(screen.queryByText(/Не удалось найти выбранную позицию/)).not.toBeInTheDocument()
     await userEvent.setup().click(screen.getByRole('button', { name: 'Повторить' }))

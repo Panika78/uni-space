@@ -115,7 +115,7 @@ async function inspectMoves(page, account) {
     const moved = items.find((item) => item.status === 'moved')
     if (moved) {
       const card = await inspectCard(moved)
-      await card.getByRole('button', { name: 'Показать конечную позицию' }).click()
+      await card.getByRole('button', { name: /Перенесено на/ }).click()
       await page.waitForFunction(
         (date) => document.querySelector('input[type=date]').value === date,
         dates.at(-1),
