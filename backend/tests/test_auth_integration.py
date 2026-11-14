@@ -220,6 +220,78 @@ def test_login_rotation_cookie_and_logout_revoke_access(auth):
     assert_error(client.refresh(current), 401, "invalid_refresh")
 
 
+def test_refresh_lock_timeout_releases_connection_and_allows_later_refresh(auth, monkeypatch):
+    import time
+
+    client, engine, ids, _logins, _student_ids = auth
+    _response, token, _access = login(auth)
+    from app.core.database import engine as api_engine
+
+    def get_api_engine_session():
+        with Session(api_engine, expire_on_commit=False) as db:
+            yield db
+
+    monkeypatch.setitem(client.app.dependency_overrides, get_db_session, get_api_engine_session)
+    with api_engine.connect() as connection:
+        assert connection.execute(text("SHOW lock_timeout")).scalar_one() == "5s"
+        assert connection.execute(text("SHOW statement_timeout")).scalar_one() == "30s"
+    with Session(engine) as db:
+        session_id = db.scalar(select(AuthSession.id).where(AuthSession.user_id == ids[0]))
+    assert session_id is not None
+
+    blocker = engine.connect()
+    transaction = blocker.begin()
+    blocker.execute(
+        select(AuthSession.id).where(AuthSession.id == session_id).with_for_update()
+    ).one()
+    blocker_pid = blocker.scalar(text("SELECT pg_backend_pid()"))
+    held_connections = api_engine.pool.checkedout()
+    started = time.monotonic()
+    try:
+        timed_out = client.refresh(token)
+        elapsed = time.monotonic() - started
+        assert timed_out.status_code == 500
+        assert timed_out.json()["error"]["code"] == "internal_error"
+        assert "lock timeout" not in timed_out.text.lower()
+        assert "postgres" not in timed_out.text.lower()
+        assert 4 <= elapsed < 12
+        # The failed request returned its connection while the blocker remains open.
+        assert api_engine.pool.checkedout() == held_connections
+        assert (
+            blocker.scalar(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE datname = current_database() "
+                    "AND state = 'idle in transaction' AND pid <> :blocker_pid"
+                ),
+                {"blocker_pid": blocker_pid},
+            )
+            == 0
+        )
+        assert (
+            blocker.scalar(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE datname = current_database() "
+                    "AND wait_event_type = 'Lock' AND pid <> :blocker_pid"
+                ),
+                {"blocker_pid": blocker_pid},
+            )
+            == 0
+        )
+    finally:
+        transaction.rollback()
+        blocker.close()
+
+    assert api_engine.pool.checkedout() == 0
+    with api_engine.connect() as connection:
+        assert connection.execute(text("SELECT 1")).scalar_one() == 1
+
+    refreshed = client.refresh(token)
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.cookies[COOKIE_NAME] != token
+
+
 def test_successful_login_revokes_the_presented_browser_session(auth):
     client, engine, ids, logins, _student_ids = auth
     _response, previous_refresh, previous_access = login(auth)

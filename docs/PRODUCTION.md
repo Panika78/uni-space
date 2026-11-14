@@ -212,6 +212,12 @@ Nginx (важно при замене файла через rename), прове�
 runtime-роли только для чтения: `SELECT` на `notifications`, без DML и sequence USAGE.
 
 API не получает административный или migration secret ни в окружение, ни в mounts.
+API pool задаёт для каждого PostgreSQL-соединения `lock_timeout=5000ms` и
+`statement_timeout=30000ms`. Это параметры сессии API-клиента; Alembic использует
+отдельный engine с `NullPool`, а backup/restore и операторские команды запускаются
+с отдельными подключениями и не получают API deadlines. Не добавляйте эти значения
+в `ALTER ROLE` или `ALTER DATABASE`: такое наследование может ограничить миграции,
+восстановление и обслуживание.
 В `migrate` нет JWT-секрета приложения: константа удовлетворяет Settings только для
 запуска Alembic, HTTP/token signing этим сервисом не выполняются. Образ общий,
 секреты не встраиваются. API читает Alembic revision, но не меняет её.
