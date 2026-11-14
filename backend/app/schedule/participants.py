@@ -107,10 +107,6 @@ def replace_lesson_participants(
     wanted = set(participants)
     if wanted == existing.keys():
         return
-    for participant, row in existing.items():
-        if participant not in wanted:
-            db.delete(row)
-    db.flush()
     for participant in wanted - existing.keys():
         db.add(
             LessonGroup(
@@ -119,5 +115,11 @@ def replace_lesson_participants(
                 subgroup_id=participant.subgroup_id,
             )
         )
+    # Keep the group represented while switching its formal subgroups. The
+    # PostgreSQL guard must never observe a missing last assignment mid-change.
+    db.flush()
+    for participant, row in existing.items():
+        if participant not in wanted:
+            db.delete(row)
     lesson.version += 1
     db.flush()

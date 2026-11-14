@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 from sqlalchemy import MetaData, Table, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, registry
 from test_academics_migrations import migration_database, run_migration  # noqa: F401
 from test_schedule_integration import schedule as create_schedule
@@ -44,7 +45,21 @@ def test_upgrade_preserves_old_students_assignments_moves_and_api(migration_data
             db.commit()
         with engine.connect() as connection:
             before = connection.scalar(text(SNAPSHOT))
-        run_migration(engine, "upgrade", "head")
+            legacy_functions = [
+                connection.scalar(
+                    text("SELECT pg_get_functiondef(to_regprocedure(:name))"), {"name": name + "()"}
+                )
+                for name in ("preserve_assessment_assignment", "validate_assessment_assignment")
+            ]
+        with engine.connect().execution_options(isolation_level="REPEATABLE READ") as stale:
+            stale.execute(text("SELECT * FROM lessons"))
+            run_migration(engine, "upgrade", "head")
+            with pytest.raises(DBAPIError) as rejected:
+                stale.execute(
+                    text("UPDATE lessons SET version=version WHERE id=:id"), {"id": root.id}
+                )
+            assert rejected.value.orig.sqlstate == "40001"
+            stale.rollback()
         run_migration(engine, "upgrade", "head")
         run_migration(engine, "check")
         with engine.connect() as connection:
@@ -70,6 +85,13 @@ def test_upgrade_preserves_old_students_assignments_moves_and_api(migration_data
         run_migration(engine, "downgrade", "20261112_03")
         with engine.connect() as connection:
             assert connection.scalar(text(SNAPSHOT)) == before
+            restored_functions = [
+                connection.scalar(
+                    text("SELECT pg_get_functiondef(to_regprocedure(:name))"), {"name": name + "()"}
+                )
+                for name in ("preserve_assessment_assignment", "validate_assessment_assignment")
+            ]
+            assert restored_functions == legacy_functions
         run_migration(engine, "upgrade", "head")
         with engine.connect() as connection:
             assert connection.scalar(text(SNAPSHOT)) == before
