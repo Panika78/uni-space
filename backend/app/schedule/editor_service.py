@@ -483,8 +483,35 @@ def list_editor_catalog(db: Session, kind: str, params: CatalogParams) -> Catalo
         else:
             raise HTTPException(422, "validation_error")
     rows = db.execute(stmt.order_by(model.id).limit(params.limit + 1)).all()
+    page_rows = rows[: params.limit]
+    groups_by_offering = defaultdict(list)
+    term_names = {}
+    building_names = {}
+    if page_rows and kind == "course-offerings":
+        offering_ids = [row.id for row, _label in page_rows]
+        for offering_id, group_id in db.execute(
+            select(CourseGroup.course_offering_id, CourseGroup.group_id)
+            .where(CourseGroup.course_offering_id.in_(offering_ids))
+            .order_by(CourseGroup.group_id)
+        ):
+            groups_by_offering[offering_id].append(str(group_id))
+        term_names = dict(
+            db.execute(
+                select(AcademicTerm.id, AcademicTerm.name).where(
+                    AcademicTerm.id.in_({row.term_id for row, _label in page_rows})
+                )
+            ).all()
+        )
+    elif page_rows and kind == "rooms":
+        building_names = dict(
+            db.execute(
+                select(Building.id, Building.name).where(
+                    Building.id.in_({row.building_id for row, _label in page_rows})
+                )
+            ).all()
+        )
     items = []
-    for row, label in rows[: params.limit]:
+    for row, label in page_rows:
         item = CatalogItem(id=str(row.id), name=label)
         if kind in ("subgroups", "teaching-assignments"):
             item.group_id = str(row.group_id)
@@ -495,18 +522,11 @@ def list_editor_catalog(db: Session, kind: str, params: CatalogParams) -> Catalo
             )
         if kind == "rooms":
             item.building_id = str(row.building_id)
-            item.building_name = db.get(Building, row.building_id).name
+            item.building_name = building_names[row.building_id]
         if kind == "course-offerings":
             item.term_id = str(row.term_id)
-            item.term_name = db.get(AcademicTerm, row.term_id).name
-            item.group_ids = [
-                str(i)
-                for i in db.scalars(
-                    select(CourseGroup.group_id)
-                    .where(CourseGroup.course_offering_id == row.id)
-                    .order_by(CourseGroup.group_id)
-                )
-            ]
+            item.term_name = term_names[row.term_id]
+            item.group_ids = groups_by_offering[row.id]
         items.append(item)
     return CatalogPage(
         items=items,
