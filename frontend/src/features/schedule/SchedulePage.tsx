@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
@@ -17,6 +17,7 @@ import {
   formatGapDuration,
 } from './calendar'
 import type { Lesson } from './calendar'
+import { useSchedulePreferences } from './useSchedulePreferences'
 import './schedule.css'
 
 const kinds = {
@@ -139,25 +140,8 @@ function LessonCard({
 }
 
 export function SchedulePage() {
-  const queryClient = useQueryClient()
-  const preferences = useQuery({
-    queryKey: ['user-preferences'],
-    queryFn: ({ signal }) =>
-      apiFetch<components['schemas']['PreferencesResponse']>('/api/v1/users/me/preferences', {
-        authenticated: true,
-        signal,
-      }),
-  })
-  const savePreferences = useMutation({
-    mutationFn: (show: boolean) =>
-      apiFetch<components['schemas']['PreferencesResponse']>('/api/v1/users/me/preferences', {
-        authenticated: true,
-        method: 'PATCH',
-        body: JSON.stringify({ show_cancelled_lessons: show }),
-      }),
-    onSuccess: (data) => queryClient.setQueryData(['user-preferences'], data),
-  })
-  const showCancelled = preferences.data?.show_cancelled_lessons ?? true
+  const { preferences, savePreferences, showCancelled, hasUncertainSave, hasExplicitSaveError } =
+    useSchedulePreferences()
   const [date, setDate] = useState(getMoscowDate)
   const [mode, setMode] = useState<'day' | 'week'>('day')
   const [navigation, setNavigation] = useState<Lesson['latest_lesson']>(null)
@@ -342,21 +326,50 @@ export function SchedulePage() {
       <label className="schedule-cancelled-toggle">
         <input
           type="checkbox"
+          ref={(input) => {
+            if (input) input.indeterminate = !preferences.isSuccess
+          }}
+          aria-describedby="schedule-preference-status"
           checked={savePreferences.isPending ? savePreferences.variables : showCancelled}
           disabled={!preferences.isSuccess || preferences.isFetching || savePreferences.isPending}
           onChange={(event) => savePreferences.mutate(event.target.checked)}
         />
         Показывать отменённые
       </label>
+      <p
+        id="schedule-preference-status"
+        aria-live="polite"
+        hidden={preferences.isSuccess && !preferences.isFetching}
+      >
+        {preferences.isPending
+          ? 'Загружаем настройку…'
+          : !preferences.isSuccess
+            ? 'Значение настройки неизвестно.'
+            : preferences.isFetching
+              ? 'Проверяем настройку…'
+              : ''}
+      </p>
       {preferences.isError && (
         <p role="alert">
           Не удалось загрузить настройку.
           <button onClick={() => void preferences.refetch()}>Повторить загрузку настройки</button>
         </p>
       )}
-      {savePreferences.isError && (
+      {hasExplicitSaveError && (
         <p role="alert">
-          Не удалось сохранить настройку. Восстановлено последнее подтверждённое значение.
+          Не удалось сохранить настройку. Показано последнее подтверждённое значение.
+        </p>
+      )}
+      {hasUncertainSave && (
+        <p role="alert">
+          Не удалось подтвердить сохранение. Предыдущий запрос ещё может завершиться на сервере.
+          Показано последнее полученное значение. Проверяйте настройку повторно.
+          <button
+            disabled={preferences.isFetching || savePreferences.isPending}
+            onClick={() => void preferences.refetch()}
+          >
+            Проверить настройку
+          </button>
         </p>
       )}
       <p className="schedule-timezone">Московское время · Europe/Moscow</p>

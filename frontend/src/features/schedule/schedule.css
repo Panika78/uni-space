@@ -52,7 +52,8 @@
   content: '';
   position: absolute;
   z-index: -1;
-  inset: 5px auto 5px 5px;
+  inset-block: 5px;
+  inset-inline-start: 5px;
   width: calc((100% - 10px) / 2);
   background: var(--accent);
   border-radius: 9px;
@@ -60,6 +61,9 @@
 }
 .schedule-modes[data-mode='week']::before {
   transform: translateX(100%);
+}
+.schedule-modes:dir(rtl)[data-mode='week']::before {
+  transform: translateX(-100%);
 }
 .schedule-modes button {
   background: transparent;
@@ -358,7 +362,8 @@
     padding: 4px;
   }
   .schedule-modes::before {
-    inset: 4px auto 4px 4px;
+    inset-block: 4px;
+    inset-inline-start: 4px;
     width: calc((100% - 8px) / 2);
   }
   .schedule-modes button {

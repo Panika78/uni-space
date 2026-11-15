@@ -104,6 +104,183 @@ async function checkOvernightDates(page) {
   ])
 }
 
+async function assertModeHighlight(page) {
+  await page.waitForFunction(
+    () => {
+      const modes = document.querySelector('.schedule-modes')
+      const selected = modes.querySelector('[aria-pressed="true"]').getBoundingClientRect()
+      const bounds = modes.getBoundingClientRect()
+      const style = window.getComputedStyle(modes, '::before')
+      const transform = new window.DOMMatrix(style.transform)
+      const left = bounds.left + Number.parseFloat(style.left) + transform.e
+      const top = bounds.top + Number.parseFloat(style.top) + transform.f
+      return (
+        Math.abs(left - selected.left) < 1.5 &&
+        Math.abs(top - selected.top) < 1.5 &&
+        Math.abs(left + Number.parseFloat(style.width) - selected.right) < 1.5 &&
+        Math.abs(top + Number.parseFloat(style.height) - selected.bottom) < 1.5
+      )
+    },
+    null,
+    { timeout: 5000 },
+  )
+}
+
+async function waitForPreference(page, show) {
+  await page.waitForFunction((value) => {
+    const input = document.querySelector('.schedule-cancelled-toggle input')
+    return input && !input.disabled && !input.indeterminate && input.checked === value
+  }, show)
+}
+
+async function checkUnknownPreference(page) {
+  let readMode = 'error'
+  let release
+  let markHeld
+  const gate = new Promise((resolve) => {
+    release = resolve
+  })
+  const held = new Promise((resolve) => {
+    markHeld = resolve
+  })
+  let patches = 0
+  const countPatch = (request) => {
+    if (request.url().endsWith('/preferences') && request.method() === 'PATCH') patches++
+  }
+  page.on('request', countPatch)
+  const handler = async (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    if (readMode === 'error')
+      return route.fulfill({
+        status: 500,
+        json: { error: { code: 'internal_error', message: 'test', details: [] } },
+      })
+    markHeld()
+    await gate
+    return route.continue()
+  }
+  await page.route('**/api/v1/users/me/preferences', handler)
+  await page.reload()
+  await page.locator('.schedule-list').waitFor()
+  await page.getByRole('alert').filter({ hasText: 'Не удалось загрузить настройку' }).waitFor()
+  async function assertUnknown() {
+    assert.ok(await page.getByRole('checkbox').isDisabled())
+    assert.ok(
+      await page.getByRole('checkbox').evaluate((input) => input.indeterminate && !input.checked),
+    )
+    assert.equal(await page.locator('.lesson-card--cancelled').count(), 0)
+    assert.ok((await page.locator('.lesson-card--scheduled:visible').count()) > 0)
+    assert.equal(patches, 0)
+  }
+  await assertUnknown()
+  readMode = 'delayed'
+  await page.getByRole('button', { name: 'Повторить загрузку настройки' }).click()
+  await held
+  await assertUnknown()
+  release()
+  await waitForPreference(page, false)
+  assert.equal(await page.locator('.lesson-card--cancelled').count(), 0)
+  assert.equal(patches, 0)
+  await page.unroute('**/api/v1/users/me/preferences', handler)
+  page.off('request', countPatch)
+  check(
+    'F-03: saved false stays concealed during failed/delayed GET, normal schedule remains available, retry restores real value without PATCH',
+  )
+}
+
+async function checkUncertainPreference(page) {
+  for (const fault of ['never', 'lost', 'late']) {
+    // A fresh document resets the test's previous fault state, never server data.
+    await page.reload()
+    await page.locator('.schedule-list').waitFor()
+    const toggle = page.getByRole('checkbox', { name: 'Показывать отменённые' })
+    await page.waitForFunction(
+      () => !document.querySelector('.schedule-cancelled-toggle input').disabled,
+    )
+    if (await toggle.isChecked()) {
+      await toggle.click()
+      await waitForPreference(page, false)
+    }
+    let releaseSend
+    let releaseResponse
+    let markCommitted
+    const sendGate = new Promise((resolve) => {
+      releaseSend = resolve
+    })
+    const responseGate = new Promise((resolve) => {
+      releaseResponse = resolve
+    })
+    const committed = new Promise((resolve) => {
+      markCommitted = resolve
+    })
+    let patches = 0
+    const handler = async (route) => {
+      if (route.request().method() !== 'PATCH') return route.continue()
+      patches++
+      if (fault === 'late') await sendGate
+      if (fault === 'never') {
+        await responseGate
+        try {
+          await route.abort()
+        } catch {
+          /* Timed-out browser already aborted. */
+        }
+        return
+      }
+      // Forward the original request to the real API; only its response is withheld.
+      const response = await route.fetch()
+      assert.equal(response.status(), 200)
+      markCommitted()
+      await responseGate
+      try {
+        await route.fulfill({ response })
+      } catch {
+        /* Timed-out browser already aborted. */
+      }
+    }
+    await page.route('**/api/v1/users/me/preferences', handler)
+    const started = Date.now()
+    await toggle.click()
+    const warning = page.getByRole('alert').filter({ hasText: 'Не удалось подтвердить сохранение' })
+    await warning.waitFor({ timeout: 25_000 })
+    assert.ok(Date.now() - started < 25_000, 'PATCH wait is bounded in real Chromium time')
+    await waitForPreference(page, fault === 'lost')
+    assert.ok((await warning.innerText()).includes('Предыдущий запрос ещё может завершиться'))
+    assert.equal((await warning.innerText()).includes('Восстановлено'), false)
+    assert.equal(patches, 1, 'No automatic PATCH replay')
+    if (fault === 'late') {
+      releaseSend()
+      await committed
+      await page.getByRole('button', { name: 'Проверить настройку', exact: true }).click()
+      await waitForPreference(page, true)
+      assert.ok(await warning.isVisible(), 'GET does not declare an old write impossible')
+    }
+    releaseSend()
+    releaseResponse()
+    await page.unroute('**/api/v1/users/me/preferences', handler)
+    assert.equal(patches, 1)
+    if (fault === 'never') {
+      // Restored control permits a deliberate new choice; no hidden automatic write.
+      await toggle.click()
+      await waitForPreference(page, true)
+      assert.ok(await warning.isVisible())
+    }
+    check(
+      `F-04: ${fault} PATCH, deadline, real GET reconciliation, persistent uncertainty and usable control`,
+    )
+  }
+  await page.reload()
+  await page.locator('.schedule-list').waitFor()
+  const toggle = page.getByRole('checkbox')
+  await page.waitForFunction(
+    () => !document.querySelector('.schedule-cancelled-toggle input').disabled,
+  )
+  if (await toggle.isChecked()) {
+    await toggle.click()
+    await waitForPreference(page, false)
+  }
+}
+
 async function checkPreferences(page, width) {
   const toggle = page.getByRole('checkbox', { name: 'Показывать отменённые' })
   await toggle.waitFor()
@@ -139,6 +316,10 @@ async function checkPreferences(page, width) {
   await login(page, 'schedule-fixture-1', false)
   await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
   assert.equal(await toggle.isChecked(), false)
+  if (width === 1440) {
+    await checkUnknownPreference(page)
+    await checkUncertainPreference(page)
+  }
   await page.route('**/api/v1/users/me/preferences', (route) =>
     route.request().method() === 'PATCH'
       ? route.fulfill({
@@ -169,13 +350,13 @@ async function checkPreferences(page, width) {
     await noOverflow(page)
     for (const viewport of [360, 768, 1440, 2560]) {
       await page.setViewportSize({ width: viewport, height: 1000 })
-      await page.evaluate(() => {
-        document.documentElement.dir = 'rtl'
-      })
-      await noOverflow(page)
-      await page.evaluate(() => {
-        document.documentElement.dir = 'ltr'
-      })
+      for (const direction of ['rtl', 'ltr']) {
+        await page.evaluate((dir) => {
+          document.documentElement.dir = dir
+        }, direction)
+        await assertModeHighlight(page)
+        await noOverflow(page)
+      }
     }
   }
   await page.setViewportSize({ width, height: 1000 })
