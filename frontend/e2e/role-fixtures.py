@@ -6,6 +6,7 @@ from app.auth.security import PASSWORD_HASHER
 from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.models import OrgUnit, StaffPermission, StaffProfile, Teacher, User
+from app.permissions import ACADEMIC_PERMISSIONS, PermissionCode
 from sqlalchemy import delete, select
 from sqlalchemy.engine import make_url
 
@@ -36,6 +37,7 @@ with SessionLocal.begin() as db:
             ("reviewer", "staff"),
             ("editor", "staff"),
             ("empty", "staff"),
+            ("all", "staff"),
         ]:
             user = db.scalar(select(User).where(User.login == f"role-e2e-{name}"))
             if user:
@@ -55,7 +57,18 @@ with SessionLocal.begin() as db:
                 profile = StaffProfile(user_id=user.id, org_unit_id=org.id)
                 db.add(profile)
                 db.flush()
-                if name != "empty":
+                if name == "all":
+                    for permission in PermissionCode:
+                        db.add(
+                            StaffPermission(
+                                staff_profile_id=profile.id,
+                                permission_code=permission.value,
+                                scope_org_unit_id=None
+                                if permission in ACADEMIC_PERMISSIONS
+                                else org.id,
+                            )
+                        )
+                elif name != "empty":
                     db.add(
                         StaffPermission(
                             staff_profile_id=profile.id,

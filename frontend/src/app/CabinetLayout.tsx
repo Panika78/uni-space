@@ -1,4 +1,13 @@
-import { createContext, useContext, useCallback, useEffect, useRef, useState } from 'react'
+import { useAccessSuspended } from '../shared/ui/AccessRecovery'
+import {
+  createContext,
+  useContext,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 import type { FocusEvent } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../features/auth/AuthProvider'
@@ -60,6 +69,7 @@ export function UserMenu({
   logoutOnly?: boolean
   exitStatus?: ExitProtectionStatus
 }) {
+  const isSuspended = useAccessSuspended()
   const { initials } = useContext(ShellContext)
   const { logout } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
@@ -71,15 +81,15 @@ export function UserMenu({
   const dialogRef = useRef<HTMLDialogElement>(null)
   const confirmingRef = useRef(false)
 
-  useEffect(() => {
-    if (!confirmLogout) return
+  useLayoutEffect(() => {
+    if (!confirmLogout || isSuspended) return
     const dialog = dialogRef.current
     dialog?.showModal()
     cancelRef.current?.focus()
     return () => {
       if (dialog?.open) dialog.close()
     }
-  }, [confirmLogout])
+  }, [confirmLogout, isSuspended])
 
   const closeConfirmation = () => {
     if (confirmingRef.current) return
@@ -89,7 +99,7 @@ export function UserMenu({
   }
 
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen || isSuspended) return
     const handlePointerDown = (event: PointerEvent) => {
       if (!containerRef.current?.contains(event.target as Node)) setIsOpen(false)
     }
@@ -105,7 +115,7 @@ export function UserMenu({
       document.removeEventListener('pointerdown', handlePointerDown)
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [isOpen])
+  }, [isOpen, isSuspended])
 
   const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
     const nextTarget = event.relatedTarget
@@ -240,11 +250,12 @@ export function UserMenu({
 }
 
 function MobileDrawer({ onClose, isOpen }: { onClose: () => void; isOpen: boolean }) {
+  const isSuspended = useAccessSuspended()
   const { present, rootRef } = useOverlayPresence(isOpen, 'left')
   const closeRef = useRef<HTMLButtonElement>(null)
 
-  useEffect(() => {
-    if (!isOpen) return
+  useLayoutEffect(() => {
+    if (!isOpen || isSuspended) return
     const background = document.querySelector<HTMLElement>('.student-main-column')
     const sidebar = document.querySelector<HTMLElement>('.desktop-sidebar')
     const previousInert = [background?.inert, sidebar?.inert]
@@ -285,7 +296,7 @@ function MobileDrawer({ onClose, isOpen }: { onClose: () => void; isOpen: boolea
       if (sidebar) sidebar.inert = previousInert[1] ?? false
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [onClose, isOpen])
+  }, [onClose, isOpen, isSuspended])
 
   if (!present) return null
 
@@ -340,6 +351,7 @@ export function CabinetLayout({
 }
 
 function CabinetShell() {
+  const isSuspended = useAccessSuspended()
   const { student, home } = useContext(ShellContext)
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [exitStatus, setExitStatus] = useState<ExitProtectionStatus>('none')
@@ -360,7 +372,10 @@ function CabinetShell() {
   const closeNotifications = useCallback(() => {
     setIsNotificationsOpen(false)
     if (location.pathname === '/notifications') navigate('/schedule', { replace: true })
-    window.setTimeout(() => notificationTriggerRef.current?.focus(), 0)
+    window.setTimeout(() => {
+      const trigger = notificationTriggerRef.current
+      if (trigger && !trigger.closest('[hidden], [inert]')) trigger.focus()
+    }, 0)
   }, [location.pathname, navigate])
 
   useEffect(() => closeDrawer, [location.key, closeDrawer])
@@ -377,6 +392,7 @@ function CabinetShell() {
   }, [closeDrawer])
 
   useEffect(() => {
+    if (isSuspended) return
     if (isDrawerOpen) {
       wasDrawerOpen.current = true
     } else if (wasDrawerOpen.current) {
@@ -385,7 +401,7 @@ function CabinetShell() {
       else menuButtonRef.current?.focus()
       wasDrawerOpen.current = false
     }
-  }, [isDrawerOpen])
+  }, [isDrawerOpen, isSuspended])
 
   return (
     <div className={`student-shell${isCollapsed ? ' sidebar-collapsed' : ''}`}>

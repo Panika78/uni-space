@@ -1,3 +1,4 @@
+import { useAccessSuspended } from '../../shared/ui/AccessRecovery'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useId, useRef } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
@@ -49,6 +50,7 @@ export function ServicesTabs({ applications = false }: { applications?: boolean 
   )
 }
 export function ApplicationsList() {
+  const isSuspended = useAccessSuspended()
   const queryClient = useQueryClient()
   const location = useLocation()
   const heading = useRef<HTMLHeadingElement>(null)
@@ -89,6 +91,7 @@ export function ApplicationsList() {
     else void query.refetch({ cancelRefetch: false })
   }
   useEffect(() => {
+    if (isSuspended) return
     const target = returnFocus.current
     if (!target || target.locationKey !== location.key) return
     const link = Array.from(
@@ -119,7 +122,7 @@ export function ApplicationsList() {
       window.cancelAnimationFrame(firstFrame)
       if (secondFrame) window.cancelAnimationFrame(secondFrame)
     }
-  }, [location.key, query.data, query.isFetching, isDenied, queryClient])
+  }, [location.key, query.data, query.isFetching, isDenied, queryClient, isSuspended])
   useEffect(() => {
     // Discard only this forbidden snapshot, retaining the 403 error state.
     // A later 500 (including after remount) must not reveal the old rows again.
@@ -130,11 +133,12 @@ export function ApplicationsList() {
         ?.setState({ data: undefined, dataUpdatedAt: 0 })
     if (
       isDenied &&
+      !isSuspended &&
       (document.activeElement === document.body ||
         heading.current?.parentElement?.contains(document.activeElement))
     )
       heading.current?.focus({ preventScroll: true })
-  }, [isDenied, queryClient])
+  }, [isDenied, queryClient, isSuspended])
   return (
     <div>
       <h2 className="applications-list-heading" ref={heading} tabIndex={-1}>
@@ -271,6 +275,7 @@ export function ApplicationsList() {
   )
 }
 export function ApplicationDetailPage() {
+  const isSuspended = useAccessSuspended()
   const { id = '' } = useParams()
   const location = useLocation()
   const navigate = useNavigate()
@@ -284,8 +289,8 @@ export function ApplicationDetailPage() {
       }),
   })
   useEffect(() => {
-    if (query.isSuccess) title.current?.focus({ preventScroll: true })
-  }, [query.data, query.isSuccess])
+    if (query.isSuccess && !isSuspended) title.current?.focus({ preventScroll: true })
+  }, [query.data, query.isSuccess, isSuspended])
   const item = query.isSuccess ? query.data : undefined
   return (
     <section className="section-page service-page application-detail" aria-busy={query.isFetching}>

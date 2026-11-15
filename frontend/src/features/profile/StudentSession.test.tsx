@@ -42,6 +42,9 @@ function error(status: number, code: string) {
 let accountBRole: 'student' | 'teacher'
 let delayContext: (() => Promise<Response>) | undefined
 let account: 'A' | 'B'
+let contextError: number | undefined
+let postCount: number
+let submit: ((body: string) => Promise<Response>) | undefined
 let profileError: number | undefined
 let delayProfile: (() => Promise<Response>) | undefined
 let delaySchedule: ((dateFrom: string, dateTo: string) => Promise<Response>) | undefined
@@ -77,6 +80,9 @@ beforeEach(() => {
   accountBRole = 'student'
   delayContext = undefined
   profileError = undefined
+  contextError = undefined
+  postCount = 0
+  submit = undefined
   delayProfile = undefined
   delaySchedule = undefined
   scheduleDates = {}
@@ -101,6 +107,9 @@ beforeEach(() => {
       }
       if (path.endsWith('/logout')) return Response.json({ session_revoked: true })
       if (path.endsWith('/auth/context')) {
+        if (contextError === 0) throw new TypeError('offline')
+        if (contextError)
+          return error(contextError, contextError === 401 ? 'session_invalid' : 'forbidden')
         if (delayContext) {
           const delayed = delayContext
           delayContext = undefined
@@ -119,10 +128,15 @@ beforeEach(() => {
           delayProfile = undefined
           return delayed()
         }
+        if (profileError === 0) throw new TypeError('offline')
         if (profileError)
           return error(profileError, profileError === 401 ? 'session_invalid' : 'forbidden')
         const token = new Headers(init?.headers).get('Authorization')?.slice(7) as 'A' | 'B'
         return Response.json(profiles[token])
+      }
+      if (path === '/api/v1/applications' && init?.method === 'POST') {
+        postCount++
+        return submit!(String(init.body))
       }
       if (path === '/api/v1/schedule') {
         const requestUrl = new URL(String(input), window.location.href)
@@ -248,7 +262,9 @@ it.each([401, 403, 500])(
       await client.invalidateQueries({ queryKey: ['student-profile'] })
     })
     await waitFor(() => expect(screen.queryByRole('article')).not.toBeInTheDocument())
-    expect(screen.queryByText('Анна Альфа')).not.toBeInTheDocument()
+    if (status === 500)
+      screen.getAllByText('Анна Альфа').forEach((node) => expect(node).not.toBeVisible())
+    else expect(screen.queryByText('Анна Альфа')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Меню пользователя' })).not.toBeInTheDocument()
     if (status === 401)
       expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
@@ -474,4 +490,183 @@ it('isolates a late role context and populated student cache from the next teach
   expect(screen.getByRole('button', { name: 'Меню пользователя' })).toHaveTextContent('—')
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
   expect(screen.queryByRole('link', { name: 'Мой профиль' })).not.toBeInTheDocument()
+})
+
+for (const key of ['authorization-context', 'student-profile']) {
+  it.each([0, 503])(
+    `retains a draft and navigation protection through ${key} error %s`,
+    async (status) => {
+      const { client, router, user } = mount()
+      await login(user, 'student-a')
+      await act(async () => router.navigate('/services/study_certificate'))
+      const field = await screen.findByRole('textbox', { name: /Место предоставления/ })
+      await user.type(field, 'Несохранённый текст')
+      field.focus()
+      if (key === 'authorization-context') contextError = status
+      else profileError = status
+      await act(async () => {
+        await client.invalidateQueries({ queryKey: [key] })
+      })
+      await screen.findByRole('region', { name: 'Восстановление доступа' })
+      expect(field).not.toBeVisible()
+      expect(field.closest('[inert]')).not.toBeNull()
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+      expect(screen.getByRole('region', { name: 'Восстановление доступа' })).toHaveFocus()
+      const unload = new Event('beforeunload', { cancelable: true })
+      window.dispatchEvent(unload)
+      expect(unload.defaultPrevented).toBe(true)
+      await act(async () => router.navigate('/profile'))
+      expect(router.state.location.pathname).toBe('/services/study_certificate')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      contextError = undefined
+      profileError = undefined
+      await user.click(screen.getByRole('button', { name: 'Повторить' }))
+      await screen.findByRole('dialog', { name: 'Выйти без сохранения?' })
+      await user.click(screen.getByRole('button', { name: 'Продолжить заполнение' }))
+      expect(screen.getByRole('textbox')).toBe(field)
+      expect(field).toHaveValue('Несохранённый текст')
+      expect(postCount).toBe(0)
+    },
+  )
+  it.each(['pending', 'uncertain', 'confirmed', 'validation'])(
+    `keeps %s submission state through a ${key} failure without another POST`,
+    async (mode) => {
+      const { client, router, user } = mount()
+      await login(user, 'student-a')
+      await act(async () => router.navigate('/services/study_certificate'))
+      const field = await screen.findByRole('textbox', { name: /Место предоставления/ })
+      await user.type(field, 'Только одно заявление')
+      let complete!: (response: Response) => void
+      submit = () =>
+        new Promise((resolve) => {
+          complete = resolve
+        })
+      await user.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+      expect(postCount).toBe(1)
+      if (key === 'authorization-context') contextError = 503
+      else profileError = 503
+      await act(async () => {
+        await client.invalidateQueries({ queryKey: [key] })
+      })
+      await screen.findByRole('region', { name: 'Восстановление доступа' })
+      const confirmation = {
+        id: '91',
+        service: { id: '1', code: 'study_certificate', title: 'Справка об обучении' },
+        form_data: { place_of_submission: 'Только одно заявление' },
+        review_status: 'submitted',
+        document_status: 'pending',
+        feedback: null,
+        created_at: '2026-11-10T12:00:00Z',
+        updated_at: '2026-11-10T12:00:00Z',
+      }
+      if (mode !== 'pending')
+        await act(async () =>
+          complete(
+            mode === 'confirmed'
+              ? Response.json(confirmation, { status: 201 })
+              : mode === 'validation'
+                ? Response.json(
+                    {
+                      error: {
+                        code: 'validation_error',
+                        message: '',
+                        details: [{ field: 'form_data.place_of_submission', code: 'required' }],
+                      },
+                    },
+                    { status: 422 },
+                  )
+                : error(500, 'internal_error'),
+          ),
+        )
+      expect(screen.getByRole('region', { name: 'Восстановление доступа' })).toHaveFocus()
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+      contextError = undefined
+      profileError = undefined
+      await user.click(screen.getByRole('button', { name: 'Повторить' }))
+      if (mode === 'confirmed') await screen.findByRole('heading', { name: 'Заявление создано' })
+      else {
+        const restored = await screen.findByRole('textbox')
+        expect(restored).toBe(field)
+        expect(restored).toHaveValue('Только одно заявление')
+        if (mode === 'validation') expect(restored).toHaveAttribute('aria-invalid', 'true')
+        else {
+          expect(
+            screen.getByRole('button', {
+              name: mode === 'pending' ? 'Отправляем…' : 'Отправить заявление',
+            }),
+          ).toBeDisabled()
+          // Even a programmatic submit cannot duplicate an in-flight/uncertain POST.
+          restored
+            .closest('form')!
+            .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+        }
+      }
+      expect(postCount).toBe(1)
+      if (mode === 'pending')
+        await act(async () => complete(Response.json(confirmation, { status: 201 })))
+    },
+  )
+}
+
+for (const key of ['authorization-context', 'student-profile']) {
+  it.each([401, 403])(`destroys a retained draft when ${key} confirms HTTP %s`, async (status) => {
+    const { client, router, user } = mount()
+    await login(user, 'student-a')
+    await act(async () => router.navigate('/services/study_certificate'))
+    const field = await screen.findByRole('textbox')
+    await user.type(field, 'Данные отозванного доступа')
+    if (key === 'authorization-context') contextError = 500
+    else profileError = 500
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: [key] })
+    })
+    await screen.findByRole('region', { name: 'Восстановление доступа' })
+    if (key === 'authorization-context') contextError = status
+    else profileError = status
+    await user.click(screen.getByRole('button', { name: 'Повторить' }))
+    await waitFor(() => expect(field).not.toBeInTheDocument())
+    if (status === 401) {
+      await screen.findByRole('heading', { name: 'Вход в систему' })
+      expect(client.getQueryCache().getAll()).toHaveLength(0)
+    } else expect(await screen.findByRole('alert')).toHaveTextContent('Доступ запрещён')
+  })
+}
+
+it('clears a suspended pending form on logout and rejects its late POST after teacher login', async () => {
+  const { client, router, user } = mount()
+  await login(user, 'student-a')
+  await act(async () => router.navigate('/services/study_certificate'))
+  const field = await screen.findByRole('textbox')
+  await user.type(field, 'Личные данные старой сессии')
+  let complete!: (response: Response) => void
+  submit = () =>
+    new Promise((resolve) => {
+      complete = resolve
+    })
+  await user.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+  contextError = 503
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ['authorization-context'] })
+  })
+  await screen.findByRole('region', { name: 'Восстановление доступа' })
+  await user.click(screen.getByRole('button', { name: 'Выйти' }))
+  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Выйти' }))
+  await screen.findByRole('heading', { name: 'Вход в систему' })
+  expect(field).not.toBeInTheDocument()
+  expect(client.getQueryCache().getAll()).toHaveLength(0)
+  contextError = undefined
+  accountBRole = 'teacher'
+  await user.type(screen.getByLabelText('Логин'), 'teacher-b')
+  await user.type(screen.getByLabelText('Пароль'), 'fictional-password')
+  await user.click(screen.getByRole('button', { name: 'Войти' }))
+  await screen.findByRole('heading', { name: 'Мои журналы' })
+  await act(async () => complete(Response.json({ id: 'old-application' }, { status: 201 })))
+  expect(screen.queryByText('Заявление создано')).not.toBeInTheDocument()
+  expect(field).not.toBeInTheDocument()
+  expect(client.getQueryData(['student-profile'])).toBeUndefined()
+  expect(client.getQueryData(['authorization-context'])).toMatchObject({
+    user_id: '2',
+    role: 'teacher',
+  })
+  expect(postCount).toBe(1)
 })

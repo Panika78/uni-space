@@ -1,3 +1,4 @@
+import { AccessRecovery, isTemporaryAccessError } from '../../shared/ui/AccessRecovery'
 import { createContext, useContext, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, Navigate, Outlet, useLocation } from 'react-router-dom'
@@ -47,10 +48,11 @@ export function RoleAccess() {
     }
   }, [refetch])
   if (query.isPending) return <LoadingState title="Проверяем доступ…" />
+  let failure = null
   if (query.isError) {
     const status = query.error instanceof ApiClientError ? query.error.status : undefined
     if (status === 401) return <Navigate to="/login" replace />
-    return (
+    failure = (
       <ErrorState
         title={
           status === 403
@@ -75,10 +77,14 @@ export function RoleAccess() {
         <UserMenu logoutOnly />
       </ErrorState>
     )
+    if (!query.data || !isTemporaryAccessError(query.error)) return failure
   }
+  if (!query.data) return null
   return (
     <RoleContext.Provider value={query.data}>
-      <Outlet key={query.data.user_id + query.data.role} />
+      <AccessRecovery blocked={query.isError} fallback={failure}>
+        <Outlet key={query.data.user_id + query.data.role} />
+      </AccessRecovery>
     </RoleContext.Provider>
   )
 }
