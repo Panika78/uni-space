@@ -838,6 +838,10 @@ with SessionLocal.begin() as db:
                 sql(f"DELETE FROM teaching_assignments WHERE id={int(assignment_id)}")
                 assert teacher_client.get(journal + "/students", headers=headers).status_code == 404
             print("PASS: teacher journal reads, isolation and old-JWT revocation under production ACL", flush=True)
+            # Keep this scenario's two logins outside the existing auth suite's
+            # process-local five-attempt window, as with its other restarts.
+            dc("restart", "api")
+            dc("up", "-d", "--wait", "--wait-timeout", "120", "api")
             staff_user_id, staff_unit_id = (
                 sql("""SELECT u.id, p.org_unit_id FROM users u
 JOIN staff_profiles p ON p.user_id=u.id WHERE u.login='rbac-deployment-check';""").split(
