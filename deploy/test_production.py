@@ -562,8 +562,15 @@ with engine.connect() as c:
     for privilege in ('INSERT','UPDATE','DELETE'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'notifications',:privilege)"), {'privilege': privilege}).scalar_one()
     assert not c.execute(text("SELECT has_sequence_privilege(current_user,'notifications_id_seq','USAGE')")).scalar_one()
-    for privilege in ('SELECT','INSERT','UPDATE','DELETE','TRUNCATE'):
+    for privilege in ('SELECT','UPDATE','DELETE','TRUNCATE'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'audit_events',:privilege)"), {'privilege': privilege}).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'audit_events','INSERT')")).scalar_one()
+    for column in ('id', 'created_at'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'audit_events',:column,'SELECT')"), {'column': column}).scalar_one()
+    event = c.execute(text("INSERT INTO audit_events (entity_type,entity_id,action,before_data,after_data) VALUES ('assessment_group',1,'update','{}','{}') RETURNING id,created_at")).one()
+    assert event.id > 0 and event.created_at is not None
+    for column in ('planned_date', 'lesson_id', 'date_needs_confirmation'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'assessment_groups',:column,'UPDATE')"), {'column': column}).scalar_one()
     assert not c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
     for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'news',:privilege)"), {'privilege': privilege}).scalar_one()
@@ -620,13 +627,12 @@ for statement in (
     "INSERT INTO notifications (user_id,type,title,body) VALUES (1,'forbidden','forbidden','forbidden')",
     "UPDATE notifications SET title='forbidden'", "DELETE FROM notifications",
     "SELECT nextval('public.notifications_id_seq')",
-    "INSERT INTO audit_events (entity_type,entity_id,action) VALUES ('user',1,'set_active')",
     "UPDATE audit_events SET reason='correction'", "DELETE FROM audit_events",
     "SELECT * FROM audit_events", "SELECT nextval('public.audit_events_id_seq')",
     "SELECT nextval('public.org_units_id_seq')", "SELECT nextval('public.programs_id_seq')",
     "UPDATE lessons SET status='cancelled'", "DELETE FROM lesson_groups",
     "INSERT INTO assessments (course_offering_id,title,type,max_score) VALUES (1,'forbidden','test',10)",
-    "UPDATE assessment_groups SET planned_date=CURRENT_DATE", "DELETE FROM assessment_results",
+    "UPDATE assessment_groups SET assessment_id=assessment_id", "DELETE FROM assessment_results",
     "UPDATE assessment_results SET score=score",
     "INSERT INTO assessment_results (assessment_group_id,student_id,score,graded_at) SELECT assessment_group_id,student_id,score,graded_at FROM assessment_results LIMIT 1",
     "UPDATE final_results SET grade_value=5", "SELECT nextval('public.final_results_id_seq')",
