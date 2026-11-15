@@ -12,7 +12,9 @@ class PreferenceSaveTimeout extends Error {}
 function isUncertainSave(error: unknown): boolean {
   return (
     error instanceof PreferenceSaveTimeout ||
-    (error instanceof ApiClientError && ['network_error', 'invalid_response'].includes(error.code))
+    (error instanceof ApiClientError &&
+      ((error.status !== undefined && error.status >= 500 && error.status < 600) ||
+        ['network_error', 'invalid_response'].includes(error.code)))
   )
 }
 

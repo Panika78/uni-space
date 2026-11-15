@@ -330,7 +330,7 @@ export function SchedulePage() {
             if (input) input.indeterminate = !preferences.isSuccess
           }}
           aria-describedby="schedule-preference-status"
-          checked={savePreferences.isPending ? savePreferences.variables : showCancelled}
+          checked={showCancelled}
           disabled={!preferences.isSuccess || preferences.isFetching || savePreferences.isPending}
           onChange={(event) => savePreferences.mutate(event.target.checked)}
         />
@@ -339,15 +339,17 @@ export function SchedulePage() {
       <p
         id="schedule-preference-status"
         aria-live="polite"
-        hidden={preferences.isSuccess && !preferences.isFetching}
+        hidden={!savePreferences.isPending && preferences.isSuccess && !preferences.isFetching}
       >
-        {preferences.isPending
-          ? 'Загружаем настройку…'
-          : !preferences.isSuccess
-            ? 'Значение настройки неизвестно.'
-            : preferences.isFetching
-              ? 'Проверяем настройку…'
-              : ''}
+        {savePreferences.isPending
+          ? 'Сохранение…'
+          : preferences.isPending
+            ? 'Загружаем настройку…'
+            : !preferences.isSuccess
+              ? 'Значение настройки неизвестно.'
+              : preferences.isFetching
+                ? 'Проверяем настройку…'
+                : ''}
       </p>
       {preferences.isError && (
         <p role="alert">

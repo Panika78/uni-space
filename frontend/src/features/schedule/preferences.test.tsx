@@ -321,3 +321,103 @@ it('offers read recovery when reconciliation fails after a timed-out PATCH', asy
     vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'PATCH'),
   ).toHaveLength(1)
 })
+
+it.each([true, false])(
+  'keeps checkbox and cancellations confirmed during PATCH from %s, then updates both on success',
+  async (initial) => {
+    let finish!: (value: unknown) => void
+    vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+      if (!String(url).includes('/preferences')) return { items }
+      if (init?.method === 'PATCH')
+        return new Promise((resolve) => {
+          finish = resolve
+        })
+      return { show_cancelled_lessons: initial }
+    })
+    mount(initial, false, false, items, false)
+    const toggle = screen.getByRole('checkbox')
+    await waitFor(() => expect(toggle).toBeEnabled())
+    const assertConfirmed = (value: boolean) => {
+      expect(toggle).toHaveProperty('checked', value)
+      expect(document.querySelectorAll('.lesson-card--cancelled')).toHaveLength(value ? 1 : 0)
+    }
+    assertConfirmed(initial)
+    fireEvent.click(toggle)
+    await screen.findByText('Сохранение…')
+    assertConfirmed(initial)
+    expect(toggle).toBeDisabled()
+    await act(async () => finish({ show_cancelled_lessons: !initial }))
+    await waitFor(() => expect(toggle).toBeEnabled())
+    assertConfirmed(!initial)
+    expect(screen.queryByText('Сохранение…')).not.toBeInTheDocument()
+    expect(
+      vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'PATCH'),
+    ).toHaveLength(1)
+  },
+)
+
+it.each([401, 403, 422])(
+  'keeps checkbox and list confirmed during PATCH and after explicit HTTP %s rejection',
+  async (status) => {
+    let reject!: (error: Error) => void
+    vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+      if (!String(url).includes('/preferences')) return { items }
+      if (init?.method === 'PATCH')
+        return new Promise((_, fail) => {
+          reject = fail
+        })
+      return { show_cancelled_lessons: true }
+    })
+    mount(true, false, false, items, false)
+    const toggle = screen.getByRole('checkbox')
+    await waitFor(() => expect(toggle).toBeEnabled())
+    fireEvent.click(toggle)
+    await screen.findByText('Сохранение…')
+    expect(toggle).toBeChecked()
+    expect(toggle).toBeDisabled()
+    expect(document.querySelectorAll('.lesson-card--cancelled')).toHaveLength(1)
+    await act(async () => reject(new ApiClientError('rejected', 'validation_error', status)))
+    await screen.findByRole('alert')
+    expect(toggle).toBeChecked()
+    expect(toggle).toBeEnabled()
+    expect(document.querySelectorAll('.lesson-card--cancelled')).toHaveLength(1)
+    expect(screen.queryByText('Сохранение…')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Предыдущий запрос ещё может завершиться/)).not.toBeInTheDocument()
+  },
+)
+
+it.each([500, 502, 503, 504])(
+  'reconciles HTTP %s after a potential commit without a PATCH replay',
+  async (status) => {
+    let reads = 0
+    let confirmRead!: (value: unknown) => void
+    vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+      if (!String(url).includes('/preferences')) return { items }
+      if (init?.method === 'PATCH')
+        throw new ApiClientError('gateway failure', 'internal_error', status)
+      reads++
+      return reads === 1
+        ? { show_cancelled_lessons: false }
+        : new Promise((resolve) => {
+            confirmRead = resolve
+          })
+    })
+    mount(false, false, false, items, false)
+    const toggle = screen.getByRole('checkbox')
+    await waitFor(() => expect(toggle).toBeEnabled())
+    fireEvent.click(toggle)
+    await screen.findByText(/Предыдущий запрос ещё может завершиться/)
+    await waitFor(() => expect(reads).toBe(2))
+    expect(toggle).not.toBeChecked()
+    expect(toggle).toBeDisabled()
+    expect(document.querySelectorAll('.lesson-card--cancelled')).toHaveLength(0)
+    await act(async () => confirmRead({ show_cancelled_lessons: true }))
+    await waitFor(() => expect(toggle).toBeEnabled())
+    expect(toggle).toBeChecked()
+    expect(document.querySelectorAll('.lesson-card--cancelled')).toHaveLength(1)
+    expect(screen.getByRole('alert')).toHaveTextContent('Предыдущий запрос ещё может завершиться')
+    expect(
+      vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'PATCH'),
+    ).toHaveLength(1)
+  },
+)

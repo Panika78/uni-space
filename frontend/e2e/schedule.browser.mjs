@@ -281,6 +281,83 @@ async function checkUncertainPreference(page) {
   }
 }
 
+async function checkServerSaveFailures(page) {
+  for (const status of [502, 500]) {
+    await page.reload()
+    await page.locator('.schedule-list').waitFor()
+    const toggle = page.getByRole('checkbox', { name: 'Показывать отменённые' })
+    await page.waitForFunction(
+      () => !document.querySelector('.schedule-cancelled-toggle input').disabled,
+    )
+    if (await toggle.isChecked()) {
+      await toggle.click()
+      await waitForPreference(page, false)
+    }
+    let patches = 0
+    let hasFailedPatch = false
+    let releaseRead
+    let markRead
+    const readGate = new Promise((resolve) => {
+      releaseRead = resolve
+    })
+    const reading = new Promise((resolve) => {
+      markRead = resolve
+    })
+    const handler = async (route) => {
+      if (route.request().method() === 'PATCH') {
+        patches++
+        if (status === 502) {
+          const committed = await route.fetch()
+          assert.equal(committed.status(), 200)
+          assert.equal((await committed.json()).show_cancelled_lessons, true)
+        }
+        // 502 replaces a committed real backend response; 500 never forwards a write.
+        hasFailedPatch = true
+        return route.fulfill({
+          status,
+          json: { error: { code: 'internal_error', message: 'test', details: [] } },
+        })
+      }
+      if (hasFailedPatch) {
+        markRead()
+        await readGate
+      }
+      return route.continue()
+    }
+    await page.route('**/api/v1/users/me/preferences', handler)
+    await toggle.click()
+    const warning = page.getByRole('alert').filter({ hasText: 'Не удалось подтвердить сохранение' })
+    await warning.waitFor()
+    await reading
+    assert.equal(
+      await toggle.isChecked(),
+      false,
+      'Last confirmed value remains during reconciliation',
+    )
+    assert.ok(await toggle.isDisabled())
+    assert.equal(await page.locator('.lesson-card--cancelled').count(), 0)
+    const readResponse = page.waitForResponse(
+      (r) => r.url().endsWith('/preferences') && r.request().method() === 'GET',
+    )
+    releaseRead()
+    assert.equal((await (await readResponse).json()).show_cancelled_lessons, status === 502)
+    await waitForPreference(page, status === 502)
+    assert.equal(
+      await page.locator('.schedule-day.is-selected .lesson-card--cancelled').count(),
+      status === 502 ? 1 : 0,
+    )
+    assert.equal(patches, 1, 'HTTP 5xx never automatically replays PATCH')
+    assert.ok(await warning.isVisible(), 'One GET cannot rule out a later commit')
+    await page.unroute('**/api/v1/users/me/preferences', handler)
+    check(
+      `R-01: HTTP ${status} ${status === 502 ? 'after PostgreSQL commit' : 'before commit'}, real GET sync and no PATCH replay`,
+    )
+  }
+  await page.reload()
+  await page.locator('.schedule-list').waitFor()
+  await waitForPreference(page, false)
+}
+
 async function checkPreferences(page, width) {
   const toggle = page.getByRole('checkbox', { name: 'Показывать отменённые' })
   await toggle.waitFor()
@@ -319,13 +396,16 @@ async function checkPreferences(page, width) {
   if (width === 1440) {
     await checkUnknownPreference(page)
     await checkUncertainPreference(page)
+    await checkServerSaveFailures(page)
   }
   await page.route('**/api/v1/users/me/preferences', (route) =>
     route.request().method() === 'PATCH'
       ? route.fulfill({
-          status: 500,
+          status: 422,
           contentType: 'application/json',
-          body: JSON.stringify({ error: { code: 'internal_error', message: 'test', details: [] } }),
+          body: JSON.stringify({
+            error: { code: 'validation_error', message: 'test', details: [] },
+          }),
         })
       : route.continue(),
   )
