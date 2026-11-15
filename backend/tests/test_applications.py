@@ -1,5 +1,7 @@
 import json
+from datetime import datetime, timedelta
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.dependencies.auth import get_current_student
 from app.dependencies.database import get_db_session
 from app.models import (
+    AcademicTerm,
     Application,
     AuthSession,
     OrgUnit,
@@ -113,7 +116,12 @@ def test_application_http_routes_use_real_bearer_authentication(postgresql_engin
                 catalog_headers = {"Authorization": f"Bearer {token}"}
                 catalog = client.get("/api/v1/services", headers=catalog_headers)
                 assert catalog.status_code == 200
-                assert [item["code"] for item in catalog.json()["items"]] == ["study_certificate"]
+                assert {item["code"] for item in catalog.json()["items"]} == {
+                    "study_certificate",
+                    "academic_transcript",
+                    "academic_leave",
+                    "accounting_certificate",
+                }
                 for query, field in (
                     ("unexpected=1", "unexpected"),
                     ("student_id=999", "student_id"),
@@ -428,7 +436,12 @@ def test_application_submission_is_owned_and_returns_location_and_server_state(d
 
         catalog = TestClient(app).get("/api/v1/services")
         assert catalog.status_code == 200
-        assert [item["code"] for item in catalog.json()["items"]] == ["study_certificate"]
+        assert {item["code"] for item in catalog.json()["items"]} == {
+            "study_certificate",
+            "academic_transcript",
+            "academic_leave",
+            "accounting_certificate",
+        }
 
         forged = TestClient(app).post(
             "/api/v1/applications",
@@ -540,6 +553,9 @@ def test_application_routes_work_with_minimal_postgresql_role(postgresql_engine)
         connection.execute(text(f"GRANT CONNECT ON DATABASE uni_space_test TO {role}"))
         connection.execute(text(f"GRANT USAGE ON SCHEMA public TO {role}"))
         connection.execute(text(f"GRANT SELECT ON service_types TO {role}"))
+        connection.execute(
+            text(f"GRANT SELECT ON academic_terms, org_units, programs, study_groups TO {role}")
+        )
         connection.execute(text(f"GRANT SELECT, INSERT ON applications TO {role}"))
         connection.execute(text(f"GRANT USAGE ON SEQUENCE applications_id_seq TO {role}"))
         connection.execute(text(f"GRANT SELECT, INSERT ON application_history TO {role}"))
@@ -587,7 +603,7 @@ def test_application_routes_work_with_minimal_postgresql_role(postgresql_engine)
         client = TestClient(app)
         catalog = client.get("/api/v1/services")
         assert catalog.status_code == 200
-        assert catalog.json()["items"][0]["code"] == "study_certificate"
+        assert "study_certificate" in {item["code"] for item in catalog.json()["items"]}
         response = client.post(
             "/api/v1/applications",
             json={
@@ -632,3 +648,147 @@ def test_application_routes_work_with_minimal_postgresql_role(postgresql_engine)
         ) as connection:
             connection.execute(text(f"DROP OWNED BY {role}"))
             connection.execute(text(f"DROP ROLE IF EXISTS {role}"))
+
+
+@pytest.mark.integration
+def test_mvp2_service_forms_fix_server_term_and_responsible_units(db_session):
+    from fastapi.testclient import TestClient
+
+    from app.applications.service import resolve_dean_office, validate_and_store_form
+    from app.dependencies.auth import get_current_student
+    from app.dependencies.database import get_db_session
+    from app.main import app
+
+    today = datetime.now(ZoneInfo("Europe/Moscow")).date()
+    faculty = OrgUnit(name=f"MVP2 forms faculty {uuid4().hex}", type="faculty")
+    db_session.add(faculty)
+    db_session.flush()
+    program = Program(
+        code=f"mvp2-{uuid4().hex}",
+        name="Forms program",
+        direction_code="00.00.00",
+        direction_name="Forms",
+        faculty_id=faculty.id,
+    )
+    db_session.add(program)
+    db_session.flush()
+    group = StudyGroup(
+        name=f"MVP2 forms group {uuid4().hex}", program_id=program.id, course_number=1
+    )
+    user = User(
+        login=f"mvp2-forms-{uuid4().hex}",
+        password_hash="fixture",
+        full_name="Fictional",
+        role="student",
+        is_active=True,
+    )
+    db_session.add_all([group, user])
+    db_session.flush()
+    student = Student(user_id=user.id, group_id=group.id, academic_status="enrolled")
+    db_session.add(student)
+    dean = OrgUnit(name=f"MVP2 forms dean {uuid4().hex}", type="dean_office", parent_id=faculty.id)
+    accounting = OrgUnit(name=f"MVP2 forms accounting {uuid4().hex}", type="accounting")
+    db_session.add_all([dean, accounting])
+    db_session.flush()
+    transcript_service = db_session.scalar(
+        select(ServiceType).where(ServiceType.code == "academic_transcript")
+    )
+    accounting_service = db_session.scalar(
+        select(ServiceType).where(ServiceType.code == "accounting_certificate")
+    )
+    leave_service = db_session.scalar(
+        select(ServiceType).where(ServiceType.code == "academic_leave")
+    )
+    assert transcript_service and accounting_service and leave_service
+    accounting_service.responsible_org_unit_id = accounting.id
+    assert resolve_dean_office(db_session, student).id == dean.id
+
+    app.dependency_overrides[get_db_session] = lambda: db_session
+    app.dependency_overrides[get_current_student] = lambda: student
+    client = TestClient(app)
+    before = db_session.scalar(select(func.count()).select_from(Application))
+    try:
+        no_term = client.post(
+            "/api/v1/applications", json={"service_code": "academic_transcript", "form_data": {}}
+        )
+        assert no_term.status_code == 409
+        spoofed = client.post(
+            "/api/v1/applications",
+            json={"service_code": "academic_transcript", "form_data": {"academic_term_id": "1"}},
+        )
+        assert spoofed.status_code == 422
+        assert db_session.scalar(select(func.count()).select_from(Application)) == before
+
+        db_session.add(
+            AcademicTerm(
+                name="Current forms term",
+                starts_on=today - timedelta(days=1),
+                ends_on=today + timedelta(days=1),
+            )
+        )
+        db_session.flush()
+        ambiguous_term = AcademicTerm(
+            name="Ambiguous current forms term",
+            starts_on=today,
+            ends_on=today + timedelta(days=2),
+        )
+        db_session.add(ambiguous_term)
+        db_session.flush()
+        ambiguous = client.post(
+            "/api/v1/applications",
+            json={"service_code": "academic_transcript", "form_data": {}},
+        )
+        assert ambiguous.status_code == 409
+        db_session.delete(ambiguous_term)
+        db_session.flush()
+        transcript = client.post(
+            "/api/v1/applications", json={"service_code": "academic_transcript", "form_data": {}}
+        )
+        assert transcript.status_code == 201, transcript.text
+        saved_form = transcript.json()["form_data"]
+        assert saved_form["academic_term_name"] == "Current forms term"
+        assert saved_form["starts_on"] == (today - timedelta(days=1)).isoformat()
+        saved_application = db_session.get(Application, int(transcript.json()["id"]))
+        assert saved_application.form_data == saved_form
+        assert saved_application.document_status == "pending"
+        saved_term = db_session.get(AcademicTerm, int(saved_form["academic_term_id"]))
+        saved_term.starts_on = today - timedelta(days=3)
+        saved_term.ends_on = today - timedelta(days=2)
+        preserved, _ = validate_and_store_form(
+            db_session, transcript_service, {}, student=student, existing=saved_form
+        )
+        assert preserved == saved_form
+
+        accounting_response = client.post(
+            "/api/v1/applications",
+            json={"service_code": "accounting_certificate", "form_data": {"purpose": "For study"}},
+        )
+        assert accounting_response.status_code == 201, accounting_response.text
+        accounting_application = db_session.get(Application, int(accounting_response.json()["id"]))
+        assert accounting_application.assigned_org_unit_id == accounting.id
+        assert accounting_application.document_status == "pending"
+
+        duplicate_dean = OrgUnit(
+            name=f"MVP2 forms second dean {uuid4().hex}", type="dean_office", parent_id=faculty.id
+        )
+        db_session.add(duplicate_dean)
+        db_session.flush()
+        assert resolve_dean_office(db_session, student) is None
+
+        leave_response = client.post(
+            "/api/v1/applications",
+            json={
+                "service_code": "academic_leave",
+                "form_data": {
+                    "basis": "medical",
+                    "starts_on": today.isoformat(),
+                    "ends_on": today.isoformat(),
+                },
+            },
+        )
+        assert leave_response.status_code == 409
+        assert leave_response.json()["error"]["code"] == "responsible_unit_unavailable"
+        assert db_session.scalar(select(func.count()).select_from(Application)) == before + 2
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+        app.dependency_overrides.pop(get_current_student, None)

@@ -1,13 +1,16 @@
 """Create two disposable student accounts for the services browser E2E."""
 
+from datetime import datetime, timedelta
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
+from sqlalchemy import select
 from sqlalchemy.engine import make_url
 
 from app.auth.security import PASSWORD_HASHER
 from app.core.config import get_settings
 from app.core.database import SessionLocal
-from app.models import OrgUnit, Program, Student, StudyGroup, User
+from app.models import AcademicTerm, OrgUnit, Program, ServiceType, Student, StudyGroup, User
 
 
 def main() -> None:
@@ -22,6 +25,32 @@ def main() -> None:
         faculty = OrgUnit(name=f"Browser E2E faculty {suffix}", type="faculty")
         session.add(faculty)
         session.flush()
+        session.add(
+            OrgUnit(name=f"Browser E2E dean {suffix}", type="dean_office", parent_id=faculty.id)
+        )
+        accounting = OrgUnit(name=f"Browser E2E accounting {suffix}", type="accounting")
+        session.add(accounting)
+        today = datetime.now(ZoneInfo("Europe/Moscow")).date()
+        active_terms = session.scalars(
+            select(AcademicTerm).where(
+                AcademicTerm.starts_on <= today, AcademicTerm.ends_on >= today
+            )
+        ).all()
+        if not active_terms:
+            session.add(
+                AcademicTerm(
+                    name=f"Browser E2E term {suffix}",
+                    starts_on=today - timedelta(days=30),
+                    ends_on=today + timedelta(days=180),
+                )
+            )
+        session.flush()
+        accounting_service = session.scalar(
+            select(ServiceType).where(ServiceType.code == "accounting_certificate")
+        )
+        if accounting_service is None:
+            raise RuntimeError("Run Alembic migrations before seeding browser students")
+        accounting_service.responsible_org_unit_id = accounting.id
         program = Program(
             code=suffix,
             name="Browser E2E program",

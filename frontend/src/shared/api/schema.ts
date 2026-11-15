@@ -475,6 +475,26 @@ export interface components {
             /** Total Score */
             total_score: number;
         };
+        /** AcademicLeaveFormData */
+        AcademicLeaveFormData: {
+            /**
+             * Basis
+             * @enum {string}
+             */
+            basis: "medical" | "family" | "other";
+            /**
+             * Ends On
+             * Format: date
+             */
+            ends_on: string;
+            /** Explanation */
+            explanation?: string | null;
+            /**
+             * Starts On
+             * Format: date
+             */
+            starts_on: string;
+        };
         /** AcademicTermResponse */
         AcademicTermResponse: {
             /**
@@ -492,20 +512,39 @@ export interface components {
              */
             starts_on: string;
         };
+        /** AcademicTranscriptFormData */
+        AcademicTranscriptFormData: {
+            /** Academic Term Id */
+            academic_term_id: string;
+            /** Academic Term Name */
+            academic_term_name: string;
+            /**
+             * Ends On
+             * Format: date
+             */
+            ends_on: string;
+            /**
+             * Starts On
+             * Format: date
+             */
+            starts_on: string;
+        };
+        /** AcademicTranscriptInput */
+        AcademicTranscriptInput: Record<string, never>;
         /** AcademicsResponse */
         AcademicsResponse: {
             /** Items */
             items: components["schemas"]["AcademicItem"][];
             term: components["schemas"]["AcademicTermResponse"] | null;
         };
+        /** AccountingCertificateFormData */
+        AccountingCertificateFormData: {
+            /** Purpose */
+            purpose?: string | null;
+        };
         /** ApiError */
         ApiError: {
             error: components["schemas"]["ErrorBody"];
-        };
-        /** ApplicationFormData */
-        ApplicationFormData: {
-            /** Place Of Submission */
-            place_of_submission: string;
         };
         /** ApplicationHistoryEvent */
         ApplicationHistoryEvent: {
@@ -556,7 +595,8 @@ export interface components {
             document_status: "not_required" | "pending" | "ready" | "failed";
             /** Feedback */
             feedback: string | null;
-            form_data: components["schemas"]["ApplicationFormData"];
+            /** Form Data */
+            form_data: components["schemas"]["StudyCertificateFormData"] | components["schemas"]["AcademicTranscriptFormData"] | components["schemas"]["AcademicLeaveFormData"] | components["schemas"]["AccountingCertificateFormData"];
             /** Id */
             id: string;
             /**
@@ -593,12 +633,39 @@ export interface components {
             /** Id */
             id: string;
         };
-        /** CreateApplicationRequest */
-        CreateApplicationRequest: {
-            form_data: components["schemas"]["ApplicationFormData"];
+        /** CreateAcademicLeaveRequest */
+        CreateAcademicLeaveRequest: {
+            form_data: components["schemas"]["AcademicLeaveFormData"];
             /**
-             * Service Code
-             * @constant
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            service_code: "academic_leave";
+        };
+        /** CreateAcademicTranscriptRequest */
+        CreateAcademicTranscriptRequest: {
+            form_data: components["schemas"]["AcademicTranscriptInput"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            service_code: "academic_transcript";
+        };
+        /** CreateAccountingCertificateRequest */
+        CreateAccountingCertificateRequest: {
+            form_data: components["schemas"]["AccountingCertificateFormData"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            service_code: "accounting_certificate";
+        };
+        /** CreateStudyCertificateRequest */
+        CreateStudyCertificateRequest: {
+            form_data: components["schemas"]["StudyCertificateFormData"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
              */
             service_code: "study_certificate";
         };
@@ -951,7 +1018,8 @@ export interface components {
         ResubmitApplicationRequest: {
             /** Expected Version */
             expected_version: number;
-            form_data: components["schemas"]["ApplicationFormData"];
+            /** Form Data */
+            form_data: components["schemas"]["StudyCertificateFormData"] | components["schemas"]["AcademicTranscriptInput"] | components["schemas"]["AcademicLeaveFormData"] | components["schemas"]["AccountingCertificateFormData"];
         };
         /** ReviewApplicationRequest */
         ReviewApplicationRequest: {
@@ -995,12 +1063,27 @@ export interface components {
         };
         /** Service */
         Service: {
+            /** Action Available */
+            action_available: boolean;
             /** Code */
             code: string;
+            /** Description */
+            description: string;
             /** Id */
             id: string;
+            /**
+             * Processing Mode
+             * @enum {string}
+             */
+            processing_mode: "automatic" | "manual";
+            /** Produces Document */
+            produces_document: boolean;
+            /** Requirements */
+            requirements: string[];
             /** Title */
             title: string;
+            /** Unavailable Reason */
+            unavailable_reason: string | null;
         };
         /** ServiceList */
         ServiceList: {
@@ -1028,7 +1111,8 @@ export interface components {
             document_status: "not_required" | "pending" | "ready" | "failed";
             /** Feedback */
             feedback: string | null;
-            form_data: components["schemas"]["ApplicationFormData"];
+            /** Form Data */
+            form_data: components["schemas"]["StudyCertificateFormData"] | components["schemas"]["AcademicTranscriptFormData"] | components["schemas"]["AcademicLeaveFormData"] | components["schemas"]["AccountingCertificateFormData"];
             /** Id */
             id: string;
             /**
@@ -1070,6 +1154,11 @@ export interface components {
             program: components["schemas"]["ProgramRef"];
             /** Student Id */
             student_id: string;
+        };
+        /** StudyCertificateFormData */
+        StudyCertificateFormData: {
+            /** Place Of Submission */
+            place_of_submission: string;
         };
         /** TeachingAssignmentResponse */
         TeachingAssignmentResponse: {
@@ -1222,7 +1311,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateApplicationRequest"];
+                "application/json": components["schemas"]["CreateStudyCertificateRequest"] | components["schemas"]["CreateAcademicTranscriptRequest"] | components["schemas"]["CreateAcademicLeaveRequest"] | components["schemas"]["CreateAccountingCertificateRequest"];
             };
         };
         responses: {

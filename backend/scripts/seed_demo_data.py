@@ -335,6 +335,13 @@ def seed_demo_data() -> None:
         faculty = one_or_create(
             db, OrgUnit, {"name": "Факультет естественных наук"}, {"type": "faculty"}
         )
+        one_or_create(
+            db,
+            OrgUnit,
+            {"name": "Деканат естественных наук"},
+            {"type": "dean_office", "parent_id": faculty.id},
+        )
+        accounting = one_or_create(db, OrgUnit, {"name": "Бухгалтерия"}, {"type": "accounting"})
         departments = {
             name: one_or_create(
                 db,
@@ -850,6 +857,19 @@ def seed_demo_data() -> None:
             raise RuntimeError(
                 "Required study_certificate service is missing; apply migrations first"
             )
+        accounting_certificate = db.scalar(
+            select(ServiceType).where(ServiceType.code == "accounting_certificate")
+        )
+        if accounting_certificate is None:
+            raise RuntimeError(
+                "Required accounting_certificate service is missing; apply migrations first"
+            )
+        existing_accounting_units = db.scalars(
+            select(OrgUnit).where(OrgUnit.type == "accounting")
+        ).all()
+        if len(existing_accounting_units) != 1 or existing_accounting_units[0].id != accounting.id:
+            raise RuntimeError("Ambiguous accounting demo configuration")
+        accounting_certificate.responsible_org_unit_id = accounting.id
 
         for title, body, published_at in DEMO_NEWS:
             allowed_bodies = {body}

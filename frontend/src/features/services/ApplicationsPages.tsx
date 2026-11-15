@@ -348,8 +348,30 @@ export function ApplicationDetailPage() {
               <dd>
                 <time dateTime={item.created_at}>{formatDate(item.created_at)}</time>
               </dd>
-              <dt>Место предоставления</dt>
-              <dd>{item.form_data.place_of_submission}</dd>
+              {Object.entries(item.form_data).map(([key, value]) => {
+                const labels: Record<string, string> = {
+                  place_of_submission: 'Место предоставления',
+                  basis: 'Основание',
+                  starts_on: 'Дата начала',
+                  ends_on: 'Дата окончания',
+                  explanation: 'Пояснение',
+                  purpose: 'Цель получения',
+                  academic_term_name: 'Учебный период',
+                  academic_term_id: 'Идентификатор периода',
+                }
+                return (
+                  <div className="application-form-data" key={key}>
+                    <dt>{labels[key] ?? key}</dt>
+                    <dd>
+                      {value === null
+                        ? '—'
+                        : typeof value === 'string' || typeof value === 'number'
+                          ? String(value)
+                          : JSON.stringify(value)}
+                    </dd>
+                  </div>
+                )
+              })}
               <dt>Рассмотрение</dt>
               <dd>
                 <span className={`application-status application-status--${item.review_status}`}>

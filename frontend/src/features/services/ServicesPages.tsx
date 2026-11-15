@@ -11,7 +11,11 @@ import { AnimatedRegion } from '../../shared/ui/AnimatedRegion'
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 
 type Application = components['schemas']['ApplicationResponse']
-type CreateApplicationRequest = components['schemas']['CreateApplicationRequest']
+type CreateApplicationRequest =
+  | components['schemas']['CreateStudyCertificateRequest']
+  | components['schemas']['CreateAcademicTranscriptRequest']
+  | components['schemas']['CreateAcademicLeaveRequest']
+  | components['schemas']['CreateAccountingCertificateRequest']
 
 const isPythonWhitespace = (character: string) => {
   const codePoint = character.codePointAt(0) ?? 0
@@ -118,55 +122,374 @@ function ServiceCatalog() {
       ) : services.length === 0 ? (
         <EmptyState title="Сейчас нет доступных услуг." />
       ) : (
-        <article className="service-card" aria-labelledby="study-certificate-title">
-          <div className="service-card__icon-box" aria-hidden="true">
-            <svg viewBox="0 0 64 64" fill="none">
-              <path
-                d="M19 8.5h18l14 14V54a3.5 3.5 0 0 1-3.5 3.5h-28A3.5 3.5 0 0 1 16 54V12a3.5 3.5 0 0 1 3-3.5Z"
-                stroke="currentColor"
-                strokeWidth="3.5"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M37 9v14h14M24 36h18M24 45h18"
-                stroke="currentColor"
-                strokeWidth="3.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </div>
-          <span className="service-card__divider" aria-hidden="true" />
-          <div className="service-card__content">
-            <h2 id="study-certificate-title">{services[0].title}</h2>
-            <p>Подайте заявление на получение справки об обучении.</p>
-            <ul className="service-card__badges" aria-label="Характеристики услуги">
-              <li>
-                <svg viewBox="0 0 20 20" aria-hidden="true">
-                  <rect x="2.5" y="3.5" width="15" height="11" rx="1.5" />
-                  <path d="M1.5 17h17M7 14.5l-.7 2.5m6.7-2.5.7 2.5" />
-                </svg>
-                Онлайн
-              </li>
-              <li>
-                <svg viewBox="0 0 20 20" aria-hidden="true">
-                  <path d="M6 2.5h6l5 5v9A1.5 1.5 0 0 1 15.5 18h-9A1.5 1.5 0 0 1 5 16.5v-12A2 2 0 0 1 6 2.5Z" />
-                  <path d="M12 2.5v5h5M8 12h5m-5 3h5" />
-                </svg>
-                Документ
-              </li>
-            </ul>
-          </div>
-          <Link className="service-action" to={`/services/${services[0].code}`}>
-            Подать заявление <Icon name="arrow" />
-          </Link>
-        </article>
+        <div className="service-catalog-grid">
+          {services.map((service) => (
+            <article className="service-card" key={service.code} aria-label={service.title}>
+              <div className="service-card__icon-box" aria-hidden="true">
+                <Icon name="file" />
+              </div>
+              <span className="service-card__divider" aria-hidden="true" />
+              <div className="service-card__content">
+                <h2>{service.title}</h2>
+                <p>{service.description ?? ''}</p>
+                <ul className="service-card__badges">
+                  <li>Онлайн</li>
+                  <li>
+                    {service.processing_mode === 'manual'
+                      ? 'Рассмотрение сотрудником'
+                      : 'Автоматическая'}
+                  </li>
+                  {service.produces_document !== false && <li>Документ</li>}
+                </ul>
+                {service.action_available === false && (
+                  <p className="service-unavailable">{service.unavailable_reason}</p>
+                )}
+              </div>
+              {service.action_available === true ? (
+                <Link className="service-action" to={`/services/${service.code}`}>
+                  Подать заявление <Icon name="arrow" />
+                </Link>
+              ) : (
+                <button className="service-action" type="button" disabled>
+                  Пока недоступно
+                </button>
+              )}
+            </article>
+          ))}
+        </div>
       )}
     </div>
   )
 }
 
 export function ApplicationFormPage() {
+  const { serviceCode } = useParams()
+  if (serviceCode && serviceCode !== 'study_certificate') {
+    return <AdditionalApplicationFormPage serviceCode={serviceCode} />
+  }
+  return <StudyCertificateFormPage />
+}
+
+function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string }) {
+  const servicesQuery = useQuery({
+    queryKey: ['services'],
+    queryFn: ({ signal }) =>
+      apiFetch<components['schemas']['ServiceList']>('/api/v1/services', {
+        authenticated: true,
+        signal,
+      }),
+    refetchOnMount: 'always',
+  })
+  const service = servicesQuery.data?.items.find((item) => item.code === serviceCode)
+  const isLeave = serviceCode === 'academic_leave'
+  const isTranscript = serviceCode === 'academic_transcript'
+  const isAccounting = serviceCode === 'accounting_certificate'
+  const title =
+    service?.title ??
+    (isTranscript
+      ? 'Выписка об успеваемости'
+      : isLeave
+        ? 'Академический отпуск'
+        : 'Бухгалтерская справка')
+  const [basis, setBasis] = useState<'medical' | 'family' | 'other'>('medical')
+  const [startsOn, setStartsOn] = useState('')
+  const [endsOn, setEndsOn] = useState('')
+  const [explanation, setExplanation] = useState('')
+  const [purpose, setPurpose] = useState('')
+  const [touched, setTouched] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [applicationId, setApplicationId] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const [uncertain, setUncertain] = useState(false)
+  const queryClient = useQueryClient()
+  const startsOnInput = useRef<HTMLInputElement>(null)
+  const endsOnInput = useRef<HTMLInputElement>(null)
+  const explanationInput = useRef<HTMLTextAreaElement>(null)
+  const { setStatus: setExitStatus } = useUnsavedChanges()
+  const draft =
+    !applicationId &&
+    !uncertain &&
+    (isLeave ? Boolean(startsOn || endsOn || explanation) : isAccounting && Boolean(purpose))
+  const blocker = useBlocker(draft || pending)
+  useEffect(() => {
+    setExitStatus(
+      applicationId
+        ? 'none'
+        : pending
+          ? 'submitting'
+          : uncertain
+            ? 'uncertain'
+            : draft
+              ? 'draft'
+              : 'none',
+    )
+    return () => setExitStatus('none')
+  }, [applicationId, draft, pending, setExitStatus, uncertain])
+  const invalidDates = isLeave && (!startsOn || !endsOn || startsOn > endsOn)
+  const invalidExplanation = isLeave && basis === 'other' && explanation.trim().length === 0
+  const invalid = invalidDates || invalidExplanation
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setTouched(true)
+    setError('')
+    if (invalid) {
+      if (isLeave && !startsOn) startsOnInput.current?.focus()
+      else if (isLeave && (!endsOn || startsOn > endsOn)) endsOnInput.current?.focus()
+      else explanationInput.current?.focus()
+      return
+    }
+    if (service?.action_available !== true || pending || uncertain) return
+    setPending(true)
+    try {
+      const formData = isTranscript
+        ? {}
+        : isAccounting
+          ? { purpose: purpose.trim() || null }
+          : {
+              basis,
+              starts_on: startsOn,
+              ends_on: endsOn,
+              explanation: basis === 'other' ? explanation.trim() : null,
+            }
+      const result = await apiFetch<unknown>('/api/v1/applications', {
+        method: 'POST',
+        authenticated: true,
+        signal: AbortSignal.timeout(30_000),
+        body: JSON.stringify({ service_code: serviceCode, form_data: formData }),
+      })
+      const response = result as Application
+      if (
+        !response ||
+        typeof response !== 'object' ||
+        !response.service ||
+        response.service.code !== serviceCode ||
+        response.review_status !== 'submitted' ||
+        response.document_status !== (isLeave ? 'not_required' : 'pending')
+      ) {
+        throw new ApiClientError(
+          'Сервер вернул некорректное подтверждение',
+          'invalid_response',
+          201,
+        )
+      }
+      setApplicationId(response.id)
+      queryClient.removeQueries({ queryKey: applicationsKey })
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === 'AbortError') return
+      const isUncertain =
+        !(cause instanceof ApiClientError) ||
+        cause.status === undefined ||
+        cause.status >= 500 ||
+        cause.code === 'invalid_response'
+      setUncertain(isUncertain)
+      setError(
+        isUncertain
+          ? 'Ответ не получен. Заявление могло сохраниться; проверьте список заявлений перед повтором.'
+          : 'Не удалось создать заявление. Проверьте данные и попробуйте ещё раз.',
+      )
+    } finally {
+      setPending(false)
+    }
+  }
+  if (!['academic_transcript', 'academic_leave', 'accounting_certificate'].includes(serviceCode)) {
+    return (
+      <section className="section-page service-page">
+        <h1>Услуга недоступна</h1>
+        <Link to="/services">Вернуться к каталогу</Link>
+      </section>
+    )
+  }
+  return (
+    <section className="section-page service-page">
+      <Link to="/services" className="service-back">
+        <Icon name="left" /> К каталогу услуг
+      </Link>
+      <p className="section-eyebrow">Новое заявление</p>
+      <h1>{applicationId ? 'Заявление создано' : title}</h1>
+      {applicationId ? (
+        <div className="application-success" role="status">
+          <h2>Заявление № {applicationId}</h2>
+          <p>Сервер подтвердил сохранение заявления.</p>
+          <Link className="service-action" to={`/applications/${applicationId}`}>
+            Открыть заявление
+          </Link>
+        </div>
+      ) : (
+        <form className="application-form" onSubmit={handleSubmit} noValidate>
+          <h2>Данные заявления</h2>
+          <p>* — обязательные поля</p>
+          {isTranscript && (
+            <p>
+              Текущий учебный период будет выбран сервером автоматически. Выбор периода не
+              требуется.
+            </p>
+          )}
+          {isLeave && (
+            <>
+              <label htmlFor="leave-basis">
+                Основание <span aria-hidden="true">*</span>
+              </label>
+              <select
+                id="leave-basis"
+                value={basis}
+                onChange={(event) => setBasis(event.target.value as typeof basis)}
+              >
+                <option value="medical">Медицинское</option>
+                <option value="family">Семейные обстоятельства</option>
+                <option value="other">Иное</option>
+              </select>
+              <label htmlFor="leave-start">
+                Дата начала <span aria-hidden="true">*</span>
+              </label>
+              <input
+                ref={startsOnInput}
+                id="leave-start"
+                type="date"
+                value={startsOn}
+                onChange={(event) => setStartsOn(event.target.value)}
+                aria-invalid={touched && !startsOn}
+                aria-describedby={touched && !startsOn ? 'leave-start-error' : undefined}
+              />
+              {touched && !startsOn && (
+                <small id="leave-start-error" role="alert">
+                  Укажите дату начала.
+                </small>
+              )}
+              <label htmlFor="leave-end">
+                Дата окончания <span aria-hidden="true">*</span>
+              </label>
+              <input
+                ref={endsOnInput}
+                id="leave-end"
+                type="date"
+                value={endsOn}
+                onChange={(event) => setEndsOn(event.target.value)}
+                aria-invalid={touched && (!endsOn || startsOn > endsOn)}
+                aria-describedby={
+                  touched && (!endsOn || startsOn > endsOn) ? 'leave-end-error' : undefined
+                }
+              />
+              {touched && (!endsOn || startsOn > endsOn) && (
+                <small id="leave-end-error" role="alert">
+                  {startsOn > endsOn
+                    ? 'Окончание должно быть не раньше начала.'
+                    : 'Укажите дату окончания.'}
+                </small>
+              )}
+              {basis === 'other' && (
+                <>
+                  <label htmlFor="leave-explanation">
+                    Пояснение <span aria-hidden="true">*</span>
+                  </label>
+                  <textarea
+                    ref={explanationInput}
+                    id="leave-explanation"
+                    value={explanation}
+                    onChange={(event) => setExplanation(event.target.value)}
+                    aria-invalid={touched && !explanation.trim()}
+                    aria-describedby={
+                      touched && !explanation.trim() ? 'leave-explanation-error' : undefined
+                    }
+                  />
+                  {touched && !explanation.trim() && (
+                    <small id="leave-explanation-error" role="alert">
+                      Добавьте пояснение.
+                    </small>
+                  )}
+                </>
+              )}
+              <div className="attachment-requirement">
+                <strong>Подтверждение обязательно</strong>
+                <p>
+                  {basis === 'medical'
+                    ? 'Медицинская справка или заключение.'
+                    : basis === 'family'
+                      ? 'Документ, подтверждающий семейные обстоятельства.'
+                      : 'Документ, подтверждающий указанное обстоятельство.'}
+                </p>
+                <p>
+                  Функция прикрепления файлов будет доступна после подключения защищённого
+                  хранилища.
+                </p>
+              </div>
+            </>
+          )}
+          {isAccounting && (
+            <>
+              <label htmlFor="accounting-purpose">Цель получения (необязательно)</label>
+              <input
+                id="accounting-purpose"
+                value={purpose}
+                onChange={(event) => setPurpose(event.target.value)}
+                maxLength={300}
+              />
+            </>
+          )}
+          {touched && invalid && <p role="alert">Проверьте обязательные поля и даты.</p>}
+          {error && (
+            <p role="alert" className="application-error">
+              {error}
+            </p>
+          )}
+          {uncertain && (
+            <Link to="/services?tab=applications">Проверить результат в моих заявлениях</Link>
+          )}
+          <div className="form-actions">
+            <button
+              className="service-action"
+              type="submit"
+              disabled={
+                service?.action_available !== true ||
+                pending ||
+                uncertain ||
+                Boolean(servicesQuery.isPending)
+              }
+            >
+              {pending
+                ? 'Отправляем…'
+                : service?.action_available !== true
+                  ? 'Подача пока недоступна'
+                  : 'Отправить заявление'}{' '}
+              <Icon name="arrow" />
+            </button>
+            <Link className="service-action service-action--light" to="/services">
+              Отмена
+            </Link>
+          </div>
+        </form>
+      )}
+      {blocker.state === 'blocked' && (
+        <div className="unsaved-dialog-backdrop" role="presentation">
+          <section
+            className="unsaved-dialog"
+            role="alertdialog"
+            aria-labelledby="additional-unsaved-title"
+            aria-modal="true"
+          >
+            <h2 id="additional-unsaved-title">
+              {pending ? 'Запрос уже отправлен. Покинуть форму?' : 'Выйти без сохранения?'}
+            </h2>
+            <p>
+              {pending
+                ? 'Заявление может сохраниться; проверьте его в списке заявлений.'
+                : 'Введённые данные ещё не отправлены и будут потеряны.'}
+            </p>
+            <div className="unsaved-dialog__actions">
+              <button type="button" onClick={() => blocker.reset()}>
+                Продолжить заполнение
+              </button>
+              <button type="button" onClick={() => blocker.proceed()}>
+                {pending ? 'Покинуть форму' : 'Выйти'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function StudyCertificateFormPage() {
   const isSuspended = useAccessSuspended()
   const queryClient = useQueryClient()
   const { serviceCode } = useParams()

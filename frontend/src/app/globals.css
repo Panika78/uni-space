@@ -2337,3 +2337,90 @@ textarea {
 .desktop-sidebar .navigation-label {
   min-width: 0;
 }
+
+.service-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 20px;
+}
+.service-catalog-grid .service-card {
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+  min-height: 0;
+  margin: 0;
+  padding: 22px;
+}
+.service-catalog-grid .service-card__icon-box {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+}
+.service-catalog-grid .service-action {
+  grid-column: 2;
+  justify-self: start;
+}
+.service-unavailable {
+  color: var(--muted);
+  font-size: 14px;
+}
+.attachment-requirement {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fffaf6;
+}
+.attachment-requirement p {
+  margin-bottom: 0;
+}
+.unsaved-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: #241a1c88;
+}
+.application-form select,
+.application-form input {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  color: var(--text);
+  font: inherit;
+}
+.application-form input:focus,
+.application-form select:focus {
+  outline: 3px solid rgb(168 73 42 / 18%);
+  border-color: var(--accent);
+}
+.application-detail-card dl {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) minmax(0, 1fr);
+  gap: 8px 16px;
+}
+.application-form-data {
+  display: contents;
+}
+@media (max-width: 720px) {
+  .service-catalog-grid {
+    grid-template-columns: 1fr;
+  }
+  .service-catalog-grid .service-card {
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 12px;
+    padding: 16px;
+  }
+  .application-detail-card dl {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+  .application-detail-card dd {
+    margin-bottom: 12px;
+  }
+}

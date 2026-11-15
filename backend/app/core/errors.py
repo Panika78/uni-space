@@ -21,7 +21,14 @@ HTTP_ERROR_CODES = {
     },
     403: {"forbidden", "origin_not_allowed"},
     404: {"not_found"},
-    409: {"version_conflict", "invalid_transition"},
+    409: {
+        "version_conflict",
+        "invalid_transition",
+        "service_unavailable",
+        "academic_term_unavailable",
+        "academic_term_ambiguous",
+        "responsible_unit_unavailable",
+    },
     413: {"request_too_large"},
     422: {"validation_error"},
     429: {"rate_limited"},
@@ -74,6 +81,13 @@ def _validation_details(errors: list[dict[str, Any]]) -> list[ErrorDetail]:
     for error in errors:
         location = tuple(error.get("loc", ()))
         if location and location[0] in ("body", "query", "path", "header", "cookie"):
+            location = location[1:]
+        if location and location[0] in {
+            "study_certificate",
+            "academic_transcript",
+            "academic_leave",
+            "accounting_certificate",
+        }:
             location = location[1:]
         field = ".".join(str(part) for part in location) or None
         details.append(
