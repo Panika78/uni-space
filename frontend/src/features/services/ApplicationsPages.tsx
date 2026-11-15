@@ -9,7 +9,7 @@ import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStat
 
 type Application = components['schemas']['ApplicationResponse']
 type Page = components['schemas']['ApplicationPage']
-type ReturnFocus = { id: string; locationKey: string }
+type ReturnFocus = { id: string }
 export const applicationsKey = ['applications'] as const
 const returnFocusKey = [...applicationsKey, 'return-focus'] as const
 const reviewLabels: Record<Application['review_status'], string> = {
@@ -52,7 +52,6 @@ export function ServicesTabs({ applications = false }: { applications?: boolean 
 export function ApplicationsList() {
   const isSuspended = useAccessSuspended()
   const queryClient = useQueryClient()
-  const location = useLocation()
   const heading = useRef<HTMLHeadingElement>(null)
   const table = useRef<HTMLTableElement>(null)
   const tableId = useId()
@@ -93,7 +92,7 @@ export function ApplicationsList() {
   useEffect(() => {
     if (isSuspended) return
     const target = returnFocus.current
-    if (!target || target.locationKey !== location.key) return
+    if (!target) return
     const link = Array.from(
       table.current?.querySelectorAll<HTMLAnchorElement>('a[data-application-id]') ?? [],
     ).find((link) => link.dataset.applicationId === target.id)
@@ -122,7 +121,7 @@ export function ApplicationsList() {
       window.cancelAnimationFrame(firstFrame)
       if (secondFrame) window.cancelAnimationFrame(secondFrame)
     }
-  }, [location.key, query.data, query.isFetching, isDenied, queryClient, isSuspended])
+  }, [query.data, query.isFetching, isDenied, queryClient, isSuspended])
   useEffect(() => {
     // Discard only this forbidden snapshot, retaining the 403 error state.
     // A later 500 (including after remount) must not reveal the old rows again.
@@ -227,7 +226,6 @@ export function ApplicationsList() {
                       queryClient.setQueryDefaults(returnFocusKey, { gcTime: Infinity })
                       queryClient.setQueryData<ReturnFocus>(returnFocusKey, {
                         id: item.id,
-                        locationKey: location.key,
                       })
                     }}
                   >
