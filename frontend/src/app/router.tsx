@@ -19,6 +19,7 @@ import { StudentLayout, UnavailableSection } from './StudentLayout'
 import { ApplicationDetailPage } from '../features/services/ApplicationsPages'
 import { ApplicationFormPage, ServicesPage } from '../features/services/ServicesPages'
 import { NewsDetailPage, NewsFeedPage } from '../features/news/NewsPages'
+import { StaffNewsPage } from '../features/news/StaffNewsPage'
 import type { ReactNode } from 'react'
 import type { RouteObject } from 'react-router-dom'
 
@@ -186,6 +187,13 @@ export const appRoutes: RouteObject[] = [
                     element: <RoleGuard role="staff" />,
                     children: [
                       { path: '/staff', element: <StaffHome /> },
+                      {
+                        element: <RoleGuard role="staff" permission="news.publish" />,
+                        children: [
+                          { path: '/staff/news', element: <StaffNewsPage /> },
+                          { path: '/staff/news/:id', element: <StaffNewsPage /> },
+                        ],
+                      },
                       {
                         element: <RoleGuard role="staff" permission="applications.review" />,
                         children: [

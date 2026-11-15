@@ -18,6 +18,7 @@ from app.core.schemas import (
     Ref,
 )
 from app.news.router import router as news_router
+from app.news.staff_router import router as staff_news_router
 from app.notifications import router as notifications_router
 from app.permissions import router as permissions_router
 from app.preferences import router as preferences_router
@@ -45,6 +46,7 @@ app.include_router(notifications_router)
 app.include_router(schedule_router)
 app.include_router(students_router)
 app.include_router(news_router)
+app.include_router(staff_news_router)
 app.include_router(teaching_router)
 
 

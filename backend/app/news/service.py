@@ -1,23 +1,160 @@
 import re
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import func, select, tuple_, update
 from sqlalchemy.orm import Session
 
+from app.audit import write_audit_event
 from app.core.pagination import (
     CursorKey,
     InvalidCursorError,
     decode_page_cursor,
     paginate_results,
 )
+from app.models.accounts import User
 from app.models.news import News
 from app.news.schemas import News as NewsResponse
-from app.news.schemas import NewsPage, NewsPreview
+from app.news.schemas import NewsContent, NewsPage, NewsPreview, StaffNews, StaffNewsPage
 
 NEWS_CURSOR_TYPES = (int, int)
 EXCERPT_LENGTH = 180
 CURSOR_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 MAX_NEWS_ID = 9_223_372_036_854_775_807
+
+
+def serialize_staff_news(item: News) -> StaffNews:
+    return StaffNews(
+        id=str(item.id),
+        title=item.title,
+        body=item.body,
+        author_user_id=str(item.author_user_id) if item.author_user_id is not None else None,
+        published_at=item.published_at,
+        is_published=item.is_published,
+    )
+
+
+def list_staff_news(db: Session, *, limit: int, cursor: str | None) -> StaffNewsPage:
+    after = decode_page_cursor(cursor, key_types=(int,), direction="desc")
+    statement = select(News)
+    if after is not None:
+        if not 1 <= after[0] <= MAX_NEWS_ID:
+            raise InvalidCursorError("Invalid news cursor")
+        statement = statement.where(News.id < after[0])
+    rows = db.scalars(statement.order_by(News.id.desc()).limit(limit + 1)).all()
+    page = paginate_results(
+        rows,
+        key=lambda item: (item.id,),
+        key_types=(int,),
+        direction="desc",
+        limit=limit,
+    )
+    return StaffNewsPage(
+        items=[serialize_staff_news(item) for item in page.items], next_cursor=page.next_cursor
+    )
+
+
+def get_staff_news(db: Session, news_id: int, *, for_update: bool = False) -> News | None:
+    statement = select(News).where(News.id == news_id)
+    if for_update:
+        statement = statement.with_for_update()
+    return db.scalar(statement)
+
+
+def create_staff_news(db: Session, actor: User, content: NewsContent) -> News:
+    item = News(title=content.title, body=content.body, author_user_id=actor.id, is_published=False)
+    try:
+        db.add(item)
+        db.flush()
+        write_audit_event(
+            db,
+            actor=actor,
+            entity_type="news",
+            entity_id=item.id,
+            action="create",
+            before_data=None,
+            after_data={
+                "title": item.title,
+                "body": item.body,
+                "is_published": False,
+                "published_at": None,
+                "author_user_id": actor.id,
+            },
+        )
+        db.commit()
+        return item
+    except Exception:
+        db.rollback()
+        raise
+
+
+def update_staff_news(db: Session, actor: User, item: News, content: NewsContent) -> News:
+    changes = {
+        key: getattr(content, key)
+        for key in ("title", "body")
+        if getattr(item, key) != getattr(content, key)
+    }
+    if not changes:
+        return item
+    before = {key: getattr(item, key) for key in changes}
+    try:
+        changed = db.scalar(
+            update(News)
+            .where(News.id == item.id)
+            .values(**changes)
+            .returning(News)
+            .execution_options(synchronize_session=False, populate_existing=True)
+        )
+        if changed is None:
+            raise ValueError("News disappeared during update")
+        write_audit_event(
+            db,
+            actor=actor,
+            entity_type="news",
+            entity_id=item.id,
+            action="update",
+            before_data=before,
+            after_data={key: getattr(changed, key) for key in changes},
+        )
+        db.commit()
+        return changed
+    except Exception:
+        db.rollback()
+        raise
+
+
+def set_news_publication(db: Session, actor: User, item: News, *, publish: bool) -> News:
+    if item.is_published == publish:
+        return item
+    previous = {"is_published": item.is_published, "published_at": item.published_at}
+    now = db.scalar(select(func.now()))
+    values = {"is_published": publish}
+    action = "publish" if publish else "unpublish"
+    if publish:
+        values["published_at"] = now
+    try:
+        changed = db.scalar(
+            update(News)
+            .where(News.id == item.id)
+            .values(**values)
+            .returning(News)
+            .execution_options(synchronize_session=False, populate_existing=True)
+        )
+        if changed is None:
+            raise ValueError("News disappeared during publication")
+        write_audit_event(
+            db,
+            actor=actor,
+            entity_type="news",
+            entity_id=item.id,
+            action=action,
+            before_data=previous,
+            after_data={"is_published": changed.is_published, "published_at": changed.published_at},
+        )
+        db.commit()
+        return changed
+    except Exception:
+        db.rollback()
+        raise
 
 
 def create_excerpt(body: str) -> str:

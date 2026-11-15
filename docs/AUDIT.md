@@ -87,6 +87,7 @@ except Exception:
 | `user` | `set_role` | `role` |
 | `user` | `set_active` | `is_active` |
 | `student` | `set_academic_status` | `academic_status` |
+| `news` | `create`, `update`, `publish`, `unpublish` | `title`, `body`, `is_published`, `published_at`, `author_user_id` |
 
 При `create` before — SQL NULL, after — объект; при `delete` наоборот.
 Остальные действия требуют двух объектов с одинаковым набором разрешённых ключей.

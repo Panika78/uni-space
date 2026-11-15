@@ -11,9 +11,12 @@ const loginName = process.env.NEWS_TEST_LOGIN
 const password = process.env.NEWS_TEST_PASSWORD
 const detailId = process.env.NEWS_TEST_DETAIL_ID
 const detailTitle = process.env.NEWS_TEST_DETAIL_TITLE
+const staffLoginName = process.env.NEWS_TEST_STAFF_LOGIN
+const staffPassword = process.env.NEWS_TEST_STAFF_PASSWORD
 assert.ok(loginName && password, 'Provide fictional NEWS_TEST_LOGIN and NEWS_TEST_PASSWORD')
 assert.ok(detailId, 'Provide NEWS_TEST_DETAIL_ID from the news browser fixture')
 assert.ok(detailTitle, 'Provide NEWS_TEST_DETAIL_TITLE from the news browser fixture')
+assert.ok(staffLoginName && staffPassword, 'Provide fictional staff news credentials')
 
 const browser = await chromium.launch({
   ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
@@ -479,6 +482,76 @@ try {
   )
   await context.unroute((url) => url.pathname === `/api/v1/news/${encodeURIComponent(detailId)}`)
   check('a cached article is hidden after a read-only HTTP 403 refetch')
+
+  currentScenario = 'deny direct staff editor navigation to a student'
+  let deniedStaffRequests = 0
+  const countDeniedStaffRequest = (request) => {
+    if (new URL(request.url()).pathname.startsWith('/api/v1/staff/news')) deniedStaffRequests += 1
+  }
+  page.on('request', countDeniedStaffRequest)
+  await page.goto(`${baseURL}/staff/news`)
+  await page.getByText('Доступ запрещён', { exact: true }).waitFor()
+  assert.equal(
+    deniedStaffRequests,
+    0,
+    'The student UI must deny the route before staff news API calls',
+  )
+  page.off('request', countDeniedStaffRequest)
+  check('student direct navigation to staff news is denied before staff API access')
+
+  currentScenario = 'open the permission-protected staff editor'
+  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Выйти', exact: true }).click()
+  await page.getByLabel('Логин', { exact: true }).fill(staffLoginName)
+  await page.getByLabel('Пароль', { exact: true }).fill(staffPassword)
+  await page.getByRole('button', { name: 'Войти', exact: true }).click()
+  await page.getByRole('heading', { name: 'Кабинет сотрудника', exact: true }).waitFor()
+  await page.getByRole('link', { name: 'Публикация новостей', exact: true }).click()
+  await page.getByRole('heading', { name: 'Публикация новостей', exact: true }).waitFor()
+  await page.getByRole('link', { name: 'Создать новость', exact: true }).click()
+  await page.getByLabel('Заголовок').fill('E2E: официальная новость')
+  await page.getByLabel('Текст новости').fill('Первая строка\nВторая строка')
+  for (const width of [360, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.waitForFunction(() => document.documentElement.scrollWidth <= window.innerWidth)
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.getByLabel('Заголовок').focus()
+  await page.keyboard.press('Tab')
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'staff-news-body-input')
+  await page.keyboard.press('Tab')
+  const failDraftSave = (url) => url.pathname === '/api/v1/staff/news'
+  await context.route(failDraftSave, (route) => {
+    if (route.request().method() !== 'POST') return route.continue()
+    return route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: { code: 'internal_error', message: 'Fictional save failure', details: [] },
+      }),
+    })
+  })
+  await page.getByRole('button', { name: 'Сохранить черновик', exact: true }).click()
+  await page.getByRole('alert').waitFor()
+  assert.equal(await page.getByLabel('Заголовок').inputValue(), 'E2E: официальная новость')
+  assert.equal(await page.locator('[role="status"]').count(), 0)
+  await context.unroute(failDraftSave)
+  check('a failed save keeps the entered content and shows no success')
+  await page.getByRole('button', { name: 'Сохранить черновик', exact: true }).click()
+  await page.getByRole('heading', { name: 'E2E: официальная новость', exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Опубликовать', exact: true }).click()
+  await page.getByText('Новость опубликована.', { exact: true }).waitFor()
+  await page.getByLabel('Заголовок').fill('E2E: изменённая официальная новость')
+  await page.getByLabel('Текст новости').fill('Обновлённая строка\nСохранённый перенос строки')
+  await page.getByRole('button', { name: 'Сохранить изменения', exact: true }).click()
+  await page.getByText('Изменения сохранены.', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Снять с публикации', exact: true }).click()
+  await page.getByText('Публикация снята.', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Опубликовать', exact: true }).click()
+  await page.getByText('Новость опубликована.', { exact: true }).waitFor()
+  check(
+    'staff creates, publishes, unpublishes and republishes a news item at 360/1440 px with keyboard navigation',
+  )
 } catch (error) {
   console.error(`FAIL ${currentScenario}: ${error?.message || String(error)}`)
   console.error(`Diagnostic URL: ${new URL(page.url()).origin}${new URL(page.url()).pathname}`)

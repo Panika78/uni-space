@@ -32,7 +32,12 @@ export function getRoleNavigation(context: AuthorizationContext): NavigationItem
   return staffSections
     .filter(({ permission }) => hasPermission(context, permission))
     .map(({ permission, label }) => ({
-      to: permission === 'applications.review' ? '/staff/applications' : `/staff#${permission}`,
+      to:
+        permission === 'applications.review'
+          ? '/staff/applications'
+          : permission === 'news.publish'
+            ? '/staff/news'
+            : `/staff#${permission}`,
       label,
       icon: 'file',
     }))

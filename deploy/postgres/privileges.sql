@@ -87,6 +87,17 @@ SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
               pg_get_serial_sequence(format('public.%I', tablename), 'id'))
 FROM pg_tables WHERE schemaname='public'
   AND tablename IN ('applications', 'application_history') \gexec
+SELECT 'GRANT INSERT ON public.news TO uni_space_api'
+WHERE to_regclass('public.news') IS NOT NULL \gexec
+SELECT 'GRANT UPDATE (title, body, is_published, published_at) ON public.news TO uni_space_api'
+WHERE to_regclass('public.news') IS NOT NULL \gexec
+SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
+              pg_get_serial_sequence('public.news', 'id'))
+WHERE to_regclass('public.news') IS NOT NULL \gexec
+SELECT 'GRANT INSERT ON public.audit_events TO uni_space_api'
+WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
+SELECT 'GRANT SELECT (id, created_at) ON public.audit_events TO uni_space_api'
+WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
 SELECT 'GRANT UPDATE (review_status, form_data, reviewer_user_id, feedback, updated_at, version)
         ON public.applications TO uni_space_api'
 WHERE to_regclass('public.applications') IS NOT NULL \gexec
