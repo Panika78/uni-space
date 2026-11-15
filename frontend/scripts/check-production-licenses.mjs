@@ -7,30 +7,25 @@ import { fileURLToPath, URL } from 'node:url'
 const frontendDirectory = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const distributionDirectory = resolve(frontendDirectory, 'dist')
 const licensePath = resolve(distributionDirectory, 'licenses.md')
-const projectLicensePath = resolve(distributionDirectory, 'LICENSE')
+const legacyProjectLicensePath = resolve(distributionDirectory, 'LICENSE')
 const provenancePath = resolve(distributionDirectory, 'ASSET_PROVENANCE.md')
-const publicFiles = [projectLicensePath, licensePath, provenancePath]
+const publicFiles = [licensePath, provenancePath]
 const lockPath = resolve(frontendDirectory, 'package-lock.json')
-const sourceLicensePath = resolve(frontendDirectory, '../LICENSE')
 
 function fail(message) {
   console.error(`Production license check failed: ${message}`)
   process.exitCode = 1
 }
 
-const [licenseText, projectLicenseText, sourceLicenseText, provenanceText, lockText] =
-  await Promise.all([
-    readFile(licensePath, 'utf8').catch(() => null),
-    readFile(projectLicensePath, 'utf8').catch(() => null),
-    readFile(sourceLicensePath, 'utf8'),
-    readFile(provenancePath, 'utf8').catch(() => null),
-    readFile(lockPath, 'utf8'),
-  ])
+const [licenseText, provenanceText, lockText] = await Promise.all([
+  readFile(licensePath, 'utf8').catch(() => null),
+  readFile(provenancePath, 'utf8').catch(() => null),
+  readFile(lockPath, 'utf8'),
+])
 
 if (!licenseText) fail('dist/licenses.md is missing or unreadable')
-if (!projectLicenseText) fail('dist/LICENSE is missing or unreadable')
-if (projectLicenseText && projectLicenseText !== sourceLicenseText) {
-  fail('dist/LICENSE does not exactly match the repository LICENSE')
+if (await stat(legacyProjectLicensePath).catch(() => null)) {
+  fail('dist/LICENSE still publishes the removed project MIT license')
 }
 if (!provenanceText) fail('dist/ASSET_PROVENANCE.md is missing or unreadable')
 for (const path of publicFiles) {
