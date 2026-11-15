@@ -24,6 +24,7 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = (
         UniqueConstraint("login", name="uq_users_login"),
+        UniqueConstraint("id", "role", name="uq_users_id_role"),
         PrimaryKeyConstraint("id", name="pk_users"),
         CheckConstraint(
             "role IN ('student', 'teacher', 'staff', 'admin')",

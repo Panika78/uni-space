@@ -241,6 +241,12 @@ Nginx (важно при замене файла через rename), прове�
 `news` и права на её последовательность запрещены. Для TASK-016 уведомления доступны
 runtime-роли только для чтения: `SELECT` на `notifications`, без DML и sequence USAGE.
 
+Для MVP2-29 текущий API не использует writer: прав на `audit_events` пока нет,
+включая UPDATE/DELETE уже созданных событий. До первого production-потребителя
+нужно явно выдать INSERT и SELECT(id, created_at) для RETURNING; IDENTITY не требует
+sequence USAGE при INSERT. UPDATE/DELETE аудита обычной API-роли не выдаются.
+Подробный контракт подключения — [AUDIT.md](AUDIT.md).
+
 API не получает административный или migration secret ни в окружение, ни в mounts.
 API pool задаёт для каждого PostgreSQL-соединения `lock_timeout=5000ms` и
 `statement_timeout=30000ms`. Это параметры сессии API-клиента; Alembic использует
@@ -478,6 +484,14 @@ HTTPX строго проверяет CA, hostname `uni.test` и срок дей
 В `finally` удаляет **только собственный** тестовый project с volume.
 Не запускайте тест параллельно с другим стендом на том же proxy subnet.
 GitHub Actions выполняет этот прогон отдельным job; остальные проверки — в README.
+
+RBAC smoke после миграций и повторного применения ACL входит в тот же прогон:
+мигратор создаёт вымышленного сотрудника деканата с `grades.edit` и scoped
+`applications.review`, затем настоящий HTTPS login и `/api/v1/auth/context`
+проверяют точный контекст под `uni_space_api`. Из подключения API проверяются
+SELECT и отсутствие INSERT/UPDATE/DELETE для обеих RBAC-таблиц; реальные
+запросы записи и обращения к их sequences должны завершаться `42501`.
+Существующие студенческие, auth и recovery-сценарии сохраняются.
 
 Регрессии security-review F-02/F-03 намеренно выдают мигратору небезопасные
 глобальные и schema-level defaults TABLES/SEQUENCES/FUNCTIONS для PUBLIC/API,

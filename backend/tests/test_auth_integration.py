@@ -524,6 +524,7 @@ def test_student_dependency_requires_current_role_and_profile(auth, condition):
     _response, _token, access = login(auth)
     with Session(engine) as db, db.begin():
         if condition == "role":
+            db.execute(delete(Student).where(Student.user_id == ids[0]))
             db.get(User, ids[0]).role = "admin"
         else:
             db.execute(delete(Student).where(Student.user_id == ids[0]))
@@ -1171,11 +1172,21 @@ def test_student_profiles_are_isolated_and_follow_academic_links(auth):
         assert client.request("GET", "/api/v1/users/me").status_code == 401
         assert client.request("GET", "/api/v1/users/me", access="invalid").status_code == 401
         with Session(engine) as db, db.begin():
+            db.execute(delete(Student).where(Student.user_id == ids[1]))
             db.get(User, ids[1]).role = "teacher"
         assert client.request("GET", "/api/v1/users/me", access=access).status_code == 403
     finally:
         with Session(engine) as db, db.begin():
-            db.get(Student, student_ids[1]).group_id = old_group
+            db.get(User, ids[1]).role = "student"
+            db.add(
+                Student(
+                    id=student_ids[1],
+                    user_id=ids[1],
+                    group_id=old_group,
+                    academic_status="enrolled",
+                )
+            )
+            db.flush()
             db.execute(delete(StudyGroup).where(StudyGroup.id == extra_ids[2]))
             db.execute(delete(Program).where(Program.id == extra_ids[1]))
             db.execute(delete(OrgUnit).where(OrgUnit.id == extra_ids[0]))
@@ -1215,6 +1226,7 @@ def test_profile_checks_role_and_account_activity_on_every_request(auth):
     _, _, access = login(auth)
     assert client.request("GET", "/api/v1/users/me", access=access).status_code == 200
     with Session(engine) as db, db.begin():
+        db.execute(delete(Student).where(Student.user_id == ids[0]))
         db.get(User, ids[0]).role = "teacher"
     assert_error(client.request("GET", "/api/v1/users/me", access=access), 403, "forbidden")
     with Session(engine) as db, db.begin():
@@ -1294,12 +1306,21 @@ def test_notifications_are_private_and_use_stable_keyset_pagination(auth):
     private = client.request("GET", "/api/v1/notifications?limit=100", access=second_access)
     assert [item["title"] for item in private.json()["items"]] == ["Student two only"]
     with Session(engine) as db, db.begin():
+        student = db.scalar(select(Student).where(Student.user_id == user_ids[0]))
+        old_student = dict(
+            id=student.id,
+            user_id=student.user_id,
+            group_id=student.group_id,
+            academic_status=student.academic_status,
+        )
+        db.execute(delete(Student).where(Student.user_id == user_ids[0]))
         db.execute(update(User).where(User.id == user_ids[0]).values(role="teacher"))
     assert_error(
         client.request("GET", "/api/v1/notifications", access=first_access), 403, "forbidden"
     )
     with Session(engine) as db, db.begin():
         db.execute(update(User).where(User.id == user_ids[0]).values(role="student"))
+        db.add(Student(**old_student))
     assert_error(
         client.request("GET", "/api/v1/notifications?limit=0", access=first_access),
         422,

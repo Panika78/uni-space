@@ -88,6 +88,8 @@ def replace_lesson_participants(
     Lock the lesson to serialize cooperating writers. Direct SQL is constrained
     by FKs and unique indexes; whole-group/subgroup redundancy is a service rule.
     A changed set increments the lesson version once; an identical set is a no-op.
+    Prelock children NOWAIT: a raw writer may hold a child while waiting for our
+    parent. On 55P03 the caller must roll back and retry the whole transaction.
     """
     lesson = db.scalars(
         select(Lesson)
@@ -101,6 +103,7 @@ def replace_lesson_participants(
         for row in db.scalars(
             select(LessonGroup)
             .where(LessonGroup.lesson_id == lesson_id)
+            .with_for_update(nowait=True)
             .execution_options(populate_existing=True)
         )
     }

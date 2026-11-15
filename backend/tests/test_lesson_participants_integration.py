@@ -234,3 +234,67 @@ def test_common_assessment_linked_to_subgroup_lesson_accepts_both_students(subgr
         assert item.total_score == score
         assert item.max_score == 10
         assert item.assessment_count == item.graded_assessment_count == 1
+
+
+@pytest.mark.parametrize("action", ["delete", "update"])
+def test_service_does_not_deadlock_with_raw_writer_holding_assignment(committed_lesson, action):
+    s = committed_lesson
+    with Session(s.engine) as db:
+        replace_lesson_participants(
+            db, s.lesson_id, [Participant(s.group_id, s.a_id), Participant(s.group_id, s.b_id)]
+        )
+        row_id = db.scalar(
+            select(LessonGroup.id).where(
+                LessonGroup.lesson_id == s.lesson_id, LessonGroup.subgroup_id == s.a_id
+            )
+        )
+        other_group = db.scalar(
+            text("SELECT id FROM study_groups WHERE id<>:id LIMIT 1"), {"id": s.group_id}
+        )
+        version = db.get(Lesson, s.lesson_id).version
+        db.commit()
+    waiter_pid = []
+    ready = Event()
+
+    def raw_writer():
+        with Session(s.engine) as db:
+            db.execute(text("SET LOCAL deadlock_timeout='100ms'"))
+            db.execute(text("SET LOCAL statement_timeout='5s'"))
+            waiter_pid.append(db.scalar(text("SELECT pg_backend_pid()")))
+            ready.set()
+            statement = (
+                "DELETE FROM lesson_groups WHERE id=:id"
+                if action == "delete"
+                else "UPDATE lesson_groups SET group_id=:group, subgroup_id=NULL WHERE id=:id"
+            )
+            db.execute(text(statement), {"id": row_id, "group": other_group})
+            db.commit()
+
+    service_error = raw_error = None
+    with ThreadPoolExecutor(max_workers=1) as pool, Session(s.engine) as service:
+        service.execute(text("SET LOCAL deadlock_timeout='100ms'"))
+        service.execute(text("SET LOCAL statement_timeout='5s'"))
+        pid = service.scalar(text("SELECT pg_backend_pid()"))
+        service.execute(select(Lesson).where(Lesson.id == s.lesson_id).with_for_update())
+        pending = pool.submit(raw_writer)
+        try:
+            assert ready.wait(5)
+            # The raw writer holds its child tuple and is waiting for our parent.
+            require_blocked_writer(s.engine, pid, waiter_pid[0])
+            try:
+                replace_lesson_participants(service, s.lesson_id, [Participant(s.group_id, s.b_id)])
+            except DBAPIError as exc:
+                service_error = exc.orig.sqlstate
+        finally:
+            service.rollback()  # Release parent even when the service refuses the lock.
+        try:
+            pending.result(timeout=5)
+        except DBAPIError as exc:
+            raw_error = exc.orig.sqlstate
+    assert (service_error, raw_error) == ("55P03", None)
+    # Retry the entire service transaction after the raw writer has committed.
+    with Session(s.engine) as db:
+        replace_lesson_participants(db, s.lesson_id, [Participant(s.group_id, s.b_id)])
+        db.commit()
+        assert list_participants(db, s.lesson_id) == {(s.group_id, s.b_id)}
+        assert db.get(Lesson, s.lesson_id).version == version + (action == "update")
