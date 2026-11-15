@@ -433,3 +433,67 @@ def test_login_waiting_for_block_cannot_create_session(admin, engine, monkeypatc
             )
             == 0
         )
+
+
+def test_concurrent_http_double_block_writes_one_event(admin, engine):
+    uid = create(admin, "staff")["user"]["id"]
+
+    def block(_):
+        return request(admin, "PUT", f"/{uid}/active", json={"is_active": False}).status_code
+
+    with ThreadPoolExecutor(2) as pool:
+        assert list(pool.map(block, range(2))) == [200, 200]
+    with Session(engine) as db:
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(AuditEvent)
+                .where(
+                    AuditEvent.entity_type == "user",
+                    AuditEvent.entity_id == int(uid),
+                    AuditEvent.action == "set_active",
+                )
+            )
+            == 1
+        )
+
+
+def test_block_waiting_for_login_revokes_newly_committed_session(admin, engine, monkeypatch):
+    created = create(admin, "staff")
+    uid = int(created["user"]["id"])
+    from app.auth import service as auth_service
+
+    ready, release = Event(), Event()
+    original = auth_service.create_refresh_token
+
+    def pause(*args, **kwargs):
+        token = original(*args, **kwargs)
+        ready.set()
+        assert release.wait(10)
+        return token
+
+    monkeypatch.setattr(auth_service, "create_refresh_token", pause)
+
+    def login():
+        with Session(engine) as db:
+            create_login_session(db, "staff", created["initial_password"], admin[4])
+
+    def block():
+        return request(admin, "PUT", f"/{uid}/active", json={"is_active": False}).status_code
+
+    with ThreadPoolExecutor(2) as pool:
+        entering = pool.submit(login)
+        assert ready.wait(10)
+        blocking = pool.submit(block)
+        release.set()
+        entering.result(10)
+        assert blocking.result(10) == 200
+    with Session(engine) as db:
+        session = db.scalar(select(AuthSession).where(AuthSession.user_id == uid))
+        assert session.revoked_at and session.revocation_reason == "user_blocked"
+        assert all(
+            token.revoked_at
+            for token in db.scalars(
+                select(RefreshToken).where(RefreshToken.session_id == session.id)
+            )
+        )
