@@ -4,9 +4,18 @@ from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import select
+from test_academics_integration import moscow_clock  # noqa: F401
 from test_teaching_integration import journal  # noqa: F401
 
-from app.models import Assessment, AssessmentGroup, AuditEvent, Lesson, LessonGroup, Subgroup
+from app.models import (
+    Assessment,
+    AssessmentGroup,
+    AuditEvent,
+    FinalResult,
+    Lesson,
+    LessonGroup,
+    Subgroup,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -79,7 +88,7 @@ def test_group_dates_confirmation_audit_noop_and_student_regression(dates_contex
     schedule_before = schedule()
     assert schedule_before.status_code == 200, schedule_before.text
     assert len(schedule_before.json()["items"]) == 1
-    before = s.request().json()
+    students_before = s.get().json()
     s.work.date_needs_confirmation = True
     s.db.commit()
     request = [item(s.work, lesson_id=s.lesson.id)]
@@ -99,7 +108,7 @@ def test_group_dates_confirmation_audit_noop_and_student_regression(dates_contex
     )
     assert s.patch(request).status_code == 200
     assert len(events(s)) == 1
-    assert s.request().json() == before
+    assert s.get().json() == students_before
     assert schedule().json() == schedule_before.json()
     assert s.get(f"assessments/{s.work.id}/results").json()["items"][0]["score"] == 7
     assert s.db.get(Assessment, s.work.assessment_id).max_score == 10
@@ -108,6 +117,65 @@ def test_group_dates_confirmation_audit_noop_and_student_regression(dates_contex
     assert s.patch([item(s.work, None)]).status_code == 200
     assert s.db.get(AssessmentGroup, s.work.id).lesson_id is None
     assert not s.db.get(AssessmentGroup, s.work.id).date_needs_confirmation
+
+
+def test_reschedule_preserves_student_academics_scores_counts_and_final_result(dates_context):
+    s = dates_context
+    # Include ungraded and zero-scored work so maximum/count preservation cannot
+    # pass by checking only the moved work's nonzero score or an empty response.
+    s.assignment(s.courses[0], maximum=15)
+    zero_scored = s.assignment(s.courses[0], maximum=5)
+    s.result(zero_scored, 0)
+    s.result(s.other, 9, student=1)  # Same assessment, another group's result.
+    s.add(
+        FinalResult, course_offering_id=s.courses[0].id, student_id=s.students[0].id, grade_value=4
+    )
+    s.work.planned_date = date(2026, 9, 2)
+    s.work.lesson_id = s.lesson.id
+    s.db.commit()
+
+    def get_student_academic_invariants():
+        response = s.client.get(
+            "/api/v1/academics",
+            headers={"Authorization": f"Bearer {s.tokens[0]}"},
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["term"]["id"] == str(s.term.id)
+        course = next(
+            row for row in payload["items"] if row["course_offering_id"] == str(s.courses[0].id)
+        )
+        # Project only grading invariants; dates or other response fields may
+        # legitimately change if the student API later exposes planned dates.
+        return {
+            name: course[name]
+            for name in (
+                "total_score",
+                "max_score",
+                "graded_assessment_count",
+                "assessment_count",
+                "attestation_type",
+                "final_result",
+            )
+        }
+
+    expected = dict(
+        total_score=7,
+        max_score=30,
+        graded_assessment_count=2,
+        assessment_count=3,
+        attestation_type="exam",
+        final_result=dict(
+            grade_value=4, passed=None, has_debt=False, retake_date=None, retake_location=None
+        ),
+    )
+    assert get_student_academic_invariants() == expected
+    response = s.patch([item(s.work, "2026-09-03")])
+    assert response.status_code == 200, response.text
+    assert response.json()["items"] == [
+        {**item(s.work, "2026-09-03"), "date_needs_confirmation": False}
+    ]
+    assert get_student_academic_invariants() == expected
 
 
 @pytest.mark.parametrize("bad", ["other", "missing", "wrong_work", "bad_lesson"])
