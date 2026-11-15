@@ -1,14 +1,17 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.core.schemas import ApiError, Page
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_db_session
 from app.models import User
-from app.teaching import service
+from app.teaching import dates, service
 from app.teaching.schemas import (
+    AssessmentDatesRequest,
+    AssessmentDatesResponse,
     AssessmentParams,
     AssignmentParams,
     JournalAssessment,
@@ -85,3 +88,33 @@ def list_lesson_students(
 ):
     service.require_journal_lesson(db, *scope, int(lesson_id))
     return service.list_journal_students(db, scope[1], params, int(lesson_id))
+
+
+@router.patch(
+    "/courses/{course_offering_id}/assessments/{assessment_id}/dates",
+    response_model=AssessmentDatesResponse,
+    responses={409: {"model": ApiError}},
+)
+def update_assessment_dates(
+    course_offering_id: TeachingId,
+    assessment_id: TeachingId,
+    request: AssessmentDatesRequest,
+    db: Db,
+    user: Annotated[User, Depends(get_current_user)],
+):
+    try:
+        payload = AssessmentDatesResponse.model_validate(
+            dates.update_assessment_dates(
+                db, user, int(course_offering_id), int(assessment_id), request
+            )
+        )
+        db.commit()
+        return payload
+    except DBAPIError as exc:
+        db.rollback()
+        if getattr(exc.orig, "sqlstate", None) in {"55P03", "40001", "40P01"}:
+            raise HTTPException(409, "version_conflict") from exc
+        raise
+    except Exception:
+        db.rollback()
+        raise

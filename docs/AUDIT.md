@@ -80,6 +80,7 @@ except Exception:
 
 | entity_type | action | Разрешённые поля before/after |
 |---|---|---|
+| `assessment_group` | `update` | `planned_date`, `lesson_id`, `date_needs_confirmation` |
 | `assessment_result` | `create`, `update`, `delete` | `assessment_group_id`, `student_id`, `score` |
 | `final_result` | `create`, `update`, `delete` | `course_offering_id`, `student_id`, `grade_value`, `passed`, `retake_date` |
 | `lesson` | `create`, `update`, `cancel`, `move` | `course_offering_id`, `teacher_id`, `starts_at`, `ends_at`, `kind`, `status`, `previous_lesson_id`, `version`, `group_ids`, `room_ids` |
@@ -104,7 +105,7 @@ except Exception:
 обхода их содержимого. ORM-объекты целиком не принимаются. Разрешённые значения:
 
 - ID, баллы, числовая оценка, версия — строго `int`, не `bool`;
-- `passed` / `is_active` — строго `bool`;
+- `passed` / `is_active` / `date_needs_confirmation` — строго `bool`;
 - даты — `date` в ISO 8601; время — timezone-aware `datetime`, нормализованный в UTC;
 - `group_ids` / `room_ids` — плоские списки целых ID с копированием;
 - `role`, `academic_status`, `kind`, `status` — только существующие значения из DB.md;
@@ -158,3 +159,34 @@ API `UPDATE`/`DELETE` аудита или широкие default GRANT. Пред
 Прямой SQL и прямое создание `AuditEvent` обходят writer: безопасность снимков —
 контракт серверного кода, не JSONB-фильтрация в БД. Защиты истории от SQL-администратора,
 триггеров автоматического аудита и криптографической неизменности в MVP2-29 нет.
+
+## Даты работ: общий контракт #71 / #74
+
+`assessment_group/update` использует `entity_id=assessment_groups.id` и полный
+снимок трёх полей: `planned_date` (ISO date / NULL), `lesson_id` (integer / NULL),
+`date_needs_confirmation` (boolean). #71 пишет отдельное событие для каждого
+реально изменённого назначения; повторное сохранение без изменений — no-op.
+Изменение нескольких групп и все события фиксируются одним commit; любая ошибка
+writer откатывает весь запрос.
+
+#74 использует **то же событие** при установке флага после отмены/переноса пары:
+дата и связь сохраняются, before/after отражают фактическое изменение флага.
+События занятия и назначений должны находиться в общей транзакции #74.
+
+#71 блокирует выбранные `assessment_groups` и актуальные `teaching_assignments`
+в порядке ID, затем новые/сохраняемые `lessons` в порядке ID через FOR UPDATE
+NOWAIT. Статус, московская дата и участники проверяются после блокировки пары.
+Блокировка удерживается до commit, совместима с родительской блокировкой #62
+и `UPDATE lessons SET version=version` существующего триггера. #74 блокирует
+занятие до изменения и устанавливает флаг непосредственно связанных назначений
+до commit. При обратном порядке блокировок #71 возвращает `409 version_conflict`
+с rollback **всего** запроса (`55P03`, `40001`, `40P01`); клиент перечитывает данные.
+Автоматического повтора и отдельной версии дат работ нет.
+
+Production ACL разрешает UPDATE только трёх полей назначения, INSERT аудита,
+SELECT его `id/created_at` для RETURNING. Identity INSERT не требует USAGE
+sequence; прямой nextval запрещён. Для row locks
+и существующих триггеров нужны UPDATE `id` у assessments/teaching_assignments,
+`group_id` у course_groups и `version` у lessons; предметные поля работ/занятий
+не доступны на запись. Изменение версии существующим триггером — присваивание
+прежнего значения, без увеличения публичной версии занятия.

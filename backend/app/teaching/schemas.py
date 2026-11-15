@@ -78,3 +78,36 @@ class JournalLesson(RequestModel):
     status: Literal["scheduled", "cancelled", "moved"]
     is_additional: bool
     version: int
+
+
+class AssessmentDateUpdate(RequestModel):
+    assessment_group_id: TeachingId
+    planned_date: Date | None
+    lesson_id: TeachingId | None
+
+    @model_validator(mode="after")
+    def validate_date_link(self):
+        if self.lesson_id is not None and self.planned_date is None:
+            raise ValueError("A linked lesson requires a date")
+        return self
+
+
+class AssessmentDatesRequest(RequestModel):
+    items: list[AssessmentDateUpdate] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_unique_targets(self):
+        if len({item.assessment_group_id for item in self.items}) != len(self.items):
+            raise ValueError("Duplicate assessment group")
+        return self
+
+
+class AssessmentDateResponse(RequestModel):
+    assessment_group_id: TeachingId
+    planned_date: Date | None
+    lesson_id: TeachingId | None
+    date_needs_confirmation: bool
+
+
+class AssessmentDatesResponse(RequestModel):
+    items: list[AssessmentDateResponse]
