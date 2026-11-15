@@ -52,12 +52,12 @@ export function ServicesTabs({ applications = false }: { applications?: boolean 
 export function ApplicationsList() {
   const isSuspended = useAccessSuspended()
   const queryClient = useQueryClient()
+  const location = useLocation()
   const heading = useRef<HTMLHeadingElement>(null)
   const table = useRef<HTMLTableElement>(null)
   const tableId = useId()
   // The private return target is cleared with applications on POST/auth changes.
   // Keep it separate so recording focus cannot change a failed list's API state.
-  const returnFocus = useRef(queryClient.getQueryData<ReturnFocus>(returnFocusKey))
   const restoredLink = useRef<HTMLAnchorElement | null>(null)
   const query = useInfiniteQuery({
     queryKey: applicationsKey,
@@ -91,7 +91,7 @@ export function ApplicationsList() {
   }
   useEffect(() => {
     if (isSuspended) return
-    const target = returnFocus.current
+    const target = queryClient.getQueryData<ReturnFocus>(returnFocusKey)
     if (!target) return
     const link = Array.from(
       table.current?.querySelectorAll<HTMLAnchorElement>('a[data-application-id]') ?? [],
@@ -112,7 +112,6 @@ export function ApplicationsList() {
           if (shouldFocusHeading) heading.current?.focus({ preventScroll: true })
         }
         if (!query.isFetching) {
-          returnFocus.current = undefined
           queryClient.removeQueries({ queryKey: returnFocusKey, exact: true })
         }
       })
@@ -121,7 +120,7 @@ export function ApplicationsList() {
       window.cancelAnimationFrame(firstFrame)
       if (secondFrame) window.cancelAnimationFrame(secondFrame)
     }
-  }, [query.data, query.isFetching, isDenied, queryClient, isSuspended])
+  }, [location.key, query.data, query.isFetching, isDenied, queryClient, isSuspended])
   useEffect(() => {
     // Discard only this forbidden snapshot, retaining the 403 error state.
     // A later 500 (including after remount) must not reveal the old rows again.
