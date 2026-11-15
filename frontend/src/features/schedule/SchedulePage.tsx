@@ -14,8 +14,11 @@ import {
   getMoscowDate,
   getWeekStart,
   listDayLessons,
+  listDayGaps,
+  formatGapDuration,
 } from './calendar'
 import type { Lesson } from './calendar'
+import { useSchedulePreferences } from './useSchedulePreferences'
 import './schedule.css'
 
 const kinds = {
@@ -139,6 +142,8 @@ function LessonCard({
 
 export function SchedulePage() {
   const isSuspended = useAccessSuspended()
+  const { preferences, savePreferences, showCancelled, hasUncertainSave, hasExplicitSaveError } =
+    useSchedulePreferences()
   const [date, setDate] = useState(getMoscowDate)
   const [mode, setMode] = useState<'day' | 'week'>('day')
   const [navigation, setNavigation] = useState<Lesson['latest_lesson']>(null)
@@ -150,6 +155,11 @@ export function SchedulePage() {
     pendingPosition.current = position.id
     setNavigation({ ...position })
     setDate(getMoscowDate(new Date(position.starts_at)))
+  }
+  function selectDate(value: string) {
+    setNavigation(null)
+    pendingPosition.current = null
+    setDate(value)
   }
   const weekStart = getWeekStart(date)
   // A whole week also supplies the mobile day selector, including Sunday.
@@ -277,7 +287,7 @@ export function SchedulePage() {
           className="schedule-today"
           onClick={() => {
             pendingToday.current = mode === 'week'
-            setDate(getMoscowDate())
+            selectDate(getMoscowDate())
             setTodayRequest((request) => request + 1)
           }}
         >
@@ -287,14 +297,14 @@ export function SchedulePage() {
           <button
             aria-label="Предыдущая неделя"
             disabled={weekStart <= '0001-01-01'}
-            onClick={() => setDate(addDays(date, -7))}
+            onClick={() => selectDate(addDays(date, -7))}
           >
             <Icon name="left" />
           </button>
           <button
             aria-label="Следующая неделя"
             disabled={dateTo >= '9999-12-31'}
-            onClick={() => setDate(addDays(date, 7))}
+            onClick={() => selectDate(addDays(date, 7))}
           >
             <Icon name="right" />
           </button>
@@ -312,11 +322,60 @@ export function SchedulePage() {
             max="9999-12-31"
             onChange={(event) => {
               if (event.target.validity.valid && /^\d{4}-\d{2}-\d{2}$/.test(event.target.value))
-                setDate(event.target.value)
+                selectDate(event.target.value)
             }}
           />
         </label>
       </div>
+      <label className="schedule-cancelled-toggle">
+        <input
+          type="checkbox"
+          ref={(input) => {
+            if (input) input.indeterminate = !preferences.isSuccess
+          }}
+          aria-describedby="schedule-preference-status"
+          checked={savePreferences.isPending ? savePreferences.variables : showCancelled}
+          disabled={!preferences.isSuccess || preferences.isFetching || savePreferences.isPending}
+          onChange={(event) => savePreferences.mutate(event.target.checked)}
+        />
+        Показывать отменённые
+      </label>
+      <p
+        id="schedule-preference-status"
+        aria-live="polite"
+        hidden={preferences.isSuccess && !preferences.isFetching}
+      >
+        {preferences.isPending
+          ? 'Загружаем настройку…'
+          : !preferences.isSuccess
+            ? 'Значение настройки неизвестно.'
+            : preferences.isFetching
+              ? 'Проверяем настройку…'
+              : ''}
+      </p>
+      {preferences.isError && (
+        <p role="alert">
+          Не удалось загрузить настройку.
+          <button onClick={() => void preferences.refetch()}>Повторить загрузку настройки</button>
+        </p>
+      )}
+      {hasExplicitSaveError && (
+        <p role="alert">
+          Не удалось сохранить настройку. Показано последнее подтверждённое значение.
+        </p>
+      )}
+      {hasUncertainSave && (
+        <p role="alert">
+          Не удалось подтвердить сохранение. Предыдущий запрос ещё может завершиться на сервере.
+          Показано последнее полученное значение. Проверяйте настройку повторно.
+          <button
+            disabled={preferences.isFetching || savePreferences.isPending}
+            onClick={() => void preferences.refetch()}
+          >
+            Проверить настройку
+          </button>
+        </p>
+      )}
       <p className="schedule-timezone">Московское время · Europe/Moscow</p>
       <AnimatedRegion className="schedule-selectors" contentKey={mode}>
         {mode === 'day' ? (
@@ -326,7 +385,7 @@ export function SchedulePage() {
                 key={day}
                 aria-label={formatDate(day)}
                 aria-pressed={date === day}
-                onClick={() => setDate(day)}
+                onClick={() => selectDate(day)}
               >
                 {weekdays[index]}
                 <span>{Number(day.slice(8))}</span>
@@ -379,7 +438,25 @@ export function SchedulePage() {
         ) : (
           <div className="schedule-list" aria-live="polite">
             {days.map((day) => {
-              const lessons = listDayLessons(query.data.items, day)
+              const lessons = listDayLessons(query.data.items, day).filter(
+                (lesson) =>
+                  showCancelled ||
+                  lesson.status !== 'cancelled' ||
+                  (navigation?.id === lesson.id &&
+                    getMoscowDate(new Date(navigation.starts_at)) === date),
+              )
+              const entries = [
+                ...lessons.map((lesson) => ({
+                  time: Date.parse(lesson.starts_at),
+                  lesson,
+                  gap: null,
+                })),
+                ...listDayGaps(query.data.items, day).map((gap) => ({
+                  time: gap.startsAt,
+                  lesson: null,
+                  gap,
+                })),
+              ].sort((a, b) => a.time - b.time)
               return (
                 <section
                   key={day}
@@ -395,7 +472,7 @@ export function SchedulePage() {
                       <button
                         className="schedule-open-day"
                         onClick={() => {
-                          setDate(day)
+                          selectDate(day)
                           setMode('day')
                         }}
                       >
@@ -408,9 +485,21 @@ export function SchedulePage() {
                   </h2>
                   <div className="schedule-day__lessons">
                     {lessons.length ? (
-                      lessons.map((lesson) => (
-                        <LessonCard key={lesson.id} lesson={lesson} onNavigate={navigateToLesson} />
-                      ))
+                      entries.map(({ lesson, gap }) =>
+                        lesson ? (
+                          <LessonCard
+                            key={lesson.id}
+                            lesson={lesson}
+                            onNavigate={navigateToLesson}
+                          />
+                        ) : (
+                          gap && (
+                            <p className="schedule-gap" key={`gap-${gap.startsAt}`}>
+                              Окно · {formatGapDuration(gap)}
+                            </p>
+                          )
+                        ),
+                      )
                     ) : (
                       <p className="schedule-empty">Занятий нет</p>
                     )}

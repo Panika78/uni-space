@@ -20,6 +20,7 @@ from app.core.schemas import (
 from app.news.router import router as news_router
 from app.notifications import router as notifications_router
 from app.permissions import router as permissions_router
+from app.preferences import router as preferences_router
 from app.schedule.router import router as schedule_router
 from app.students import router as students_router
 from app.teaching.router import router as teaching_router
@@ -36,6 +37,7 @@ app = FastAPI(
 app.add_middleware(ApiHeadersMiddleware)
 install_exception_handlers(app)
 app.include_router(auth_router)
+app.include_router(preferences_router)
 app.include_router(permissions_router)
 app.include_router(academics_router)
 app.include_router(applications_router)

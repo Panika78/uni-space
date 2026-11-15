@@ -16,7 +16,20 @@ async function login(page, account = 'schedule-fixture-1', navigate = true) {
   if (navigate) await page.goto(`${baseURL}/login`)
   await page.getByLabel('Логин', { exact: true }).fill(account)
   await page.getByLabel('Пароль', { exact: true }).fill(password)
-  await page.getByRole('button', { name: 'Войти', exact: true }).click()
+  const submit = async () => {
+    const result = page.waitForResponse((r) => r.url().endsWith('/auth/login'))
+    await page.getByRole('button', { name: 'Войти', exact: true }).click()
+    return result
+  }
+  let result = await submit()
+  if (result.status() === 429) {
+    // Extra account-switching scenarios share the real server's IP rate limit.
+    // Model a user explicitly retrying after Retry-After; the app never retries login.
+    console.log('Waiting for the real login rate-limit window')
+    await delay((Number(result.headers()['retry-after']) + 1) * 1000)
+    result = await submit()
+  }
+  assert.equal(result.status(), 200)
   await page.getByRole('heading', { name: 'Расписание', exact: true }).waitFor()
   await page.locator('.schedule-list').waitFor()
 }
@@ -89,6 +102,268 @@ async function checkOvernightDates(page) {
     'вторник, 10 ноября, 23:30',
     'среда, 11 ноября, 00:30',
   ])
+}
+
+async function assertModeHighlight(page) {
+  await page.waitForFunction(
+    () => {
+      const modes = document.querySelector('.schedule-modes')
+      const selected = modes.querySelector('[aria-pressed="true"]').getBoundingClientRect()
+      const bounds = modes.getBoundingClientRect()
+      const style = window.getComputedStyle(modes, '::before')
+      const transform = new window.DOMMatrix(style.transform)
+      const left = bounds.left + Number.parseFloat(style.left) + transform.e
+      const top = bounds.top + Number.parseFloat(style.top) + transform.f
+      return (
+        Math.abs(left - selected.left) < 1.5 &&
+        Math.abs(top - selected.top) < 1.5 &&
+        Math.abs(left + Number.parseFloat(style.width) - selected.right) < 1.5 &&
+        Math.abs(top + Number.parseFloat(style.height) - selected.bottom) < 1.5
+      )
+    },
+    null,
+    { timeout: 5000 },
+  )
+}
+
+async function waitForPreference(page, show) {
+  await page.waitForFunction((value) => {
+    const input = document.querySelector('.schedule-cancelled-toggle input')
+    return input && !input.disabled && !input.indeterminate && input.checked === value
+  }, show)
+}
+
+async function checkUnknownPreference(page) {
+  let readMode = 'error'
+  let release
+  let markHeld
+  const gate = new Promise((resolve) => {
+    release = resolve
+  })
+  const held = new Promise((resolve) => {
+    markHeld = resolve
+  })
+  let patches = 0
+  const countPatch = (request) => {
+    if (request.url().endsWith('/preferences') && request.method() === 'PATCH') patches++
+  }
+  page.on('request', countPatch)
+  const handler = async (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    if (readMode === 'error')
+      return route.fulfill({
+        status: 500,
+        json: { error: { code: 'internal_error', message: 'test', details: [] } },
+      })
+    markHeld()
+    await gate
+    return route.continue()
+  }
+  await page.route('**/api/v1/users/me/preferences', handler)
+  await page.reload()
+  await page.locator('.schedule-list').waitFor()
+  await page.getByRole('alert').filter({ hasText: 'Не удалось загрузить настройку' }).waitFor()
+  async function assertUnknown() {
+    assert.ok(await page.getByRole('checkbox').isDisabled())
+    assert.ok(
+      await page.getByRole('checkbox').evaluate((input) => input.indeterminate && !input.checked),
+    )
+    assert.equal(await page.locator('.lesson-card--cancelled').count(), 0)
+    assert.ok((await page.locator('.lesson-card--scheduled:visible').count()) > 0)
+    assert.equal(patches, 0)
+  }
+  await assertUnknown()
+  readMode = 'delayed'
+  await page.getByRole('button', { name: 'Повторить загрузку настройки' }).click()
+  await held
+  await assertUnknown()
+  release()
+  await waitForPreference(page, false)
+  assert.equal(await page.locator('.lesson-card--cancelled').count(), 0)
+  assert.equal(patches, 0)
+  await page.unroute('**/api/v1/users/me/preferences', handler)
+  page.off('request', countPatch)
+  check(
+    'F-03: saved false stays concealed during failed/delayed GET, normal schedule remains available, retry restores real value without PATCH',
+  )
+}
+
+async function checkUncertainPreference(page) {
+  for (const fault of ['never', 'lost', 'late']) {
+    // A fresh document resets the test's previous fault state, never server data.
+    await page.reload()
+    await page.locator('.schedule-list').waitFor()
+    const toggle = page.getByRole('checkbox', { name: 'Показывать отменённые' })
+    await page.waitForFunction(
+      () => !document.querySelector('.schedule-cancelled-toggle input').disabled,
+    )
+    if (await toggle.isChecked()) {
+      await toggle.click()
+      await waitForPreference(page, false)
+    }
+    let releaseSend
+    let releaseResponse
+    let markCommitted
+    const sendGate = new Promise((resolve) => {
+      releaseSend = resolve
+    })
+    const responseGate = new Promise((resolve) => {
+      releaseResponse = resolve
+    })
+    const committed = new Promise((resolve) => {
+      markCommitted = resolve
+    })
+    let patches = 0
+    const handler = async (route) => {
+      if (route.request().method() !== 'PATCH') return route.continue()
+      patches++
+      if (fault === 'late') await sendGate
+      if (fault === 'never') {
+        await responseGate
+        try {
+          await route.abort()
+        } catch {
+          /* Timed-out browser already aborted. */
+        }
+        return
+      }
+      // Forward the original request to the real API; only its response is withheld.
+      const response = await route.fetch()
+      assert.equal(response.status(), 200)
+      markCommitted()
+      await responseGate
+      try {
+        await route.fulfill({ response })
+      } catch {
+        /* Timed-out browser already aborted. */
+      }
+    }
+    await page.route('**/api/v1/users/me/preferences', handler)
+    const started = Date.now()
+    await toggle.click()
+    const warning = page.getByRole('alert').filter({ hasText: 'Не удалось подтвердить сохранение' })
+    await warning.waitFor({ timeout: 25_000 })
+    assert.ok(Date.now() - started < 25_000, 'PATCH wait is bounded in real Chromium time')
+    await waitForPreference(page, fault === 'lost')
+    assert.ok((await warning.innerText()).includes('Предыдущий запрос ещё может завершиться'))
+    assert.equal((await warning.innerText()).includes('Восстановлено'), false)
+    assert.equal(patches, 1, 'No automatic PATCH replay')
+    if (fault === 'late') {
+      releaseSend()
+      await committed
+      await page.getByRole('button', { name: 'Проверить настройку', exact: true }).click()
+      await waitForPreference(page, true)
+      assert.ok(await warning.isVisible(), 'GET does not declare an old write impossible')
+    }
+    releaseSend()
+    releaseResponse()
+    await page.unroute('**/api/v1/users/me/preferences', handler)
+    assert.equal(patches, 1)
+    if (fault === 'never') {
+      // Restored control permits a deliberate new choice; no hidden automatic write.
+      await toggle.click()
+      await waitForPreference(page, true)
+      assert.ok(await warning.isVisible())
+    }
+    check(
+      `F-04: ${fault} PATCH, deadline, real GET reconciliation, persistent uncertainty and usable control`,
+    )
+  }
+  await page.reload()
+  await page.locator('.schedule-list').waitFor()
+  const toggle = page.getByRole('checkbox')
+  await page.waitForFunction(
+    () => !document.querySelector('.schedule-cancelled-toggle input').disabled,
+  )
+  if (await toggle.isChecked()) {
+    await toggle.click()
+    await waitForPreference(page, false)
+  }
+}
+
+async function checkPreferences(page, width) {
+  const toggle = page.getByRole('checkbox', { name: 'Показывать отменённые' })
+  await toggle.waitFor()
+  await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
+  // Explicitly reset fictional account state so each viewport run is independent.
+  if (!(await toggle.isChecked())) {
+    const reset = page.waitForResponse(
+      (r) => r.url().endsWith('/preferences') && r.request().method() === 'PATCH',
+    )
+    const [response] = await Promise.all([reset, toggle.click()])
+    assert.equal(response.status(), 200)
+    await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
+  }
+  const before = await page.locator('.schedule-gap').allTextContents()
+  assert.deepEqual(before, ['Окно · 2 ч', 'Окно · 10 ч 30 мин'])
+  const save = page.waitForResponse(
+    (r) => r.url().endsWith('/preferences') && r.request().method() === 'PATCH',
+  )
+  const [response] = await Promise.all([save, toggle.click()])
+  assert.equal(response.status(), 200)
+  await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
+  assert.equal(await page.locator('.lesson-card--cancelled').count(), 0)
+  assert.deepEqual(await page.locator('.schedule-gap').allTextContents(), before)
+  await page.reload()
+  await page.locator('.schedule-list').waitFor()
+  await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
+  assert.equal(await toggle.isChecked(), false)
+  await logout(page)
+  await login(page, 'schedule-fixture-2', false)
+  await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
+  assert.equal(await toggle.isChecked(), true)
+  await logout(page)
+  await login(page, 'schedule-fixture-1', false)
+  await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
+  assert.equal(await toggle.isChecked(), false)
+  if (width === 1440) {
+    await checkUnknownPreference(page)
+    await checkUncertainPreference(page)
+  }
+  await page.route('**/api/v1/users/me/preferences', (route) =>
+    route.request().method() === 'PATCH'
+      ? route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: { code: 'internal_error', message: 'test', details: [] } }),
+        })
+      : route.continue(),
+  )
+  await toggle.click()
+  await page.getByRole('alert').filter({ hasText: 'Не удалось сохранить настройку' }).waitFor()
+  assert.equal(await toggle.isChecked(), false)
+  await page.unroute('**/api/v1/users/me/preferences')
+  for (const mode of ['День', 'Неделя']) {
+    await page.getByRole('button', { name: mode, exact: true }).click()
+    assert.equal(await toggle.isChecked(), false)
+    await page.getByRole('button', { name: 'Следующая неделя' }).click()
+    await page.locator('.schedule-list').waitFor()
+    await page.getByRole('button', { name: 'Сегодня', exact: true }).click()
+    await page.locator('.schedule-list').waitFor()
+    assert.equal(await page.getByLabel('Дата', { exact: true }).inputValue(), '2026-11-10')
+    if (mode === 'Неделя') {
+      await page.waitForFunction(() => {
+        const bounds = document.querySelector('.schedule-day.is-selected').getBoundingClientRect()
+        return bounds.top >= 0 && bounds.top < window.innerHeight
+      })
+    }
+    await noOverflow(page)
+    for (const viewport of [360, 768, 1440, 2560]) {
+      await page.setViewportSize({ width: viewport, height: 1000 })
+      for (const direction of ['rtl', 'ltr']) {
+        await page.evaluate((dir) => {
+          document.documentElement.dir = dir
+        }, direction)
+        await assertModeHighlight(page)
+        await noOverflow(page)
+      }
+    }
+  }
+  await page.setViewportSize({ width, height: 1000 })
+  await page.getByRole('button', { name: 'День', exact: true }).click()
+  check(
+    'Real preference PATCH, reload/login, two-account isolation, failed-save rollback, shared day/week and RTL 360–2560px',
+  )
 }
 
 async function checkCancelledLesson(card, width) {
@@ -179,6 +454,13 @@ async function checkScheduleChanges(page, width) {
       await noOverflow(page)
     }
   }
+  const toggle = page.getByRole('checkbox', { name: 'Показывать отменённые' })
+  const saved = page.waitForResponse(
+    (r) => r.url().endsWith('/preferences') && r.request().method() === 'PATCH',
+  )
+  const [response] = await Promise.all([saved, toggle.click()])
+  assert.equal(response.status(), 200)
+  await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
   await page.getByLabel('Дата', { exact: true }).fill('2026-11-10')
   const cancelled = page.getByRole('article', { name: 'Отменённое занятие' })
   await cancelled.waitFor()
@@ -255,6 +537,7 @@ try {
     assert.ok((await shared.innerText()).includes('09:00'))
     assert.equal(await shared.locator('li').count(), 2)
     assert.equal((await shared.locator('.lesson-card__time').innerText()).trim(), '09:00 — 10:00')
+    await checkPreferences(page, width)
     await checkScheduleChanges(page, width)
     await checkOvernightDates(page)
     await page.getByLabel('Дата', { exact: true }).fill('2026-11-11')

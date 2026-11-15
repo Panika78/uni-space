@@ -49,6 +49,8 @@ beforeEach(() => {
     if (url.pathname === '/api/v1/auth/context')
       return Promise.resolve({ user_id: '1', role: 'student', org_unit_id: null, permissions: [] })
     if (url.pathname === '/api/v1/users/me' && !url.search) return Promise.resolve(profile)
+    if (url.pathname === '/api/v1/users/me/preferences')
+      return Promise.resolve({ show_cancelled_lessons: true })
     if (url.pathname === '/api/v1/notifications')
       return Promise.resolve({ items: [], next_cursor: null })
     if (
@@ -155,7 +157,12 @@ it('loads StudentAccess before the real schedule and keeps the working profile r
   const urls = vi
     .mocked(apiFetch)
     .mock.calls.map(([input]) => new URL(String(input), window.location.href).pathname)
-  expect(urls).toEqual(['/api/v1/auth/context', '/api/v1/users/me', '/api/v1/schedule'])
+  expect(urls).toEqual([
+    '/api/v1/auth/context',
+    '/api/v1/users/me',
+    '/api/v1/users/me/preferences',
+    '/api/v1/schedule',
+  ])
   await userEvent.setup().click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await userEvent.setup().click(screen.getByRole('link', { name: 'Мой профиль' }))
   expect(await screen.findByRole('heading', { name: 'Мой профиль' })).toBeInTheDocument()
