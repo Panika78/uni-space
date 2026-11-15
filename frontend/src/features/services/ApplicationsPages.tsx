@@ -104,7 +104,7 @@ export function ApplicationsList() {
       secondFrame = window.requestAnimationFrame(() => {
         const focusWasLost = document.activeElement === document.body
         if (link) {
-          if (!restoredLink.current || (!query.isFetching && focusWasLost)) {
+          if (!restoredLink.current || focusWasLost) {
             link.focus({ preventScroll: true })
             restoredLink.current = link
           }
@@ -112,12 +112,12 @@ export function ApplicationsList() {
           const shouldFocusHeading = !restoredLink.current || focusWasLost
           if (shouldFocusHeading) heading.current?.focus({ preventScroll: true })
         }
+        if (!query.isFetching) {
+          returnFocus.current = undefined
+          queryClient.removeQueries({ queryKey: returnFocusKey, exact: true })
+        }
       })
     })
-    if (!query.isFetching) {
-      returnFocus.current = undefined
-      queryClient.removeQueries({ queryKey: returnFocusKey, exact: true })
-    }
     return () => {
       window.cancelAnimationFrame(firstFrame)
       if (secondFrame) window.cancelAnimationFrame(secondFrame)

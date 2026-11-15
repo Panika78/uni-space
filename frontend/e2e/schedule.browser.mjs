@@ -1,4 +1,4 @@
-/* global process, console, document, window, URL, Event */
+/* global process, console, document, window, URL, Event, getComputedStyle */
 // Real backend and fictional deploy/schedule_fixtures.py; faults are scoped to schedule reads.
 import assert from 'node:assert/strict'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -563,6 +563,14 @@ async function checkScheduleChanges(page, width) {
 }
 
 async function noOverflow(page) {
+  await page.waitForFunction(() => {
+    const main = document.querySelector('.student-main-column')
+    const collapsed = document.body.classList.contains('sidebar-collapsed')
+    const width = window.innerWidth
+    const expected =
+      width <= 720 ? 0 : width <= 1050 ? 230 : width <= 1450 ? 252 : collapsed ? 76 : 272
+    return Math.abs(Number.parseFloat(getComputedStyle(main).marginLeft) - expected) < 0.5
+  })
   const overflow = await page.evaluate(() => ({
     viewportWidth: window.innerWidth,
     documentWidth: document.documentElement.scrollWidth,
