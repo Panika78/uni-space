@@ -78,7 +78,13 @@ it.each(staffSections)(
     }
     expect(getRoleNavigation(context).map((section) => section.label)).toEqual([label])
     expect(getStartRoute(context)).toBe(
-      permission === 'applications.review' ? '/staff/applications' : '/staff',
+      permission === 'applications.review'
+        ? '/staff/applications'
+        : permission === 'students.read'
+          ? '/staff/students'
+          : permission === 'students.status.edit'
+            ? '/staff/students/status'
+            : '/staff',
     )
   },
 )

@@ -127,12 +127,12 @@ except Exception:
 вместе с тестами. Не нужны event bus, repositories, регистрация во время HTTP-запроса
 или миграция enum в БД. Вызовы writer добавляются в доменных issues: #69 (баллы),
 #72 (итоги), #74 (расписание), #78 (администрирование), #79 (академические статусы).
-Изменения permissions согласуются с владельцем #60 отдельной интеграцией: этот PR
-не меняет роли или механизмы выдачи прав. Production ACL намеренно разрешают только
-уже используемые операции API. При подключении первого предметного write API нужно
-согласованно расширить `deploy/postgres/privileges.sql`: `INSERT` на `audit_events`,
-`SELECT (id, created_at)` для SQLAlchemy `INSERT ... RETURNING`, вместе с правами
-записи самого предметного модуля. `id` — IDENTITY, а не SERIAL: генерация значения
+Изменения permissions согласуются с владельцем #60 отдельной интеграцией: #79
+использует существующий реестр и механизм выдачи прав. Production ACL для ручной
+смены статуса расширен в MVP2-27: `INSERT` на `audit_events`, `SELECT (id, created_at)`
+для SQLAlchemy `INSERT ... RETURNING` и `UPDATE (academic_status)` на `students`.
+У будущих предметных write API права аудита и таблиц добавляются отдельно и узко.
+`id` — IDENTITY, а не SERIAL: генерация значения
 при INSERT не требует `USAGE` на `audit_events_id_seq`; прямой `nextval()` требует
 права на последовательность и приложению не нужен. Не выдавать
 API `UPDATE`/`DELETE` аудита или широкие default GRANT. Предметное чтение при его

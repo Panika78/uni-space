@@ -19,6 +19,7 @@ import { StudentLayout, UnavailableSection } from './StudentLayout'
 import { ApplicationDetailPage } from '../features/services/ApplicationsPages'
 import { ApplicationFormPage, ServicesPage } from '../features/services/ServicesPages'
 import { NewsDetailPage, NewsFeedPage } from '../features/news/NewsPages'
+import { StaffStudentStatusPage, StaffStudentsPage } from '../features/students/StaffStudentsPage'
 import type { ReactNode } from 'react'
 import type { RouteObject } from 'react-router-dom'
 
@@ -193,6 +194,16 @@ export const appRoutes: RouteObject[] = [
                             path: '/staff/applications',
                             element: <ModuleUnavailable title="Заявления" />,
                           },
+                        ],
+                      },
+                      {
+                        element: <RoleGuard role="staff" permission="students.read" />,
+                        children: [{ path: '/staff/students', element: <StaffStudentsPage /> }],
+                      },
+                      {
+                        element: <RoleGuard role="staff" permission="students.status.edit" />,
+                        children: [
+                          { path: '/staff/students/status', element: <StaffStudentStatusPage /> },
                         ],
                       },
                     ],

@@ -629,7 +629,7 @@ jobs:
           PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs SCHEDULE_TEST_PASSWORD=fictional-schedule-password node frontend/e2e/schedule.browser.mjs
 
   roles-browser:
-    name: Role routes and shell in Chromium
+    name: Role and staff student routes in Chromium
     runs-on: ubuntu-24.04
     env:
       APP_ENV: test
@@ -684,6 +684,7 @@ jobs:
             sleep 1
           done
           PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs node frontend/e2e/roles.browser.mjs
+          PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs node frontend/e2e/staff-students.browser.mjs
       - name: Upload role shell screenshots
         if: always()
         uses: actions/upload-artifact@v4

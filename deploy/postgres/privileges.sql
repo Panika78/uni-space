@@ -60,6 +60,12 @@ FROM pg_tables WHERE schemaname='public' AND tablename IN
      'academic_terms','course_groups',
      'assessments','assessment_groups','assessment_results','final_results',
      'staff_profiles','staff_permissions','teaching_assignments','user_preferences') \gexec
+-- Status changes append the required event in the same transaction. The API
+-- cannot read or mutate arbitrary audit history; RETURNING needs only these columns.
+SELECT 'GRANT INSERT ON public.audit_events TO uni_space_api'
+WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
+SELECT 'GRANT SELECT (id, created_at) ON public.audit_events TO uni_space_api'
+WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
 SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
               pg_get_serial_sequence(format('public.%I', tablename), 'id'))
 FROM pg_tables WHERE schemaname='public' AND tablename IN
@@ -94,4 +100,6 @@ WHERE to_regclass('public.applications') IS NOT NULL \gexec
 -- Grant only the immutable-by-API identifier, not password/role/active fields.
 SELECT 'GRANT UPDATE (id) ON public.users TO uni_space_api'
 WHERE to_regclass('public.users') IS NOT NULL \gexec
+SELECT 'GRANT UPDATE (academic_status) ON public.students TO uni_space_api'
+WHERE to_regclass('public.students') IS NOT NULL \gexec
 COMMIT;
