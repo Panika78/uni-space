@@ -58,7 +58,7 @@ FROM pg_tables WHERE schemaname='public' AND tablename IN
      'buildings','rooms','lessons','lesson_groups','lesson_rooms',
      'service_types','applications','news','notifications','academic_terms','course_groups',
      'assessments','assessment_groups','assessment_results','final_results',
-     'staff_profiles','staff_permissions') \gexec
+     'staff_profiles','staff_permissions','user_preferences') \gexec
 SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
               pg_get_serial_sequence(format('public.%I', tablename), 'id'))
 FROM pg_tables WHERE schemaname='public' AND tablename IN
@@ -77,9 +77,9 @@ ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator IN SCHEMA public
     REVOKE ALL ON SEQUENCES FROM PUBLIC, uni_space_api;
 ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator IN SCHEMA public
     REVOKE ALL ON FUNCTIONS FROM PUBLIC, uni_space_api;
--- The only current API writes are session/token creation, rotation and revocation.
+-- Explicit writes for session/token lifecycle and the implemented user preference.
 SELECT format('GRANT INSERT, UPDATE ON public.%I TO uni_space_api', tablename)
-FROM pg_tables WHERE schemaname='public' AND tablename IN ('auth_sessions','refresh_tokens') \gexec
+FROM pg_tables WHERE schemaname='public' AND tablename IN ('auth_sessions','refresh_tokens','user_preferences') \gexec
 SELECT format('GRANT INSERT ON public.%I TO uni_space_api', tablename)
 FROM pg_tables WHERE schemaname='public' AND tablename='applications' \gexec
 SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',

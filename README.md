@@ -144,7 +144,7 @@ MVP2-14 (REQ-S05/S06): расписание показывает компакт�
 Специализированные проверки: `pytest -m integration tests/test_preferences_integration.py tests/test_preferences_migrations.py`;
 frontend — `gaps.test.ts`, `preferences.test.tsx`; браузерные сценарии включены
 в существующую `schedule-browser` CI job. Перед production нужен обычный
-`alembic upgrade head`; дополнительных переменных окружения нет.
+`bash scripts/migrate-postgres.sh` (upgrade и повторное применение явных ACL); дополнительных переменных окружения нет.
 
 Браузерный тест `frontend/e2e/schedule.browser.mjs` использует настоящий API,
 Vite и отдельную тестовую PostgreSQL, не production-данные. В пустой **изолированной**
