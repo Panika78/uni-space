@@ -775,7 +775,12 @@ with SessionLocal.begin() as db:
             run(["bash", "scripts/configure-postgres.sh"], env=env)
             # Exercise teacher scope using the real API role after repeated ACL.
             dc(
-                "run", "--rm", "-T", "migrate", "python", "-c",
+                "run",
+                "--rm",
+                "-T",
+                "migrate",
+                "python",
+                "-c",
                 """
 from sqlalchemy import select
 from app.core.database import SessionLocal
@@ -800,44 +805,87 @@ with SessionLocal.begin() as db:
             with ExitStack() as teacher_clients:
                 teacher_scopes = []
                 for index in range(2):
-                    teacher_client = teacher_clients.enter_context(httpx.Client(
-                        base_url=public_origin, verify=context, trust_env=False, timeout=10
-                    ))
+                    teacher_client = teacher_clients.enter_context(
+                        httpx.Client(
+                            base_url=public_origin,
+                            verify=context,
+                            trust_env=False,
+                            timeout=10,
+                        )
+                    )
                     login = teacher_client.post(
-                        "/api/v1/auth/login", headers={"Origin": public_origin},
+                        "/api/v1/auth/login",
+                        headers={"Origin": public_origin},
                         json={"login": f"teaching-acl-{index}", "password": password},
                     )
                     assert login.status_code == 200
-                    headers = {"Authorization": "Bearer " + login.json()["access_token"]}
-                    response = teacher_client.get("/api/v1/teaching/assignments", headers=headers)
+                    headers = {
+                        "Authorization": "Bearer " + login.json()["access_token"]
+                    }
+                    response = teacher_client.get(
+                        "/api/v1/teaching/assignments", headers=headers
+                    )
                     assert response.status_code == 200, response.text
                     assert response.headers["cache-control"] == "no-store"
                     items = response.json()["items"]
                     assert len(items) == 1
                     assignment = items[0]
-                    journal = (f"/api/v1/teaching/courses/{assignment['course_offering_id']}"
-                               f"/groups/{assignment['group']['id']}")
-                    teacher_scopes.append((headers, journal, assignment["id"], teacher_client))
+                    journal = (
+                        f"/api/v1/teaching/courses/{assignment['course_offering_id']}"
+                        f"/groups/{assignment['group']['id']}"
+                    )
+                    teacher_scopes.append(
+                        (headers, journal, assignment["id"], teacher_client)
+                    )
                     for suffix in ("students", "assessments", "lessons"):
-                        page = teacher_client.get(journal + "/" + suffix, headers=headers)
+                        page = teacher_client.get(
+                            journal + "/" + suffix, headers=headers
+                        )
                         assert page.status_code == 200, page.text
-                    works = teacher_client.get(journal + "/assessments", headers=headers).json()
+                    works = teacher_client.get(
+                        journal + "/assessments", headers=headers
+                    ).json()
                     for work in works["items"]:
-                        assert teacher_client.get(
-                            journal + f"/assessments/{work['id']}/results", headers=headers
-                        ).status_code == 200
-                    lessons = teacher_client.get(journal + "/lessons", headers=headers).json()
+                        assert (
+                            teacher_client.get(
+                                journal + f"/assessments/{work['id']}/results",
+                                headers=headers,
+                            ).status_code
+                            == 200
+                        )
+                    lessons = teacher_client.get(
+                        journal + "/lessons", headers=headers
+                    ).json()
                     for lesson in lessons["items"]:
-                        assert teacher_client.get(
-                            journal + f"/lessons/{lesson['id']}/students", headers=headers
-                        ).status_code == 200
-                for index, (headers, journal, _, teacher_client) in enumerate(teacher_scopes):
+                        assert (
+                            teacher_client.get(
+                                journal + f"/lessons/{lesson['id']}/students",
+                                headers=headers,
+                            ).status_code
+                            == 200
+                        )
+                for index, (headers, journal, _, teacher_client) in enumerate(
+                    teacher_scopes
+                ):
                     other_journal = teacher_scopes[1 - index][1]
-                    assert teacher_client.get(other_journal + "/students", headers=headers).status_code == 404
+                    assert (
+                        teacher_client.get(
+                            other_journal + "/students", headers=headers
+                        ).status_code
+                        == 404
+                    )
                 headers, journal, assignment_id, teacher_client = teacher_scopes[0]
                 sql(f"DELETE FROM teaching_assignments WHERE id={int(assignment_id)}")
-                assert teacher_client.get(journal + "/students", headers=headers).status_code == 404
-            print("PASS: teacher journal reads, isolation and old-JWT revocation under production ACL", flush=True)
+                assert (
+                    teacher_client.get(
+                        journal + "/students", headers=headers
+                    ).status_code
+                    == 404
+                )
+            print(
+                "PASS: teacher journal reads, isolation and old-JWT revocation under production ACL",
+                flush=True,
+            )
             # Keep this scenario's two logins outside the existing auth suite's
             # process-local five-attempt window, as with its other restarts.
             dc("restart", "api")
