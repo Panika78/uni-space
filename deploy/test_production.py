@@ -562,8 +562,16 @@ with engine.connect() as c:
     for privilege in ('INSERT','UPDATE','DELETE'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'notifications',:privilege)"), {'privilege': privilege}).scalar_one()
     assert not c.execute(text("SELECT has_sequence_privilege(current_user,'notifications_id_seq','USAGE')")).scalar_one()
-    for privilege in ('SELECT','INSERT','UPDATE','DELETE','TRUNCATE'):
+    for privilege in ('SELECT','UPDATE','DELETE','TRUNCATE'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'audit_events',:privilege)"), {'privilege': privilege}).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'audit_events','INSERT')")).scalar_one()
+    for column in ('id', 'created_at'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'audit_events',:column,'SELECT')"), {'column': column}).scalar_one()
+    for privilege in ('SELECT','INSERT','UPDATE','DELETE'):
+        assert c.execute(text("SELECT has_table_privilege(current_user,'attendance',:privilege)"), {'privilege': privilege}).scalar_one()
+    # Exercise INSERT ... RETURNING without preserving a synthetic event.
+    event = c.execute(text("INSERT INTO audit_events (entity_type,entity_id,action) VALUES ('acl_fixture',1,'create') RETURNING id,created_at")).one()
+    assert event.id > 0 and event.created_at is not None
     assert not c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
     for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'news',:privilege)"), {'privilege': privilege}).scalar_one()
@@ -588,7 +596,7 @@ with engine.connect() as c:
                   'disciplines','course_offerings','buildings','rooms','lessons','lesson_groups',
                   'lesson_rooms','news','notifications','academic_terms','course_groups',
                   'assessments','assessment_groups','assessment_results','final_results',
-                  'staff_profiles','staff_permissions','teaching_assignments'):
+                  'staff_profiles','staff_permissions','teaching_assignments','attendance'):
         assert c.execute(text("SELECT has_table_privilege(current_user, :table, 'SELECT')"), {'table': table}).scalar_one()
         c.execute(text(f"SELECT * FROM public.{table} LIMIT 1")).all()
     for table in ('study_groups','programs','org_units','teachers','disciplines','course_offerings',
@@ -620,9 +628,10 @@ for statement in (
     "INSERT INTO notifications (user_id,type,title,body) VALUES (1,'forbidden','forbidden','forbidden')",
     "UPDATE notifications SET title='forbidden'", "DELETE FROM notifications",
     "SELECT nextval('public.notifications_id_seq')",
-    "INSERT INTO audit_events (entity_type,entity_id,action) VALUES ('user',1,'set_active')",
     "UPDATE audit_events SET reason='correction'", "DELETE FROM audit_events",
     "SELECT * FROM audit_events", "SELECT nextval('public.audit_events_id_seq')",
+    "TRUNCATE attendance", "UPDATE students SET group_id=group_id",
+    "DELETE FROM teaching_assignments",
     "SELECT nextval('public.org_units_id_seq')", "SELECT nextval('public.programs_id_seq')",
     "UPDATE lessons SET status='cancelled'", "DELETE FROM lesson_groups",
     "INSERT INTO assessments (course_offering_id,title,type,max_score) VALUES (1,'forbidden','test',10)",
