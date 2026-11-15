@@ -483,6 +483,14 @@ def committed_academics(postgresql_engine):
                 if isinstance(obj, AssessmentGroup) and inspect(obj).identity
             ]
             db.execute(
+                text(
+                    "DELETE FROM audit_events WHERE entity_type='assessment_result' "
+                    "AND jsonb_extract_path_text(coalesce(before_data, after_data), "
+                    "'assessment_group_id') = ANY(:assignment_ids)"
+                ),
+                {"assignment_ids": [str(value) for value in assignment_ids]},
+            )
+            db.execute(
                 delete(AssessmentResult).where(
                     AssessmentResult.assessment_group_id.in_(assignment_ids)
                 )

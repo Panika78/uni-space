@@ -94,4 +94,24 @@ WHERE to_regclass('public.applications') IS NOT NULL \gexec
 -- Grant only the immutable-by-API identifier, not password/role/active fields.
 SELECT 'GRANT UPDATE (id) ON public.users TO uni_space_api'
 WHERE to_regclass('public.users') IS NOT NULL \gexec
+-- SELECT FOR SHARE in score writes serializes teacher eligibility against transfers.
+SELECT 'GRANT UPDATE (id) ON public.students TO uni_space_api'
+WHERE to_regclass('public.students') IS NOT NULL \gexec
+SELECT 'GRANT INSERT, UPDATE, DELETE ON public.assessment_results TO uni_space_api'
+WHERE to_regclass('public.assessment_results') IS NOT NULL \gexec
+-- The result trigger touches these parent columns without changing their values
+-- to serialize against concurrent maximum/assignment changes.
+SELECT 'GRANT UPDATE (max_score) ON public.assessments TO uni_space_api'
+WHERE to_regclass('public.assessments') IS NOT NULL \gexec
+SELECT 'GRANT UPDATE (id) ON public.assessment_groups TO uni_space_api'
+WHERE to_regclass('public.assessment_groups') IS NOT NULL \gexec
+-- Assignment validation triggers take row locks using FOR SHARE / no-op writes.
+SELECT 'GRANT UPDATE (group_id) ON public.course_groups TO uni_space_api'
+WHERE to_regclass('public.course_groups') IS NOT NULL \gexec
+SELECT 'GRANT UPDATE (version) ON public.lessons TO uni_space_api'
+WHERE to_regclass('public.lessons') IS NOT NULL \gexec
+SELECT 'GRANT INSERT ON public.audit_events TO uni_space_api'
+WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
+SELECT 'GRANT SELECT (id, created_at) ON public.audit_events TO uni_space_api'
+WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
 COMMIT;

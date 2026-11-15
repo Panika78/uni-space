@@ -776,6 +776,8 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
         "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/assessments",
         "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/assessments/"
         "{assessment_group_id}/results",
+        "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/assessments/"
+        "{assessment_group_id}/results/{student_id}",
         "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/lessons",
         "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/lessons/{lesson_id}/students",
         "/api/v1/auth/context",

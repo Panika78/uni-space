@@ -1604,6 +1604,75 @@
         "title": "ScheduleResponse",
         "type": "object"
       },
+      "ScoreWriteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "score": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "required": [
+          "score"
+        ],
+        "title": "ScoreWriteRequest",
+        "type": "object"
+      },
+      "ScoreWriteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "graded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graded At"
+          },
+          "result_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Id"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "required": [
+          "result_id",
+          "score",
+          "graded_at"
+        ],
+        "title": "ScoreWriteResponse",
+        "type": "object"
+      },
       "Service": {
         "properties": {
           "code": {
@@ -4135,6 +4204,142 @@
           }
         ],
         "summary": "List Journal Results",
+        "tags": [
+          "teaching"
+        ]
+      }
+    },
+    "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/assessments/{assessment_group_id}/results/{student_id}": {
+      "put": {
+        "operationId": "write_journal_result_api_v1_teaching_courses__course_offering_id__groups__group_id__assessments__assessment_group_id__results__student_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assessment_group_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Assessment Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Student Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScoreWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoreWriteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Write Journal Result",
         "tags": [
           "teaching"
         ]

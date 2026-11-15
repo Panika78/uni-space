@@ -342,6 +342,7 @@ scope — только `teaching_assignments` через `teachers.user_id` де
 | `J/students` | `Page<JournalStudent>` | `student_id` |
 | `J/assessments` | `Page<JournalAssessment>` | `assessment_group_id` |
 | `J/assessments/{assessment_group_id}/results` | `Page<JournalResult>` | `student_id` |
+| `PUT J/assessments/{assessment_group_id}/results/{student_id}` | `ScoreWriteResponse` | JSON `{"score": number \| null}` |
 | `J/lessons` | `Page<JournalLesson>` | `lesson_id`, `starts_from`, `starts_before`, `status` |
 | `J/lessons/{lesson_id}/students` | `Page<JournalStudent>` | `student_id` |
 
@@ -390,6 +391,16 @@ keyset-граница, курсор и Python-проверка порядка и
   `result_id/score/graded_at=null`; выставленный `score=0` остаётся нулём.
   Результаты других назначений работ и текущая группа переведённого студента
   не раскрываются. Отдельного исторического roster нет.
+
+Запись результата принимает целое `score` в диапазоне `0..max_score`; `null`
+очищает запись. Отсутствующий результат при `null` остаётся отсутствующим.
+Преподаватель должен иметь действующее назначение и студент должен сейчас
+состоять в группе работы. Сотрудник деканата с эффективным `grades.edit` может
+исправить или очистить существующий исторический результат; создание для
+бывшего участника дополнительно блокируется PostgreSQL. Повторное значение —
+no-op, без смены автора/времени и audit event. Все фактические изменения
+сохраняются с `assessment_result/create|update|delete` в одной транзакции.
+Структура assessment и `max_score` через этот API не изменяются.
 - Занятие: `id`, `starts_at`, `ends_at`, `kind`, `status`, `is_additional`,
   `version`. Список дедуплицирован через `EXISTS lesson_groups`. Не выдаёт
   остальные группы совместной пары, ссылки на переносы или чужие журналы.

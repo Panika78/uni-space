@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, StrictInt, model_validator
 
 from app.core.schemas import Date, DateTime, Id, PaginationParams, Ref, RequestModel
 from app.teaching.validation import TeachingId
@@ -68,6 +68,16 @@ class JournalResult(RequestModel):
     score: int | None
     graded_at: DateTime | None
     is_current_group_member: bool
+
+
+class ScoreWriteRequest(RequestModel):
+    score: StrictInt | None = Field(ge=0)
+
+
+class ScoreWriteResponse(RequestModel):
+    result_id: Id | None
+    score: int | None
+    graded_at: DateTime | None
 
 
 class JournalLesson(RequestModel):

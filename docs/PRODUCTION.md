@@ -209,7 +209,7 @@ Nginx (важно при замене файла через rename), прове�
 |---|---|---|
 | `POSTGRES_USER` (прежнее имя сохраняется) | `POSTGRES_PASSWORD_FILE`, только `db` | Администратор кластера; bootstrap, backup, создание отдельной restore-БД |
 | `uni_space_migrator` | `MIGRATION_DB_PASSWORD_FILE`, только `db` и одноразовый `migrate` | LOGIN без SUPERUSER/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS; владелец public и прикладных объектов, DDL миграций |
-| `uni_space_api` | `API_DB_PASSWORD_FILE`, только `db` и `api` | CONNECT рабочей БД, USAGE public и последовательностей auth/applications; SELECT users, students, auth_sessions, refresh_tokens, alembic_version, справочников профиля/расписания (ниже), service_types, applications, news и notifications; INSERT applications; INSERT/UPDATE auth_sessions и refresh_tokens |
+| `uni_space_api` | `API_DB_PASSWORD_FILE`, только `db` и `api` | CONNECT рабочей БД, USAGE public и последовательностей auth/applications; SELECT на таблицы активных API (allowlist в `privileges.sql`); INSERT applications и assessment_results; UPDATE/DELETE assessment_results; INSERT и ограниченный RETURNING-SELECT `audit_events`; узкие column UPDATE для технических блокировок проверки баллов; INSERT/UPDATE auth_sessions и refresh_tokens |
 
 Явный демонстрационный seed — отдельная операторская операция, он не запускается
 миграциями, API или Compose startup. Для текущей demo-конфигурации seed закрепляет
@@ -225,9 +225,9 @@ Nginx (важно при замене файла через rename), прове�
 Для совместной работы TASK-009/010 явно разрешён только `SELECT` на
 `study_groups`, `programs`, `org_units`, `teachers`,
 `disciplines`, `course_offerings`, `buildings`, `rooms`, `lessons`, `lesson_groups`,
-`lesson_rooms`. `academic_terms`/`course_groups` создаются миграцией как основа
-учебной модели, но текущий API их не читает и прав на них не получает. Не выдаются
-права записи или USAGE на последовательности расписания. Список разрешений в
+`lesson_rooms`. Табличный DML и USAGE на последовательности расписания не выдаются;
+`lessons.version` и `course_groups.group_id` имеют отдельные технические column
+UPDATE для PostgreSQL-проверок записи баллов, как описано ниже. Список разрешений в
 `deploy/postgres/privileges.sql` применяется существующим migration wrapper до и
 после Alembic, без широких default GRANT. Изолированный production-тест создаёт
 вымышленные учебные фикстуры мигратором, повторяет ACL и выполняет настоящий
@@ -243,11 +243,14 @@ Nginx (важно при замене файла через rename), прове�
 `news` и права на её последовательность запрещены. Для TASK-016 уведомления доступны
 runtime-роли только для чтения: `SELECT` на `notifications`, без DML и sequence USAGE.
 
-Для MVP2-29 текущий API не использует writer: прав на `audit_events` пока нет,
-включая UPDATE/DELETE уже созданных событий. До первого production-потребителя
-нужно явно выдать INSERT и SELECT(id, created_at) для RETURNING; IDENTITY не требует
-sequence USAGE при INSERT. UPDATE/DELETE аудита обычной API-роли не выдаются.
-Подробный контракт подключения — [AUDIT.md](AUDIT.md).
+Для MVP2-04 score writer использует append-only `audit_events`: runtime-роль имеет
+INSERT и только SELECT(id, created_at) для ORM RETURNING; UPDATE/DELETE аудита
+запрещены, IDENTITY не требует sequence USAGE. Запись результата включает узкие
+column UPDATE для `students.id` (блокировка перевода), `assessments.max_score`,
+`assessment_groups.id`, `course_groups.group_id` и `lessons.version`: PostgreSQL
+триггеры используют эти строки для сериализации проверок, не меняя их значения.
+Остальные поля этих таблиц не разрешены к UPDATE. Подробный контракт —
+[AUDIT.md](AUDIT.md).
 
 API не получает административный или migration secret ни в окружение, ни в mounts.
 API pool задаёт для каждого PostgreSQL-соединения `lock_timeout=5000ms` и

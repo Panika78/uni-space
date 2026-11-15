@@ -6,7 +6,20 @@ from sqlalchemy.exc import IntegrityError
 from test_academics_integration import academics as academics_fixture
 
 from app.auth.security import create_access_token
-from app.models import AuthSession, Lesson, LessonGroup, Subgroup, Teacher, TeachingAssignment, User
+from app.models import (
+    AssessmentResult,
+    AuditEvent,
+    AuthSession,
+    Lesson,
+    LessonGroup,
+    OrgUnit,
+    StaffPermission,
+    StaffProfile,
+    Subgroup,
+    Teacher,
+    TeachingAssignment,
+    User,
+)
 from app.teaching.router import router
 
 pytestmark = pytest.mark.integration
@@ -104,6 +117,140 @@ def test_scope_roles_revocation_and_filters(journal):
     assert s.get().status_code == 404
     assert len(s.get("assignments").json()["items"]) == 1
     assert s.get(course=1).status_code == s.get(course=1, teacher=1).status_code == 200
+
+
+def test_score_write_range_noop_update_delete_and_transfer(journal):
+    s = journal
+    work = s.assignment(s.courses[0])
+    endpoint = (
+        f"/api/v1/teaching/courses/{s.courses[0].id}/groups/{s.groups[0].id}"
+        f"/assessments/{work.id}/results/{s.students[0].id}"
+    )
+    headers = {"Authorization": f"Bearer {s.teacher_tokens[0]}"}
+    assert (
+        s.client.put(
+            endpoint,
+            json={"score": 1},
+            headers={"Authorization": f"Bearer {s.teacher_tokens[1]}"},
+        ).status_code
+        == 404
+    )
+
+    def write(score):
+        return s.client.put(endpoint, json={"score": score}, headers=headers)
+
+    created = write(0)
+    assert created.status_code == 200 and created.json()["score"] == 0
+    result_id = int(created.json()["result_id"])
+    result = s.db.get(AssessmentResult, result_id)
+    graded_at, grader = result.graded_at, result.graded_by_user_id
+    assert grader == s.teacher_users[0].id
+    event_count = s.db.query(AuditEvent).filter_by(entity_type="assessment_result").count()
+    assert event_count == 1
+    assert write(5).status_code == 200
+    assert result.graded_at != graded_at and result.graded_by_user_id == s.teacher_users[0].id
+    updated_at = result.graded_at
+    updated_by = result.graded_by_user_id
+    assert write(5).status_code == 200
+    assert result.graded_at == updated_at and result.graded_by_user_id == updated_by
+    assert result.graded_by_user_id == grader
+    assert s.db.query(AuditEvent).filter_by(entity_type="assessment_result").count() == 2
+    for invalid in (-1, 1.5, 11):
+        assert write(invalid).status_code == 422
+    assert write(None).status_code == 200
+    assert s.db.get(AssessmentResult, result_id) is None
+    actions = [
+        event.action
+        for event in s.db.query(AuditEvent).filter_by(entity_type="assessment_result").all()
+    ]
+    assert actions == ["create", "update", "delete"]
+    created_event, updated_event, deleted_event = (
+        s.db.query(AuditEvent)
+        .filter_by(entity_type="assessment_result")
+        .order_by(AuditEvent.id)
+        .all()
+    )
+    assert created_event.actor_user_id == updated_event.actor_user_id == deleted_event.actor_user_id
+    assert created_event.after_data["score"] == 0
+    assert updated_event.before_data["score"] == 0 and updated_event.after_data["score"] == 5
+    assert deleted_event.before_data["score"] == 5 and deleted_event.after_data is None
+    s.students[0].group_id = s.groups[1].id
+    s.db.flush()
+    assert write(2).status_code == 404
+
+
+def test_staff_can_correct_historical_result_only_with_grant(journal):
+    s = journal
+    work = s.assignment(s.courses[0])
+    result = s.result(work, 3)
+    s.students[0].group_id = s.groups[1].id
+    dean = s.add(OrgUnit, name="Вымышленный деканат", type="dean_office")
+    user = s.add(
+        User,
+        login=uuid4().hex,
+        password_hash="unused",
+        full_name="Вымышленный сотрудник",
+        role="staff",
+        is_active=True,
+    )
+    profile = s.add(StaffProfile, user_id=user.id, org_unit_id=dean.id)
+    s.add(StaffPermission, staff_profile_id=profile.id, permission_code="grades.edit")
+    auth_session = s.add(
+        AuthSession, user_id=user.id, expires_at=datetime.now(UTC) + timedelta(days=1)
+    )
+    token = create_access_token(auth_session, s.settings)["access_token"]
+    endpoint = (
+        f"/api/v1/teaching/courses/{s.courses[0].id}/groups/{s.groups[0].id}"
+        f"/assessments/{work.id}/results/{s.students[0].id}"
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    response = s.client.put(endpoint, json={"score": 4}, headers=headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["score"] == 4
+    assert s.client.put(endpoint, json={"score": None}, headers=headers).status_code == 200
+    # The staff role cannot create a new result for a former group member.
+    assert s.client.put(endpoint, json={"score": 4}, headers=headers).status_code == 422
+    assert s.db.get(AssessmentResult, result.id) is None
+
+    admin = s.add(
+        User,
+        login=uuid4().hex,
+        password_hash="unused",
+        full_name="Вымышленный администратор",
+        role="admin",
+        is_active=True,
+    )
+    admin_session = s.add(
+        AuthSession, user_id=admin.id, expires_at=datetime.now(UTC) + timedelta(days=1)
+    )
+    admin_headers = {
+        "Authorization": "Bearer " + create_access_token(admin_session, s.settings)["access_token"]
+    }
+    assert s.client.put(endpoint, json={"score": 4}, headers=admin_headers).status_code == 403
+
+
+def test_score_and_audit_roll_back_together(journal, monkeypatch):
+    from app.teaching import service
+
+    s = journal
+    work = s.assignment(s.courses[0])
+    endpoint = (
+        f"/api/v1/teaching/courses/{s.courses[0].id}/groups/{s.groups[0].id}"
+        f"/assessments/{work.id}/results/{s.students[0].id}"
+    )
+
+    def fail_audit(*_args, **_kwargs):
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(service, "write_audit_event", fail_audit)
+    response = s.client.put(
+        endpoint,
+        json={"score": 5},
+        headers={"Authorization": f"Bearer {s.teacher_tokens[0]}"},
+    )
+    assert response.status_code == 500
+    assert s.db.query(AssessmentResult).filter_by(assessment_group_id=work.id).count() == 0
+    assert s.db.query(AuditEvent).filter_by(entity_type="assessment_result").count() == 0
 
 
 def test_roster_results_subgroups_history_and_pagination(journal):
@@ -352,3 +499,118 @@ def test_assignment_changes_committed_independently_apply_to_old_jwt(committed_a
         db.execute(delete(TeachingAssignment).where(TeachingAssignment.teacher_id == teacher.id))
         db.get(User, user.id).is_active = False
     assert s.client.get(path, headers=headers).status_code == 401
+
+
+def test_concurrent_score_creates_use_one_result_and_one_audit(committed_academics):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from app.dependencies.database import get_db_session
+
+    s = committed_academics
+    s.app.include_router(router)
+    user = s.add(
+        User,
+        login=uuid4().hex,
+        password_hash="unused",
+        full_name="Teacher",
+        role="teacher",
+        is_active=True,
+    )
+    teacher = s.add(Teacher, user_id=user.id, full_name=user.full_name)
+    auth_session = s.add(
+        AuthSession, user_id=user.id, expires_at=datetime.now(UTC) + timedelta(days=1)
+    )
+    course = s.offering()
+    work = s.assignment(course)
+    s.add(
+        TeachingAssignment,
+        teacher_id=teacher.id,
+        course_offering_id=course.id,
+        group_id=s.groups[0].id,
+    )
+    headers = {
+        "Authorization": "Bearer " + create_access_token(auth_session, s.settings)["access_token"]
+    }
+    path = (
+        f"/api/v1/teaching/courses/{course.id}/groups/{s.groups[0].id}"
+        f"/assessments/{work.id}/results/{s.students[0].id}"
+    )
+    engine = s.db.bind
+    s.db.commit()
+
+    def get_request_session():
+        with Session(engine) as db:
+            yield db
+
+    s.app.dependency_overrides[get_db_session] = get_request_session
+    barrier = Barrier(2)
+
+    def write_score():
+        barrier.wait(timeout=5)
+        return s.client.put(path, json={"score": 6}, headers=headers)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(executor.map(lambda _index: write_score(), range(2)))
+    assert [response.status_code for response in responses] == [200, 200]
+    with Session(engine) as db:
+        stored = db.scalar(
+            select(AssessmentResult).where(
+                AssessmentResult.assessment_group_id == work.id,
+                AssessmentResult.student_id == s.students[0].id,
+            )
+        )
+        assert stored is not None
+        result_id = stored.id
+        assert (
+            db.query(AuditEvent)
+            .filter_by(entity_type="assessment_result", entity_id=result_id, action="create")
+            .count()
+            == 1
+        )
+
+    def run_concurrently(payloads):
+        barrier = Barrier(len(payloads))
+
+        def request(payload):
+            barrier.wait(timeout=5)
+            return s.client.put(path, json=payload, headers=headers)
+
+        with ThreadPoolExecutor(max_workers=len(payloads)) as executor:
+            return list(executor.map(request, payloads))
+
+    updates = run_concurrently([{"score": 7}, {"score": 8}])
+    assert [response.status_code for response in updates] == [200, 200]
+    with Session(engine) as db:
+        stored = db.scalar(
+            select(AssessmentResult).where(
+                AssessmentResult.assessment_group_id == work.id,
+                AssessmentResult.student_id == s.students[0].id,
+            )
+        )
+        assert stored.score in {7, 8}
+        assert (
+            db.query(AuditEvent)
+            .filter_by(entity_type="assessment_result", entity_id=result_id, action="update")
+            .count()
+            == 2
+        )
+
+    deletions = run_concurrently([{"score": None}, {"score": None}])
+    assert [response.status_code for response in deletions] == [200, 200]
+    with Session(engine) as db:
+        assert (
+            db.query(AssessmentResult)
+            .filter_by(assessment_group_id=work.id, student_id=s.students[0].id)
+            .count()
+            == 0
+        )
+        assert (
+            db.query(AuditEvent)
+            .filter_by(entity_type="assessment_result", entity_id=result_id, action="delete")
+            .count()
+            == 1
+        )
