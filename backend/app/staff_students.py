@@ -1,5 +1,7 @@
 """Staff student search and explicit academic status updates."""
 
+import hashlib
+import json
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -140,10 +142,11 @@ def list_staff_students(
         term = params.q.strip()
         if not term:
             raise HTTPException(422, "validation_error")
+        term = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{term}%"
         query = query.where(
-            func.lower(User.full_name).like(func.lower(pattern))
-            | func.lower(StudyGroup.name).like(func.lower(pattern))
+            func.lower(User.full_name).like(func.lower(pattern), escape="\\")
+            | func.lower(StudyGroup.name).like(func.lower(pattern), escape="\\")
         )
     if params.faculty_id is not None:
         query = query.where(Program.faculty_id == int(params.faculty_id))
@@ -152,19 +155,38 @@ def list_staff_students(
     if params.course_number is not None:
         query = query.where(StudyGroup.course_number == params.course_number)
 
-    boundary = decode_page_cursor(params.cursor, key_types=(str, int), direction="asc")
-    if boundary is not None:
-        if not boundary[0].startswith(STUDENT_KEY_PREFIX):
-            raise InvalidCursorError("Cursor uses an obsolete student ordering")
-        query = query.where(tuple_(name_key, Student.id) > tuple_(*boundary))
+    # Keep this selection-specific fingerprint inside the existing typed key.
+    # Other API cursors and the shared pagination module retain their contract.
+    selection = hashlib.sha256(
+        json.dumps(
+            [
+                (params.q or "").strip().lower(),
+                int(params.faculty_id) if params.faculty_id else None,
+                int(params.program_id) if params.program_id else None,
+                params.course_number,
+                STUDENT_KEY_PREFIX,
+                "asc",
+            ],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    try:
+        boundary = decode_page_cursor(params.cursor, key_types=(str, str, int), direction="asc")
+        if boundary is not None:
+            if boundary[0] != selection or not boundary[1].startswith(STUDENT_KEY_PREFIX):
+                raise InvalidCursorError("Cursor does not match this selection")
+            query = query.where(tuple_(name_key, Student.id) > tuple_(*boundary[1:]))
+    except InvalidCursorError:
+        raise HTTPException(422, "invalid_cursor") from None
     rows = db.execute(
         query.add_columns(name_key).order_by(name_key, Student.id).limit(params.limit + 1)
     ).all()
-    entries = [(_student_response(row[:5]), (row[5], row[0].id)) for row in rows]
+    entries = [(_student_response(row[:5]), (selection, row[5], row[0].id)) for row in rows]
     page = paginate_results(
         entries,
         key=lambda entry: entry[1],
-        key_types=(str, int),
+        key_types=(str, str, int),
         direction="asc",
         limit=params.limit,
     )
@@ -191,7 +213,7 @@ def get_staff_student(
     return _student_response(row)
 
 
-@router.put("/{student_id}/academic-status", response_model=AcademicStatusResponse)
+@router.patch("/{student_id}/academic-status", response_model=AcademicStatusResponse)
 def set_student_academic_status(
     student_id: Id,
     change: AcademicStatusUpdate,

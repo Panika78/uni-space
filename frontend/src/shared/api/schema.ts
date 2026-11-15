@@ -373,13 +373,13 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Set Student Academic Status */
-        put: operations["set_student_academic_status_api_v1_staff_students__student_id__academic_status_put"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Set Student Academic Status */
+        patch: operations["set_student_academic_status_api_v1_staff_students__student_id__academic_status_patch"];
         trace?: never;
     };
     "/api/v1/teaching/assignments": {
@@ -2626,7 +2626,7 @@ export interface operations {
             };
         };
     };
-    set_student_academic_status_api_v1_staff_students__student_id__academic_status_put: {
+    set_student_academic_status_api_v1_staff_students__student_id__academic_status_patch: {
         parameters: {
             query?: never;
             header?: never;

@@ -23,7 +23,7 @@ HTTP_ERROR_CODES = {
     404: {"not_found"},
     409: {"version_conflict", "invalid_transition"},
     413: {"request_too_large"},
-    422: {"validation_error"},
+    422: {"validation_error", "invalid_cursor"},
     429: {"rate_limited"},
 }
 DEFAULT_HTTP_ERROR_CODES = {

@@ -1,6 +1,8 @@
 .staff-students-page {
   display: grid;
   gap: 1rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .staff-students-page h1,
@@ -128,7 +130,9 @@
 }
 
 .student-status-dialog {
-  width: min(100%, 34rem);
+  width: min(calc(100% - 2rem), 34rem);
+  border: 0;
+  margin: auto;
   max-height: 90dvh;
   overflow: auto;
   padding: 1.25rem;
@@ -195,4 +199,11 @@
   .student-form-actions button {
     width: 100%;
   }
+}
+
+.student-status-dialog::backdrop {
+  background: rgb(15 23 42 / 46%);
+}
+.student-status-dialog:not([open]) {
+  display: none;
 }

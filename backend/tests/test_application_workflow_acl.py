@@ -218,7 +218,7 @@ def test_production_acl_allows_only_academic_status_and_transactional_audit(
 
     c["client"].app.dependency_overrides[get_db_session] = runtime_session
     response = c["request"](
-        "PUT",
+        "PATCH",
         f"/api/v1/staff/students/{student_id}/academic-status",
         c["tokens"][0],
         json={"academic_status": "academic_leave", "reason": "administrative_change"},
@@ -239,5 +239,29 @@ def test_production_acl_allows_only_academic_status_and_transactional_audit(
         assert event.actor_user_id == actor.id
         assert event.before_data == {"academic_status": "enrolled"}
         assert event.after_data == {"academic_status": "academic_leave"}
+    # A genuine INSERT denial under the production runtime role must roll back status.
+    with admin_engine.begin() as db:
+        db.execute(text("REVOKE INSERT ON audit_events FROM uni_space_api"))
+    denied = c["request"](
+        "PATCH",
+        f"/api/v1/staff/students/{student_id}/academic-status",
+        c["tokens"][0],
+        json={"academic_status": "expelled", "reason": "correction"},
+    )
+    assert denied.status_code == 500
+    with Session(admin_engine) as db:
+        assert db.get(Student, student_id).academic_status == "academic_leave"
+        assert (
+            len(
+                db.scalars(
+                    select(AuditEvent).where(
+                        AuditEvent.entity_id == student_id, AuditEvent.entity_type == "student"
+                    )
+                ).all()
+            )
+            == 1
+        )
+    with admin_engine.begin() as db:
+        db.execute(text("GRANT INSERT ON audit_events TO uni_space_api"))
     with Session(admin_engine) as db, db.begin():
         db.execute(delete(AuditEvent).where(AuditEvent.actor_user_id == c["actors"][0]))

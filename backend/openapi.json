@@ -4170,8 +4170,8 @@
       }
     },
     "/api/v1/staff/students/{student_id}/academic-status": {
-      "put": {
-        "operationId": "set_student_academic_status_api_v1_staff_students__student_id__academic_status_put",
+      "patch": {
+        "operationId": "set_student_academic_status_api_v1_staff_students__student_id__academic_status_patch",
         "parameters": [
           {
             "in": "path",
