@@ -548,8 +548,8 @@ DELETE только staff_permissions. Соответствующие identity s
 
 ```bash
 # После запуска db и upgrade head, из каталога проекта.
-# -it обязателен: stdin/stdout должны быть TTY.
-bash scripts/production-compose.sh exec -it api sh /app/docker-entrypoint.sh python -m app.admin.bootstrap
+# Compose exec выделяет TTY по умолчанию; не добавляйте -T.
+bash scripts/production-compose.sh exec api sh /app/docker-entrypoint.sh python -m app.admin.bootstrap
 ```
 
 Команда интерактивно запрашивает логин/отображаемое имя, создаёт admin и единственное
