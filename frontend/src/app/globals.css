@@ -2308,3 +2308,32 @@ textarea {
     font-size: 12px;
   }
 }
+
+/* Retained access-error trees (and their portals) must never override hidden. */
+.access-recovery-content[hidden],
+.notification-drawer-layer[hidden] {
+  display: none !important;
+}
+
+/* Pin brand/actions while a long role menu scrolls inside the fixed sidebar. */
+.desktop-sidebar .sidebar-brand-link,
+.desktop-sidebar .sidebar-collapse {
+  flex-shrink: 0;
+}
+.desktop-sidebar .student-navigation {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  align-content: start;
+  padding: 6px;
+  scroll-padding-block: 6px;
+}
+.desktop-sidebar .student-navigation__link {
+  flex-shrink: 0;
+  overflow-wrap: anywhere;
+}
+.desktop-sidebar .navigation-label {
+  min-width: 0;
+}

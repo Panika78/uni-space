@@ -615,7 +615,7 @@ try {
     await checkStudentProfile(page, 1)
     await page.goto(`${baseURL}/schedule/unknown-integration-path`)
     await page.getByRole('heading', { name: 'Страница не найдена' }).waitFor()
-    await page.getByRole('link', { name: 'Вернуться к расписанию' }).click()
+    await page.getByRole('link', { name: 'Вернуться в кабинет' }).click()
     await page.locator('.schedule-list').waitFor()
     assert.equal(await page.getByLabel('Дата', { exact: true }).inputValue(), '2026-11-10')
     assert.ok(

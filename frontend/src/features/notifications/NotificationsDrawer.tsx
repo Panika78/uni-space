@@ -1,3 +1,4 @@
+import { useAccessSuspended } from '../../shared/ui/AccessRecovery'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { apiFetch } from '../../shared/api/client'
@@ -32,11 +33,13 @@ function NotificationRow({ item }: { item: Notification }) {
 
 export function NotificationsDrawer({
   onClose,
-  isOpen = true,
+  isOpen: requestedOpen = true,
 }: {
   onClose: () => void
   isOpen?: boolean
 }) {
+  const isSuspended = useAccessSuspended()
+  const isOpen = requestedOpen && !isSuspended
   const { present, rootRef } = useOverlayPresence(isOpen, 'right')
   const panelRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
@@ -167,6 +170,7 @@ export function NotificationsDrawer({
     <div
       ref={rootRef}
       className="notification-drawer-layer"
+      hidden={isSuspended}
       inert={!isOpen}
       aria-hidden={!isOpen || undefined}
     >

@@ -563,6 +563,13 @@ try {
   // Synthetic login fixtures need matching protected data fixtures. Real sessions above
   // continue using the real profile and schedule APIs, including session checks.
   assert.ok(currentProfile, 'Real student profile must have loaded before lock fixtures')
+  await context.route('**/api/v1/auth/context', (route) =>
+    route.request().headers().authorization === 'Bearer fictional-browser-token'
+      ? route.fulfill({
+          json: { user_id: currentProfile.id, role: 'student', org_unit_id: null, permissions: [] },
+        })
+      : route.continue(),
+  )
   await context.route('**/api/v1/users/me', (route) =>
     route.request().headers().authorization === 'Bearer fictional-browser-token'
       ? route.fulfill({ json: currentProfile })
@@ -617,6 +624,7 @@ try {
   await heading(page, 'Расписание')
   await context.unroute('**/api/v1/auth/login')
   await context.unroute('**/api/v1/users/me')
+  await context.unroute('**/api/v1/auth/context')
   await context.unroute('**/api/v1/users/me/preferences')
   await holdAuthLock()
   const beforeWaitingLogout = countAuth()

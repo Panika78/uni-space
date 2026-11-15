@@ -1,3 +1,4 @@
+import { useAccessSuspended } from '../../shared/ui/AccessRecovery'
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
@@ -140,6 +141,7 @@ function LessonCard({
 }
 
 export function SchedulePage() {
+  const isSuspended = useAccessSuspended()
   const { preferences, savePreferences, showCancelled, hasUncertainSave, hasExplicitSaveError } =
     useSchedulePreferences()
   const [date, setDate] = useState(getMoscowDate)
@@ -174,6 +176,7 @@ export function SchedulePage() {
       ),
   })
   useEffect(() => {
+    if (isSuspended) return
     if (!navigation || getMoscowDate(new Date(navigation.starts_at)) !== date) {
       pendingPosition.current = null
       return
@@ -191,8 +194,9 @@ export function SchedulePage() {
       target.scrollIntoView?.({ block: 'nearest' })
       pendingPosition.current = null
     }
-  }, [date, navigation, query.data, query.isSuccess, query.isFetching])
+  }, [date, navigation, query.data, query.isSuccess, query.isFetching, isSuspended])
   useEffect(() => {
+    if (isSuspended) return
     if (!pendingToday.current || mode !== 'week' || !query.isSuccess || query.isFetching) return
     const target = pageRef.current?.querySelector<HTMLElement>('.schedule-day.is-selected')
     if (!target) return
@@ -243,7 +247,7 @@ export function SchedulePage() {
       cancelled = true
       cancelAnimationFrame(frame)
     }
-  }, [todayRequest, mode, date, query.isSuccess, query.isFetching, query.data])
+  }, [todayRequest, mode, date, query.isSuccess, query.isFetching, query.data, isSuspended])
   const isPositionUnavailable =
     navigation !== null &&
     getMoscowDate(new Date(navigation.starts_at)) === date &&

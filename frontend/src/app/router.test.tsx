@@ -46,7 +46,11 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-11-10T08:00:00Z'))
   vi.mocked(apiFetch).mockImplementation((input) => {
     const url = new URL(String(input), window.location.href)
+    if (url.pathname === '/api/v1/auth/context')
+      return Promise.resolve({ user_id: '1', role: 'student', org_unit_id: null, permissions: [] })
     if (url.pathname === '/api/v1/users/me' && !url.search) return Promise.resolve(profile)
+    if (url.pathname === '/api/v1/users/me/preferences')
+      return Promise.resolve({ show_cancelled_lessons: true })
     if (url.pathname === '/api/v1/notifications')
       return Promise.resolve({ items: [], next_cursor: null })
     if (
@@ -97,18 +101,18 @@ describe('route fallbacks', () => {
     auth.status = 'authenticated'
     renderRouter('/schedule/nonexistent')
     expect(await screen.findByRole('heading', { name: 'Страница не найдена' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Вернуться к расписанию' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Вернуться в кабинет' })).toHaveAttribute(
       'href',
-      '/schedule',
+      '/cabinet',
     )
     expect(screen.queryByRole('navigation', { name: 'Разделы кабинета' })).not.toBeInTheDocument()
-    await userEvent.setup().click(screen.getByRole('link', { name: 'Вернуться к расписанию' }))
+    await userEvent.setup().click(screen.getByRole('link', { name: 'Вернуться в кабинет' }))
     expect(await screen.findByRole('heading', { name: 'Расписание' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Разделы кабинета' })).toBeInTheDocument()
   })
 
   it.each([
-    ['authenticated', 'Вернуться к расписанию', '/schedule'],
+    ['authenticated', 'Вернуться в кабинет', '/cabinet'],
     ['unauthenticated', 'Перейти ко входу', '/login'],
   ] as const)(
     'hides technical details for unexpected route errors when %s',
@@ -153,7 +157,12 @@ it('loads StudentAccess before the real schedule and keeps the working profile r
   const urls = vi
     .mocked(apiFetch)
     .mock.calls.map(([input]) => new URL(String(input), window.location.href).pathname)
-  expect(urls).toEqual(['/api/v1/users/me', '/api/v1/users/me/preferences', '/api/v1/schedule'])
+  expect(urls).toEqual([
+    '/api/v1/auth/context',
+    '/api/v1/users/me',
+    '/api/v1/users/me/preferences',
+    '/api/v1/schedule',
+  ])
   await userEvent.setup().click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await userEvent.setup().click(screen.getByRole('link', { name: 'Мой профиль' }))
   expect(await screen.findByRole('heading', { name: 'Мой профиль' })).toBeInTheDocument()
@@ -163,11 +172,16 @@ it('loads StudentAccess before the real schedule and keeps the working profile r
 
 it('does not load or show schedule when StudentAccess rejects access', async () => {
   auth.status = 'authenticated'
-  vi.mocked(apiFetch).mockRejectedValue(new ApiClientError('Denied', 'forbidden', 403))
+  vi.mocked(apiFetch).mockImplementation(async (input) => {
+    if (input === '/api/v1/auth/context')
+      return { user_id: '1', role: 'student', permissions: [], org_unit_id: null }
+    throw new ApiClientError('Denied', 'forbidden', 403)
+  })
   renderRouter('/schedule')
   expect(await screen.findByRole('alert')).toHaveTextContent('Доступ запрещён')
   expect(screen.queryByRole('heading', { name: 'Расписание' })).not.toBeInTheDocument()
   expect(vi.mocked(apiFetch).mock.calls.map(([input]) => String(input))).toEqual([
+    '/api/v1/auth/context',
     '/api/v1/users/me',
   ])
 })

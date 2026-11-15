@@ -1,8 +1,9 @@
+import { AccessRecovery, isTemporaryAccessError } from '../../shared/ui/AccessRecovery'
 import universityBuilding from '../../assets/university-building.webp'
 import './profile.css'
 import { useQuery } from '@tanstack/react-query'
 import { Outlet } from 'react-router-dom'
-import { UserMenu } from '../../app/StudentLayout'
+import { UserMenu } from '../../app/CabinetLayout'
 import { ApiClientError, apiFetch } from '../../shared/api/client'
 import { Icon } from '../../shared/ui/Icon'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
@@ -17,11 +18,14 @@ export function StudentAccess() {
     queryFn: ({ signal }) => apiFetch<Profile>('/api/v1/users/me', { authenticated: true, signal }),
     retry: false,
     staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   })
   if (query.isPending) return <LoadingState title="Загружаем профиль…" />
+  let failure = null
   if (query.isError) {
     const forbidden = query.error instanceof ApiClientError && query.error.status === 403
-    return (
+    failure = (
       <ErrorState
         title={forbidden ? 'Доступ запрещён' : 'Не удалось загрузить профиль'}
         description={
@@ -40,10 +44,14 @@ export function StudentAccess() {
         <UserMenu logoutOnly />
       </ErrorState>
     )
+    if (!query.data || !isTemporaryAccessError(query.error)) return failure
   }
+  if (!query.data) return null
   return (
     <ProfileContext.Provider value={query.data}>
-      <Outlet />
+      <AccessRecovery blocked={query.isError} fallback={failure}>
+        <Outlet key={query.data.id} />
+      </AccessRecovery>
     </ProfileContext.Provider>
   )
 }

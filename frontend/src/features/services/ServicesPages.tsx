@@ -1,6 +1,7 @@
+import { useAccessSuspended } from '../../shared/ui/AccessRecovery'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApplicationsList, applicationsKey, ServicesTabs } from './ApplicationsPages'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useBlocker, useParams, useSearchParams } from 'react-router-dom'
 import { useUnsavedChanges } from '../../app/UnsavedChangesContext'
 import { ApiClientError, apiFetch } from '../../shared/api/client'
@@ -166,6 +167,7 @@ function ServiceCatalog() {
 }
 
 export function ApplicationFormPage() {
+  const isSuspended = useAccessSuspended()
   const queryClient = useQueryClient()
   const { serviceCode } = useParams()
   const [value, setValue] = useState('')
@@ -197,17 +199,20 @@ export function ApplicationFormPage() {
   }, [exitStatus, setExitStatus])
   useEffect(() => () => setExitStatus('none'), [setExitStatus])
   useEffect(() => {
-    if (serverFieldError && !pending) input.current?.focus()
-  }, [pending, serverFieldError])
-  useEffect(() => {
+    if (serverFieldError && !pending && !isSuspended) input.current?.focus()
+  }, [pending, serverFieldError, isSuspended])
+  useLayoutEffect(() => {
     const dialog = leaveDialog.current
-    if (blocker.state === 'blocked') {
+    if (blocker.state === 'blocked' && !isSuspended) {
       if (!dialog?.open) dialog?.showModal()
       continueButton.current?.focus()
     } else if (dialog?.open) {
       dialog.close()
     }
-  }, [blocker.state])
+    return () => {
+      if (dialog?.open) dialog.close()
+    }
+  }, [blocker.state, isSuspended])
   useEffect(() => {
     if (exitStatus === 'none') return
     const handle = (event: BeforeUnloadEvent) => {
@@ -218,14 +223,14 @@ export function ApplicationFormPage() {
     return () => window.removeEventListener('beforeunload', handle)
   }, [exitStatus])
   useEffect(() => {
-    if (uncertain) checkResult.current?.focus({ preventScroll: true })
-  }, [uncertain])
+    if (uncertain && !isSuspended) checkResult.current?.focus({ preventScroll: true })
+  }, [uncertain, isSuspended])
   const normalized = trimPythonWhitespace(value)
   const characterCount = Array.from(normalized).length
   const invalid = characterCount < 1 || characterCount > 300
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (uncertain || inFlight.current) return
+    if (isSuspended || uncertain || inFlight.current) return
     setTouched(true)
     setError('')
     setServerFieldError(null)
