@@ -726,3 +726,14 @@ proxy `http://127.0.0.1:18080`, настоящий backend работает на
 окружение; пароли и auth-логи не публикуются в артефактах.
 `bash scripts/test-e2e-exit.sh` проверяет, что оба конвейера `node | tee` передают
 намеренный exit 37 в CI; workflow явно использует Bash с `pipefail`.
+
+MVP2-05: независимая посещаемость по занятию и студенту, защищённые PUT/DELETE
+для назначенного преподавателя и деканата с `attendance.edit`, собственное чтение
+студентом с сохранёнными историческими отметками. Контракт — [API.md](docs/API.md),
+аудит — [AUDIT.md](docs/AUDIT.md). После миграции необходимо повторно применить
+production ACL по существующей процедуре [PRODUCTION.md](docs/PRODUCTION.md).
+
+Тест `test_attendance_transactions.py` проверяет настоящие production ACL на
+отдельной эфемерной БД. Для локального Compose-прогона задайте
+`POSTGRES_TEST_CONTAINER=uni-space-test-test-db-1`; без этой переменной нужен
+локальный `psql`. В CI используется PostgreSQL service container.

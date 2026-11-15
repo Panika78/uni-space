@@ -80,6 +80,7 @@ except Exception:
 
 | entity_type | action | Разрешённые поля before/after |
 |---|---|---|
+| `attendance` | `create`, `update`, `delete` | обязательные `student_id` (положительный integer), `status` (`attended`/`absent`) |
 | `assessment_result` | `create`, `update`, `delete` | `assessment_group_id`, `student_id`, `score` |
 | `final_result` | `create`, `update`, `delete` | `course_offering_id`, `student_id`, `grade_value`, `passed`, `retake_date` |
 | `lesson` | `create`, `update`, `cancel`, `move` | `course_offering_id`, `teacher_id`, `starts_at`, `ends_at`, `kind`, `status`, `previous_lesson_id`, `version`, `group_ids`, `room_ids` |
@@ -87,6 +88,14 @@ except Exception:
 | `user` | `set_role` | `role` |
 | `user` | `set_active` | `is_active` |
 | `student` | `set_academic_status` | `academic_status` |
+
+Для `attendance` действует явное исключение: `entity_id=lesson_id`, полный
+идентификатор отметки — `(lesson_id, student_id)`, а не один `entity_id`.
+Снимок содержит строго `student_id` и `status`; update сохраняет один student_id
+и меняет статус. Неизменившийся статус — no-op без события. Для будущего чтения
+истории конкретной отметки обязательны предметная ACL-проверка **обоих** ID,
+фильтр `entity_type='attendance'`, `entity_id=lesson_id`, action и `student_id`
+из before/after. Нельзя выдавать события всех студентов по одному ID занятия.
 
 При `create` before — SQL NULL, after — объект; при `delete` наоборот.
 Остальные действия требуют двух объектов с одинаковым набором разрешённых ключей.
@@ -128,11 +137,12 @@ except Exception:
 или миграция enum в БД. Вызовы writer добавляются в доменных issues: #69 (баллы),
 #72 (итоги), #74 (расписание), #78 (администрирование), #79 (академические статусы).
 Изменения permissions согласуются с владельцем #60 отдельной интеграцией: этот PR
-не меняет роли или механизмы выдачи прав. Production ACL намеренно разрешают только
-уже используемые операции API. При подключении первого предметного write API нужно
-согласованно расширить `deploy/postgres/privileges.sql`: `INSERT` на `audit_events`,
-`SELECT (id, created_at)` для SQLAlchemy `INSERT ... RETURNING`, вместе с правами
-записи самого предметного модуля. `id` — IDENTITY, а не SERIAL: генерация значения
+не меняет роли или механизмы выдачи прав. Production ACL в
+`deploy/postgres/privileges.sql` для #70 разрешают CRUD `attendance`,
+`UPDATE(id)` для блокировок lessons/students/teaching_assignments,
+`INSERT` на `audit_events`, `SELECT (id, created_at)` для SQLAlchemy
+`INSERT ... RETURNING`, без права чтения снимков аудита.
+`id` — IDENTITY, а не SERIAL: генерация значения
 при INSERT не требует `USAGE` на `audit_events_id_seq`; прямой `nextval()` требует
 права на последовательность и приложению не нужен. Не выдавать
 API `UPDATE`/`DELETE` аудита или широкие default GRANT. Предметное чтение при его

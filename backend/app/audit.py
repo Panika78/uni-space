@@ -15,6 +15,13 @@ def _integer(value: object) -> int:
     return value
 
 
+def _positive_integer(value: object) -> int:
+    result = _integer(value)
+    if result <= 0:
+        raise ValueError("Audit ID must be positive")
+    return result
+
+
 def _boolean(value: object) -> bool:
     if type(value) is not bool:
         raise ValueError("Audit field requires a boolean")
@@ -51,6 +58,7 @@ def _ids(value: object) -> list[int]:
 # Explicit fields AND value serializers per event. Never traverse ORM objects,
 # arbitrary nested mappings, or stringify unknown objects.
 _SCORE_FIELDS = {"assessment_group_id": _integer, "student_id": _integer, "score": _integer}
+_ATTENDANCE_FIELDS = {"student_id": _positive_integer, "status": _choice("attended", "absent")}
 _FINAL_FIELDS = {
     "course_offering_id": _integer,
     "student_id": _integer,
@@ -72,6 +80,7 @@ _LESSON_FIELDS = {
 }
 _ROLE = _choice("student", "teacher", "staff", "admin")
 _EVENT_FIELDS = {
+    **{("attendance", action): _ATTENDANCE_FIELDS for action in ("create", "update", "delete")},
     **{("assessment_result", action): _SCORE_FIELDS for action in ("create", "update", "delete")},
     **{("final_result", action): _FINAL_FIELDS for action in ("create", "update", "delete")},
     **{("lesson", action): _LESSON_FIELDS for action in ("create", "update", "cancel", "move")},
@@ -135,6 +144,23 @@ def write_audit_event(
         raise ValueError("Audit requires an active caller transaction before business commit")
     if _integer(entity_id) <= 0:
         raise ValueError("Audit entity ID must be positive; flush new entities first")
+    if entity_type == "attendance":
+        for snapshot in (before_data, after_data):
+            if snapshot is not None and (
+                not isinstance(snapshot, Mapping)
+                or set(snapshot) != set(_ATTENDANCE_FIELDS)
+                or any(value is None for value in snapshot.values())
+            ):
+                raise ValueError("Attendance audit requires student_id and status only")
+        if (
+            before_data is not None
+            and after_data is not None
+            and (
+                before_data["student_id"] != after_data["student_id"]
+                or before_data["status"] == after_data["status"]
+            )
+        ):
+            raise ValueError("Attendance update requires the same student and a changed status")
     before = _serialize_snapshot(before_data, fields)
     after = _serialize_snapshot(after_data, fields)
     if action == "create":

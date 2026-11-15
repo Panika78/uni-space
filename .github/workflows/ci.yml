@@ -80,6 +80,7 @@ jobs:
       - name: Run PostgreSQL integration tests
         working-directory: backend
         env:
+          POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
         run: uv run --locked --python 3.12.16 pytest -m integration
