@@ -1,6 +1,7 @@
 /* global process, console, window, document, URL */
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { setTimeout as delay } from 'node:timers/promises'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const baseURL = process.env.STAFF_STUDENTS_TEST_URL || 'http://localhost:5173'
 const password = 'Fictional-Role-E2E-Password-2026'
@@ -32,10 +33,20 @@ async function login(page, name) {
   await page.goto(`${baseURL}/login`)
   await page.getByLabel('Логин', { exact: true }).fill(`role-e2e-${name}`)
   await page.getByLabel('Пароль', { exact: true }).fill(password)
-  await page.getByRole('button', { name: 'Войти', exact: true }).click()
-  await page.waitForURL(
-    (url) => new URL(url).pathname === '/schedule' || new URL(url).pathname.startsWith('/staff'),
-  )
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const pending = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === '/api/v1/auth/login',
+    )
+    await page.getByRole('button', { name: 'Войти', exact: true }).click()
+    const response = await pending
+    if (response.status() !== 429) {
+      assert.equal(response.status(), 200)
+      await page.waitForFunction(() => window.location.pathname !== '/login')
+      return
+    }
+    await delay((Number(response.headers()['retry-after']) + 1) * 1000)
+  }
+  throw new Error('Login remained rate limited')
 }
 
 try {

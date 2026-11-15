@@ -430,6 +430,14 @@ async function checkPreferences(page, width) {
     await noOverflow(page)
     for (const viewport of [360, 768, 1440, 2560]) {
       await page.setViewportSize({ width: viewport, height: 1000 })
+      await page.waitForFunction((width) => {
+        const margin = window.getComputedStyle(
+          document.querySelector('.student-main-column'),
+        ).marginLeft
+        const expected =
+          width <= 720 ? '0px' : width <= 1050 ? '230px' : width <= 1450 ? '252px' : '272px'
+        return margin === expected
+      }, viewport)
       for (const direction of ['rtl', 'ltr']) {
         await page.evaluate((dir) => {
           document.documentElement.dir = dir
