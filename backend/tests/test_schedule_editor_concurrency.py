@@ -1,6 +1,7 @@
 """Cross-session PostgreSQL races with the #71 confirmation write contract."""
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from threading import Event
 from types import SimpleNamespace
 
@@ -65,7 +66,14 @@ def test_confirmation_and_schedule_change_cannot_leave_false_flag(committed_edit
                 action,
                 lesson_id=s.lesson_id,
                 version=1,
-                data=s.data if action == "move" else None,
+                data=s.data.model_copy(
+                    update={
+                        "starts_at": s.data.starts_at + timedelta(days=1),
+                        "ends_at": s.data.ends_at + timedelta(days=1),
+                    }
+                )
+                if action == "move"
+                else None,
             )
 
     def second():

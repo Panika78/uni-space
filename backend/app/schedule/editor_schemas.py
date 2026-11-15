@@ -60,7 +60,10 @@ class EditorLesson(LessonWrite):
 class EditorScheduleParams(ScheduleParams):
     resource: Literal["group", "teacher", "room"]
     resource_id: Id
-    after_id: Id | None = None
+    after_id: Id | None = Field(
+        default=None,
+        description="Last lesson ID: (starts_at, id) anchor within the same selection",
+    )
     limit: int = Field(default=100, ge=1, le=200)
 
 

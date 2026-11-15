@@ -4381,6 +4381,7 @@
             }
           },
           {
+            "description": "Last lesson ID: (starts_at, id) anchor within the same selection",
             "in": "query",
             "name": "after_id",
             "required": false,
@@ -4394,6 +4395,7 @@
                   "type": "null"
                 }
               ],
+              "description": "Last lesson ID: (starts_at, id) anchor within the same selection",
               "title": "After Id"
             }
           },

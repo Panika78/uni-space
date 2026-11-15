@@ -2637,6 +2637,7 @@ export interface operations {
                 date_to: string;
                 resource: "group" | "teacher" | "room";
                 resource_id: string;
+                /** @description Last lesson ID: (starts_at, id) anchor within the same selection */
                 after_id?: string | null;
                 limit?: number;
             };

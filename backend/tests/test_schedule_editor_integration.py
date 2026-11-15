@@ -87,6 +87,12 @@ def create(e, **changes):
     return result.json()
 
 
+def move_payload(e, **changes):
+    return e.payload(
+        starts_at="2026-11-11T09:00:00+03:00", ends_at="2026-11-11T10:00:00+03:00", **changes
+    )
+
+
 def events(e, entity="lesson"):
     return list(
         e.db.scalars(
@@ -221,7 +227,7 @@ def test_assessment_flags_and_audit_are_atomic_without_changing_date_or_link(edi
     assignment = link_assessment(e.db, work.id, lesson.id, e.groups[0].id)
     assignment.planned_date = date(2026, 11, 10)
     e.db.commit()
-    body = e.payload(version=1) if action == "move" else {"version": 1}
+    body = move_payload(e, version=1) if action == "move" else {"version": 1}
     response = e.request_editor("POST", f"/lessons/{item['id']}/{action}", body)
     assert response.status_code in (200, 201), response.text
     e.db.refresh(assignment)
@@ -265,6 +271,8 @@ def test_audit_failure_rolls_back_schedule_links_flags_and_version(
 
     monkeypatch.setattr(editor_service, "write_audit_event", fail)
     body = e.payload(version=1, room_ids=[]) if action in ("move", "update") else {"version": 1}
+    if action == "move":
+        body = move_payload(e, version=1, room_ids=[])
     path = f"/lessons/{item['id']}" + ("" if action == "update" else f"/{action}")
     response = e.request_editor("PATCH" if action == "update" else "POST", path, body)
     assert response.status_code == 500
@@ -419,7 +427,7 @@ def test_failure_of_new_move_target_audit_rolls_back_source_and_continuation(edi
             raise ValueError("forced continuation audit failure")
 
     monkeypatch.setattr(editor_service, "write_audit_event", fail_new_target)
-    response = e.request_editor("POST", f"/lessons/{item['id']}/move", e.payload(version=1))
+    response = e.request_editor("POST", f"/lessons/{item['id']}/move", move_payload(e, version=1))
     assert response.status_code == 500
     assert e.request_editor("GET", f"/lessons/{item['id']}").json() == item
     assert e.db.scalar(select(func.count()).select_from(Lesson)) == 1
@@ -468,7 +476,7 @@ def test_schedule_changes_preserve_works_scores_assignments_and_unlinked_flags(e
         ]
 
     before = snapshot_tables()
-    result = e.request_editor("POST", f"/lessons/{item['id']}/move", e.payload(version=1))
+    result = e.request_editor("POST", f"/lessons/{item['id']}/move", move_payload(e, version=1))
     assert result.status_code == 201, result.text
     assert snapshot_tables() == before
     e.db.refresh(unrelated)

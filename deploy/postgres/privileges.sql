@@ -106,6 +106,8 @@ SELECT 'GRANT INSERT, UPDATE (course_offering_id, teacher_id, starts_at, ends_at
 WHERE to_regclass('public.lessons') IS NOT NULL \gexec
 SELECT format('GRANT INSERT, DELETE ON public.%I TO uni_space_api', tablename)
 FROM pg_tables WHERE schemaname='public' AND tablename IN ('lesson_groups','lesson_rooms') \gexec
+SELECT 'GRANT UPDATE (room_id) ON public.lesson_rooms TO uni_space_api'
+WHERE to_regclass('public.lesson_rooms') IS NOT NULL \gexec
 SELECT 'GRANT UPDATE (id) ON public.lesson_groups TO uni_space_api'
 WHERE to_regclass('public.lesson_groups') IS NOT NULL \gexec
 SELECT 'GRANT UPDATE (date_needs_confirmation) ON public.assessment_groups TO uni_space_api'

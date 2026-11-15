@@ -182,15 +182,12 @@ def test_concurrent_replacement_refreshes_assignment_changed_in_place(committed_
         try:
             assert ready.wait(5)
             blocker_pid = first.scalar(text("SELECT pg_backend_pid()"))
-            lesson = first.scalars(
-                select(Lesson).where(Lesson.id == s.lesson_id).with_for_update()
-            ).one()
+            first.scalars(select(Lesson).where(Lesson.id == s.lesson_id).with_for_update()).one()
             assignment = first.scalars(
                 select(LessonGroup).where(LessonGroup.lesson_id == s.lesson_id)
             ).one()
             assignment.subgroup_id = s.a_id
-            lesson.version += 1
-            first.flush()
+            first.flush()  # The child statement trigger advances the public version.
             proceed.set()
             require_blocked_writer(s.engine, blocker_pid, waiter_pid[0])
             first.commit()
@@ -297,4 +294,4 @@ def test_service_does_not_deadlock_with_raw_writer_holding_assignment(committed_
         replace_lesson_participants(db, s.lesson_id, [Participant(s.group_id, s.b_id)])
         db.commit()
         assert list_participants(db, s.lesson_id) == {(s.group_id, s.b_id)}
-        assert db.get(Lesson, s.lesson_id).version == version + (action == "update")
+        assert db.get(Lesson, s.lesson_id).version == version + 1 + (action == "update")

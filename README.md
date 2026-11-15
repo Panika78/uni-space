@@ -734,7 +734,7 @@ proxy `http://127.0.0.1:18080`, настоящий backend работает на
 Требуется актуальное `schedule.edit` сотрудника деканата. Версии, конфликты #73,
 аудит участников и пометки дат работ сохраняются транзакционно; UI #82 не включён.
 Контракт: [API](docs/API.md), [аудит](docs/AUDIT.md). Перед запуском применить
-`alembic upgrade head` (новая миграция `20261115_04`) и штатный production ACL script
+`alembic upgrade head` (миграции `20261115_04` и `20261115_05`) и штатный production ACL script
 для существующих volumes. Предыдущие миграции не меняются.
 Проверки: `pytest -m integration tests/test_schedule_editor*.py` и регрессии
 `tests/test_assessed_lesson_participants.py`; нужны PostgreSQL и runtime ACL.

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from test_academics_migrations import migration_database  # noqa: F401
 from test_application_workflow_acl import runtime_engine  # noqa: F401
 from test_assessed_lesson_participants import add_assessment, link_assessment
-from test_schedule_editor_integration import create
+from test_schedule_editor_integration import create, move_payload
 from test_schedule_editor_integration import editor as editor_fixture
 from test_schedule_integration import schedule as schedule_fixture
 
@@ -50,7 +50,7 @@ def test_production_role_can_edit_and_audit_but_cannot_change_academic_records(r
         response = e.request_editor("POST", path + "/cancel", {"version": 2})
         assert response.status_code == 200, response.text
         assert e.request_editor("POST", path + "/restore", {"version": 3}).status_code == 200
-        response = e.request_editor("POST", path + "/move", e.payload(version=4))
+        response = e.request_editor("POST", path + "/move", move_payload(e, version=4))
         assert response.status_code == 201, response.text
         for kind in (
             "groups",

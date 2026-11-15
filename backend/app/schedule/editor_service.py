@@ -1,11 +1,12 @@
 """Official schedule operations. One transaction includes links, flags and audit."""
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, time
 from typing import Literal
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.orm import Session
 
 from app.audit import write_audit_event
@@ -65,42 +66,59 @@ def get_editor_lesson(db: Session, lesson_id: int) -> EditorLesson:
     lesson = db.get(Lesson, lesson_id, populate_existing=True)
     if lesson is None or lesson.is_additional:
         raise HTTPException(404, "not_found")
-    participants = list(
-        db.execute(
-            select(LessonGroup.group_id, LessonGroup.subgroup_id)
-            .where(LessonGroup.lesson_id == lesson_id)
-            .order_by(LessonGroup.group_id, LessonGroup.subgroup_id.nullsfirst())
-        )
-    )
-    return EditorLesson(
-        id=str(lesson.id),
-        course_offering_id=str(lesson.course_offering_id),
-        teacher_id=str(lesson.teacher_id) if lesson.teacher_id else None,
-        starts_at=lesson.starts_at,
-        ends_at=lesson.ends_at,
-        kind=lesson.kind,
-        participants=[
-            LessonParticipant(group_id=str(g), subgroup_id=str(s) if s else None)
-            for g, s in participants
-        ],
-        room_ids=[
-            str(i)
-            for i in db.scalars(
-                select(LessonRoom.room_id)
-                .where(LessonRoom.lesson_id == lesson_id)
-                .order_by(LessonRoom.room_id)
+    return list_editor_lessons(db, [lesson])[0]
+
+
+def list_editor_lessons(db: Session, lessons: list[Lesson]) -> list[EditorLesson]:
+    """Load links and continuations in three bounded queries, including details."""
+    if not lessons:
+        return []
+    ids = [lesson.id for lesson in lessons]
+    participants = defaultdict(list)
+    for lesson_id, group_id, subgroup_id in db.execute(
+        select(LessonGroup.lesson_id, LessonGroup.group_id, LessonGroup.subgroup_id)
+        .where(LessonGroup.lesson_id.in_(ids))
+        .order_by(LessonGroup.group_id, LessonGroup.subgroup_id.nullsfirst())
+    ):
+        participants[lesson_id].append(
+            LessonParticipant(
+                group_id=str(group_id), subgroup_id=str(subgroup_id) if subgroup_id else None
             )
-        ],
-        status=lesson.status,
-        version=lesson.version,
-        previous_lesson_id=str(lesson.previous_lesson_id) if lesson.previous_lesson_id else None,
-        next_lesson_id=(
-            str(n)
-            if (n := db.scalar(select(Lesson.id).where(Lesson.previous_lesson_id == lesson_id)))
-            else None
-        ),
-        created_by_user_id=str(lesson.created_by_user_id) if lesson.created_by_user_id else None,
+        )
+    rooms = defaultdict(list)
+    for lesson_id, room_id in db.execute(
+        select(LessonRoom.lesson_id, LessonRoom.room_id)
+        .where(LessonRoom.lesson_id.in_(ids))
+        .order_by(LessonRoom.room_id)
+    ):
+        rooms[lesson_id].append(str(room_id))
+    continuations = dict(
+        db.execute(
+            select(Lesson.previous_lesson_id, Lesson.id).where(Lesson.previous_lesson_id.in_(ids))
+        ).all()
     )
+    return [
+        EditorLesson(
+            id=str(lesson.id),
+            course_offering_id=str(lesson.course_offering_id),
+            teacher_id=str(lesson.teacher_id) if lesson.teacher_id else None,
+            starts_at=lesson.starts_at,
+            ends_at=lesson.ends_at,
+            kind=lesson.kind,
+            participants=participants[lesson.id],
+            room_ids=rooms[lesson.id],
+            status=lesson.status,
+            version=lesson.version,
+            previous_lesson_id=str(lesson.previous_lesson_id)
+            if lesson.previous_lesson_id
+            else None,
+            next_lesson_id=str(continuations[lesson.id]) if lesson.id in continuations else None,
+            created_by_user_id=str(lesson.created_by_user_id)
+            if lesson.created_by_user_id
+            else None,
+        )
+        for lesson in lessons
+    ]
 
 
 def snapshot(item: EditorLesson) -> dict:
@@ -207,6 +225,10 @@ def insert_lesson(db, actor, data, previous_id=None):
     for room_id in data.room_ids:
         db.add(LessonRoom(lesson_id=lesson.id, room_id=int(room_id)))
     db.flush()
+    # Child statement triggers protect raw SQL. Creation is one aggregate
+    # operation: its intermediate revisions are invisible outside our lock.
+    db.execute(update(Lesson).where(Lesson.id == lesson.id).values(version=1))
+    db.refresh(lesson)
     audit_lesson(db, actor, lesson.id, "create", None)
     return lesson
 
@@ -275,6 +297,8 @@ def mutate_lesson(
             raise HTTPException(409, "invalid_transition")
         old = get_editor_lesson(db, lesson_id)
         before = snapshot(old)
+        if action == "move" and data.starts_at == old.starts_at and data.ends_at == old.ends_at:
+            raise HTTPException(409, "invalid_transition")
         if action == "update":
             desired_participants = sorted(
                 data.participants, key=lambda p: (int(p.group_id), int(p.subgroup_id or 0))
@@ -324,13 +348,31 @@ def mutate_lesson(
             replace_lesson_participants(db, lesson_id, participants)
             # #62 may already increment; exactly one increment for the whole operation.
             lesson.version = version + 1
-            db.execute(delete(LessonRoom).where(LessonRoom.lesson_id == lesson_id))
-            for room_id in data.room_ids:
-                db.add(LessonRoom(lesson_id=lesson_id, room_id=int(room_id)))
+            # Prelock before DML: raw writers can already hold a room tuple.
+            existing_rooms = set(
+                db.scalars(
+                    select(LessonRoom.room_id)
+                    .where(LessonRoom.lesson_id == lesson_id)
+                    .with_for_update(nowait=True)
+                )
+            )
+            desired_rooms = {int(i) for i in data.room_ids}
+            db.execute(
+                delete(LessonRoom).where(
+                    LessonRoom.lesson_id == lesson_id,
+                    LessonRoom.room_id.in_(existing_rooms - desired_rooms),
+                )
+            )
+            for room_id in desired_rooms - existing_rooms:
+                db.add(LessonRoom(lesson_id=lesson_id, room_id=room_id))
         else:
             lesson.status = {"cancel": "cancelled", "move": "moved", "restore": "scheduled"}[action]
             lesson.version = version + 1
         db.flush()
+        # Normalize the whole locked operation after every child statement has
+        # fired its DB version guard. Always issue SQL, even if ORM looks equal.
+        db.execute(update(Lesson).where(Lesson.id == lesson_id).values(version=version + 1))
+        db.refresh(lesson)
         if action in ("cancel", "move"):
             mark_assessment_dates(db, actor, lesson_id)
         audit_lesson(db, actor, lesson_id, action, before)
@@ -348,7 +390,7 @@ def list_editor_schedule(db: Session, params: EditorScheduleParams) -> EditorSch
         raise HTTPException(404, "not_found")
     start = datetime.combine(params.date_from, time.min, MOSCOW)
     end = datetime.combine(params.date_to, time.max, MOSCOW)
-    statement = select(Lesson.id).where(
+    statement = select(Lesson).where(
         Lesson.is_additional.is_(False), Lesson.starts_at <= end, Lesson.ends_at > start
     )
     resource_id = int(params.resource_id)
@@ -363,11 +405,22 @@ def list_editor_schedule(db: Session, params: EditorScheduleParams) -> EditorSch
             Lesson.id.in_(select(LessonRoom.lesson_id).where(LessonRoom.room_id == resource_id))
         )
     if params.after_id:
-        statement = statement.where(Lesson.id > int(params.after_id))
-    ids = list(db.scalars(statement.order_by(Lesson.id).limit(params.limit + 1)))
+        anchor = db.scalar(statement.where(Lesson.id == int(params.after_id)))
+        if anchor is None:
+            raise HTTPException(422, "validation_error")
+        statement = statement.where(
+            tuple_(Lesson.starts_at, Lesson.id) > (anchor.starts_at, anchor.id)
+        )
+    lessons = list(
+        db.scalars(
+            statement.order_by(Lesson.starts_at, Lesson.id)
+            .limit(params.limit + 1)
+            .execution_options(populate_existing=True)
+        )
+    )
     return EditorSchedule(
-        items=[get_editor_lesson(db, i) for i in ids[: params.limit]],
-        next_after_id=str(ids[params.limit - 1]) if len(ids) > params.limit else None,
+        items=list_editor_lessons(db, lessons[: params.limit]),
+        next_after_id=str(lessons[params.limit - 1].id) if len(lessons) > params.limit else None,
     )
 
 
