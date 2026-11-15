@@ -304,6 +304,20 @@ export function ApplicationDetailPage() {
           ) {
             event.preventDefault()
             navigate(-1)
+            let frames = 0
+            const restoreSourceFocus = () => {
+              const source = Array.from(
+                document.querySelectorAll<HTMLAnchorElement>(
+                  '.applications-table a[data-application-id]',
+                ),
+              ).find((link) => link.dataset.applicationId === id)
+              if (source) {
+                source.focus({ preventScroll: true })
+                return
+              }
+              if (frames++ < 120) window.requestAnimationFrame(restoreSourceFocus)
+            }
+            window.requestAnimationFrame(() => window.requestAnimationFrame(restoreSourceFocus))
           }
         }}
       >
