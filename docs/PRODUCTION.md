@@ -241,6 +241,12 @@ Nginx (важно при замене файла через rename), прове�
 `news` и права на её последовательность запрещены. Для TASK-016 уведомления доступны
 runtime-роли только для чтения: `SELECT` на `notifications`, без DML и sequence USAGE.
 
+Для MVP2-29 текущий API не использует writer: прав на `audit_events` пока нет,
+включая UPDATE/DELETE уже созданных событий. До первого production-потребителя
+нужно явно выдать INSERT и SELECT(id, created_at) для RETURNING; IDENTITY не требует
+sequence USAGE при INSERT. UPDATE/DELETE аудита обычной API-роли не выдаются.
+Подробный контракт подключения — [AUDIT.md](AUDIT.md).
+
 API не получает административный или migration secret ни в окружение, ни в mounts.
 API pool задаёт для каждого PostgreSQL-соединения `lock_timeout=5000ms` и
 `statement_timeout=30000ms`. Это параметры сессии API-клиента; Alembic использует
