@@ -678,3 +678,27 @@
     margin-left: auto;
   }
 }
+
+.schedule-cancelled-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  width: fit-content;
+  max-width: 100%;
+  cursor: pointer;
+}
+
+.schedule-cancelled-toggle input {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.schedule-gap {
+  margin: 0;
+  padding: 0.5rem 1rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}

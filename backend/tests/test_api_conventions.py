@@ -781,6 +781,7 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
         "/api/v1/schedule",
         "/api/v1/academics",
         "/api/v1/users/me",
+        "/api/v1/users/me/preferences",
         "/api/v1/news",
         "/api/v1/news/{id}",
         "/api/v1/notifications",

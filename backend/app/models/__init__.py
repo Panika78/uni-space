@@ -5,6 +5,7 @@ from app.models.audit import AuditEvent
 from app.models.base import Base
 from app.models.news import News
 from app.models.permissions import StaffPermission, StaffProfile
+from app.models.preferences import UserPreferences
 from app.models.schedule import (
     AcademicTerm,
     Building,
@@ -47,6 +48,7 @@ __all__ = [
     "Subgroup",
     "Teacher",
     "User",
+    "UserPreferences",
     "StaffPermission",
     "StaffProfile",
 ]

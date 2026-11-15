@@ -16,7 +16,20 @@ async function login(page, account = 'schedule-fixture-1', navigate = true) {
   if (navigate) await page.goto(`${baseURL}/login`)
   await page.getByLabel('Логин', { exact: true }).fill(account)
   await page.getByLabel('Пароль', { exact: true }).fill(password)
-  await page.getByRole('button', { name: 'Войти', exact: true }).click()
+  const submit = async () => {
+    const result = page.waitForResponse((r) => r.url().endsWith('/auth/login'))
+    await page.getByRole('button', { name: 'Войти', exact: true }).click()
+    return result
+  }
+  let result = await submit()
+  if (result.status() === 429) {
+    // Extra account-switching scenarios share the real server's IP rate limit.
+    // Model a user explicitly retrying after Retry-After; the app never retries login.
+    console.log('Waiting for the real login rate-limit window')
+    await delay((Number(result.headers()['retry-after']) + 1) * 1000)
+    result = await submit()
+  }
+  assert.equal(result.status(), 200)
   await page.getByRole('heading', { name: 'Расписание', exact: true }).waitFor()
   await page.locator('.schedule-list').waitFor()
 }
@@ -89,6 +102,87 @@ async function checkOvernightDates(page) {
     'вторник, 10 ноября, 23:30',
     'среда, 11 ноября, 00:30',
   ])
+}
+
+async function checkPreferences(page, width) {
+  const toggle = page.getByRole('checkbox', { name: 'Показывать отменённые' })
+  await toggle.waitFor()
+  await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
+  // Explicitly reset fictional account state so each viewport run is independent.
+  if (!(await toggle.isChecked())) {
+    const reset = page.waitForResponse(
+      (r) => r.url().endsWith('/preferences') && r.request().method() === 'PATCH',
+    )
+    const [response] = await Promise.all([reset, toggle.click()])
+    assert.equal(response.status(), 200)
+    await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
+  }
+  const before = await page.locator('.schedule-gap').allTextContents()
+  assert.deepEqual(before, ['Окно · 2 ч', 'Окно · 10 ч 30 мин'])
+  const save = page.waitForResponse(
+    (r) => r.url().endsWith('/preferences') && r.request().method() === 'PATCH',
+  )
+  const [response] = await Promise.all([save, toggle.click()])
+  assert.equal(response.status(), 200)
+  await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
+  assert.equal(await page.locator('.lesson-card--cancelled').count(), 0)
+  assert.deepEqual(await page.locator('.schedule-gap').allTextContents(), before)
+  await page.reload()
+  await page.locator('.schedule-list').waitFor()
+  await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
+  assert.equal(await toggle.isChecked(), false)
+  await logout(page)
+  await login(page, 'schedule-fixture-2', false)
+  await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
+  assert.equal(await toggle.isChecked(), true)
+  await logout(page)
+  await login(page, 'schedule-fixture-1', false)
+  await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
+  assert.equal(await toggle.isChecked(), false)
+  await page.route('**/api/v1/users/me/preferences', (route) =>
+    route.request().method() === 'PATCH'
+      ? route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: { code: 'internal_error', message: 'test', details: [] } }),
+        })
+      : route.continue(),
+  )
+  await toggle.click()
+  await page.getByRole('alert').filter({ hasText: 'Не удалось сохранить настройку' }).waitFor()
+  assert.equal(await toggle.isChecked(), false)
+  await page.unroute('**/api/v1/users/me/preferences')
+  for (const mode of ['День', 'Неделя']) {
+    await page.getByRole('button', { name: mode, exact: true }).click()
+    assert.equal(await toggle.isChecked(), false)
+    await page.getByRole('button', { name: 'Следующая неделя' }).click()
+    await page.locator('.schedule-list').waitFor()
+    await page.getByRole('button', { name: 'Сегодня', exact: true }).click()
+    await page.locator('.schedule-list').waitFor()
+    assert.equal(await page.getByLabel('Дата', { exact: true }).inputValue(), '2026-11-10')
+    if (mode === 'Неделя') {
+      await page.waitForFunction(() => {
+        const bounds = document.querySelector('.schedule-day.is-selected').getBoundingClientRect()
+        return bounds.top >= 0 && bounds.top < window.innerHeight
+      })
+    }
+    await noOverflow(page)
+    for (const viewport of [360, 768, 1440, 2560]) {
+      await page.setViewportSize({ width: viewport, height: 1000 })
+      await page.evaluate(() => {
+        document.documentElement.dir = 'rtl'
+      })
+      await noOverflow(page)
+      await page.evaluate(() => {
+        document.documentElement.dir = 'ltr'
+      })
+    }
+  }
+  await page.setViewportSize({ width, height: 1000 })
+  await page.getByRole('button', { name: 'День', exact: true }).click()
+  check(
+    'Real preference PATCH, reload/login, two-account isolation, failed-save rollback, shared day/week and RTL 360–2560px',
+  )
 }
 
 async function checkCancelledLesson(card, width) {
@@ -179,6 +273,13 @@ async function checkScheduleChanges(page, width) {
       await noOverflow(page)
     }
   }
+  const toggle = page.getByRole('checkbox', { name: 'Показывать отменённые' })
+  const saved = page.waitForResponse(
+    (r) => r.url().endsWith('/preferences') && r.request().method() === 'PATCH',
+  )
+  const [response] = await Promise.all([saved, toggle.click()])
+  assert.equal(response.status(), 200)
+  await page.waitForFunction(() => !document.querySelector('input[type=checkbox]').disabled)
   await page.getByLabel('Дата', { exact: true }).fill('2026-11-10')
   const cancelled = page.getByRole('article', { name: 'Отменённое занятие' })
   await cancelled.waitFor()
@@ -255,6 +356,7 @@ try {
     assert.ok((await shared.innerText()).includes('09:00'))
     assert.equal(await shared.locator('li').count(), 2)
     assert.equal((await shared.locator('.lesson-card__time').innerText()).trim(), '09:00 — 10:00')
+    await checkPreferences(page, width)
     await checkScheduleChanges(page, width)
     await checkOvernightDates(page)
     await page.getByLabel('Дата', { exact: true }).fill('2026-11-11')

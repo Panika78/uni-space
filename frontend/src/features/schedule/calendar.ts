@@ -78,3 +78,43 @@ export function listDayLessons(items: Lesson[], date: string): Lesson[] {
     return startDate <= date && (endDate > date || (endDate === date && !endsAtMidnight))
   })
 }
+
+export interface ScheduleGap {
+  startsAt: number
+  endsAt: number
+}
+
+export function listDayGaps(items: Lesson[], date: string): ScheduleGap[] {
+  const intervals = listDayLessons(items, date)
+    .filter((lesson) => lesson.status === 'scheduled')
+    .map((lesson) => ({
+      startsAt: Date.parse(lesson.starts_at),
+      endsAt: Date.parse(lesson.ends_at),
+    }))
+    .sort((a, b) => a.startsAt - b.startsAt)
+  const merged: ScheduleGap[] = []
+  for (const interval of intervals) {
+    const previous = merged.at(-1)
+    if (previous && interval.startsAt <= previous.endsAt) {
+      previous.endsAt = Math.max(previous.endsAt, interval.endsAt)
+    } else merged.push({ ...interval })
+  }
+  // Both occupied intervals intersect this Moscow day, so every interior gap
+  // already lies within its calendar boundaries, including overnight lessons.
+  return merged.slice(1).flatMap((interval, index) => {
+    const startsAt = merged[index].endsAt
+    return interval.startsAt - startsAt >= 45 * 60_000
+      ? [{ startsAt, endsAt: interval.startsAt }]
+      : []
+  })
+}
+
+export function formatGapDuration(gap: ScheduleGap): string {
+  const milliseconds = gap.endsAt - gap.startsAt
+  const hours = Math.floor(milliseconds / 3_600_000)
+  const minutes = Math.floor((milliseconds % 3_600_000) / 60_000)
+  const remainder = (milliseconds % 60_000) / 1000
+  return [hours && `${hours} ч`, minutes && `${minutes} мин`, remainder && `${remainder} с`]
+    .filter(Boolean)
+    .join(' ')
+}

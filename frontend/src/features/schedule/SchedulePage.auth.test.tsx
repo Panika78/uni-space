@@ -78,6 +78,14 @@ it.each(['focus', 'reconnect'] as const)(
       }
       if (path === '/api/v1/auth/logout')
         return Promise.resolve(Response.json({ session_revoked: true }))
+      if (path === '/api/v1/users/me/preferences') {
+        return Promise.resolve(
+          Response.json({
+            show_cancelled_lessons:
+              new Headers(init?.headers).get('Authorization') !== 'Bearer first-access',
+          }),
+        )
+      }
       if (path !== '/api/v1/schedule') throw new Error('Unexpected test request')
       const token = new Headers(init?.headers).get('Authorization')!
       tokens.push(token)
@@ -103,6 +111,8 @@ it.each(['focus', 'reconnect'] as const)(
       </QueryClientProvider>,
     )
     await screen.findByRole('article', { name: 'Занятие первого студента' })
+    await waitFor(() => expect(screen.getByRole('checkbox')).toBeEnabled())
+    expect(screen.getByRole('checkbox')).not.toBeChecked()
     const refresh = () =>
       act(() => {
         if (event === 'focus') {
@@ -124,6 +134,8 @@ it.each(['focus', 'reconnect'] as const)(
     expect(screen.queryByRole('article')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Войти вторым студентом' }))
     await screen.findByRole('article', { name: 'Занятие второго студента' })
+    await waitFor(() => expect(screen.getByRole('checkbox')).toBeEnabled())
+    expect(screen.getByRole('checkbox')).toBeChecked()
     await act(async () => {
       completeOldResponse(scheduleResponse('Запоздавшее занятие первого студента'))
     })
