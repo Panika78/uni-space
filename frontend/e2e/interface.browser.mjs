@@ -238,10 +238,12 @@ try {
         }
       }
       if (route === '/services') {
-        const icon = await page.locator('.service-card__icon-box').boundingBox()
-        const text = await page.locator('.service-card__content').boundingBox()
-        if (icon.y < text.y + text.height && text.y < icon.y + icon.height)
-          assert.ok(icon.x + icon.width <= text.x, 'service icon does not overlap text')
+        for (const card of await page.locator('.service-catalog-grid .service-card').all()) {
+          const icon = await card.locator('.service-card__icon-box').boundingBox()
+          const text = await card.locator('.service-card__content').boundingBox()
+          if (icon.y < text.y + text.height && text.y < icon.y + icon.height)
+            assert.ok(icon.x + icon.width <= text.x, 'service icon does not overlap text')
+        }
 
         const tabs = page.getByRole('navigation', { name: 'Разделы услуг' })
         const top = (await tabs.boundingBox()).y
