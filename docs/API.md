@@ -166,7 +166,7 @@ type AcademicsResponse = {
 ```ts
 type Service = {
   id: Id;
-  code: "study_certificate";
+  code: string; // создание MVP1 по-прежнему принимает только study_certificate
   title: string;
 };
 
@@ -179,6 +179,7 @@ type CreateApplicationRequest = {
 
 type Application = {
   id: Id;
+  version: number; // версия для изменяющих запросов MVP2
   service: Service;
   form_data: { place_of_submission: string };
   review_status:
@@ -324,3 +325,83 @@ type AuthorizationContext = {
 действуют при следующем запросе со старым JWT. Ошибки 401/422/500 используют
 общий `ApiError`. UI не может использовать этот ответ вместо серверной проверки.
 `GET /users/me` и login/refresh/logout сохраняют прежние контракты.
+
+## Workflow заявлений MVP2-15
+
+Маршруты относительно `/api/v1`; все требуют Bearer. Студенческие маршруты
+MVP1 сохранены, в ответы создания/списка/деталей добавлено обязательное `version`.
+Создание нового заявления по-прежнему не требует `expected_version` и создаёт
+реальное событие `null → submitted` вместе с заявлением. Для существовавших
+заявлений история начинается с первого реального действия после обновления.
+
+| Метод | Путь | Вход | Ответ 200 |
+|---|---|---|---|
+| GET | `/staff/applications` | `limit`, `cursor` | `Page<StaffApplicationResponse>` |
+| GET | `/staff/applications/{id}` | ID | `StaffApplicationResponse` |
+| POST | `/staff/applications/{id}/review` | `ReviewApplicationRequest` | `StaffApplicationResponse` |
+| GET | `/staff/applications/{id}/history` | `limit`, `cursor` | `Page<ApplicationHistoryEvent>` |
+| POST | `/applications/{id}/resubmit` | `ResubmitApplicationRequest` | `Application` |
+| GET | `/applications/{id}/history` | `limit`, `cursor` | `Page<ApplicationHistoryEvent>` |
+
+`StaffApplicationResponse` расширяет `Application` полями `student_id: Id` и
+`reviewer_user_id: Id | null`. Список заявлений сортируется по `(created_at, id)`
+убывающе, история — по `(created_at, id)` возрастающе; пагинация SQL/cursor,
+по умолчанию 20, максимум 100. Неизвестные/повторные query-параметры запрещены.
+
+```ts
+type ReviewApplicationRequest = {
+  expected_version: number; // строго целое 1..2147483647
+  action: "start_review" | "approve" | "reject" | "return_for_correction";
+  comment?: string | null; // trim, 1..3000 символов; обязательна причина двух отказных действий
+};
+type ResubmitApplicationRequest = {
+  expected_version: number;
+  form_data: { place_of_submission: string }; // действующий строгий контракт формы
+};
+type ApplicationHistoryEvent = {
+  id: Id;
+  actor_user_id: Id | null;
+  from_status: Application["review_status"] | null;
+  to_status: Application["review_status"];
+  comment: string | null;
+  created_at: DateTime;
+};
+```
+
+Допустимые ручные переходы: `start_review` — `submitted/resubmitted → in_review`,
+затем `approve/reject/return_for_correction` — соответственно
+`approved/rejected/needs_correction`. Студент-владелец может атомарно отправить
+исправленную форму только из `needs_correction → resubmitted` с прежним ID.
+Неизвестные поля формы запрещены. В production пока поддерживается только форма
+`study_certificate`; новые формы и ручные услуги добавляет #67 вместе с расширением
+схем запросов/ответов и `APPLICATION_FORMS`. Тестовые ручные услуги не входят в seed.
+
+`reviewer_user_id` берётся из авторизации при рассмотрении/решении; сотрудники
+одного разрешённого подразделения могут продолжить рассмотрение друг друга.
+Повторная отправка сбрасывает назначение и текущий `feedback`, сохраняя причину
+в истории. Решение, форма, версия, `updated_at` и событие фиксируются одной
+транзакцией. Устаревшая версия — `409 version_conflict`; недопустимое действие,
+автоматическая услуга или выданный документ — `409 invalid_transition`.
+В обоих случаях история/форма/поля решения не меняются. Клиент перечитывает
+состояние; автоматический повтор изменения с новой версией недопустим.
+
+Без авторизации — `401`, без действующего `applications.review` — `403`;
+чужой/несуществующий ID — одинаковый `404`. Сотрудник ограничен эффективной
+областью #60: назначенное подразделение приоритетнее ответственного подразделения
+услуги; отсутствие обоих закрывает доступ. Студент видит только собственные
+заявления/историю. Условный UPDATE также проверяет владельца (ресабмит) либо
+эффективное подразделение в разрешённых сервером областях (рассмотрение).
+Конкурентная потеря доступа к объекту возвращает `404`, в том числе если одновременно
+изменилась версия; если после неуспешного UPDATE объект остаётся доступен —
+`409 version_conflict`. История и бизнес-поля при отказе не изменяются.
+Это не сериализует одновременный отзыв разрешения в `staff_permissions`:
+отзыв права/смена подразделения сотрудника действуют на следующий запрос.
+Ошибки формы, причины и версии — `422 validation_error`. Общая форма — `ApiError`.
+
+`approved/rejected` терминальны. `document_status` workflow не изменяет, PDF,
+вложения и уведомления не запускает. Автоматическая `study_certificate` остаётся
+`submitted/pending` до отдельной реализации #67/#83; ручное одобрение для неё
+запрещено. Академический статус студента не меняется при одобрении заявления.
+#75 должен включать изменение вложений в ту же версию заявления; #83 сохраняет
+отдельную транзакцию генерации и её проверки; #84/#85 используют эти API, текущую
+версию и обработку 409, без выбора серверного актора/подразделения клиентом.

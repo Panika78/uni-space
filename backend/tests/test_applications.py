@@ -542,6 +542,8 @@ def test_application_routes_work_with_minimal_postgresql_role(postgresql_engine)
         connection.execute(text(f"GRANT SELECT ON service_types TO {role}"))
         connection.execute(text(f"GRANT SELECT, INSERT ON applications TO {role}"))
         connection.execute(text(f"GRANT USAGE ON SEQUENCE applications_id_seq TO {role}"))
+        connection.execute(text(f"GRANT SELECT, INSERT ON application_history TO {role}"))
+        connection.execute(text(f"GRANT USAGE ON SEQUENCE application_history_id_seq TO {role}"))
 
     admin = Session(postgresql_engine, expire_on_commit=False)
     api_engine = None
