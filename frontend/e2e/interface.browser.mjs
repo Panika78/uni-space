@@ -294,7 +294,7 @@ try {
     await page.getByRole('heading', { name: 'Страница не найдена', exact: true }).waitFor()
     assert.equal(await page.getByRole('navigation', { name: 'Разделы кабинета' }).count(), 0)
     await inspect('not-found-authenticated', width)
-    await page.getByRole('link', { name: 'Вернуться к расписанию', exact: true }).click()
+    await page.getByRole('link', { name: 'Вернуться в кабинет', exact: true }).click()
     await page.getByRole('heading', { name: 'Расписание', exact: true }).waitFor()
     await page.locator('.schedule-list').waitFor()
     const notificationsResponse = page.waitForResponse(

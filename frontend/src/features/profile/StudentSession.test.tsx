@@ -39,6 +39,8 @@ const profiles = {
 function error(status: number, code: string) {
   return Response.json({ error: { code, message: 'Error', details: [] } }, { status })
 }
+let accountBRole: 'student' | 'teacher'
+let delayContext: (() => Promise<Response>) | undefined
 let account: 'A' | 'B'
 let profileError: number | undefined
 let delayProfile: (() => Promise<Response>) | undefined
@@ -72,6 +74,8 @@ function scheduleResponse(token: 'A' | 'B', dateFrom: string, dateTo: string) {
 beforeEach(() => {
   localStorage.clear()
   account = 'A'
+  accountBRole = 'student'
+  delayContext = undefined
   profileError = undefined
   delayProfile = undefined
   delaySchedule = undefined
@@ -96,6 +100,19 @@ beforeEach(() => {
         return Response.json({ access_token: account, token_type: 'bearer', expires_in: 600 })
       }
       if (path.endsWith('/logout')) return Response.json({ session_revoked: true })
+      if (path.endsWith('/auth/context')) {
+        if (delayContext) {
+          const delayed = delayContext
+          delayContext = undefined
+          return delayed()
+        }
+        return Response.json({
+          user_id: account === 'A' ? '1' : '2',
+          role: account === 'A' ? 'student' : accountBRole,
+          org_unit_id: null,
+          permissions: [],
+        })
+      }
       if (path.endsWith('/users/me')) {
         if (delayProfile) {
           const delayed = delayProfile
@@ -415,4 +432,46 @@ it('keeps account B schedule isolated when a Sunday request resolves after Mosco
       ]),
     }),
   )
+})
+
+it('isolates a late role context and populated student cache from the next teacher account', async () => {
+  const { client, user } = mount()
+  await login(user, 'student-a')
+  expect(client.getQueryData(['student-profile'])).toEqual(profiles.A)
+  let complete!: (response: Response) => void
+  let started = false
+  delayContext = () => {
+    started = true
+    return new Promise((resolve) => {
+      complete = resolve
+    })
+  }
+  let pending!: Promise<void>
+  act(() => {
+    pending = client.invalidateQueries({ queryKey: ['authorization-context'] })
+  })
+  await waitFor(() => expect(started).toBe(true))
+  await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
+  await user.click(screen.getByRole('button', { name: 'Выйти' }))
+  await user.click(screen.getByRole('button', { name: 'Выйти' }))
+  await screen.findByRole('heading', { name: 'Вход в систему' })
+  expect(client.getQueryCache().getAll()).toHaveLength(0)
+  accountBRole = 'teacher'
+  await user.type(screen.getByLabelText('Логин'), 'teacher-b')
+  await user.type(screen.getByLabelText('Пароль'), 'fictional-password')
+  await user.click(screen.getByRole('button', { name: 'Войти' }))
+  await screen.findByRole('heading', { name: 'Мои журналы' })
+  await act(async () => {
+    complete(Response.json({ user_id: '1', role: 'student', org_unit_id: null, permissions: [] }))
+    await pending
+  })
+  expect(client.getQueryData(['authorization-context'])).toMatchObject({
+    user_id: '2',
+    role: 'teacher',
+  })
+  expect(client.getQueryData(['student-profile'])).toBeUndefined()
+  expect(screen.queryByText('Анна Альфа')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Меню пользователя' })).toHaveTextContent('—')
+  await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
+  expect(screen.queryByRole('link', { name: 'Мой профиль' })).not.toBeInTheDocument()
 })

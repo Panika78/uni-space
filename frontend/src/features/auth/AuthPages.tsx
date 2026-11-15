@@ -16,7 +16,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   if (status === 'initializing')
     return <LoadingState title="Проверяем сессию…" variant="compact" className="auth-loading" />
-  if (status === 'authenticated') return <Navigate to="/schedule" replace />
+  if (status === 'authenticated') return <Navigate to="/cabinet" replace />
   return (
     <section className="welcome-card login-card" aria-labelledby="login-title">
       <div className="login-brand">
@@ -24,7 +24,7 @@ export function LoginPage() {
         <p>РГУЧВ им. А. М. Кашпировского</p>
       </div>
       <h1 id="login-title">Вход в систему</h1>
-      <p className="login-intro">Добро пожаловать в студенческий кабинет</p>
+      <p className="login-intro">Добро пожаловать в университетский кабинет</p>
       <form
         onSubmit={(event) => {
           event.preventDefault()

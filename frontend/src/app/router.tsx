@@ -1,3 +1,11 @@
+import {
+  RoleAccess,
+  RoleStart,
+  RoleGuard,
+  RoleLayout,
+  ModuleUnavailable,
+  StaffHome,
+} from '../features/auth/RoleContext'
 import { StudentAccess, StudentProfilePage } from '../features/profile/StudentProfile'
 import { createBrowserRouter, Link, Navigate, Outlet, ScrollRestoration } from 'react-router-dom'
 
@@ -67,7 +75,7 @@ function RouteIssuePage({ notFound = false }: { notFound?: boolean }) {
   if (status === 'initializing')
     return <LoadingState title="Проверяем сессию…" variant="compact" className="auth-loading" />
 
-  const destination = status === 'authenticated' ? '/schedule' : '/login'
+  const destination = status === 'authenticated' ? '/cabinet' : '/login'
   return (
     <section
       className={`welcome-card route-issue-card${notFound ? ' route-issue-card--not-found' : ''}`}
@@ -78,7 +86,7 @@ function RouteIssuePage({ notFound = false }: { notFound?: boolean }) {
           <Icon name="info" />
         </span>
       ) : (
-        <p className="section-eyebrow">Студенческий кабинет</p>
+        <p className="section-eyebrow">Кабинет Uni Space</p>
       )}
       <h1 id="route-issue-title">
         {notFound ? 'Страница не найдена' : 'Не удалось открыть страницу'}
@@ -89,7 +97,7 @@ function RouteIssuePage({ notFound = false }: { notFound?: boolean }) {
           : 'Произошла ошибка. Попробуйте перейти к доступной странице.'}
       </p>
       <Link className="route-recovery-link" to={destination}>
-        {status === 'authenticated' ? 'Вернуться к расписанию' : 'Перейти ко входу'}
+        {status === 'authenticated' ? 'Вернуться в кабинет' : 'Перейти ко входу'}
       </Link>
     </section>
   )
@@ -124,21 +132,71 @@ export const appRoutes: RouteObject[] = [
         element: <ProtectedRoute />,
         children: [
           {
-            element: <StudentAccess />,
+            element: <RoleAccess />,
             children: [
+              { path: '/cabinet', element: <RoleStart /> },
               {
-                element: <StudentLayout />,
+                element: <RoleGuard role="student" />,
                 children: [
-                  { path: '/schedule', element: <SchedulePage /> },
-                  { path: '/academics', element: <AcademicsPage /> },
-                  { path: '/applications/:id', element: <ApplicationDetailPage /> },
-                  { path: '/services', element: <ServicesPage /> },
-                  { path: '/services/:serviceCode', element: <ApplicationFormPage /> },
-                  { path: '/news', element: <NewsFeedPage /> },
-                  { path: '/news/:id', element: <NewsDetailPage /> },
-                  { path: '/notifications', element: null },
-                  { path: '/profile', element: <StudentProfilePage /> },
-                  { path: '/settings', element: <UnavailableSection title="Настройки" /> },
+                  {
+                    element: <StudentAccess />,
+                    children: [
+                      {
+                        element: <StudentLayout />,
+                        children: [
+                          { path: '/schedule', element: <SchedulePage /> },
+                          { path: '/academics', element: <AcademicsPage /> },
+                          { path: '/applications/:id', element: <ApplicationDetailPage /> },
+                          { path: '/services', element: <ServicesPage /> },
+                          { path: '/services/:serviceCode', element: <ApplicationFormPage /> },
+                          { path: '/news', element: <NewsFeedPage /> },
+                          { path: '/news/:id', element: <NewsDetailPage /> },
+                          { path: '/notifications', element: null },
+                          { path: '/profile', element: <StudentProfilePage /> },
+                          { path: '/settings', element: <UnavailableSection title="Настройки" /> },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                element: <RoleLayout />,
+                children: [
+                  {
+                    element: <RoleGuard role="teacher" />,
+                    children: [
+                      {
+                        path: '/teacher/journals',
+                        element: <ModuleUnavailable title="Мои журналы" />,
+                      },
+                      {
+                        path: '/teacher/schedule',
+                        element: <ModuleUnavailable title="Расписание" />,
+                      },
+                    ],
+                  },
+                  {
+                    element: <RoleGuard role="admin" />,
+                    children: [
+                      { path: '/admin/users', element: <ModuleUnavailable title="Пользователи" /> },
+                    ],
+                  },
+                  {
+                    element: <RoleGuard role="staff" />,
+                    children: [
+                      { path: '/staff', element: <StaffHome /> },
+                      {
+                        element: <RoleGuard role="staff" permission="applications.review" />,
+                        children: [
+                          {
+                            path: '/staff/applications',
+                            element: <ModuleUnavailable title="Заявления" />,
+                          },
+                        ],
+                      },
+                    ],
+                  },
                 ],
               },
             ],
