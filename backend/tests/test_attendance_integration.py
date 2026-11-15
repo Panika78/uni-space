@@ -204,7 +204,6 @@ def test_lesson_state_time_and_independent_replacement(attendance, status):
     assert s.write(student=2, token=token).status_code == 409
     assert s.read(lesson=s.lesson.id).json()["status"] == "attended"
     assert s.write("absent", token=token).status_code == 200
-    assert s.write(method="delete", token=token).status_code == 200
     replacement = s.add(
         Lesson,
         course_offering_id=s.courses[0].id,
@@ -216,6 +215,9 @@ def test_lesson_state_time_and_independent_replacement(attendance, status):
     s.add(LessonGroup, lesson_id=replacement.id, group_id=s.groups[0].id)
     assert s.read(lesson=replacement.id).json()["status"] == "unmarked"
     assert s.write(lesson=replacement.id).status_code == 200
+    assert s.read(lesson=s.lesson.id).json()["status"] == "absent"
+    assert s.write(method="delete", token=token).status_code == 200
+    assert s.read(lesson=replacement.id).json()["status"] == "attended"
 
 
 def test_effective_staff_permissions_and_unsafe_requests(attendance):
