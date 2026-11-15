@@ -42,6 +42,30 @@ TASK-014 добавляет вкладку «Мои заявления», отд
 Специализированные проверки: `pytest -m integration tests/test_permissions_integration.py`;
 они входят и в общий PostgreSQL-прогон.
 
+## Workflow заявлений (MVP2-15)
+
+Реализованы защищённые `/api/v1/staff/applications`, детали/история и действие
+`review`, а также студенческие `resubmit` и `history` на существующем ID.
+Сервер проверяет полномочия #60, подразделение, владельца, конечный автомат и
+версию условным UPDATE; история сохраняется одной транзакцией с изменением.
+Контракт — [docs/API.md](docs/API.md#workflow-заявлений-mvp2-15).
+
+Миграция `20261115_01` добавляет `application_history` после `20261114_03`, без
+вымышленной истории старых заявлений. В production запустите штатный
+`scripts/migrate-postgres.sh`: повторное применение ACL после upgrade даёт
+`uni_space_api` SELECT/INSERT истории, USAGE её sequence и UPDATE только
+изменяемых workflow-столбцов заявления. UPDATE/DELETE истории не разрешены.
+UI, ручные услуги/новые формы, вложения, PDF и уведомления остаются в отдельных
+issues; `study_certificate` сохраняет автоматический режим без ручного одобрения.
+
+Проверки: `pytest -m integration tests/test_application_workflow*.py`.
+Тест настоящего production ACL использует `psql` из PATH; при запуске PostgreSQL
+через Compose можно передать `POSTGRES_TEST_CONTAINER=uni-space-test-test-db-1`.
+Он применяет `deploy/postgres/privileges.sql` в отдельной временной БД и выполняет
+авторизованные HTTP-запросы через настоящее подключение `uni_space_api`.
+Запускать только на изолированном тестовом PostgreSQL: штатный ACL управляет
+кластерными ролями/CONNECT, как и при production-настройке.
+
 ## Успеваемость студента (TASK-012)
 
 `/academics` и `GET /api/v1/academics` показывают дисциплины текущей группы
