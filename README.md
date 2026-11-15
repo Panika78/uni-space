@@ -726,3 +726,15 @@ proxy `http://127.0.0.1:18080`, настоящий backend работает на
 окружение; пароли и auth-логи не публикуются в артефактах.
 `bash scripts/test-e2e-exit.sh` проверяет, что оба конвейера `node | tee` передают
 намеренный exit 37 в CI; workflow явно использует Bash с `pipefail`.
+
+### Backend официального редактора расписания (MVP2-12)
+
+Защищённые `/api/v1/staff/schedule` предоставляют справочники, расписания группы,
+преподавателя и аудитории, детали занятия и create/update/cancel/move/restore.
+Требуется актуальное `schedule.edit` сотрудника деканата. Версии, конфликты #73,
+аудит участников и пометки дат работ сохраняются транзакционно; UI #82 не включён.
+Контракт: [API](docs/API.md), [аудит](docs/AUDIT.md). Перед запуском применить
+`alembic upgrade head` (новая миграция `20261115_04`) и штатный production ACL script
+для существующих volumes. Предыдущие миграции не меняются.
+Проверки: `pytest -m integration tests/test_schedule_editor*.py` и регрессии
+`tests/test_assessed_lesson_participants.py`; нужны PostgreSQL и runtime ACL.

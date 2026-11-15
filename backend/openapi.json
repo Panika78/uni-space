@@ -401,6 +401,146 @@
         "title": "AuthorizationContext",
         "type": "object"
       },
+      "CatalogItem": {
+        "additionalProperties": false,
+        "properties": {
+          "building_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Building Id"
+          },
+          "building_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Building Name"
+          },
+          "course_offering_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Course Offering Id"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "group_ids": {
+            "items": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "title": "Group Ids",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "teacher_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teacher Id"
+          },
+          "term_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term Id"
+          },
+          "term_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term Name"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "CatalogItem",
+        "type": "object"
+      },
+      "CatalogPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_after_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next After Id"
+          }
+        },
+        "required": [
+          "items",
+          "next_after_id"
+        ],
+        "title": "CatalogPage",
+        "type": "object"
+      },
       "CourseOfferingRef": {
         "additionalProperties": false,
         "properties": {
@@ -464,6 +604,164 @@
           "name"
         ],
         "title": "Direction",
+        "type": "object"
+      },
+      "EditorLesson": {
+        "additionalProperties": false,
+        "properties": {
+          "course_offering_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Course Offering Id",
+            "type": "string"
+          },
+          "created_by_user_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By User Id"
+          },
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "lecture",
+              "seminar",
+              "lab",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "next_lesson_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Lesson Id"
+          },
+          "participants": {
+            "items": {
+              "$ref": "#/components/schemas/LessonParticipant"
+            },
+            "title": "Participants",
+            "type": "array"
+          },
+          "previous_lesson_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Lesson Id"
+          },
+          "room_ids": {
+            "items": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Room Ids",
+            "type": "array"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "scheduled",
+              "cancelled",
+              "moved"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "teacher_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teacher Id"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "course_offering_id",
+          "starts_at",
+          "ends_at",
+          "kind",
+          "participants",
+          "room_ids",
+          "id",
+          "version",
+          "status",
+          "previous_lesson_id",
+          "next_lesson_id",
+          "created_by_user_id"
+        ],
+        "title": "EditorLesson",
+        "type": "object"
+      },
+      "EditorSchedule": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EditorLesson"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_after_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next After Id"
+          }
+        },
+        "required": [
+          "items",
+          "next_after_id"
+        ],
+        "title": "EditorSchedule",
         "type": "object"
       },
       "EffectivePermission": {
@@ -543,6 +841,21 @@
           "code"
         ],
         "title": "ErrorDetail",
+        "type": "object"
+      },
+      "ExpectedVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "ExpectedVersion",
         "type": "object"
       },
       "FinalResultResponse": {
@@ -863,6 +1176,109 @@
         "title": "JournalStudent",
         "type": "object"
       },
+      "LessonChange": {
+        "additionalProperties": false,
+        "properties": {
+          "course_offering_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Course Offering Id",
+            "type": "string"
+          },
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "lecture",
+              "seminar",
+              "lab",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "participants": {
+            "items": {
+              "$ref": "#/components/schemas/LessonParticipant"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Participants",
+            "type": "array"
+          },
+          "room_ids": {
+            "items": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Room Ids",
+            "type": "array"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "teacher_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teacher Id"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "course_offering_id",
+          "starts_at",
+          "ends_at",
+          "kind",
+          "participants",
+          "room_ids"
+        ],
+        "title": "LessonChange",
+        "type": "object"
+      },
+      "LessonParticipant": {
+        "additionalProperties": false,
+        "properties": {
+          "group_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Group Id",
+            "type": "string"
+          },
+          "subgroup_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subgroup Id"
+          }
+        },
+        "required": [
+          "group_id"
+        ],
+        "title": "LessonParticipant",
+        "type": "object"
+      },
       "LessonPosition": {
         "additionalProperties": false,
         "properties": {
@@ -999,6 +1415,76 @@
           "latest_lesson"
         ],
         "title": "LessonResponse",
+        "type": "object"
+      },
+      "LessonWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "course_offering_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Course Offering Id",
+            "type": "string"
+          },
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "lecture",
+              "seminar",
+              "lab",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "participants": {
+            "items": {
+              "$ref": "#/components/schemas/LessonParticipant"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Participants",
+            "type": "array"
+          },
+          "room_ids": {
+            "items": {
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Room Ids",
+            "type": "array"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "teacher_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teacher Id"
+          }
+        },
+        "required": [
+          "course_offering_id",
+          "starts_at",
+          "ends_at",
+          "kind",
+          "participants",
+          "room_ids"
+        ],
+        "title": "LessonWrite",
         "type": "object"
       },
       "LoginRequest": {
@@ -3664,6 +4150,968 @@
         "tags": [
           "services",
           "applications"
+        ]
+      }
+    },
+    "/api/v1/staff/schedule/catalog/{kind}": {
+      "get": {
+        "operationId": "list_catalog_api_v1_staff_schedule_catalog__kind__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "enum": [
+                "groups",
+                "subgroups",
+                "teachers",
+                "rooms",
+                "course-offerings",
+                "teaching-assignments"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 100,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "group_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Group Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "course_offering_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Course Offering Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Catalog",
+        "tags": [
+          "schedule-editor"
+        ]
+      }
+    },
+    "/api/v1/staff/schedule/lessons": {
+      "get": {
+        "operationId": "list_lessons_api_v1_staff_schedule_lessons_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Date From",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Date To",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resource",
+            "required": true,
+            "schema": {
+              "enum": [
+                "group",
+                "teacher",
+                "room"
+              ],
+              "title": "Resource",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resource_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Resource Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorSchedule"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Lessons",
+        "tags": [
+          "schedule-editor"
+        ]
+      },
+      "post": {
+        "operationId": "create_lesson_api_v1_staff_schedule_lessons_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LessonWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorLesson"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Lesson",
+        "tags": [
+          "schedule-editor"
+        ]
+      }
+    },
+    "/api/v1/staff/schedule/lessons/{lesson_id}": {
+      "get": {
+        "operationId": "get_lesson_api_v1_staff_schedule_lessons__lesson_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorLesson"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Lesson",
+        "tags": [
+          "schedule-editor"
+        ]
+      },
+      "patch": {
+        "operationId": "update_lesson_api_v1_staff_schedule_lessons__lesson_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LessonChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorLesson"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Lesson",
+        "tags": [
+          "schedule-editor"
+        ]
+      }
+    },
+    "/api/v1/staff/schedule/lessons/{lesson_id}/cancel": {
+      "post": {
+        "operationId": "cancel_lesson_api_v1_staff_schedule_lessons__lesson_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpectedVersion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorLesson"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel Lesson",
+        "tags": [
+          "schedule-editor"
+        ]
+      }
+    },
+    "/api/v1/staff/schedule/lessons/{lesson_id}/move": {
+      "post": {
+        "operationId": "move_lesson_api_v1_staff_schedule_lessons__lesson_id__move_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LessonChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorLesson"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Move Lesson",
+        "tags": [
+          "schedule-editor"
+        ]
+      }
+    },
+    "/api/v1/staff/schedule/lessons/{lesson_id}/restore": {
+      "post": {
+        "operationId": "restore_lesson_api_v1_staff_schedule_lessons__lesson_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpectedVersion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditorLesson"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Restore Lesson",
+        "tags": [
+          "schedule-editor"
         ]
       }
     },

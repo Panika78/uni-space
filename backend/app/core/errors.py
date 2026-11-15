@@ -21,7 +21,14 @@ HTTP_ERROR_CODES = {
     },
     403: {"forbidden", "origin_not_allowed"},
     404: {"not_found"},
-    409: {"version_conflict", "invalid_transition"},
+    409: {
+        "version_conflict",
+        "invalid_transition",
+        "schedule_conflict",
+        "assessment_group_in_use",
+        "concurrent_change",
+        "assignment_conflict",
+    },
     413: {"request_too_large"},
     422: {"validation_error"},
     429: {"rate_limited"},
@@ -125,6 +132,13 @@ def install_exception_handlers(app: FastAPI) -> None:
             message = HTTPStatus(exc.status_code).phrase
         except ValueError:
             message = "Request failed"
+        message = {
+            "version_conflict": "Запись изменена другим пользователем; обновите данные",
+            "invalid_transition": "Операция недоступна в текущем состоянии",
+            "assessment_group_in_use": "Сначала перепривяжите работы, назначенные этой группе",
+            "concurrent_change": "Данные изменяются параллельно; обновите и повторите запрос",
+            "assignment_conflict": "Изменение нарушает связи учебных данных",
+        }.get(code, message)
         return _error_response(exc.status_code, code, message, headers=headers)
 
     @app.exception_handler(Exception)

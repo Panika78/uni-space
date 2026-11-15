@@ -60,3 +60,29 @@ def test_unknown_event_and_request_actor_id_are_rejected():
             )
         with pytest.raises(TypeError, match="actor_user_id"):
             write_audit_event(db, actor_user_id=1)
+
+
+def test_participant_audit_is_typed_sorted_and_copied():
+    source = [{"group_id": 2, "subgroup_id": 4}, {"group_id": 1, "subgroup_id": None}]
+    result = _serialize_snapshot({"participants": source}, _EVENT_FIELDS["lesson", "restore"])
+    source[0]["subgroup_id"] = 99
+    assert result == {
+        "participants": [{"group_id": 1, "subgroup_id": None}, {"group_id": 2, "subgroup_id": 4}]
+    }
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "secret",
+        {"group_id": 1},
+        [{"group_id": True, "subgroup_id": None}],
+        [{"group_id": 1, "subgroup_id": "2"}],
+        [{"group_id": 1, "subgroup_id": 2, "name": "secret"}],
+        [{"group_id": 1, "subgroup_id": None}] * 2,
+    ],
+)
+def test_participant_audit_rejects_arbitrary_nested_data(value):
+    with pytest.raises(ValueError):
+        _serialize_snapshot({"participants": value}, _EVENT_FIELDS["lesson", "update"])

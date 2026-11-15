@@ -82,7 +82,8 @@ except Exception:
 |---|---|---|
 | `assessment_result` | `create`, `update`, `delete` | `assessment_group_id`, `student_id`, `score` |
 | `final_result` | `create`, `update`, `delete` | `course_offering_id`, `student_id`, `grade_value`, `passed`, `retake_date` |
-| `lesson` | `create`, `update`, `cancel`, `move` | `course_offering_id`, `teacher_id`, `starts_at`, `ends_at`, `kind`, `status`, `previous_lesson_id`, `version`, `group_ids`, `room_ids` |
+| `lesson` | `create`, `update`, `cancel`, `move`, `restore` | `course_offering_id`, `teacher_id`, `starts_at`, `ends_at`, `kind`, `status`, `previous_lesson_id`, `version`, `group_ids`, `participants`, `room_ids` |
+| `assessment_group` | `update` | `planned_date`, `lesson_id`, `date_needs_confirmation` |
 | `user` | `create` | `role`, `is_active` |
 | `user` | `set_role` | `role` |
 | `user` | `set_active` | `is_active` |
@@ -158,3 +159,34 @@ API `UPDATE`/`DELETE` аудита или широкие default GRANT. Пред
 Прямой SQL и прямое создание `AuditEvent` обходят writer: безопасность снимков —
 контракт серверного кода, не JSONB-фильтрация в БД. Защиты истории от SQL-администратора,
 триггеров автоматического аудита и криптографической неизменности в MVP2-29 нет.
+
+## Официальный редактор расписания (#74)
+
+`participants` — строго список объектов с ровно двумя полями: положительный целый
+`group_id` и положительный целый либо NULL `subgroup_id`. Снимок сортируется по
+группе и подгруппе (NULL первым); дубликаты, bool, строки вместо ID и дополнительные
+поля запрещены. Объекты копируются. Поэтому смена подгруппы А→Б различима даже при
+неизменном `group_ids`. Произвольные вложенные JSON по-прежнему запрещены.
+
+Операции create/update/cancel/move/restore сохраняют состав участников и аудитории
+в снимках lesson. Перенос пишет move старого занятия и create нового. No-op не
+создаёт события и не меняет version. Для cancel/move каждое фактическое изменение
+флага связанной работы записывается как assessment_group/update с тремя полями
+контракта #71; дата и lesson_id сохраняются. Все события и данные фиксируются
+единственным commit; ошибка любого writer откатывает всю операцию.
+
+Блокировки: сначала актуальная строка lessons, затем дочерние строки NOWAIT;
+#62 уже сохраняет последнюю групповую связь при удалении участников. Миграция
+20261115_04 дополнительно проверяет course_groups при SQL-записи участников и
+запрещает подтверждение отменённой/перенесённой связи работы. Триггеры касаются
+версии строки родителя без изменения значения version, чтобы отвергать устаревший
+REPEATABLE READ snapshot. Обратный порядок блокировок при подтверждении #71
+может дать 55P03; редактор откатывает запрос и возвращает 409 concurrent_change.
+Автоматического повтора с обходом RBAC/version нет.
+
+Production ACL разрешают INSERT аудита и SELECT только id/created_at для RETURNING;
+UPDATE/DELETE аудита и чтение его payload runtime-роли запрещены. Даты/связи работ,
+баллы и посещаемость редактору не предоставляются. UPDATE идентификатора assessments
+и ключа course_groups нужны существующим invoker-триггерам для SELECT FOR SHARE;
+значимые свойства работ не разрешены. Эти GRANT должны сохраняться вместе с
+дополнениями #70/#71 при интеграции.
