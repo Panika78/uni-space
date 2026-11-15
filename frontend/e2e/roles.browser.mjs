@@ -331,7 +331,13 @@ try {
     await page.reload()
     await heading(page, title)
     assert.equal(new URL(page.url()).pathname, path)
-    assert.ok(requests.every((url) => /\/auth\//.test(url)))
+    assert.ok(
+      requests.every(
+        (url) =>
+          /\/auth\//.test(url) ||
+          (name === 'admin' && new URL(url).pathname === '/api/v1/admin/users'),
+      ),
+    )
     for (const width of [360, 1440]) {
       await page.setViewportSize({ width, height: 900 })
       // The reused sidebar has a 180ms width transition across the breakpoint.
@@ -388,7 +394,13 @@ try {
     )
     await page.goto(`${baseURL}/schedule`)
     await page.getByRole('alert').filter({ hasText: 'Доступ запрещён' }).waitFor()
-    assert.ok(requests.every((url) => /\/auth\//.test(url)))
+    assert.ok(
+      requests.every(
+        (url) =>
+          /\/auth\//.test(url) ||
+          (name === 'admin' && new URL(url).pathname === '/api/v1/admin/users'),
+      ),
+    )
     if (name === 'reviewer') {
       await page.goto(`${baseURL}/staff/applications`)
       await heading(page, 'Заявления')

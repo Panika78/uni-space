@@ -562,9 +562,13 @@ with engine.connect() as c:
     for privilege in ('INSERT','UPDATE','DELETE'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'notifications',:privilege)"), {'privilege': privilege}).scalar_one()
     assert not c.execute(text("SELECT has_sequence_privilege(current_user,'notifications_id_seq','USAGE')")).scalar_one()
-    for privilege in ('SELECT','INSERT','UPDATE','DELETE','TRUNCATE'):
+    for privilege in ('SELECT','UPDATE','DELETE','TRUNCATE'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'audit_events',:privilege)"), {'privilege': privilege}).scalar_one()
-    assert not c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'audit_events','INSERT')")).scalar_one()
+    assert c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
+    for column in ('role','password_hash','login','full_name'):
+        assert not c.execute(text("SELECT has_column_privilege(current_user,'users',:column,'UPDATE')"), {'column': column}).scalar_one()
+    assert c.execute(text("SELECT has_column_privilege(current_user,'users','is_active','UPDATE')")).scalar_one()
     for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'news',:privilege)"), {'privilege': privilege}).scalar_one()
     for privilege in ('SELECT','INSERT','UPDATE'):
@@ -594,7 +598,7 @@ with engine.connect() as c:
     for table in ('study_groups','programs','org_units','teachers','disciplines','course_offerings',
                   'buildings','rooms','lessons','lesson_groups','lesson_rooms',
                   'academic_terms','course_groups','assessments','assessment_groups',
-                  'assessment_results','final_results','staff_profiles','staff_permissions','teaching_assignments'):
+                  'assessment_results','final_results','teaching_assignments'):
         for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
             assert not c.execute(text("SELECT has_table_privilege(current_user, :table, :privilege)"),
                                  {'table': table, 'privilege': privilege}).scalar_one()
@@ -620,9 +624,8 @@ for statement in (
     "INSERT INTO notifications (user_id,type,title,body) VALUES (1,'forbidden','forbidden','forbidden')",
     "UPDATE notifications SET title='forbidden'", "DELETE FROM notifications",
     "SELECT nextval('public.notifications_id_seq')",
-    "INSERT INTO audit_events (entity_type,entity_id,action) VALUES ('user',1,'set_active')",
     "UPDATE audit_events SET reason='correction'", "DELETE FROM audit_events",
-    "SELECT * FROM audit_events", "SELECT nextval('public.audit_events_id_seq')",
+    "SELECT * FROM audit_events",
     "SELECT nextval('public.org_units_id_seq')", "SELECT nextval('public.programs_id_seq')",
     "UPDATE lessons SET status='cancelled'", "DELETE FROM lesson_groups",
     "INSERT INTO assessments (course_offering_id,title,type,max_score) VALUES (1,'forbidden','test',10)",
@@ -631,13 +634,8 @@ for statement in (
     "INSERT INTO assessment_results (assessment_group_id,student_id,score,graded_at) SELECT assessment_group_id,student_id,score,graded_at FROM assessment_results LIMIT 1",
     "UPDATE final_results SET grade_value=5", "SELECT nextval('public.final_results_id_seq')",
     "SELECT nextval('public.lessons_id_seq')",
-    "SELECT nextval('public.users_id_seq')",
-    "INSERT INTO staff_profiles (user_id,org_unit_id) VALUES (1,1)",
-    "UPDATE staff_profiles SET org_unit_id=1", "DELETE FROM staff_profiles",
-    "INSERT INTO staff_permissions (staff_profile_id,permission_code) VALUES (1,'grades.edit')",
-    "UPDATE staff_permissions SET permission_code='grades.edit'", "DELETE FROM staff_permissions",
-    "SELECT nextval('public.staff_profiles_id_seq')",
-    "SELECT nextval('public.staff_permissions_id_seq')",
+    "UPDATE staff_profiles SET user_id=1", "DELETE FROM staff_profiles",
+    "UPDATE staff_permissions SET permission_code='grades.edit'",
     "SELECT setval('public.auth_sessions_id_seq', 9999)",
 ):
     try:

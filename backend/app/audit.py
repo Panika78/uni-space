@@ -7,6 +7,7 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.models import AuditEvent, User
+from app.permissions import PermissionCode
 
 
 def _integer(value: object) -> int:
@@ -75,6 +76,22 @@ _EVENT_FIELDS = {
     **{("assessment_result", action): _SCORE_FIELDS for action in ("create", "update", "delete")},
     **{("final_result", action): _FINAL_FIELDS for action in ("create", "update", "delete")},
     **{("lesson", action): _LESSON_FIELDS for action in ("create", "update", "cancel", "move")},
+    ("student", "create"): {
+        "user_id": _integer,
+        "group_id": _integer,
+        "academic_status": _choice("enrolled"),
+    },
+    ("teacher", "link_user"): {"user_id": _integer},
+    ("staff_profile", "create"): {"user_id": _integer, "org_unit_id": _integer},
+    ("staff_profile", "set_org_unit"): {"org_unit_id": _integer},
+    **{
+        ("staff_permission", action): {
+            "staff_profile_id": _integer,
+            "permission_code": _choice(*(code.value for code in PermissionCode)),
+            "scope_org_unit_id": _integer,
+        }
+        for action in ("create", "delete")
+    },
     ("user", "create"): {"role": _ROLE, "is_active": _boolean},
     ("user", "set_role"): {"role": _ROLE},
     ("user", "set_active"): {"is_active": _boolean},

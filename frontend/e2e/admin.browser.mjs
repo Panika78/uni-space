@@ -1,0 +1,215 @@
+/* global process, console, window, document */
+import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
+execFileSync(
+  'uv',
+  [
+    'run',
+    '--locked',
+    '--python',
+    '3.12.16',
+    '--project',
+    'backend',
+    'python',
+    'frontend/e2e/admin-fixtures.py',
+  ],
+  { env: { ...process.env, PYTHONPATH: 'backend' }, stdio: 'pipe' },
+)
+const browser = await chromium.launch({
+  headless: true,
+  executablePath: process.env.CHROMIUM_PATH || undefined,
+  args: ['--no-sandbox'],
+})
+const base = process.env.ADMIN_TEST_URL || 'http://localhost:5173'
+const suffix = Date.now().toString()
+try {
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  page.on('dialog', (dialog) => dialog.accept())
+  let authorization
+  page.on('request', (request) => {
+    if (request.url().includes('/api/v1/'))
+      authorization = request.headers().authorization || authorization
+  })
+  await page.goto(base + '/login')
+  await page.getByLabel('Логин', { exact: true }).fill('admin-browser-operator')
+  await page.getByLabel('Пароль', { exact: true }).fill('Fictional-Admin-Browser-2026')
+  await page.getByRole('button', { name: 'Войти', exact: true }).click()
+  await page.getByRole('heading', { name: 'Пользователи', exact: true }).waitFor()
+  const checkWidth = async () =>
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+      false,
+    )
+  let staffId, staffPassword
+  for (const width of [1440, 360]) {
+    await page.setViewportSize({ width, height: 900 })
+    await checkWidth()
+    for (const role of ['student', 'teacher', 'staff', 'admin']) {
+      await page.getByRole('link', { name: 'Создать пользователя' }).click()
+      await page.getByLabel('Логин', { exact: true }).fill(`browser-${role}-${width}-${suffix}`)
+      await page.getByLabel('ФИО', { exact: true }).fill('Вымышленный пользователь')
+      await page.getByLabel('Роль', { exact: true }).selectOption(role)
+      if (role !== 'admin') {
+        const name =
+          role === 'student'
+            ? 'Admin Browser Group'
+            : role === 'teacher'
+              ? 'Admin Browser Free Teacher'
+              : 'Admin Browser Dean'
+        await page.getByLabel('Поиск в справочнике').fill(name)
+        const select = page.locator('fieldset select')
+        await select
+          .locator('option')
+          .filter({ hasText: name })
+          .first()
+          .waitFor({ state: 'attached' })
+        const value = await select
+          .locator('option')
+          .filter({ hasText: name })
+          .first()
+          .getAttribute('value')
+        await select.selectOption(value)
+      }
+      await page.getByRole('button', { name: 'Создать', exact: true }).click()
+      await page.getByRole('heading', { name: 'Пользователь создан', exact: true }).waitFor()
+      const secret = await page.locator('.admin-secret').textContent()
+      assert.ok(secret.length >= 32)
+      assert.equal(
+        await page
+          .getByRole('heading', { name: 'Пользователь создан' })
+          .evaluate((el) => el === document.activeElement),
+        true,
+      )
+      await checkWidth()
+      const href = await page
+        .getByRole('link', { name: 'Открыть учётную запись' })
+        .getAttribute('href')
+      await page.getByRole('link', { name: 'Открыть учётную запись' }).click()
+      await page.getByRole('button', { name: 'Заблокировать', exact: true }).waitFor()
+      assert.equal(await page.getByText(secret, { exact: true }).count(), 0)
+      await checkWidth()
+      if (role === 'staff') {
+        staffId = href.split('/').at(-1)
+        staffPassword = secret
+        await page.getByLabel('Разрешение', { exact: true }).selectOption('grades.edit')
+        await page.getByRole('button', { name: 'Выдать разрешение' }).click()
+        await page.getByRole('button', { name: 'Отозвать grades.edit' }).waitFor()
+        await page.getByRole('button', { name: 'Отозвать grades.edit' }).click()
+        await page.getByText('Разрешений нет.', { exact: true }).waitFor()
+        await page.getByRole('button', { name: 'Выдать разрешение' }).click()
+        await page.getByRole('button', { name: 'Отозвать grades.edit' }).waitFor()
+        const field = page.getByRole('group', { name: 'Подразделение', exact: true })
+        await field.getByLabel('Поиск в справочнике').fill('Admin Browser Accounting')
+        await field
+          .locator('option')
+          .filter({ hasText: 'Admin Browser Accounting' })
+          .waitFor({ state: 'attached' })
+        await field
+          .locator('select')
+          .selectOption(
+            await field
+              .locator('option')
+              .filter({ hasText: 'Admin Browser Accounting' })
+              .getAttribute('value'),
+          )
+        await page.getByRole('button', { name: 'Сменить подразделение и отозвать права' }).click()
+        await page.getByText('Разрешений нет.', { exact: true }).waitFor()
+        await page.getByRole('button', { name: 'Выдать разрешение' }).click()
+        await page.getByRole('alert').filter({ hasText: 'Проверьте профиль' }).waitFor()
+      }
+      await page.getByRole('button', { name: 'Заблокировать', exact: true }).click()
+      await page.getByRole('button', { name: 'Разблокировать', exact: true }).waitFor()
+      await page.getByRole('button', { name: 'Разблокировать', exact: true }).click()
+      await page.getByRole('button', { name: 'Заблокировать', exact: true }).waitFor()
+      await page.getByRole('link', { name: 'К списку пользователей' }).click()
+    }
+  }
+  // Commit through the real API, then deliberately lose only the HTTP response.
+  let creates = 0
+  await page.route('**/api/v1/admin/users', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue()
+    creates++
+    await route.fetch()
+    await route.abort('failed')
+  })
+  await page.getByRole('link', { name: 'Создать пользователя' }).click()
+  await page.getByLabel('Логин', { exact: true }).fill(`lost-${suffix}`)
+  await page.getByLabel('ФИО', { exact: true }).fill('Вымышленный')
+  await page.getByLabel('Роль', { exact: true }).selectOption('admin')
+  await page.getByRole('button', { name: 'Создать', exact: true }).click()
+  await page.getByRole('link', { name: 'Проверить список по логину' }).click()
+  await page.getByRole('link', { name: new RegExp(`lost-${suffix}`) }).waitFor()
+  assert.equal(creates, 1)
+  await page.unroute('**/api/v1/admin/users')
+  // Independent browser session loses permissions and tokens immediately.
+  const staffContext = await browser.newContext()
+  const staffPage = await staffContext.newPage()
+  await staffPage.goto(base + '/login')
+  await staffPage.getByLabel('Логин', { exact: true }).fill(`browser-staff-360-${suffix}`)
+  await staffPage.getByLabel('Пароль', { exact: true }).fill(staffPassword)
+  await staffPage.getByRole('button', { name: 'Войти', exact: true }).click()
+  await staffPage.getByRole('heading', { name: 'Нет доступных разделов', exact: true }).waitFor()
+  await page.goto(base + `/admin/users/${staffId}`)
+  await page.getByLabel('Разрешение', { exact: true }).selectOption('applications.review')
+  await page.getByRole('button', { name: 'Выдать разрешение' }).click()
+  await page.getByRole('button', { name: 'Отозвать applications.review' }).waitFor()
+  await staffPage.reload()
+  await staffPage.getByRole('link', { name: 'Заявления', exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Отозвать applications.review' }).click()
+  await page.getByText('Разрешений нет.', { exact: true }).waitFor()
+  await staffPage.reload()
+  await staffPage.getByRole('heading', { name: 'Нет доступных разделов', exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Заблокировать', exact: true }).click()
+  await page.getByRole('button', { name: 'Разблокировать', exact: true }).waitFor()
+  await staffPage.reload()
+  await staffPage.getByRole('heading', { name: 'Вход в систему', exact: true }).waitFor()
+  await page.goto(base + '/admin/users')
+  await page.getByLabel('Логин или ФИО').fill('browser-')
+  await page.getByRole('button', { name: 'Найти', exact: true }).focus()
+  await page.keyboard.press('Enter')
+  await page
+    .getByRole('link', { name: new RegExp('browser-') })
+    .first()
+    .waitFor()
+  await checkWidth()
+  // Real keyset pagination, using only fictional accounts in the isolated fixture DB.
+  for (let i = 0; i < 21; i++) {
+    const response = await context.request.post(base + '/api/v1/admin/users', {
+      headers: { Authorization: authorization },
+      data: { login: `pagination-${suffix}-${i}`, full_name: 'Вымышленный', role: 'admin' },
+    })
+    assert.equal(response.status(), 201)
+  }
+  await page.getByLabel('Логин или ФИО').fill(`pagination-${suffix}`)
+  await page.getByRole('button', { name: 'Найти', exact: true }).click()
+  await page.getByRole('button', { name: 'Следующая страница', exact: true }).click()
+  await page.getByRole('link', { name: new RegExp(`pagination-${suffix}-20`) }).waitFor()
+  await page.getByRole('button', { name: 'Начало списка', exact: true }).click()
+  await page.getByRole('button', { name: 'Следующая страница', exact: true }).waitFor()
+  await page.getByRole('link', { name: new RegExp(`pagination-${suffix}-0$`) }).click()
+  await page.getByRole('button', { name: 'Заблокировать', exact: true }).waitFor()
+  await page.goBack()
+  await page.getByRole('heading', { name: 'Пользователи', exact: true }).waitFor()
+  await page.getByLabel('Логин или ФИО').fill(`absent-${suffix}`)
+  await page.getByRole('button', { name: 'Найти', exact: true }).click()
+  await page.getByText('Пользователи не найдены.', { exact: true }).waitFor()
+  // Supplementary read failure; creation and all writes above use the real backend.
+  await page.route('**/api/v1/admin/users?**', (route) =>
+    route.fulfill({
+      status: 403,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'forbidden', message: 'Forbidden', details: [] } }),
+    }),
+  )
+  await page.reload()
+  await page.getByRole('alert').filter({ hasText: 'Доступ запрещён' }).waitFor()
+  await checkWidth()
+  await page.unroute('**/api/v1/admin/users?**')
+  console.log(
+    'PASS admin: all roles, one-time password, lost committed response, activity, grants, department, independent session, keyboard and 360/1440px',
+  )
+} finally {
+  await browser.close()
+}

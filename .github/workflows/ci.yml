@@ -684,6 +684,7 @@ jobs:
             sleep 1
           done
           PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs node frontend/e2e/roles.browser.mjs
+          PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs node frontend/e2e/admin.browser.mjs
       - name: Upload role shell screenshots
         if: always()
         uses: actions/upload-artifact@v4

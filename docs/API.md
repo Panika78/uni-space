@@ -501,3 +501,39 @@ PATCH принимает ровно одно обязательное поле `
 возвращают стандартный `422 validation_error`; недействующая сессия — `401`.
 Пути для чтения или изменения предпочтений другого пользователя нет.
 Ответы используют общий `Cache-Control: no-store`. Контракт расписания не меняется.
+
+### MVP2-25: администрирование пользователей
+
+Все `/api/v1/admin/*` требуют действующую сессию и актуальную роль `admin`;
+остальные роли получают 403 до поиска объекта. Несуществующий объект — 404.
+ID — положительные BIGINT-строки. Неизвестные поля тела/параметров списка запрещены.
+Ответы `Cache-Control: no-store`. Публичного bootstrap/reset/set_role endpoint нет.
+
+| Метод и путь | Вход / результат |
+|---|---|
+| GET `/admin/users` | `q` (логин/ФИО, буквальный регистронезависимый поиск), `limit=20` (1–100), `after_id`; `{items,next_after_id}` в порядке ID |
+| GET `/admin/lookups` | `kind=groups|teachers|org_units`, `q`, `limit`, `after_id`; ограниченный список вариантов профиля, teachers только свободные |
+| GET `/admin/users/{id}` | логин, ФИО, роль, активность, ID профиля/группы/подразделения, permissions; никаких секретов |
+| POST `/admin/users` | `login`, `full_name`, `role`, ровно соответствующий роли `group_id` / `teacher_id` / `org_unit_id`; admin без профиля. 201 `{user,initial_password}` |
+| PUT `/admin/users/{id}/active` | `{is_active:boolean}`; блокировка отзывает все сессии/refresh, разблокировка требует нового входа |
+| PUT `/admin/users/{id}/department` | `{org_unit_id}`; все прежние grants удаляются атомарно |
+| PUT / DELETE `/admin/users/{id}/permissions` | `{permission_code,scope_org_unit_id}`; grant/revoke отдельного разрешения, результат — деталь пользователя |
+
+Для teacher имя берётся из выбранной свободной записи; существующие назначения
+не меняются. Student создаётся с `academic_status=enrolled`, без подгруппы.
+Staff создаётся без разрешений. Роль, логин и пароль существующего аккаунта
+через этот API не меняются. Учебные PermissionCode допустимы только у деканата
+с NULL scope; `applications.review` / `news.publish` — со scope своего подразделения.
+
+409: `login_exists`, `teacher_unavailable`, `self_block_forbidden`, `last_admin`,
+`conflict` (конфликт ограничений). 422: `invalid_profile`,
+`invalid_permission_scope`, `validation_error`. No-op не создаёт аудит.
+Создание аккаунта/профиля, grants, перевод, отзыв сессий и аудит атомарны.
+
+`initial_password` генерирует сервер (192 случайных бита), хранится только Argon2id.
+Он возвращается только в одном успешном POST-ответе, не восстанавливается через GET.
+UI не помещает его в query cache/storage/history и удаляет при закрытии/уходе.
+При потерянном/неразбираемом ответе или 5xx после отправки POST повтор не выполняется:
+проверить список по уникальному логину. Неизвестный пароль нельзя восстановить
+до #66. Полученный 401 `access_expired` допускает существующий auth-refresh/replay:
+это явный отказ до предметной операции, не потерянный ответ после COMMIT.
