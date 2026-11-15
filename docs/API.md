@@ -166,7 +166,7 @@ type AcademicsResponse = {
 ```ts
 type Service = {
   id: Id;
-  code: "study_certificate";
+  code: string; // создание MVP1 по-прежнему принимает только study_certificate
   title: string;
 };
 
@@ -179,6 +179,7 @@ type CreateApplicationRequest = {
 
 type Application = {
   id: Id;
+  version: number; // версия для изменяющих запросов MVP2
   service: Service;
   form_data: { place_of_submission: string };
   review_status:
@@ -324,3 +325,166 @@ type AuthorizationContext = {
 действуют при следующем запросе со старым JWT. Ошибки 401/422/500 используют
 общий `ApiError`. UI не может использовать этот ответ вместо серверной проверки.
 `GET /users/me` и login/refresh/logout сохраняют прежние контракты.
+
+## MVP2-03: защищённое чтение преподавательского журнала
+
+Все маршруты ниже — `GET /api/v1/teaching`, Bearer обязателен. Источник
+scope — только `teaching_assignments` через `teachers.user_id` действующего
+аккаунта с ролью `teacher`. Назначения проверяются в БД на каждом запросе;
+отзыв действует со следующим запросом, включая ранее выданный JWT.
+`lessons.teacher_id`, факультет, кафедра и staff permissions scope не расширяют.
+
+Базовый путь журнала `J = /courses/{course_offering_id}/groups/{group_id}`:
+
+| Путь после `/teaching` | Ответ | Дополнительные фильтры |
+|---|---|---|
+| `/assignments` | `Page<TeachingAssignmentResponse>` | `course_offering_id`, `group_id`, `term_id` |
+| `J/students` | `Page<JournalStudent>` | `student_id` |
+| `J/assessments` | `Page<JournalAssessment>` | `assessment_group_id` |
+| `J/assessments/{assessment_group_id}/results` | `Page<JournalResult>` | `student_id` |
+| `J/lessons` | `Page<JournalLesson>` | `lesson_id`, `starts_from`, `starts_before`, `status` |
+| `J/lessons/{lesson_id}/students` | `Page<JournalStudent>` | `student_id` |
+
+Все списки принимают `limit=20` (1–100), непрозрачный `cursor` и возвращают
+`items`, `next_cursor` без общего количества. Назначения и работы сортируются
+по числовому `id ASC`; студенты и результаты — по русскому алфавиту
+`А … Е, Ё, Ж … Я` без учёта регистра, затем по числовому `student_id ASC`
+при совпадающих нормализованных ФИО; занятия — по `starts_at ASC,
+id ASC`. Пагинация keyset, SQL ограничен `limit + 1`, scope и фильтры применяются
+до пагинации. Курсор следует использовать с тем же маршрутом и фильтрами;
+перенос курсора не предоставляет доступ к другим данным. Интервал занятий —
+`starts_from <= starts_at < starts_before`, ISO 8601 с часовым поясом; обе
+границы необязательны, при одновременной передаче правая должна быть больше.
+`status`: `scheduled`, `cancelled`, `moved`; по умолчанию видны все статусы.
+Неизвестные параметры, неверные ID/курсор/интервал дают `422 validation_error`.
+Teaching ID в path и фильтрах — каноническая десятичная строка в диапазоне
+`1..9223372036854775807`, без знака и ведущих нулей, не длиннее 19 символов.
+Проверка выполняется до SQL, включая запросы авторизации; общий `Id` и MVP1
+не меняются.
+
+Ключ ФИО формируется в SQL встроенным `translate`: оба регистра 33 русских
+букв отображаются в последовательные Unicode-ранги с отдельной позицией Ё;
+латинские A–Z приводятся к a–z, остальные символы сохраняют кодовые точки.
+`COLLATE "C"` применяется к этому ключу, а не к исходному ФИО. SQL ORDER BY,
+keyset-граница, курсор и Python-проверка порядка используют один и тот же
+ключ и `student_id`. Зависимости от ICU или установленной русской локали нет;
+требуется штатная UTF-8 БД. Курсоры ФИО имеют префикс ключа `ru-v1:`;
+курсоры прежнего технического порядка возвращают 422 — клиент начинает
+выборку заново. Поля ответов и формат общего Page не меняются.
+
+Схемы полей и nullable-значения определены в OpenAPI (`backend/openapi.json`),
+клиентские типы генерируются в `frontend/src/shared/api/schema.ts`:
+
+- Назначение содержит `id`, `course_offering_id`, `discipline`, `term`, `group`
+  (последние три — `Ref`) и `attestation_type`.
+- Студент: `id`, `full_name`, `subgroup_id`, `academic_status`. Roster включает
+  всех текущих студентов `students.group_id`, без фильтра по академическому
+  статусу. Контактные данные и идентификатор аккаунта не выдаются.
+- Работа: `id` **равен `assessment_groups.id`**, отдельно `assessment_id`,
+  `title`, `type`, `description`, `max_score`, `planned_date`, `lesson_id`,
+  `date_needs_confirmation`. Выдаются существующие заранее утверждённые работы;
+  связь с парой подгруппы не ограничивает список результатов.
+- Результаты: текущий roster плюс студенты с сохранённым результатом этой
+  работы после перевода, без дубликатов; `student_id`, `full_name`, `result_id`,
+  `score`, `graded_at`, `is_current_group_member`. Отсутствующий результат —
+  `result_id/score/graded_at=null`; выставленный `score=0` остаётся нулём.
+  Результаты других назначений работ и текущая группа переведённого студента
+  не раскрываются. Отдельного исторического roster нет.
+- Занятие: `id`, `starts_at`, `ends_at`, `kind`, `status`, `is_additional`,
+  `version`. Список дедуплицирован через `EXISTS lesson_groups`. Не выдаёт
+  остальные группы совместной пары, ссылки на переносы или чужие журналы.
+  Участники — текущие студенты выбранной группы, соответствующие её назначениям
+  `lesson_groups`: вся группа либо объединение формальных подгрупп по #62.
+  Студент без подгруппы участвует только в занятии всей группы.
+
+Ошибки используют общий `ApiError`: `401 invalid_access/session_invalid` при
+отсутствующей/недействительной сессии или неактивном аккаунте; `403 forbidden`
+для другой роли либо отсутствующего teacher profile; `404 not_found` для
+неназначенной пары и отсутствующего/чужого вложенного объекта. Учитель без
+назначений получает пустой `/assignments`, прямой журнал — `404`.
+Чужие ID в фильтрах дают пустую выборку; не раскрываются число записей и курсоры
+чужих данных. Ответы имеют `Cache-Control: no-store`.
+
+Для #69/#70/#71/#72/#80 использовать эти идентификаторы и общий
+`require_teaching_assignment`; новые write-сценарии должны дополнительно
+проверять свою предметную целостность и использовать аудит #87. Этот контракт
+не предоставляет права записи, не создаёт attendance и не меняет расчёт MVP1.
+## Workflow заявлений MVP2-15
+
+Маршруты относительно `/api/v1`; все требуют Bearer. Студенческие маршруты
+MVP1 сохранены, в ответы создания/списка/деталей добавлено обязательное `version`.
+Создание нового заявления по-прежнему не требует `expected_version` и создаёт
+реальное событие `null → submitted` вместе с заявлением. Для существовавших
+заявлений история начинается с первого реального действия после обновления.
+
+| Метод | Путь | Вход | Ответ 200 |
+|---|---|---|---|
+| GET | `/staff/applications` | `limit`, `cursor` | `Page<StaffApplicationResponse>` |
+| GET | `/staff/applications/{id}` | ID | `StaffApplicationResponse` |
+| POST | `/staff/applications/{id}/review` | `ReviewApplicationRequest` | `StaffApplicationResponse` |
+| GET | `/staff/applications/{id}/history` | `limit`, `cursor` | `Page<ApplicationHistoryEvent>` |
+| POST | `/applications/{id}/resubmit` | `ResubmitApplicationRequest` | `Application` |
+| GET | `/applications/{id}/history` | `limit`, `cursor` | `Page<ApplicationHistoryEvent>` |
+
+`StaffApplicationResponse` расширяет `Application` полями `student_id: Id` и
+`reviewer_user_id: Id | null`. Список заявлений сортируется по `(created_at, id)`
+убывающе, история — по `(created_at, id)` возрастающе; пагинация SQL/cursor,
+по умолчанию 20, максимум 100. Неизвестные/повторные query-параметры запрещены.
+
+```ts
+type ReviewApplicationRequest = {
+  expected_version: number; // строго целое 1..2147483647
+  action: "start_review" | "approve" | "reject" | "return_for_correction";
+  comment?: string | null; // trim, 1..3000 символов; обязательна причина двух отказных действий
+};
+type ResubmitApplicationRequest = {
+  expected_version: number;
+  form_data: { place_of_submission: string }; // действующий строгий контракт формы
+};
+type ApplicationHistoryEvent = {
+  id: Id;
+  actor_user_id: Id | null;
+  from_status: Application["review_status"] | null;
+  to_status: Application["review_status"];
+  comment: string | null;
+  created_at: DateTime;
+};
+```
+
+Допустимые ручные переходы: `start_review` — `submitted/resubmitted → in_review`,
+затем `approve/reject/return_for_correction` — соответственно
+`approved/rejected/needs_correction`. Студент-владелец может атомарно отправить
+исправленную форму только из `needs_correction → resubmitted` с прежним ID.
+Неизвестные поля формы запрещены. В production пока поддерживается только форма
+`study_certificate`; новые формы и ручные услуги добавляет #67 вместе с расширением
+схем запросов/ответов и `APPLICATION_FORMS`. Тестовые ручные услуги не входят в seed.
+
+`reviewer_user_id` берётся из авторизации при рассмотрении/решении; сотрудники
+одного разрешённого подразделения могут продолжить рассмотрение друг друга.
+Повторная отправка сбрасывает назначение и текущий `feedback`, сохраняя причину
+в истории. Решение, форма, версия, `updated_at` и событие фиксируются одной
+транзакцией. Устаревшая версия — `409 version_conflict`; недопустимое действие,
+автоматическая услуга или выданный документ — `409 invalid_transition`.
+В обоих случаях история/форма/поля решения не меняются. Клиент перечитывает
+состояние; автоматический повтор изменения с новой версией недопустим.
+
+Без авторизации — `401`, без действующего `applications.review` — `403`;
+чужой/несуществующий ID — одинаковый `404`. Сотрудник ограничен эффективной
+областью #60: назначенное подразделение приоритетнее ответственного подразделения
+услуги; отсутствие обоих закрывает доступ. Студент видит только собственные
+заявления/историю. Условный UPDATE также проверяет владельца (ресабмит) либо
+эффективное подразделение в разрешённых сервером областях (рассмотрение).
+Конкурентная потеря доступа к объекту возвращает `404`, в том числе если одновременно
+изменилась версия; если после неуспешного UPDATE объект остаётся доступен —
+`409 version_conflict`. История и бизнес-поля при отказе не изменяются.
+Это не сериализует одновременный отзыв разрешения в `staff_permissions`:
+отзыв права/смена подразделения сотрудника действуют на следующий запрос.
+Ошибки формы, причины и версии — `422 validation_error`. Общая форма — `ApiError`.
+
+`approved/rejected` терминальны. `document_status` workflow не изменяет, PDF,
+вложения и уведомления не запускает. Автоматическая `study_certificate` остаётся
+`submitted/pending` до отдельной реализации #67/#83; ручное одобрение для неё
+запрещено. Академический статус студента не меняется при одобрении заявления.
+#75 должен включать изменение вложений в ту же версию заявления; #83 сохраняет
+отдельную транзакцию генерации и её проверки; #84/#85 используют эти API, текущую
+версию и обработку 409, без выбора серверного актора/подразделения клиентом.

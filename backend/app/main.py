@@ -22,6 +22,7 @@ from app.notifications import router as notifications_router
 from app.permissions import router as permissions_router
 from app.schedule.router import router as schedule_router
 from app.students import router as students_router
+from app.teaching.router import router as teaching_router
 
 settings = get_settings()
 
@@ -42,6 +43,7 @@ app.include_router(notifications_router)
 app.include_router(schedule_router)
 app.include_router(students_router)
 app.include_router(news_router)
+app.include_router(teaching_router)
 
 
 def create_openapi_schema(application: FastAPI) -> dict:

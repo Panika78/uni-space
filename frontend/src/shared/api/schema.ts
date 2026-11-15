@@ -56,6 +56,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/applications/{id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Student Application History */
+        get: operations["list_student_application_history_api_v1_applications__id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/applications/{id}/resubmit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resubmit Application */
+        post: operations["resubmit_application_api_v1_applications__id__resubmit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/context": {
         parameters: {
             query?: never;
@@ -212,6 +246,176 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/staff/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Staff Applications */
+        get: operations["list_staff_applications_api_v1_staff_applications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/staff/applications/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Staff Application */
+        get: operations["get_staff_application_api_v1_staff_applications__id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/staff/applications/{id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Staff Application History */
+        get: operations["list_staff_application_history_api_v1_staff_applications__id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/staff/applications/{id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Review Application */
+        post: operations["review_application_api_v1_staff_applications__id__review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teaching/assignments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Teaching Assignments */
+        get: operations["list_teaching_assignments_api_v1_teaching_assignments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/assessments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Journal Assessments */
+        get: operations["list_journal_assessments_api_v1_teaching_courses__course_offering_id__groups__group_id__assessments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/assessments/{assessment_group_id}/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Journal Results */
+        get: operations["list_journal_results_api_v1_teaching_courses__course_offering_id__groups__group_id__assessments__assessment_group_id__results_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/lessons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Journal Lessons */
+        get: operations["list_journal_lessons_api_v1_teaching_courses__course_offering_id__groups__group_id__lessons_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/lessons/{lesson_id}/students": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Lesson Students */
+        get: operations["list_lesson_students_api_v1_teaching_courses__course_offering_id__groups__group_id__lessons__lesson_id__students_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/students": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Journal Students */
+        get: operations["list_journal_students_api_v1_teaching_courses__course_offering_id__groups__group_id__students_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/me": {
         parameters: {
             query?: never;
@@ -285,6 +489,34 @@ export interface components {
             /** Place Of Submission */
             place_of_submission: string;
         };
+        /** ApplicationHistoryEvent */
+        ApplicationHistoryEvent: {
+            /** Actor User Id */
+            actor_user_id: string | null;
+            /** Comment */
+            comment: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** From Status */
+            from_status: ("submitted" | "in_review" | "needs_correction" | "resubmitted" | "approved" | "rejected") | null;
+            /** Id */
+            id: string;
+            /**
+             * To Status
+             * @enum {string}
+             */
+            to_status: "submitted" | "in_review" | "needs_correction" | "resubmitted" | "approved" | "rejected";
+        };
+        /** ApplicationHistoryPage */
+        ApplicationHistoryPage: {
+            /** Items */
+            items: components["schemas"]["ApplicationHistoryEvent"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
         /** ApplicationPage */
         ApplicationPage: {
             /** Items */
@@ -320,6 +552,8 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Version */
+            version: number;
         };
         /** AuthorizationContext */
         AuthorizationContext: {
@@ -397,6 +631,88 @@ export interface components {
             retake_location: string | null;
         };
         Id: string;
+        /** JournalAssessment */
+        JournalAssessment: {
+            /** Assessment Id */
+            assessment_id: string;
+            /** Date Needs Confirmation */
+            date_needs_confirmation: boolean;
+            /** Description */
+            description: string | null;
+            /**
+             * Id
+             * @description assessment_groups.id; group-specific work identity
+             */
+            id: string;
+            /** Lesson Id */
+            lesson_id: string | null;
+            /** Max Score */
+            max_score: number;
+            /** Planned Date */
+            planned_date: string | null;
+            /** Title */
+            title: string;
+            /** Type */
+            type: string;
+        };
+        /** JournalLesson */
+        JournalLesson: {
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /** Id */
+            id: string;
+            /** Is Additional */
+            is_additional: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "lecture" | "seminar" | "lab" | "other";
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "scheduled" | "cancelled" | "moved";
+            /** Version */
+            version: number;
+        };
+        /** JournalResult */
+        JournalResult: {
+            /** Full Name */
+            full_name: string;
+            /** Graded At */
+            graded_at: string | null;
+            /** Is Current Group Member */
+            is_current_group_member: boolean;
+            /** Result Id */
+            result_id: string | null;
+            /** Score */
+            score: number | null;
+            /** Student Id */
+            student_id: string;
+        };
+        /** JournalStudent */
+        JournalStudent: {
+            /**
+             * Academic Status
+             * @enum {string}
+             */
+            academic_status: "enrolled" | "academic_leave" | "expelled" | "graduated";
+            /** Full Name */
+            full_name: string;
+            /** Id */
+            id: string;
+            /** Subgroup Id */
+            subgroup_id: string | null;
+        };
         /** LessonPosition */
         LessonPosition: {
             /**
@@ -524,10 +840,45 @@ export interface components {
             /** Next Cursor */
             next_cursor: string | null;
         };
+        /** Page[JournalAssessment] */
+        Page_JournalAssessment_: {
+            /** Items */
+            items: components["schemas"]["JournalAssessment"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** Page[JournalLesson] */
+        Page_JournalLesson_: {
+            /** Items */
+            items: components["schemas"]["JournalLesson"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** Page[JournalResult] */
+        Page_JournalResult_: {
+            /** Items */
+            items: components["schemas"]["JournalResult"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** Page[JournalStudent] */
+        Page_JournalStudent_: {
+            /** Items */
+            items: components["schemas"]["JournalStudent"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
         /** Page[NewsPreview] */
         Page_NewsPreview_: {
             /** Items */
             items: components["schemas"]["NewsPreview"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** Page[TeachingAssignmentResponse] */
+        Page_TeachingAssignmentResponse_: {
+            /** Items */
+            items: components["schemas"]["TeachingAssignmentResponse"][];
             /** Next Cursor */
             next_cursor: string | null;
         };
@@ -565,6 +916,24 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** ResubmitApplicationRequest */
+        ResubmitApplicationRequest: {
+            /** Expected Version */
+            expected_version: number;
+            form_data: components["schemas"]["ApplicationFormData"];
+        };
+        /** ReviewApplicationRequest */
+        ReviewApplicationRequest: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "start_review" | "approve" | "reject" | "return_for_correction";
+            /** Comment */
+            comment?: string | null;
+            /** Expected Version */
+            expected_version: number;
+        };
         /** RoomRef */
         RoomRef: {
             building: components["schemas"]["Ref"];
@@ -595,11 +964,8 @@ export interface components {
         };
         /** Service */
         Service: {
-            /**
-             * Code
-             * @constant
-             */
-            code: "study_certificate";
+            /** Code */
+            code: string;
             /** Id */
             id: string;
             /** Title */
@@ -609,6 +975,48 @@ export interface components {
         ServiceList: {
             /** Items */
             items: components["schemas"]["Service"][];
+        };
+        /** StaffApplicationPage */
+        StaffApplicationPage: {
+            /** Items */
+            items: components["schemas"]["StaffApplicationResponse"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** StaffApplicationResponse */
+        StaffApplicationResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Document Status
+             * @enum {string}
+             */
+            document_status: "not_required" | "pending" | "ready" | "failed";
+            /** Feedback */
+            feedback: string | null;
+            form_data: components["schemas"]["ApplicationFormData"];
+            /** Id */
+            id: string;
+            /**
+             * Review Status
+             * @enum {string}
+             */
+            review_status: "submitted" | "in_review" | "needs_correction" | "resubmitted" | "approved" | "rejected";
+            /** Reviewer User Id */
+            reviewer_user_id: string | null;
+            service: components["schemas"]["Service"];
+            /** Student Id */
+            student_id: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
         };
         /** StudentProfile */
         StudentProfile: {
@@ -631,6 +1039,21 @@ export interface components {
             program: components["schemas"]["ProgramRef"];
             /** Student Id */
             student_id: string;
+        };
+        /** TeachingAssignmentResponse */
+        TeachingAssignmentResponse: {
+            /**
+             * Attestation Type
+             * @enum {string}
+             */
+            attestation_type: "exam" | "pass_fail" | "graded_pass";
+            /** Course Offering Id */
+            course_offering_id: string;
+            discipline: components["schemas"]["Ref"];
+            group: components["schemas"]["Ref"];
+            /** Id */
+            id: string;
+            term: components["schemas"]["Ref"];
         };
         /** TokenResponse */
         TokenResponse: {
@@ -851,6 +1274,147 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_student_application_history_api_v1_applications__id__history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationHistoryPage"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    resubmit_application_api_v1_applications__id__resubmit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResubmitApplicationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1420,6 +1984,718 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_staff_applications_api_v1_staff_applications_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffApplicationPage"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    get_staff_application_api_v1_staff_applications__id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffApplicationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_staff_application_history_api_v1_staff_applications__id__history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationHistoryPage"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    review_application_api_v1_staff_applications__id__review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewApplicationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffApplicationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_teaching_assignments_api_v1_teaching_assignments_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                course_offering_id?: string | null;
+                group_id?: string | null;
+                term_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_TeachingAssignmentResponse_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_journal_assessments_api_v1_teaching_courses__course_offering_id__groups__group_id__assessments_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                assessment_group_id?: string | null;
+            };
+            header?: never;
+            path: {
+                course_offering_id: string;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_JournalAssessment_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_journal_results_api_v1_teaching_courses__course_offering_id__groups__group_id__assessments__assessment_group_id__results_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                student_id?: string | null;
+            };
+            header?: never;
+            path: {
+                assessment_group_id: string;
+                course_offering_id: string;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_JournalResult_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_journal_lessons_api_v1_teaching_courses__course_offering_id__groups__group_id__lessons_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                lesson_id?: string | null;
+                starts_from?: string | null;
+                starts_before?: string | null;
+                status?: ("scheduled" | "cancelled" | "moved") | null;
+            };
+            header?: never;
+            path: {
+                course_offering_id: string;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_JournalLesson_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_lesson_students_api_v1_teaching_courses__course_offering_id__groups__group_id__lessons__lesson_id__students_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                student_id?: string | null;
+            };
+            header?: never;
+            path: {
+                lesson_id: string;
+                course_offering_id: string;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_JournalStudent_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_journal_students_api_v1_teaching_courses__course_offering_id__groups__group_id__students_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                student_id?: string | null;
+            };
+            header?: never;
+            path: {
+                course_offering_id: string;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_JournalStudent_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
