@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import and_, exists, or_, select, tuple_
 from sqlalchemy.orm import Session
 
-from app.core.pagination import decode_page_cursor, paginate_results
+from app.core.pagination import InvalidCursorError, decode_page_cursor, paginate_results
 from app.core.schemas import Ref
 from app.models import (
     AcademicTerm,
@@ -27,6 +27,7 @@ from app.models import (
 )
 from app.permissions import get_authorization_context
 from app.schedule.participants import get_student_lesson_condition
+from app.teaching.ordering import STUDENT_KEY_PREFIX, get_student_name_key
 from app.teaching.schemas import (
     JournalAssessment,
     JournalLesson,
@@ -58,9 +59,11 @@ def require_teaching_assignment(db: Session, teacher_id: int, course_id: int, gr
         raise HTTPException(404, "not_found")
 
 
-def list_page(db, query, params, columns, key_types, convert):
+def list_page(db, query, params, columns, key_types, convert, *, cursor_prefix=None):
     boundary = decode_page_cursor(params.cursor, key_types=key_types, direction="asc")
     if boundary is not None:
+        if cursor_prefix is not None and not boundary[0].startswith(cursor_prefix):
+            raise InvalidCursorError("Cursor uses an obsolete student ordering")
         query = query.where(tuple_(*columns) > tuple_(*boundary))
     rows = db.execute(query.order_by(*columns).limit(params.limit + 1)).all()
     # Keep cursor keys in their SQL ordering, independent of serialized IDs.
@@ -115,9 +118,9 @@ def list_teaching_assignments(db, teacher_id, params):
 
 
 def list_journal_students(db, group_id, params, lesson_id=None):
-    name_key = User.full_name.collate("C").label("student_name")
+    name_key = get_student_name_key(User.full_name)
     query = (
-        select(Student, name_key, Student.id)
+        select(Student, User.full_name, Student.id, name_key)
         .join(User, User.id == Student.user_id)
         .where(Student.group_id == group_id)
     )
@@ -127,7 +130,7 @@ def list_journal_students(db, group_id, params, lesson_id=None):
         query = query.where(get_student_lesson_condition(lesson_id, group_id, Student.subgroup_id))
 
     def convert(row):
-        student, name, _ = row
+        student, name, _, _key = row
         return JournalStudent(
             id=str(student.id),
             full_name=name,
@@ -135,7 +138,15 @@ def list_journal_students(db, group_id, params, lesson_id=None):
             academic_status=student.academic_status,
         )
 
-    return list_page(db, query, params, (name_key, Student.id), (str, int), convert)
+    return list_page(
+        db,
+        query,
+        params,
+        (name_key, Student.id),
+        (str, int),
+        convert,
+        cursor_prefix=STUDENT_KEY_PREFIX,
+    )
 
 
 def get_assessment_query(course_id, group_id):
@@ -179,9 +190,9 @@ def list_journal_results(db, course_id, group_id, assessment_group_id, params):
         is None
     ):
         raise HTTPException(404, "not_found")
-    name_key = User.full_name.collate("C").label("student_name")
+    name_key = get_student_name_key(User.full_name)
     query = (
-        select(Student, name_key, AssessmentResult, Student.id)
+        select(Student, User.full_name, AssessmentResult, Student.id, name_key)
         .join(User, User.id == Student.user_id)
         .outerjoin(
             AssessmentResult,
@@ -196,7 +207,7 @@ def list_journal_results(db, course_id, group_id, assessment_group_id, params):
         query = query.where(Student.id == int(params.student_id))
 
     def convert(row):
-        student, name, result, _ = row
+        student, name, result, _, _key = row
         return JournalResult(
             student_id=str(student.id),
             full_name=name,
@@ -206,7 +217,15 @@ def list_journal_results(db, course_id, group_id, assessment_group_id, params):
             is_current_group_member=student.group_id == group_id,
         )
 
-    return list_page(db, query, params, (name_key, Student.id), (str, int), convert)
+    return list_page(
+        db,
+        query,
+        params,
+        (name_key, Student.id),
+        (str, int),
+        convert,
+        cursor_prefix=STUDENT_KEY_PREFIX,
+    )
 
 
 def get_lesson_query(course_id, group_id):

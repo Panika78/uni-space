@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.core.schemas import ApiError, Id, Page
+from app.core.schemas import ApiError, Page
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_db_session
 from app.models import User
@@ -19,10 +19,12 @@ from app.teaching.schemas import (
     StudentParams,
     TeachingAssignmentResponse,
 )
+from app.teaching.validation import TeachingId, validate_teaching_ids
 
 router = APIRouter(
     prefix="/api/v1/teaching",
     tags=["teaching"],
+    dependencies=[Depends(validate_teaching_ids)],
     responses={code: {"model": ApiError} for code in (401, 403, 404, 422, 500)},
 )
 Db = Annotated[Session, Depends(get_db_session)]
@@ -35,7 +37,9 @@ def get_current_teacher(db: Db, user: Annotated[User, Depends(get_current_user)]
 TeacherId = Annotated[int, Depends(get_current_teacher)]
 
 
-def require_journal_scope(course_offering_id: Id, group_id: Id, db: Db, teacher: TeacherId):
+def require_journal_scope(
+    course_offering_id: TeachingId, group_id: TeachingId, db: Db, teacher: TeacherId
+):
     service.require_teaching_assignment(db, teacher, int(course_offering_id), int(group_id))
     return int(course_offering_id), int(group_id)
 
@@ -65,7 +69,7 @@ def list_journal_assessments(db: Db, scope: Scope, params: Annotated[AssessmentP
     JOURNAL + "/assessments/{assessment_group_id}/results", response_model=Page[JournalResult]
 )
 def list_journal_results(
-    assessment_group_id: Id, db: Db, scope: Scope, params: Annotated[StudentParams, Query()]
+    assessment_group_id: TeachingId, db: Db, scope: Scope, params: Annotated[StudentParams, Query()]
 ):
     return service.list_journal_results(db, *scope, int(assessment_group_id), params)
 
@@ -77,7 +81,7 @@ def list_journal_lessons(db: Db, scope: Scope, params: Annotated[LessonParams, Q
 
 @router.get(JOURNAL + "/lessons/{lesson_id}/students", response_model=Page[JournalStudent])
 def list_lesson_students(
-    lesson_id: Id, db: Db, scope: Scope, params: Annotated[StudentParams, Query()]
+    lesson_id: TeachingId, db: Db, scope: Scope, params: Annotated[StudentParams, Query()]
 ):
     service.require_journal_lesson(db, *scope, int(lesson_id))
     return service.list_journal_students(db, scope[1], params, int(lesson_id))

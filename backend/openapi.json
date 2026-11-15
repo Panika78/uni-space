@@ -2757,6 +2757,8 @@
             "schema": {
               "anyOf": [
                 {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
                   "pattern": "^[1-9][0-9]*$",
                   "type": "string"
                 },
@@ -2774,6 +2776,8 @@
             "schema": {
               "anyOf": [
                 {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
                   "pattern": "^[1-9][0-9]*$",
                   "type": "string"
                 },
@@ -2791,6 +2795,8 @@
             "schema": {
               "anyOf": [
                 {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
                   "pattern": "^[1-9][0-9]*$",
                   "type": "string"
                 },
@@ -2884,6 +2890,8 @@
             "name": "course_offering_id",
             "required": true,
             "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
               "pattern": "^[1-9][0-9]*$",
               "title": "Course Offering Id",
               "type": "string"
@@ -2894,6 +2902,8 @@
             "name": "group_id",
             "required": true,
             "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
               "pattern": "^[1-9][0-9]*$",
               "title": "Group Id",
               "type": "string"
@@ -2934,6 +2944,8 @@
             "schema": {
               "anyOf": [
                 {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
                   "pattern": "^[1-9][0-9]*$",
                   "type": "string"
                 },
@@ -3027,6 +3039,8 @@
             "name": "assessment_group_id",
             "required": true,
             "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
               "pattern": "^[1-9][0-9]*$",
               "title": "Assessment Group Id",
               "type": "string"
@@ -3037,6 +3051,8 @@
             "name": "course_offering_id",
             "required": true,
             "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
               "pattern": "^[1-9][0-9]*$",
               "title": "Course Offering Id",
               "type": "string"
@@ -3047,6 +3063,8 @@
             "name": "group_id",
             "required": true,
             "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
               "pattern": "^[1-9][0-9]*$",
               "title": "Group Id",
               "type": "string"
@@ -3087,6 +3105,8 @@
             "schema": {
               "anyOf": [
                 {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
                   "pattern": "^[1-9][0-9]*$",
                   "type": "string"
                 },
@@ -3180,6 +3200,8 @@
             "name": "course_offering_id",
             "required": true,
             "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
               "pattern": "^[1-9][0-9]*$",
               "title": "Course Offering Id",
               "type": "string"
@@ -3190,6 +3212,8 @@
             "name": "group_id",
             "required": true,
             "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
               "pattern": "^[1-9][0-9]*$",
               "title": "Group Id",
               "type": "string"
@@ -3230,6 +3254,8 @@
             "schema": {
               "anyOf": [
                 {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
                   "pattern": "^[1-9][0-9]*$",
                   "type": "string"
                 },
@@ -3378,6 +3404,8 @@
             "name": "lesson_id",
             "required": true,
             "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
               "pattern": "^[1-9][0-9]*$",
               "title": "Lesson Id",
               "type": "string"
@@ -3388,6 +3416,8 @@
             "name": "course_offering_id",
             "required": true,
             "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
               "pattern": "^[1-9][0-9]*$",
               "title": "Course Offering Id",
               "type": "string"
@@ -3398,6 +3428,8 @@
             "name": "group_id",
             "required": true,
             "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
               "pattern": "^[1-9][0-9]*$",
               "title": "Group Id",
               "type": "string"
@@ -3438,6 +3470,8 @@
             "schema": {
               "anyOf": [
                 {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
                   "pattern": "^[1-9][0-9]*$",
                   "type": "string"
                 },
@@ -3531,6 +3565,8 @@
             "name": "course_offering_id",
             "required": true,
             "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
               "pattern": "^[1-9][0-9]*$",
               "title": "Course Offering Id",
               "type": "string"
@@ -3541,6 +3577,8 @@
             "name": "group_id",
             "required": true,
             "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
               "pattern": "^[1-9][0-9]*$",
               "title": "Group Id",
               "type": "string"
@@ -3581,6 +3619,8 @@
             "schema": {
               "anyOf": [
                 {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
                   "pattern": "^[1-9][0-9]*$",
                   "type": "string"
                 },

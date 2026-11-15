@@ -569,7 +569,17 @@ with engine.connect() as c:
         assert not c.execute(text("SELECT has_table_privilege(current_user,'news',:privilege)"), {'privilege': privilege}).scalar_one()
     assert not c.execute(text("SELECT has_table_privilege(current_user,'applications','UPDATE')")).scalar_one()
     assert not c.execute(text("SELECT has_table_privilege(current_user,'applications','DELETE')")).scalar_one()
-    print('PASS: API role flags false; isolated secrets')
+    # Built-in C collation + explicit Russian ranks must work under production ACL,
+    # independently of OS/database locales and installed ICU collations.
+    from sqlalchemy import String, column, select, values
+    from app.teaching.ordering import get_student_name_key
+    assert c.execute(text("SHOW server_encoding")).scalar_one() == 'UTF8'
+    names = values(column('name', String), column('id', String), name='names').data(
+        [('Ёж', '3'), ('Жук', '4'), ('Ева', '1'), ('ева', '2')])
+    name_key = get_student_name_key(names.c.name)
+    ordered = c.execute(select(names.c.name).order_by(name_key, names.c.id)).scalars().all()
+    assert ordered == ['Ева', 'ева', 'Ёж', 'Жук'], ordered
+    print('PASS: API role flags false; isolated secrets; reproducible Russian ordering')
     for table in ('users','students','study_groups','programs','org_units','teachers',
                   'disciplines','course_offerings','buildings','rooms','lessons','lesson_groups',
                   'lesson_rooms','news','notifications','academic_terms','course_groups',
@@ -613,6 +623,8 @@ for statement in (
     "UPDATE lessons SET status='cancelled'", "DELETE FROM lesson_groups",
     "INSERT INTO assessments (course_offering_id,title,type,max_score) VALUES (1,'forbidden','test',10)",
     "UPDATE assessment_groups SET planned_date=CURRENT_DATE", "DELETE FROM assessment_results",
+    "UPDATE assessment_results SET score=score",
+    "INSERT INTO assessment_results (assessment_group_id,student_id,score,graded_at) SELECT assessment_group_id,student_id,score,graded_at FROM assessment_results LIMIT 1",
     "UPDATE final_results SET grade_value=5", "SELECT nextval('public.final_results_id_seq')",
     "SELECT nextval('public.lessons_id_seq')",
     "SELECT nextval('public.users_id_seq')",
@@ -784,13 +796,17 @@ with SessionLocal.begin() as db:
                 """
 from sqlalchemy import select
 from app.core.database import SessionLocal
-from app.models import CourseGroup, Teacher, TeachingAssignment, User
+from app.models import CourseGroup, CourseOffering, Discipline, Student, Teacher, TeachingAssignment, User
 with SessionLocal.begin() as db:
     password_hash = db.scalar(select(User.password_hash).where(User.login == 'deployment-check'))
-    pairs = db.scalars(select(CourseGroup).order_by(
-        CourseGroup.course_offering_id, CourseGroup.group_id).limit(2)).all()
-    assert len(pairs) == 2
-    for index, pair in enumerate(pairs):
+    # Pin both teachers to the seeded course with three approved works: positive,
+    # zero (first student), and ungraded. An empty works list must never pass.
+    for index in range(2):
+        group_id = db.scalar(select(Student.group_id).join(User).where(
+            User.login == f'schedule-fixture-{index + 1}'))
+        pair = db.scalars(select(CourseGroup).join(CourseOffering).join(Discipline).where(
+            Discipline.name == 'Успеваемость: тестовый предмет 1',
+            CourseGroup.group_id == group_id)).one()
         user = User(login=f'teaching-acl-{index}', full_name='Fictional Teacher',
                     role='teacher', is_active=True, password_hash=password_hash)
         db.add(user)
@@ -804,6 +820,7 @@ with SessionLocal.begin() as db:
             )
             with ExitStack() as teacher_clients:
                 teacher_scopes = []
+                teacher_work_ids = []
                 for index in range(2):
                     teacher_client = teacher_clients.enter_context(
                         httpx.Client(
@@ -845,14 +862,39 @@ with SessionLocal.begin() as db:
                     works = teacher_client.get(
                         journal + "/assessments", headers=headers
                     ).json()
+                    assert len(works["items"]) == 3, works
+                    assert works["next_cursor"] is None
+                    scores_by_title = {}
+                    expected_student_id = sql(
+                        "SELECT s.id FROM students s JOIN users u ON u.id=s.user_id "
+                        f"WHERE u.login='schedule-fixture-{index + 1}'"
+                    )
                     for work in works["items"]:
-                        assert (
-                            teacher_client.get(
-                                journal + f"/assessments/{work['id']}/results",
-                                headers=headers,
-                            ).status_code
-                            == 200
+                        response = teacher_client.get(
+                            journal + f"/assessments/{work['id']}/results",
+                            headers=headers,
                         )
+                        assert response.status_code == 200, response.text
+                        results = response.json()
+                        assert results["next_cursor"] is None
+                        assert len(results["items"]) == 1, results
+                        result = results["items"][0]
+                        assert result["student_id"] == expected_student_id
+                        assert result["is_current_group_member"] is True
+                        if work["title"] == "Работа 2":
+                            assert result["score"] is None
+                            assert result["result_id"] is None
+                            assert result["graded_at"] is None
+                        else:
+                            assert result["result_id"] is not None
+                            assert result["graded_at"] is not None
+                        scores_by_title[work["title"]] = result["score"]
+                    assert scores_by_title == {
+                        "Работа 0": 6 if index == 0 else 9,
+                        "Работа 1": 0 if index == 0 else 9,
+                        "Работа 2": None,
+                    }, scores_by_title
+                    teacher_work_ids.append(works["items"][0]["id"])
                     lessons = teacher_client.get(
                         journal + "/lessons", headers=headers
                     ).json()
@@ -868,6 +910,21 @@ with SessionLocal.begin() as db:
                     teacher_scopes
                 ):
                     other_journal = teacher_scopes[1 - index][1]
+                    foreign_work_id = teacher_work_ids[1 - index]
+                    assert (
+                        teacher_client.get(
+                            journal + f"/assessments/{foreign_work_id}/results",
+                            headers=headers,
+                        ).status_code
+                        == 404
+                    )
+                    assert (
+                        teacher_client.get(
+                            other_journal + f"/assessments/{foreign_work_id}/results",
+                            headers=headers,
+                        ).status_code
+                        == 404
+                    )
                     assert (
                         teacher_client.get(
                             other_journal + "/students", headers=headers
@@ -883,7 +940,7 @@ with SessionLocal.begin() as db:
                     == 404
                 )
             print(
-                "PASS: teacher journal reads, isolation and old-JWT revocation under production ACL",
+                "PASS: teacher journal results (positive/zero/null), foreign work isolation and old-JWT revocation under production ACL",
                 flush=True,
             )
             # Keep this scenario's two logins outside the existing auth suite's

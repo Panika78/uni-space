@@ -3,24 +3,25 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from app.core.schemas import Date, DateTime, Id, PaginationParams, Ref, RequestModel
+from app.teaching.validation import TeachingId
 
 
 class AssignmentParams(PaginationParams):
-    course_offering_id: Id | None = None
-    group_id: Id | None = None
-    term_id: Id | None = None
+    course_offering_id: TeachingId | None = None
+    group_id: TeachingId | None = None
+    term_id: TeachingId | None = None
 
 
 class StudentParams(PaginationParams):
-    student_id: Id | None = None
+    student_id: TeachingId | None = None
 
 
 class AssessmentParams(PaginationParams):
-    assessment_group_id: Id | None = None
+    assessment_group_id: TeachingId | None = None
 
 
 class LessonParams(PaginationParams):
-    lesson_id: Id | None = None
+    lesson_id: TeachingId | None = None
     starts_from: DateTime | None = None
     starts_before: DateTime | None = None
     status: Literal["scheduled", "cancelled", "moved"] | None = None
