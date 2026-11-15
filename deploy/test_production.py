@@ -566,7 +566,7 @@ with engine.connect() as c:
         assert not c.execute(text("SELECT has_table_privilege(current_user,'audit_events',:privilege)"), {'privilege': privilege}).scalar_one()
     assert c.execute(text("SELECT has_table_privilege(current_user,'audit_events','INSERT')")).scalar_one()
     assert c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
-    for column in ('role','password_hash','login','full_name'):
+    for column in ('id','role','password_hash','login','full_name'):
         assert not c.execute(text("SELECT has_column_privilege(current_user,'users',:column,'UPDATE')"), {'column': column}).scalar_one()
     assert c.execute(text("SELECT has_column_privilege(current_user,'users','is_active','UPDATE')")).scalar_one()
     for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
@@ -609,7 +609,7 @@ for statement in (
     "CREATE TABLE public.forbidden_table(id int)", "CREATE SCHEMA forbidden_schema",
     "SET ROLE uni_space_migrator", "SET ROLE deployment_check",
     "SELECT * FROM private_fixture.secret", "SELECT * FROM pg_authid",
-    "UPDATE users SET role='admin'", "TRUNCATE users",
+    "UPDATE users SET role='admin'", "UPDATE users SET id=id", "TRUNCATE users",
     "ALTER TABLE users ADD COLUMN forbidden int", "DELETE FROM refresh_tokens",
     "UPDATE alembic_version SET version_num='forbidden'",
     "CREATE TEMP TABLE forbidden_temp(id int)",

@@ -926,6 +926,8 @@ export interface components {
         };
         /** LookupItem */
         LookupItem: {
+            /** Context */
+            context?: string | null;
             /** Id */
             id: string;
             /** Name */
@@ -1260,6 +1262,8 @@ export interface components {
         };
         /** UserDetail */
         UserDetail: {
+            /** Available Permission Codes */
+            available_permission_codes?: components["schemas"]["PermissionCode"][];
             /** Full Name */
             full_name: string;
             /** Group Id */

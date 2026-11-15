@@ -1,10 +1,13 @@
 """Real PostgreSQL transactions, HTTP auth, races, audit and production runtime ACL."""
 
+import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from threading import Event
 
 import pytest
 from fastapi import FastAPI, HTTPException
+from pydantic import SecretStr
 from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 from test_academics_migrations import migration_database, run_migration  # noqa: F401
@@ -22,8 +25,12 @@ from app.core.errors import install_exception_handlers
 from app.core.middleware import ApiHeadersMiddleware
 from app.dependencies.database import get_db_session
 from app.models import (
+    AcademicTerm,
     AuditEvent,
     AuthSession,
+    CourseGroup,
+    CourseOffering,
+    Discipline,
     OrgUnit,
     Program,
     RefreshToken,
@@ -31,6 +38,7 @@ from app.models import (
     Student,
     StudyGroup,
     Teacher,
+    TeachingAssignment,
     User,
 )
 from app.permissions import router as context_router
@@ -126,8 +134,18 @@ def create(admin, role="admin", login=None):
 
 
 def test_create_roles_profiles_secret_duplicates_and_lost_response(admin, engine):
+    sensitive_values = [SecretStr(admin[1])]
     for role in ("student", "teacher", "staff", "admin"):
-        result = create(admin, role)
+        login_name = f"fictional-sensitive-{role}-account"
+        result = create(admin, role, login=login_name)
+        sensitive_values.extend(
+            SecretStr(value)
+            for value in (
+                result["initial_password"],
+                result["user"]["login"],
+                result["user"]["full_name"],
+            )
+        )
         user = result["user"]
         password = result["initial_password"]
         assert len(password) >= 32
@@ -139,6 +157,7 @@ def test_create_roles_profiles_secret_duplicates_and_lost_response(admin, engine
             account = db.get(User, int(user["id"]))
             assert verify_password(account.password_hash, password)
             assert account.password_hash != password
+            sensitive_values.append(SecretStr(account.password_hash))
             counts = [
                 db.scalar(select(func.count()).select_from(m).where(m.user_id == account.id))
                 for m in (Student, Teacher, StaffProfile)
@@ -151,18 +170,25 @@ def test_create_roles_profiles_secret_duplicates_and_lost_response(admin, engine
         found = request(admin, "GET", "?q=" + role).json()["items"]
         assert any(u["id"] == user["id"] for u in found)
         duplicate = request(
-            admin, "POST", json={"login": role, "full_name": "Fictional", "role": "admin"}
+            admin, "POST", json={"login": login_name, "full_name": "Fictional", "role": "admin"}
         )
         assert duplicate.status_code == 409
     with Session(engine) as db:
         assert db.scalar(select(func.count()).select_from(Teacher)) == 1
-        events = db.scalars(select(AuditEvent))
-        for item in events:
-            snapshot = str(item.after_data) + str(item.before_data)
-            assert all(
-                secret not in snapshot
-                for secret in ("password", "hash", "login", "full_name", "token")
-            )
+        snapshots = [(item.before_data, item.after_data) for item in db.scalars(select(AuditEvent))]
+        require_private_audit_snapshots(
+            SecretStr(json.dumps(snapshots, ensure_ascii=False)), sensitive_values
+        )
+        # Mutation sensitivity: a value leak must fail even under an innocuous key,
+        # including a nested value and either before_data or after_data.
+        for value in sensitive_values:
+            for before in (True, False):
+                leak = {"allowed_looking_key": {"nested": value.get_secret_value()}}
+                polluted = [(leak, None) if before else (None, leak)]
+                with pytest.raises(AssertionError, match="Sensitive audit value detected"):
+                    require_private_audit_snapshots(
+                        SecretStr(json.dumps(polluted, ensure_ascii=False)), [value]
+                    )
     bad = request(
         admin,
         "POST",
@@ -215,6 +241,12 @@ def test_permission_scope_noops_transfer_back_and_current_jwt(admin, engine):
         response = request(admin, "PUT", f"/{uid}/department", json={"org_unit_id": target})
         assert response.status_code == 200, response.text
         assert response.json()["permissions"] == []
+        codes = response.json()["available_permission_codes"]
+        if target == admin[3]["other_unit"]:
+            assert set(codes) == {"applications.review", "news.publish"}
+            assert grant("grades.edit", None).status_code == 422
+        else:
+            assert set(codes) == {code.value for code in service.PermissionCode}
         assert (
             client.request("GET", "/api/v1/auth/context", access=token).json()["permissions"] == []
         )
@@ -497,3 +529,135 @@ def test_block_waiting_for_login_revokes_newly_committed_session(admin, engine, 
                 select(RefreshToken).where(RefreshToken.session_id == session.id)
             )
         )
+
+
+def require_private_audit_snapshots(snapshot_payload: SecretStr, sensitive_values):
+    serialized = snapshot_payload.get_secret_value()
+    if any(value.get_secret_value() in serialized for value in sensitive_values):
+        # Do not put the secret or snapshots into pytest's assertion explanation.
+        raise AssertionError("Sensitive audit value detected")
+    if any(field in serialized for field in ("password", "hash", "login", "full_name", "token")):
+        raise AssertionError("Sensitive audit field detected")
+
+
+@pytest.fixture
+def assigned_teachers(admin, engine):
+    with Session(engine) as db, db.begin():
+        departments = [
+            OrgUnit(
+                name=f"Fictional Department {i}",
+                type="department",
+                parent_id=int(admin[3]["org_unit_id"]),
+            )
+            for i in range(2)
+        ]
+        db.add_all(departments)
+        db.flush()
+        teachers = [
+            Teacher(full_name="Fictional Namesake", department_id=unit.id) for unit in departments
+        ]
+        db.add_all(teachers)
+        term = AcademicTerm(
+            name="Fictional term", starts_on=date(2026, 9, 1), ends_on=date(2027, 1, 31)
+        )
+        db.add(term)
+        db.flush()
+        courses = []
+        assignments = []
+        for i, teacher in enumerate(teachers):
+            discipline = Discipline(name=f"Fictional Discipline {i}")
+            db.add(discipline)
+            db.flush()
+            course = CourseOffering(
+                discipline_id=discipline.id, term_id=term.id, attestation_type="exam"
+            )
+            db.add(course)
+            db.flush()
+            group = CourseGroup(course_offering_id=course.id, group_id=int(admin[3]["group_id"]))
+            db.add(group)
+            db.flush()
+            assignment = TeachingAssignment(
+                teacher_id=teacher.id, course_offering_id=course.id, group_id=group.group_id
+            )
+            db.add(assignment)
+            db.flush()
+            courses.append(course.id)
+            assignments.append(assignment.id)
+        return [t.id for t in teachers], courses, assignments
+
+
+def test_namesake_teacher_selection_preserves_assignments_and_journal(
+    admin, engine, assigned_teachers
+):
+    from app.teaching.router import router as teaching_router
+
+    admin[0].app.include_router(teaching_router)
+    teachers, courses, assignments = assigned_teachers
+    lookup = admin[0].request(
+        "GET", "/api/v1/admin/lookups?kind=teachers&q=Fictional%20Namesake", access=admin[1]
+    )
+    rows = lookup.json()["items"]
+    assert len(rows) == 2 and {row["id"] for row in rows} == {str(i) for i in teachers}
+    assert rows[0]["name"] == rows[1]["name"]
+    assert rows[0]["context"] != rows[1]["context"]
+    for kind, fragment in (("groups", "курс 1"), ("org_units", "Родительское подразделение")):
+        options = (
+            admin[0]
+            .request("GET", f"/api/v1/admin/lookups?kind={kind}", access=admin[1])
+            .json()["items"]
+        )
+        assert any(fragment in (item["context"] or "") for item in options)
+
+    def snapshot(db):
+        return [
+            list(
+                db.execute(
+                    select(*model.__table__.columns).order_by(*model.__table__.primary_key.columns)
+                )
+            )
+            for model in (TeachingAssignment, CourseOffering, CourseGroup, Discipline)
+        ]
+
+    with Session(engine) as db:
+        before = snapshot(db)
+    response = request(
+        admin,
+        "POST",
+        json={
+            "login": "namesake-selected",
+            "full_name": "Fictional",
+            "role": "teacher",
+            "teacher_id": str(teachers[1]),
+        },
+    )
+    assert response.status_code == 201
+    result = response.json()
+    with Session(engine) as db:
+        assert snapshot(db) == before
+        assert db.get(Teacher, teachers[0]).user_id is None
+        assert db.get(Teacher, teachers[1]).user_id == int(result["user"]["id"])
+    token = (
+        admin[0]
+        .login(json={"login": "namesake-selected", "password": result["initial_password"]})
+        .json()["access_token"]
+    )
+    listed = admin[0].request("GET", "/api/v1/teaching/assignments", access=token)
+    assert listed.status_code == 200
+    assert [row["id"] for row in listed.json()["items"]] == [str(assignments[1])]
+    group = admin[3]["group_id"]
+    assert (
+        admin[0]
+        .request(
+            "GET", f"/api/v1/teaching/courses/{courses[1]}/groups/{group}/students", access=token
+        )
+        .status_code
+        == 200
+    )
+    assert (
+        admin[0]
+        .request(
+            "GET", f"/api/v1/teaching/courses/{courses[0]}/groups/{group}/students", access=token
+        )
+        .status_code
+        == 404
+    )

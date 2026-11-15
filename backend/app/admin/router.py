@@ -23,7 +23,7 @@ from app.admin.schemas import (
 from app.core.schemas import ApiError
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_db_session
-from app.models import OrgUnit, StudyGroup, Teacher, User
+from app.models import OrgUnit, Program, StudyGroup, Teacher, User
 
 Db = Annotated[Session, Depends(get_db_session)]
 Actor = Annotated[User, Depends(get_current_user)]
@@ -66,12 +66,45 @@ def list_profile_options(db: Db, actor: Actor, params: Annotated[LookupParams, Q
     if params.after_id:
         query = query.where(model.id > parse_id(params.after_id))
     rows = list(db.scalars(query.order_by(model.id).limit(params.limit + 1)))
+    # Bounded context reads preserve pagination and distinguish identically named records.
+    visible = rows[: params.limit]
+    unit_ids = (
+        {row.department_id if model is Teacher else row.parent_id for row in visible}
+        if model in (Teacher, OrgUnit)
+        else set()
+    )
+    units = {unit.id: unit for unit in db.scalars(select(OrgUnit).where(OrgUnit.id.in_(unit_ids)))}
+    programs = (
+        {
+            program.id: program
+            for program in db.scalars(
+                select(Program).where(Program.id.in_({row.program_id for row in visible}))
+            )
+        }
+        if model is StudyGroup
+        else {}
+    )
+
+    def get_context(row):
+        if model is StudyGroup:
+            program = programs[row.program_id]
+            return (
+                f"Программа {program.code}: {program.name} (ID {program.id}); "
+                f"курс {row.course_number}"
+            )
+        parent = units.get(row.department_id if model is Teacher else row.parent_id)
+        if parent:
+            label = "Кафедра" if model is Teacher else "Родительское подразделение"
+            return f"{label}: {parent.name} (ID {parent.id})"
+        return None
+
     return LookupPage(
         items=[
             LookupItem(
                 id=str(row.id),
                 name=row.full_name if model is Teacher else row.name,
                 type=row.type if model is OrgUnit else None,
+                context=get_context(row),
             )
             for row in rows[: params.limit]
         ],

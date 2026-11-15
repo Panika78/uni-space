@@ -1132,6 +1132,17 @@
       "LookupItem": {
         "additionalProperties": false,
         "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context"
+          },
           "id": {
             "pattern": "^[1-9][0-9]*$",
             "title": "Id",
@@ -2112,6 +2123,13 @@
       "UserDetail": {
         "additionalProperties": false,
         "properties": {
+          "available_permission_codes": {
+            "items": {
+              "$ref": "#/components/schemas/PermissionCode"
+            },
+            "title": "Available Permission Codes",
+            "type": "array"
+          },
           "full_name": {
             "title": "Full Name",
             "type": "string"

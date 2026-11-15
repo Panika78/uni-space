@@ -55,6 +55,7 @@ class UserDetail(UserSummary):
     staff_profile_id: Id | None
     org_unit_id: Id | None
     permissions: list[PermissionGrant]
+    available_permission_codes: list[PermissionCode] = Field(default_factory=list)
 
 
 class CreatedUser(RequestModel):
@@ -92,6 +93,7 @@ class LookupItem(RequestModel):
     id: Id
     name: str
     type: str | None = None
+    context: str | None = None
 
 
 class LookupPage(RequestModel):

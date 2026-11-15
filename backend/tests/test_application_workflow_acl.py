@@ -67,11 +67,14 @@ def runtime_engine(migration_database):  # noqa: F811
     }
     api_engine = None
     try:
-        for _ in range(2):  # reapplying ACL is required for existing production volumes
+        for iteration in range(2):  # reapplying ACL must also revoke legacy column grants
             result = subprocess.run(
                 command, input=script, text=True, capture_output=True, env=env, timeout=30
             )
             assert result.returncode == 0, result.stderr
+            if iteration == 0:
+                with admin_engine.begin() as db:
+                    db.execute(text("GRANT UPDATE (id) ON users TO uni_space_api"))
         api_engine = create_engine(
             admin_engine.url.set(username="uni_space_api", password=API_PASSWORD)
         )

@@ -92,7 +92,10 @@ SELECT 'GRANT UPDATE (review_status, form_data, reviewer_user_id, feedback, upda
 WHERE to_regclass('public.applications') IS NOT NULL \gexec
 -- SELECT FOR UPDATE in login requires UPDATE on at least one user column.
 -- Administration can change activity; passwords and roles remain immutable.
-SELECT 'GRANT UPDATE (id, is_active) ON public.users TO uni_space_api'
+-- Table-level REVOKE above does not remove previously granted column ACL.
+SELECT 'REVOKE UPDATE (id) ON public.users FROM uni_space_api'
+WHERE to_regclass('public.users') IS NOT NULL \gexec
+SELECT 'GRANT UPDATE (is_active) ON public.users TO uni_space_api'
 WHERE to_regclass('public.users') IS NOT NULL \gexec
 -- MVP2-25: explicit administration writes; no role/password UPDATE or profile DELETE.
 SELECT format('GRANT INSERT ON public.%I TO uni_space_api', tablename)

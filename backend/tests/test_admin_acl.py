@@ -1,11 +1,14 @@
 """Exercise all administration writes as the actual production runtime role."""
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from test_academics_migrations import migration_database  # noqa: F401
 from test_admin_integration import admin, create, request  # noqa: F401
 from test_application_workflow_acl import runtime_engine  # noqa: F401
+
+from app.models import User
 
 pytestmark = pytest.mark.integration
 
@@ -28,6 +31,15 @@ def test_admin_operations_with_production_acl(admin, runtime_engine):  # noqa: F
     for role in ("student", "teacher", "staff", "admin"):
         result = create(admin, role)
         uid = result["user"]["id"]
+        login = admin[0].login(json={"login": role, "password": result["initial_password"]})
+        assert login.status_code == 200
+        with Session(engine) as db:
+            assert db.scalar(select(User.id).where(User.id == int(uid)).with_for_update()) == int(
+                uid
+            )
+        with engine.begin() as db, pytest.raises(DBAPIError) as denied:
+            db.execute(text("UPDATE users SET id=id WHERE id=:id"), {"id": int(uid)})
+        assert denied.value.orig.sqlstate == "42501"
         assert request(admin, "PUT", f"/{uid}/active", json={"is_active": False}).status_code == 200
         assert request(admin, "PUT", f"/{uid}/active", json={"is_active": True}).status_code == 200
         if role == "staff":
@@ -43,6 +55,7 @@ def test_admin_operations_with_production_acl(admin, runtime_engine):  # noqa: F
             )
     with Session(engine) as db:
         for table, column in [
+            ("users", "id"),
             ("users", "password_hash"),
             ("users", "role"),
             ("students", "user_id"),

@@ -260,10 +260,11 @@ API pool задаёт для каждого PostgreSQL-соединения `loc
 запуска Alembic, HTTP/token signing этим сервисом не выполняются. Образ общий,
 секреты не встраиваются. API читает Alembic revision, но не меняет её.
 `SELECT FOR UPDATE` пользователя при login требует UPDATE хотя бы одной колонки:
-выдан только `UPDATE(id)` users; пароль, роль и активность менять нельзя.
-Это ограничение PostgreSQL: обладатель SQL credentials может менять ID, если
-ограничения целостности допускают это. Защита credentials и серверная авторизация
-остаются необходимыми. Удаление сессий/токенов API сейчас не выполняет и не разрешено.
+выдан только `UPDATE(is_active)` users; пароль, роль и ID менять нельзя.
+Для row lock в PostgreSQL достаточно UPDATE любой одной колонки. SQL credentials
+позволяют менять активность аккаунта, поэтому защита credentials и серверная
+авторизация остаются необходимыми. Повторное применение ACL явно отзывает старый
+column-level `UPDATE(id)`, а не только заменяет GRANT. Удаление сессий/токенов API сейчас не выполняет и не разрешено.
 ALTER DEFAULT PRIVILEGES снимает права PUBLIC/API на новые таблицы,
 последовательности и функции мигратора **глобально и в public**: schema-level
 REVOKE не отменяет ранее выданный глобальный GRANT. Повторный bootstrap
@@ -538,7 +539,7 @@ TASK-019 не доказывает безопасность и доступно�
 После миграций примените штатный `scripts/migrate-postgres.sh` (включая повторное
 применение ACL). Новая схема/миграция не требуется. API получает INSERT users,
 students, staff_profiles, staff_permissions; UPDATE только users.is_active
-(плюс id для row locks), teachers.user_id, staff_profiles.org_unit_id;
+(достаточно и для row locks), teachers.user_id, staff_profiles.org_unit_id;
 DELETE только staff_permissions. Соответствующие identity sequences доступны.
 Аудит — INSERT и SELECT(id,created_at), без чтения payload/UPDATE/DELETE.
 Это расширяет прежние ограничения read-only административных таблиц; UPDATE

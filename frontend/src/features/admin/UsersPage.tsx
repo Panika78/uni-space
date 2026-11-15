@@ -96,7 +96,8 @@ function ProfileSelect({
               )}
               {query.data.items.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.name}
+                  {item.name} · ID {item.id}
+                  {item.context ? ` · ${item.context}` : ''}
                   {item.type ? ` (${item.type})` : ''}
                 </option>
               ))}
@@ -373,7 +374,13 @@ function UserDetailContent({ id }: { id: string }) {
       </section>
     )
   const user = query.data
-  const academic = code !== 'applications.review' && code !== 'news.publish'
+  const availableSections = staffSections.filter((section) =>
+    user.available_permission_codes?.includes(section.permission),
+  )
+  const selectedCode = availableSections.some((section) => section.permission === code)
+    ? code
+    : availableSections[0]?.permission
+  const academic = selectedCode !== 'applications.review' && selectedCode !== 'news.publish'
   return (
     <section className="admin-users">
       <h1>{user.full_name}</h1>
@@ -438,7 +445,7 @@ function UserDetailContent({ id }: { id: string }) {
             onSubmit={(e) => {
               e.preventDefault()
               void change('permissions', 'PUT', {
-                permission_code: code,
+                permission_code: selectedCode,
                 scope_org_unit_id: academic ? null : user.org_unit_id,
               })
             }}
@@ -447,10 +454,10 @@ function UserDetailContent({ id }: { id: string }) {
               Разрешение
               <select
                 aria-label="Разрешение"
-                value={code}
+                value={selectedCode ?? ''}
                 onChange={(e) => setCode(e.target.value as Grant['permission_code'])}
               >
-                {staffSections.map((s) => (
+                {availableSections.map((s) => (
                   <option key={s.permission} value={s.permission}>
                     {s.label} ({s.permission})
                   </option>
@@ -462,7 +469,7 @@ function UserDetailContent({ id }: { id: string }) {
                 ? 'Все учебные группы. Доступно только сотрудникам деканата.'
                 : 'Только текущее подразделение сотрудника.'}
             </p>
-            <button disabled={busy}>Выдать разрешение</button>
+            <button disabled={busy || !selectedCode}>Выдать разрешение</button>
           </form>
         </>
       )}

@@ -60,6 +60,7 @@ try {
     await page.setViewportSize({ width, height: 900 })
     await checkWidth()
     for (const role of ['student', 'teacher', 'staff', 'admin']) {
+      let selectedTeacherId
       await page.getByRole('link', { name: 'Создать пользователя' }).click()
       await page.getByLabel('Логин', { exact: true }).fill(`browser-${role}-${width}-${suffix}`)
       await page.getByLabel('ФИО', { exact: true }).fill('Вымышленный пользователь')
@@ -83,6 +84,11 @@ try {
           .filter({ hasText: name })
           .first()
           .getAttribute('value')
+        assert.match(
+          await select.locator(`option[value="${value}"]`).textContent(),
+          new RegExp(`ID ${value}`),
+        )
+        if (role === 'teacher') selectedTeacherId = value
         await select.selectOption(value)
       }
       await page.getByRole('button', { name: 'Создать', exact: true }).click()
@@ -102,6 +108,10 @@ try {
       await page.getByRole('link', { name: 'Открыть учётную запись' }).click()
       await page.getByRole('button', { name: 'Заблокировать', exact: true }).waitFor()
       assert.equal(await page.getByText(secret, { exact: true }).count(), 0)
+      if (role === 'teacher')
+        await page
+          .getByText(`Профиль преподавателя: ${selectedTeacherId}`, { exact: true })
+          .waitFor()
       await checkWidth()
       if (role === 'staff') {
         staffId = href.split('/').at(-1)
@@ -129,8 +139,31 @@ try {
           )
         await page.getByRole('button', { name: 'Сменить подразделение и отозвать права' }).click()
         await page.getByText('Разрешений нет.', { exact: true }).waitFor()
-        await page.getByRole('button', { name: 'Выдать разрешение' }).click()
-        await page.getByRole('alert').filter({ hasText: 'Проверьте профиль' }).waitFor()
+        assert.equal(await page.getByRole('option', { name: /grades.edit/ }).count(), 0)
+        assert.deepEqual(
+          await page
+            .getByLabel('Разрешение', { exact: true })
+            .locator('option')
+            .evaluateAll((options) => options.map((o) => o.value)),
+          ['applications.review', 'news.publish'],
+        )
+        // Return to the dean office: academic options must reappear, without old grants.
+        await field.getByLabel('Поиск в справочнике').fill('Admin Browser Dean')
+        await field
+          .locator('option')
+          .filter({ hasText: 'Admin Browser Dean' })
+          .waitFor({ state: 'attached' })
+        await field
+          .locator('select')
+          .selectOption(
+            await field
+              .locator('option')
+              .filter({ hasText: 'Admin Browser Dean' })
+              .getAttribute('value'),
+          )
+        await page.getByRole('button', { name: 'Сменить подразделение и отозвать права' }).click()
+        await page.getByRole('option', { name: /grades.edit/ }).waitFor({ state: 'attached' })
+        assert.equal(await page.getByRole('button', { name: 'Отозвать grades.edit' }).count(), 0)
       }
       await page.getByRole('button', { name: 'Заблокировать', exact: true }).click()
       await page.getByRole('button', { name: 'Разблокировать', exact: true }).waitFor()

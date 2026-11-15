@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { CreateUserPage } from './UsersPage'
+import { CreateUserPage, UserDetailPage } from './UsersPage'
+vi.mock('../auth/RoleContext', () => ({ useRoleContext: () => ({ user_id: '1', role: 'admin' }) }))
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 vi.mock('../../shared/api/client', async (original) => ({
   ...(await original<typeof import('../../shared/api/client')>()),
@@ -12,9 +13,14 @@ vi.mock('../../shared/api/client', async (original) => ({
 afterEach(() => {
   cleanup()
   vi.resetAllMocks()
+  vi.restoreAllMocks()
 })
 beforeEach(() => {
-  vi.mocked(apiFetch).mockResolvedValue({ items: [], next_after_id: null })
+  vi.mocked(apiFetch).mockImplementation(async (_url, init) =>
+    init?.method === 'POST'
+      ? { user: { id: '9', login: 'selected-namesake' }, initial_password: 'fictional-secret' }
+      : { items: [], next_after_id: null },
+  )
 })
 function mount() {
   render(
@@ -74,4 +80,99 @@ it('reports a rejected duplicate without inventing a password', async () => {
   await submit()
   expect(await screen.findByRole('alert')).toHaveTextContent('Действие отклонено')
   expect(screen.queryByText('Первоначальный пароль:')).not.toBeInTheDocument()
+})
+
+it('distinguishes namesake teachers by ID and department and submits the selected ID', async () => {
+  vi.mocked(apiFetch).mockResolvedValue({
+    items: [
+      { id: '11', name: 'Вымышленный Однофамилец', context: 'Кафедра: Физика (ID 3)' },
+      { id: '12', name: 'Вымышленный Однофамилец', context: 'Кафедра: Математика (ID 4)' },
+    ],
+    next_after_id: null,
+  })
+  mount()
+  const user = userEvent.setup()
+  await user.type(screen.getByLabelText('Логин'), 'selected-namesake')
+  await user.type(screen.getByLabelText('ФИО'), 'Вымышленный')
+  await user.selectOptions(screen.getByLabelText('Роль'), 'teacher')
+  const option = await screen.findByRole('option', { name: /Однофамилец · ID 12.*Математика/ })
+  expect(screen.getByRole('option', { name: /Однофамилец · ID 11.*Физика/ })).toBeInTheDocument()
+  await user.selectOptions(option.closest('select')!, '12')
+  await user.click(screen.getByRole('button', { name: 'Создать' }))
+  const post = vi.mocked(apiFetch).mock.calls.find(([, init]) => init?.method === 'POST')
+  expect(JSON.parse(String(post?.[1]?.body)).teacher_id).toBe('12')
+})
+
+it('uses the server permission catalogue and replaces an invalid selection after transfer', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  let detail = {
+    id: '9',
+    login: 'fictional-staff',
+    full_name: 'Вымышленный сотрудник',
+    role: 'staff',
+    is_active: true,
+    student_id: null,
+    teacher_id: null,
+    staff_profile_id: '7',
+    group_id: null,
+    org_unit_id: '3',
+    permissions: [],
+    available_permission_codes: ['grades.edit', 'applications.review', 'news.publish'],
+  }
+  vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+    if (String(url).includes('/lookups'))
+      return {
+        items: [
+          { id: '3', name: 'Деканат', type: 'dean_office' },
+          { id: '4', name: 'Бухгалтерия', type: 'accounting' },
+        ],
+        next_after_id: null,
+      }
+    if (String(url).endsWith('/department') && init?.method === 'PUT') {
+      const { org_unit_id } = JSON.parse(String(init.body))
+      detail = {
+        ...detail,
+        org_unit_id,
+        available_permission_codes:
+          org_unit_id === '4'
+            ? ['applications.review', 'news.publish']
+            : ['grades.edit', 'applications.review', 'news.publish'],
+      }
+    }
+    return detail
+  })
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <RouterProvider
+        router={createMemoryRouter([{ path: '/admin/users/:id', element: <UserDetailPage /> }], {
+          initialEntries: ['/admin/users/9'],
+        })}
+      />
+    </QueryClientProvider>,
+  )
+  const user = userEvent.setup()
+  await screen.findByRole('option', { name: /grades.edit/ })
+  await user.selectOptions(screen.getByLabelText('Разрешение'), 'grades.edit')
+  const accounting = await screen.findByRole('option', { name: /Бухгалтерия · ID 4/ })
+  const departments = accounting.closest('select')!
+  await user.selectOptions(departments, '4')
+  await user.click(screen.getByRole('button', { name: 'Сменить подразделение и отозвать права' }))
+  await screen.findByText('Текущее подразделение: 4')
+  expect(screen.queryByRole('option', { name: /grades.edit/ })).not.toBeInTheDocument()
+  expect(screen.getByLabelText('Разрешение')).toHaveValue('applications.review')
+  await user.click(screen.getByRole('button', { name: 'Выдать разрешение' }))
+  const grant = vi
+    .mocked(apiFetch)
+    .mock.calls.find(
+      ([url, init]) => String(url).endsWith('/permissions') && init?.method === 'PUT',
+    )
+  expect(JSON.parse(String(grant?.[1]?.body))).toEqual({
+    permission_code: 'applications.review',
+    scope_org_unit_id: '4',
+  })
+  await user.selectOptions(departments, '3')
+  await user.click(screen.getByRole('button', { name: 'Сменить подразделение и отозвать права' }))
+  await screen.findByRole('option', { name: /grades.edit/ })
 })

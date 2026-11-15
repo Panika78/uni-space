@@ -21,7 +21,7 @@ from app.models import (
     Teacher,
     User,
 )
-from app.permissions import ACADEMIC_PERMISSIONS
+from app.permissions import ACADEMIC_PERMISSIONS, PermissionCode
 
 # All administrator writes (including bootstrap) serialize before any user row lock.
 # Re-read the actor after waiting: two administrators cannot disable each other.
@@ -79,6 +79,7 @@ def get_user_detail(db: Session, user: User) -> UserDetail:
         if staff
         else []
     )
+    unit = db.get(OrgUnit, staff.org_unit_id) if staff else None
     return UserDetail(
         **summarize_user(user).model_dump(),
         student_id=str(student.id) if student else None,
@@ -86,6 +87,11 @@ def get_user_detail(db: Session, user: User) -> UserDetail:
         teacher_id=str(teacher.id) if teacher else None,
         staff_profile_id=str(staff.id) if staff else None,
         org_unit_id=str(staff.org_unit_id) if staff else None,
+        available_permission_codes=[
+            code
+            for code in PermissionCode
+            if unit and (unit.type == "dean_office" or code not in ACADEMIC_PERMISSIONS)
+        ],
         permissions=[
             PermissionGrant(
                 permission_code=g.permission_code,
