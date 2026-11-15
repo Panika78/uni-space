@@ -8,7 +8,7 @@ pytestmark = pytest.mark.integration
 def test_preferences_upgrade_downgrade_and_metadata(migration_database):  # noqa: F811
     engine = migration_database
     run_migration(engine, "upgrade", "20261114_03")
-    run_migration(engine, "upgrade", "head")
+    run_migration(engine, "upgrade", "20261115_03")
     run_migration(engine, "check")
     assert "user_preferences" in inspect(engine).get_table_names()
     with engine.begin() as db:
@@ -25,7 +25,7 @@ def test_preferences_upgrade_downgrade_and_metadata(migration_database):  # noqa
             ),
             {"id": user},
         )
-    run_migration(engine, "downgrade", "20261114_03")
+    run_migration(engine, "downgrade", "20261115_02")
     assert "user_preferences" not in inspect(engine).get_table_names()
     with engine.connect() as db:
         assert db.scalar(text("SELECT count(*) FROM users WHERE id=:id"), {"id": user}) == 1

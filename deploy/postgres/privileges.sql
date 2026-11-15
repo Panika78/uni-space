@@ -56,13 +56,14 @@ FROM pg_tables WHERE schemaname='public' AND tablename IN
     ('users','auth_sessions','refresh_tokens','students','alembic_version',
      'study_groups','programs','org_units','teachers','disciplines','course_offerings',
      'buildings','rooms','lessons','lesson_groups','lesson_rooms',
-     'service_types','applications','news','notifications','academic_terms','course_groups',
+     'service_types','applications','application_history','news','notifications',
+     'academic_terms','course_groups',
      'assessments','assessment_groups','assessment_results','final_results',
-     'staff_profiles','staff_permissions','user_preferences') \gexec
+     'staff_profiles','staff_permissions','teaching_assignments','user_preferences') \gexec
 SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
               pg_get_serial_sequence(format('public.%I', tablename), 'id'))
 FROM pg_tables WHERE schemaname='public' AND tablename IN
-    ('auth_sessions','refresh_tokens') \gexec
+    ('auth_sessions','refresh_tokens','user_preferences') \gexec
 -- Schema REVOKE cannot undo a global default GRANT: reset both levels.
 -- Functions have PUBLIC EXECUTE even without an explicit default ACL row.
 ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator
@@ -77,15 +78,18 @@ ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator IN SCHEMA public
     REVOKE ALL ON SEQUENCES FROM PUBLIC, uni_space_api;
 ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator IN SCHEMA public
     REVOKE ALL ON FUNCTIONS FROM PUBLIC, uni_space_api;
--- Explicit writes for session/token lifecycle and the implemented user preference.
+-- Explicit API write allowlist; history is append-only for the runtime role.
 SELECT format('GRANT INSERT, UPDATE ON public.%I TO uni_space_api', tablename)
 FROM pg_tables WHERE schemaname='public' AND tablename IN ('auth_sessions','refresh_tokens','user_preferences') \gexec
 SELECT format('GRANT INSERT ON public.%I TO uni_space_api', tablename)
-FROM pg_tables WHERE schemaname='public' AND tablename='applications' \gexec
+FROM pg_tables WHERE schemaname='public' AND tablename IN ('applications', 'application_history') \gexec
 SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
-              pg_get_serial_sequence('public.applications', 'id'))
-WHERE to_regclass('public.applications') IS NOT NULL
-  AND pg_get_serial_sequence('public.applications', 'id') IS NOT NULL \gexec
+              pg_get_serial_sequence(format('public.%I', tablename), 'id'))
+FROM pg_tables WHERE schemaname='public'
+  AND tablename IN ('applications', 'application_history') \gexec
+SELECT 'GRANT UPDATE (review_status, form_data, reviewer_user_id, feedback, updated_at, version)
+        ON public.applications TO uni_space_api'
+WHERE to_regclass('public.applications') IS NOT NULL \gexec
 -- SELECT FOR UPDATE in login requires UPDATE on at least one user column.
 -- Grant only the immutable-by-API identifier, not password/role/active fields.
 SELECT 'GRANT UPDATE (id) ON public.users TO uni_space_api'

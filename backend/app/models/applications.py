@@ -89,3 +89,31 @@ class Application(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+
+
+class ApplicationHistory(Base):
+    __tablename__ = "application_history"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_application_history"),
+        Index(
+            "ix_application_history_application_created_id", "application_id", "created_at", "id"
+        ),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    application_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "applications.id",
+            name="fk_application_history_application_id_applications",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    actor_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", name="fk_application_history_actor_user_id_users"), nullable=True
+    )
+    from_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    to_status: Mapped[str] = mapped_column(String, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.statement_timestamp()
+    )

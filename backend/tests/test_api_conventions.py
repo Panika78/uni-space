@@ -771,6 +771,13 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
     assert openapi.json()["components"]["schemas"]["ApiError"]
     assert "servers" not in openapi.json()
     assert set(openapi.json()["paths"]) == {
+        "/api/v1/teaching/assignments",
+        "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/students",
+        "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/assessments",
+        "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/assessments/"
+        "{assessment_group_id}/results",
+        "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/lessons",
+        "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/lessons/{lesson_id}/students",
         "/api/v1/auth/context",
         "/api/v1/auth/login",
         "/api/v1/auth/refresh",
@@ -778,6 +785,12 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
         "/api/v1/services",
         "/api/v1/applications",
         "/api/v1/applications/{id}",
+        "/api/v1/applications/{id}/resubmit",
+        "/api/v1/applications/{id}/history",
+        "/api/v1/staff/applications",
+        "/api/v1/staff/applications/{id}",
+        "/api/v1/staff/applications/{id}/review",
+        "/api/v1/staff/applications/{id}/history",
         "/api/v1/schedule",
         "/api/v1/academics",
         "/api/v1/users/me",
