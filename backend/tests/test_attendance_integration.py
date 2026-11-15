@@ -35,8 +35,8 @@ def attendance(db_session):
         Lesson,
         course_offering_id=s.courses[0].id,
         teacher_id=s.teachers[2].id,
-        starts_at=datetime.now(UTC) - timedelta(hours=2),
-        ends_at=datetime.now(UTC) - timedelta(hours=1),
+        starts_at=datetime.now(UTC),
+        ends_at=datetime.now(UTC) + timedelta(hours=1),
         kind="lab",
     )
     s.add(LessonGroup, lesson_id=s.lesson.id, group_id=s.groups[0].id)
@@ -136,6 +136,10 @@ def test_teacher_scope_subgroups_and_revoked_assignment(attendance):
     s.students[0].subgroup_id = subgroup.id
     s.students[2].subgroup_id = other.id
     s.db.flush()
+    # Initial subgroup setup precedes this lesson, unlike a later transfer.
+    s.lesson.starts_at = datetime.now(UTC)
+    s.lesson.ends_at = s.lesson.starts_at + timedelta(hours=1)
+    s.db.flush()
     assert s.write().status_code == 200
     assert s.write(student=2).status_code == 404
     assert s.read(2, lesson=s.lesson.id).status_code == 404
@@ -154,6 +158,10 @@ def test_history_after_transfer_only_staff_can_correct_existing(attendance, tran
     group = s.db.scalar(select(LessonGroup).where(LessonGroup.lesson_id == s.lesson.id))
     group.subgroup_id = subgroup.id
     s.students[0].subgroup_id = subgroup.id
+    s.db.flush()
+    # Initial subgroup setup precedes this lesson, unlike a later transfer.
+    s.lesson.starts_at = datetime.now(UTC)
+    s.lesson.ends_at = s.lesson.starts_at + timedelta(hours=1)
     s.db.flush()
     assert s.write().status_code == 200
     empty = s.add(
@@ -208,8 +216,8 @@ def test_lesson_state_time_and_independent_replacement(attendance, status):
         Lesson,
         course_offering_id=s.courses[0].id,
         previous_lesson_id=s.lesson.id,
-        starts_at=datetime.now(UTC) - timedelta(hours=1),
-        ends_at=datetime.now(UTC),
+        starts_at=datetime.now(UTC),
+        ends_at=datetime.now(UTC) + timedelta(hours=1),
         kind="lab",
     )
     s.add(LessonGroup, lesson_id=replacement.id, group_id=s.groups[0].id)

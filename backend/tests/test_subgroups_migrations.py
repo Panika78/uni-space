@@ -15,7 +15,8 @@ from app.models import Subgroup
 pytestmark = pytest.mark.integration
 
 SNAPSHOT = """SELECT jsonb_build_array(
-    (SELECT jsonb_agg(to_jsonb(s) - 'subgroup_id' ORDER BY id) FROM students s),
+    (SELECT jsonb_agg((to_jsonb(s) - 'membership_version' - 'membership_changed_at')
+     - 'subgroup_id' ORDER BY id) FROM students s),
     (SELECT jsonb_agg(to_jsonb(g) - 'subgroup_id' ORDER BY id) FROM lesson_groups g),
     (SELECT jsonb_agg(to_jsonb(l) ORDER BY id) FROM lessons l))"""
 
@@ -142,7 +143,7 @@ def test_downgrade_rejects_populated_distribution_without_losing_data(migration_
     result = run_migration(engine, "downgrade", "20261114_02", success=False)
     assert "Cannot downgrade populated subgroups" in result.stderr
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261115_04"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261115_05"
         assert (
             connection.scalar(text("SELECT count(*) FROM students WHERE subgroup_id IS NOT NULL"))
             == 1

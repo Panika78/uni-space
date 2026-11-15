@@ -73,9 +73,18 @@ def update_attendance(db: Session, user: User, lesson_id: int, student_id: int, 
                 )
                 .with_for_update(read=True)
             )
-            if assignment is None or not current:
+            same_membership = mark is None or (
+                mark.origin_group_id == student.group_id
+                and mark.origin_subgroup_id == student.subgroup_id
+                and mark.membership_version == student.membership_version
+            )
+            if assignment is None or not current or not same_membership:
                 raise HTTPException(404, "not_found")
         elif not current and mark is None:
+            raise HTTPException(404, "not_found")
+        # No roster history exists: only the latest membership boundary is kept.
+        # A shared lesson or returning to an old group cannot reopen old writes.
+        if mark is None and lesson.starts_at < student.membership_changed_at:
             raise HTTPException(404, "not_found")
         if (not staff or mark is None) and (
             lesson.status != "scheduled" or lesson.starts_at > datetime.now(UTC)
@@ -91,7 +100,13 @@ def update_attendance(db: Session, user: User, lesson_id: int, student_id: int, 
             db.delete(mark)
         else:
             if mark is None:
-                mark = Attendance(lesson_id=lesson_id, student_id=student_id)
+                mark = Attendance(
+                    lesson_id=lesson_id,
+                    student_id=student_id,
+                    origin_group_id=student.group_id,
+                    origin_subgroup_id=student.subgroup_id,
+                    membership_version=student.membership_version,
+                )
                 db.add(mark)
             mark.status = status
             mark.marked_by_user_id = user.id
@@ -116,17 +131,19 @@ def update_attendance(db: Session, user: User, lesson_id: int, student_id: int, 
 def get_attendance_query(student):
     return (
         select(Lesson, Attendance, Lesson.id)
+        .select_from(Lesson)
+        .join(Student, Student.id == student.id)
         .outerjoin(
             Attendance,
             and_(
                 Attendance.lesson_id == Lesson.id,
-                Attendance.student_id == student.id,
+                Attendance.student_id == Student.id,
             ),
         )
         .where(
             or_(
-                get_student_lesson_condition(Lesson.id, student.group_id, student.subgroup_id),
-                Attendance.student_id == student.id,
+                get_student_lesson_condition(Lesson.id, Student.group_id, Student.subgroup_id),
+                Attendance.student_id == Student.id,
             )
         )
     )

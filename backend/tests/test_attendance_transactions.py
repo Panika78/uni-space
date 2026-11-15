@@ -173,6 +173,8 @@ def test_real_production_acl_supports_attendance_and_append_only_audit(runtime_e
             "SELECT before_data FROM audit_events",
             "UPDATE lessons SET status='cancelled'",
             "UPDATE students SET group_id=group_id",
+            "UPDATE students SET membership_version=0",
+            "UPDATE students SET membership_changed_at=clock_timestamp()",
             "DELETE FROM teaching_assignments",
         ]:
             with runtime.begin() as db, pytest.raises(DBAPIError) as error:
