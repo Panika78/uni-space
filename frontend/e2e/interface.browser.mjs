@@ -249,7 +249,10 @@ try {
         await settle()
         assert.ok(Math.abs((await tabs.boundingBox()).y - top) < 1)
         await page.goBack()
-        await page.getByRole('link', { name: 'Подать заявление' }).waitFor()
+        await page
+          .getByRole('article', { name: 'Справка об обучении' })
+          .getByRole('link', { name: 'Подать заявление', exact: true })
+          .waitFor()
         await page.goForward()
         await tabs.getByRole('link', { name: 'Мои заявления' }).waitFor()
       }
@@ -486,7 +489,10 @@ try {
     await page.getByText('Вы ещё не подавали заявлений', { exact: true }).waitFor()
     await inspect('empty-applications-fixture', width)
     await page.getByRole('link', { name: 'Перейти в каталог услуг' }).click()
-    await page.getByRole('link', { name: 'Подать заявление' }).waitFor()
+    await page
+      .getByRole('article', { name: 'Справка об обучении' })
+      .getByRole('link', { name: 'Подать заявление', exact: true })
+      .waitFor()
   }
   await page.unroute('**/api/v1/applications?*')
   console.log('PASS read-only empty application fixture and catalog transition')
