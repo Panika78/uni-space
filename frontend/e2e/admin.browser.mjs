@@ -23,6 +23,22 @@ const browser = await chromium.launch({
 })
 const base = process.env.ADMIN_TEST_URL || 'http://localhost:5173'
 const suffix = Date.now().toString()
+async function login(page, name, password) {
+  await page.goto(base + '/login')
+  await page.getByLabel('Логин', { exact: true }).fill(name)
+  await page.getByLabel('Пароль', { exact: true }).fill(password)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const pending = page.waitForResponse((response) => response.url().endsWith('/auth/login'))
+    await page.getByRole('button', { name: 'Войти', exact: true }).click()
+    const response = await pending
+    if (response.status() !== 429) {
+      assert.equal(response.status(), 200)
+      return
+    }
+    await page.waitForTimeout((Number(response.headers()['retry-after']) + 1) * 1000)
+  }
+  throw new Error('Login remained rate limited')
+}
 try {
   const context = await browser.newContext()
   const page = await context.newPage()
@@ -32,10 +48,7 @@ try {
     if (request.url().includes('/api/v1/'))
       authorization = request.headers().authorization || authorization
   })
-  await page.goto(base + '/login')
-  await page.getByLabel('Логин', { exact: true }).fill('admin-browser-operator')
-  await page.getByLabel('Пароль', { exact: true }).fill('Fictional-Admin-Browser-2026')
-  await page.getByRole('button', { name: 'Войти', exact: true }).click()
+  await login(page, 'admin-browser-operator', 'Fictional-Admin-Browser-2026')
   await page.getByRole('heading', { name: 'Пользователи', exact: true }).waitFor()
   const checkWidth = async () =>
     assert.equal(
@@ -146,10 +159,7 @@ try {
   // Independent browser session loses permissions and tokens immediately.
   const staffContext = await browser.newContext()
   const staffPage = await staffContext.newPage()
-  await staffPage.goto(base + '/login')
-  await staffPage.getByLabel('Логин', { exact: true }).fill(`browser-staff-360-${suffix}`)
-  await staffPage.getByLabel('Пароль', { exact: true }).fill(staffPassword)
-  await staffPage.getByRole('button', { name: 'Войти', exact: true }).click()
+  await login(staffPage, `browser-staff-360-${suffix}`, staffPassword)
   await staffPage.getByRole('heading', { name: 'Нет доступных разделов', exact: true }).waitFor()
   await page.goto(base + `/admin/users/${staffId}`)
   await page.getByLabel('Разрешение', { exact: true }).selectOption('applications.review')
