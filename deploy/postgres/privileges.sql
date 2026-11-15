@@ -63,7 +63,7 @@ FROM pg_tables WHERE schemaname='public' AND tablename IN
 SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
               pg_get_serial_sequence(format('public.%I', tablename), 'id'))
 FROM pg_tables WHERE schemaname='public' AND tablename IN
-    ('auth_sessions','refresh_tokens','user_preferences') \gexec
+    ('auth_sessions','refresh_tokens') \gexec
 -- Schema REVOKE cannot undo a global default GRANT: reset both levels.
 -- Functions have PUBLIC EXECUTE even without an explicit default ACL row.
 ALTER DEFAULT PRIVILEGES FOR ROLE uni_space_migrator

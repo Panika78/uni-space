@@ -483,9 +483,23 @@ async function checkScheduleChanges(page, width) {
 }
 
 async function noOverflow(page) {
+  const overflow = await page.evaluate(() => ({
+    viewportWidth: window.innerWidth,
+    documentWidth: document.documentElement.scrollWidth,
+    elements: Array.from(document.body.querySelectorAll('*'))
+      .map((element) => ({
+        tag: element.tagName.toLowerCase(),
+        className: typeof element.className === 'string' ? element.className : '',
+        id: element.id,
+        left: Math.round(element.getBoundingClientRect().left),
+        right: Math.round(element.getBoundingClientRect().right),
+      }))
+      .filter(({ left, right }) => left < 0 || right > window.innerWidth + 1)
+      .slice(0, 12),
+  }))
   assert.ok(
-    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-    'No horizontal page overflow',
+    overflow.documentWidth <= overflow.viewportWidth,
+    `No horizontal page overflow: ${JSON.stringify(overflow)}`,
   )
   assert.ok(
     await page.locator('.lesson-card:visible').evaluateAll((cards) =>
