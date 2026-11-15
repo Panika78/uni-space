@@ -40,6 +40,7 @@ from app.schedule.editor_schemas import (
 )
 from app.schedule.participants import Participant, replace_lesson_participants
 from app.schedule.service import MOSCOW
+from app.teaching.service import require_teaching_assignment
 
 
 @dataclass(frozen=True)
@@ -144,17 +145,17 @@ def validate_state(
     if db.get(CourseOffering, int(data.course_offering_id)) is None:
         raise HTTPException(422, "validation_error")
     if validate_assignment and data.teacher_id:
-        assigned = set(
-            db.scalars(
-                select(TeachingAssignment.group_id).where(
-                    TeachingAssignment.course_offering_id == int(data.course_offering_id),
-                    TeachingAssignment.teacher_id == int(data.teacher_id),
-                    TeachingAssignment.group_id.in_(groups),
+        for group_id in sorted(groups):
+            try:
+                # Selected teacher's subject assignment; the staff actor does
+                # not need a teacher profile or a journal assignment.
+                require_teaching_assignment(
+                    db, int(data.teacher_id), int(data.course_offering_id), group_id
                 )
-            )
-        )
-        if groups != assigned:
-            raise HTTPException(422, "validation_error")
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+                raise HTTPException(422, "validation_error") from exc
     rooms = {int(i) for i in data.room_ids}
     if rooms != set(db.scalars(select(Room.id).where(Room.id.in_(rooms)))):
         raise HTTPException(422, "validation_error")
