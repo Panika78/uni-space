@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
 import httpx
@@ -797,11 +797,12 @@ with SessionLocal.begin() as db:
                                  course_offering_id=pair.course_offering_id, group_id=pair.group_id))
 """,
             )
-            with httpx.Client(
-                base_url=public_origin, verify=context, trust_env=False, timeout=10
-            ) as teacher_client:
+            with ExitStack() as teacher_clients:
                 teacher_scopes = []
                 for index in range(2):
+                    teacher_client = teacher_clients.enter_context(httpx.Client(
+                        base_url=public_origin, verify=context, trust_env=False, timeout=10
+                    ))
                     login = teacher_client.post(
                         "/api/v1/auth/login", headers={"Origin": public_origin},
                         json={"login": f"teaching-acl-{index}", "password": password},
@@ -816,7 +817,7 @@ with SessionLocal.begin() as db:
                     assignment = items[0]
                     journal = (f"/api/v1/teaching/courses/{assignment['course_offering_id']}"
                                f"/groups/{assignment['group']['id']}")
-                    teacher_scopes.append((headers, journal, assignment["id"]))
+                    teacher_scopes.append((headers, journal, assignment["id"], teacher_client))
                     for suffix in ("students", "assessments", "lessons"):
                         page = teacher_client.get(journal + "/" + suffix, headers=headers)
                         assert page.status_code == 200, page.text
@@ -830,10 +831,10 @@ with SessionLocal.begin() as db:
                         assert teacher_client.get(
                             journal + f"/lessons/{lesson['id']}/students", headers=headers
                         ).status_code == 200
-                for index, (headers, journal, _) in enumerate(teacher_scopes):
+                for index, (headers, journal, _, teacher_client) in enumerate(teacher_scopes):
                     other_journal = teacher_scopes[1 - index][1]
                     assert teacher_client.get(other_journal + "/students", headers=headers).status_code == 404
-                headers, journal, assignment_id = teacher_scopes[0]
+                headers, journal, assignment_id, teacher_client = teacher_scopes[0]
                 sql(f"DELETE FROM teaching_assignments WHERE id={int(assignment_id)}")
                 assert teacher_client.get(journal + "/students", headers=headers).status_code == 404
             print("PASS: teacher journal reads, isolation and old-JWT revocation under production ACL", flush=True)
