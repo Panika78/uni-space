@@ -153,7 +153,7 @@ it('loads StudentAccess before the real schedule and keeps the working profile r
   const urls = vi
     .mocked(apiFetch)
     .mock.calls.map(([input]) => new URL(String(input), window.location.href).pathname)
-  expect(urls).toEqual(['/api/v1/users/me', '/api/v1/schedule'])
+  expect(urls).toEqual(['/api/v1/users/me', '/api/v1/users/me/preferences', '/api/v1/schedule'])
   await userEvent.setup().click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await userEvent.setup().click(screen.getByRole('link', { name: 'Мой профиль' }))
   expect(await screen.findByRole('heading', { name: 'Мой профиль' })).toBeInTheDocument()

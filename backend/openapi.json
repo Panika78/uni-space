@@ -1415,6 +1415,32 @@
         "title": "PermissionCode",
         "type": "string"
       },
+      "PreferencesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "show_cancelled_lessons": {
+            "default": true,
+            "title": "Show Cancelled Lessons",
+            "type": "boolean"
+          }
+        },
+        "title": "PreferencesResponse",
+        "type": "object"
+      },
+      "PreferencesUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "show_cancelled_lessons": {
+            "title": "Show Cancelled Lessons",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "show_cancelled_lessons"
+        ],
+        "title": "PreferencesUpdate",
+        "type": "object"
+      },
       "ProgramRef": {
         "additionalProperties": false,
         "properties": {
@@ -4691,6 +4717,96 @@
         "summary": "Get Student Profile",
         "tags": [
           "students"
+        ]
+      }
+    },
+    "/api/v1/users/me/preferences": {
+      "get": {
+        "operationId": "get_user_preferences_api_v1_users_me_preferences_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferencesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get User Preferences",
+        "tags": [
+          "preferences"
+        ]
+      },
+      "patch": {
+        "operationId": "update_user_preferences_api_v1_users_me_preferences_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreferencesUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferencesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update User Preferences",
+        "tags": [
+          "preferences"
         ]
       }
     }

@@ -567,6 +567,10 @@ with engine.connect() as c:
     assert not c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
     for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'news',:privilege)"), {'privilege': privilege}).scalar_one()
+    for privilege in ('SELECT','INSERT','UPDATE'):
+        assert c.execute(text("SELECT has_table_privilege(current_user,'user_preferences',:privilege)"), {'privilege': privilege}).scalar_one()
+    for privilege in ('DELETE','TRUNCATE','REFERENCES','TRIGGER'):
+        assert not c.execute(text("SELECT has_table_privilege(current_user,'user_preferences',:privilege)"), {'privilege': privilege}).scalar_one()
     assert not c.execute(text("SELECT has_table_privilege(current_user,'applications','UPDATE')")).scalar_one()
     assert not c.execute(text("SELECT has_table_privilege(current_user,'applications','DELETE')")).scalar_one()
     # Built-in C collation + explicit Russian ranks must work under production ACL,
@@ -1283,6 +1287,33 @@ RETURNING id;""")
                     "PASS: real /academics under restricted uni_space_api after repeated ACL",
                     flush=True,
                 )
+                preferences_path = "/api/v1/users/me/preferences"
+                preferences = client.get(preferences_path, headers=schedule_headers)
+                assert preferences.status_code == 200, preferences.text
+                assert preferences.json() == {"show_cancelled_lessons": True}
+                saved = client.patch(
+                    preferences_path,
+                    headers=schedule_headers,
+                    json={"show_cancelled_lessons": False},
+                )
+                assert saved.status_code == 200, saved.text
+                assert saved.json() == {"show_cancelled_lessons": False}
+                assert (
+                    client.get(preferences_path, headers=schedule_headers).json()
+                    == saved.json()
+                )
+                assert (
+                    client.patch(
+                        preferences_path,
+                        headers=schedule_headers,
+                        json={"show_cancelled_lessons": "false"},
+                    ).status_code
+                    == 422
+                )
+                print(
+                    "PASS: real preference read/upsert under restricted uni_space_api",
+                    flush=True,
+                )
                 profile = client.get("/api/v1/users/me", headers=schedule_headers)
                 assert profile.status_code == 200, profile.text
                 assert profile.headers["cache-control"] == "no-store"
@@ -1374,6 +1405,11 @@ RETURNING id;""")
                 second_headers = {
                     "Authorization": "Bearer " + second_login.json()["access_token"]
                 }
+                second_preferences = client.get(
+                    preferences_path, headers=second_headers
+                )
+                assert second_preferences.status_code == 200, second_preferences.text
+                assert second_preferences.json() == {"show_cancelled_lessons": True}
                 second_notifications = client.get(
                     "/api/v1/notifications", headers=second_headers
                 )

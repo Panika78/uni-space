@@ -568,6 +568,11 @@ try {
       ? route.fulfill({ json: currentProfile })
       : route.continue(),
   )
+  await context.route('**/api/v1/users/me/preferences', (route) =>
+    route.request().headers().authorization === 'Bearer fictional-browser-token'
+      ? route.fulfill({ json: { show_cancelled_lessons: true } })
+      : route.continue(),
+  )
   await context.route('**/api/v1/schedule?*', (route) => {
     if (route.request().headers().authorization !== 'Bearer fictional-browser-token')
       return route.continue()
@@ -612,6 +617,7 @@ try {
   await heading(page, 'Расписание')
   await context.unroute('**/api/v1/auth/login')
   await context.unroute('**/api/v1/users/me')
+  await context.unroute('**/api/v1/users/me/preferences')
   await holdAuthLock()
   const beforeWaitingLogout = countAuth()
   await clickLogout(page)

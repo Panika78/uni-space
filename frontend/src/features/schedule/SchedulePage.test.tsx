@@ -3,16 +3,19 @@ import userEvent from '@testing-library/user-event'
 import { focusManager, onlineManager, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createQueryClient } from '../../app/queryClient'
-import { ApiClientError, apiFetch } from '../../shared/api/client'
+import { ApiClientError } from '../../shared/api/client'
 import { SchedulePage } from './SchedulePage'
 import { createLesson } from './testFixtures'
 import type { components } from '../../shared/api/schema'
 
+const { request } = vi.hoisted(() => ({ request: vi.fn() }))
 vi.mock('../../shared/api/client', async (original) => ({
   ...(await original<typeof import('../../shared/api/client')>()),
-  apiFetch: vi.fn(),
+  apiFetch: (url: string, ...args: unknown[]) =>
+    url.includes('/preferences')
+      ? Promise.resolve({ show_cancelled_lessons: true })
+      : request(url, ...args),
 }))
-const request = vi.mocked(apiFetch)
 const response = (items = [createLesson()]): components['schemas']['ScheduleResponse'] => ({
   date_from: '2026-11-09',
   date_to: '2026-11-15',

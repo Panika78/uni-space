@@ -52,7 +52,8 @@
   content: '';
   position: absolute;
   z-index: -1;
-  inset: 5px auto 5px 5px;
+  inset-block: 5px;
+  inset-inline-start: 5px;
   width: calc((100% - 10px) / 2);
   background: var(--accent);
   border-radius: 9px;
@@ -60,6 +61,9 @@
 }
 .schedule-modes[data-mode='week']::before {
   transform: translateX(100%);
+}
+.schedule-modes:dir(rtl)[data-mode='week']::before {
+  transform: translateX(-100%);
 }
 .schedule-modes button {
   background: transparent;
@@ -358,7 +362,8 @@
     padding: 4px;
   }
   .schedule-modes::before {
-    inset: 4px auto 4px 4px;
+    inset-block: 4px;
+    inset-inline-start: 4px;
     width: calc((100% - 8px) / 2);
   }
   .schedule-modes button {
@@ -677,4 +682,28 @@
     flex: 0 0 auto;
     margin-left: auto;
   }
+}
+
+.schedule-cancelled-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  width: fit-content;
+  max-width: 100%;
+  cursor: pointer;
+}
+
+.schedule-cancelled-toggle input {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.schedule-gap {
+  margin: 0;
+  padding: 0.5rem 1rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
 }

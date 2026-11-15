@@ -31,7 +31,7 @@ def test_upgrade_populated_schema_preserves_results_and_has_single_head(migratio
     run_migration(engine, "check")
     with engine.connect() as db:
         assert db.scalar(text(SNAPSHOT)) == before
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261115_02"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261115_03"
     run_migration(engine, "downgrade", "20261114_03")
     with engine.connect() as db:
         assert db.scalar(text(SNAPSHOT)) == before
