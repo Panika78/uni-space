@@ -568,6 +568,7 @@ def test_resubmit_conflict_and_failure_do_not_save_form_or_clear_reason(context)
                 row,
                 expected_version=3,
                 actor_user_id=9223372036854775807,
+                access_predicate=Application.student_id == c["students"][0],
                 from_statuses={"needs_correction"},
                 to_status="resubmitted",
                 form_data={"place_of_submission": "Must rollback"},
@@ -656,3 +657,137 @@ def test_academic_leave_approval_preserves_student_status_and_document_not_requi
     assert approved.json()["document_status"] == "not_required"
     with Session(c["engine"]) as db:
         assert db.get(Student, c["students"][0]).academic_status == "enrolled"
+
+
+@pytest.mark.parametrize(
+    ("actor", "timing", "change_version"),
+    [
+        ("staff", "before_update", False),
+        ("student", "before_update", False),
+        ("staff", "while_locked", False),
+        ("student", "while_locked", False),
+        ("staff", "before_update", True),
+        ("student", "before_update", True),
+        ("staff_fallback", "before_update", False),
+        ("staff_unassign", "before_update", False),
+    ],
+)
+def test_concurrent_reassignment_denies_workflow_without_business_changes(
+    context, actor, timing, change_version
+):
+    from threading import Event
+    from time import monotonic, sleep
+
+    c = context
+    is_staff = actor.startswith("staff")
+    if actor == "staff_unassign":
+        with Session(c["engine"]) as db, db.begin():
+            db.get(ServiceType, c["service_id"]).responsible_org_unit_id = c["unit_ids"][1]
+    identifier = c["application"](
+        assigned_org_unit_id=c["unit_ids"][0] if actor in ("staff", "staff_unassign") else None,
+        review_status="submitted" if is_staff else "needs_correction",
+        feedback="Preserve reason",
+        reviewer_user_id=c["actors"][0],
+    )
+    student_token = c["login"]()
+    before_update = Event()
+    continue_update = Event()
+    workflow_pids = []
+
+    def pause_workflow_update(connection, _cursor, statement, _params, _context, _many):
+        if (
+            statement.startswith("UPDATE applications SET")
+            and "applications.version =" in statement
+        ):
+            workflow_pids.append(connection.scalar(text("SELECT pg_backend_pid()")))
+            before_update.set()
+            assert continue_update.wait(timeout=15)
+
+    def request_change():
+        if is_staff:
+            return c["review"](identifier, "start_review", 1)
+        return c["request"](
+            "POST",
+            f"/api/v1/applications/{identifier}/resubmit",
+            student_token,
+            json={"expected_version": 1, "form_data": {"place_of_submission": "Must not save"}},
+        )
+
+    event.listen(c["engine"], "before_cursor_execute", pause_workflow_update)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(request_change)
+            try:
+                assert before_update.wait(timeout=10)  # access SELECT has already succeeded
+                with Session(c["engine"]) as admin:
+                    admin_pid = admin.scalar(text("SELECT pg_backend_pid()"))
+                    assert admin_pid != workflow_pids[0]
+                    column = "assigned_org_unit_id" if is_staff else "student_id"
+                    target = c["unit_ids"][1] if is_staff else c["students"][1]
+                    if actor == "staff_unassign":
+                        target = None
+                    version_change = ", version=version+1" if change_version else ""
+                    if actor == "staff_fallback":
+                        admin.execute(
+                            text(
+                                "UPDATE service_types SET responsible_org_unit_id=:target "
+                                "WHERE id=:id"
+                            ),
+                            {"target": target, "id": c["service_id"]},
+                        )
+                    else:
+                        admin.execute(
+                            text(
+                                f"UPDATE applications SET {column}=:target{version_change} "
+                                "WHERE id=:id"
+                            ),
+                            {"target": target, "id": identifier},
+                        )
+                    snapshot = admin.scalar(
+                        text("SELECT to_jsonb(a) FROM applications a WHERE id=:id"),
+                        {"id": identifier},
+                    )
+                    if timing == "while_locked":
+                        # Ensure UPDATE started with the old READ COMMITTED snapshot
+                        # and is waiting for the administrative transaction's row lock.
+                        continue_update.set()
+                        deadline = monotonic() + 10
+                        with c["engine"].connect() as observer:
+                            while not observer.scalar(
+                                text("SELECT :admin = ANY(pg_blocking_pids(:workflow))"),
+                                {"admin": admin_pid, "workflow": workflow_pids[0]},
+                            ):
+                                assert monotonic() < deadline
+                                sleep(0.01)
+                    admin.commit()
+                # Confirm the reassignment is committed on an independent connection.
+                with c["engine"].connect() as observer:
+                    assert (
+                        observer.scalar(
+                            text("SELECT to_jsonb(a) FROM applications a WHERE id=:id"),
+                            {"id": identifier},
+                        )
+                        == snapshot
+                    )
+                continue_update.set()
+                response = future.result(timeout=15)
+            finally:
+                continue_update.set()
+    finally:
+        event.remove(c["engine"], "before_cursor_execute", pause_workflow_update)
+    assert response.status_code == 404, response.text
+    assert response.json()["error"]["code"] == "not_found"
+    with c["engine"].connect() as observer:
+        assert (
+            observer.scalar(
+                text("SELECT to_jsonb(a) FROM applications a WHERE id=:id"), {"id": identifier}
+            )
+            == snapshot
+        )  # includes version, status, form, feedback, reviewer and timestamps
+        assert (
+            observer.scalar(
+                text("SELECT count(*) FROM application_history WHERE application_id=:id"),
+                {"id": identifier},
+            )
+            == 0
+        )

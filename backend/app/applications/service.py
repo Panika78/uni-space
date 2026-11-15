@@ -3,10 +3,16 @@
 from fastapi import HTTPException
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import ColumnElement
 
 from app.applications.schemas import ApplicationFormData, ReviewApplicationRequest
 from app.models import Application, ApplicationHistory, ServiceType, Student, User
-from app.permissions import require_application_review
+from app.permissions import (
+    PermissionCode,
+    get_application_scope,
+    get_authorization_context,
+    require_application_review,
+)
 
 APPLICATION_FORMS = {"study_certificate": ApplicationFormData}
 
@@ -35,6 +41,7 @@ def update_application(
     *,
     expected_version: int,
     actor_user_id: int,
+    access_predicate: ColumnElement[bool],
     from_statuses: set[str],
     to_status: str,
     comment: str | None = None,
@@ -66,6 +73,7 @@ def update_application(
         update(Application)
         .where(
             Application.id == application.id,
+            access_predicate,
             Application.version == expected_version,
             Application.review_status == previous_status,
             Application.document_status != "ready",
@@ -75,6 +83,14 @@ def update_application(
         .execution_options(synchronize_session=False, populate_existing=True)
     )
     if changed is None:
+        # A failed conditional write may mean access was lost, not just a stale
+        # version. Select only an accessible ID with a fresh READ COMMITTED
+        # snapshot; do not classify using the previously loaded ORM instance.
+        accessible_id = db.scalar(
+            select(Application.id).where(Application.id == application.id, access_predicate)
+        )
+        if accessible_id is None:
+            raise HTTPException(404, "not_found")
         raise HTTPException(409, "version_conflict")
     db.add(
         ApplicationHistory(
@@ -96,12 +112,22 @@ def review_application(
     request: ReviewApplicationRequest,
 ) -> Application:
     application = require_application_review(db, user, application_id)
+    context = get_authorization_context(db, user)
+    scopes = [
+        int(permission.scope_org_unit_id)
+        for permission in context.permissions
+        if permission.permission_code == PermissionCode.APPLICATIONS_REVIEW
+        and permission.scope_org_unit_id is not None
+    ]
+    if not scopes:
+        raise HTTPException(403, "forbidden")
     from_statuses, to_status = REVIEW_TRANSITIONS[request.action]
     return update_application(
         db,
         application,
         expected_version=request.expected_version,
         actor_user_id=user.id,
+        access_predicate=get_application_scope().in_(scopes),
         from_statuses=from_statuses,
         to_status=to_status,
         comment=request.comment,
@@ -128,6 +154,7 @@ def resubmit_application(
         application,
         expected_version=expected_version,
         actor_user_id=student.user_id,
+        access_predicate=Application.student_id == student.id,
         from_statuses={"needs_correction"},
         to_status="resubmitted",
         form_data=form_type.model_validate(form_data.model_dump()).model_dump(),
