@@ -132,7 +132,10 @@ async function inspectMoves(page, account) {
 }
 
 async function submitAndRestore(page, account, password) {
-  await page.getByRole('link', { name: 'Подать заявление' }).click()
+  await page
+    .getByRole('article', { name: 'Справка об обучении' })
+    .getByRole('link', { name: 'Подать заявление', exact: true })
+    .click()
   const place = `Acceptance ${account} ${page.viewportSize().width}`
   await page.getByLabel(/Место предоставления/).fill(place)
   const pending = page.waitForResponse(

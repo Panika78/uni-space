@@ -2,8 +2,9 @@
 
 from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision: str = "20261115_04"
 down_revision: str | Sequence[str] | None = "20261115_03"
@@ -47,7 +48,8 @@ def upgrade() -> None:
             existing = (
                 connection.execute(
                     sa.text(
-                        "SELECT processing_mode, produces_document FROM service_types WHERE code=:code"
+                        "SELECT processing_mode, produces_document "
+                        "FROM service_types WHERE code=:code"
                     ),
                     {"code": code},
                 )
