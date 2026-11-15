@@ -27,6 +27,8 @@ EXPECTED_MODEL_TABLES = {
     "study_groups",
     "students",
     "teachers",
+    "subgroups",
+    "audit_events",
 }
 REQUIRED_COLUMNS = {
     "users": {"id", "login", "password_hash", "full_name", "role", "is_active", "created_at"},
@@ -43,8 +45,10 @@ REQUIRED_COLUMNS = {
     "org_units": {"id", "name", "type"},
     "programs": {"id", "code", "name", "direction_code", "direction_name", "faculty_id"},
     "study_groups": {"id", "name", "program_id", "course_number"},
-    "students": {"id", "user_id", "group_id", "academic_status"},
-    "teachers": {"id", "full_name"},
+    "students": {"id", "user_id", "group_id", "academic_status", "profile_role"},
+    "teachers": {"id", "full_name", "profile_role"},
+    "subgroups": {"id", "group_id", "name"},
+    "audit_events": {"id", "entity_type", "entity_id", "action", "created_at"},
 }
 EXPECTED_FOREIGN_KEYS = {
     "auth_sessions": {("user_id", "users", "id")},
@@ -56,8 +60,14 @@ EXPECTED_FOREIGN_KEYS = {
     "org_units": {("parent_id", "org_units", "id")},
     "programs": {("faculty_id", "org_units", "id")},
     "study_groups": {("program_id", "programs", "id")},
-    "students": {("user_id", "users", "id"), ("group_id", "study_groups", "id")},
+    "students": {
+        ("user_id", "users", "id"),
+        ("group_id", "study_groups", "id"),
+        ("group_id", "subgroups", "group_id"),
+    },
     "teachers": {("user_id", "users", "id"), ("department_id", "org_units", "id")},
+    "subgroups": {("group_id", "study_groups", "id")},
+    "audit_events": {("actor_user_id", "users", "id")},
 }
 FIXTURE_PASSWORD_HASH = "argon2id$fixture-only$not-a-secret"
 
@@ -146,8 +156,7 @@ def test_migration_creates_task_005_tables_without_premature_extended_tables(
     table_names = set(inspect(postgresql_engine).get_table_names(schema="public"))
 
     assert table_names >= EXPECTED_MODEL_TABLES
-    assert {"staff_profiles", "staff_permissions"} <= table_names
-    assert "subgroups" not in table_names
+    assert {"staff_profiles", "staff_permissions", "audit_events", "subgroups"} <= table_names
 
 
 def test_postgresql_ids_are_bigint_by_default_identity(postgresql_engine) -> None:
@@ -190,6 +199,16 @@ def test_postgresql_required_columns_and_foreign_keys_match_the_models(postgresq
             for foreign_key in inspector.get_foreign_keys(table_name, schema="public")
         }
         assert actual_keys == expected_keys
+
+    student_keys = {
+        tuple(fk["constrained_columns"]): tuple(fk["referred_columns"])
+        for fk in inspector.get_foreign_keys("students")
+    }
+    assert student_keys[("user_id", "profile_role")] == ("id", "role")
+    assert student_keys[("group_id", "subgroup_id")] == ("group_id", "id")
+    assert {column["name"]: column["nullable"] for column in inspector.get_columns("students")}[
+        "subgroup_id"
+    ]
 
     notification_columns = {
         column["name"]: column["nullable"]

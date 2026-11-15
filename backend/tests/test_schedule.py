@@ -16,6 +16,7 @@ from app.schedule.schemas import ScheduleParams
     "params",
     [
         {},
+        {"date_from": "2026-11-01", "date_to": "2026-11-01", "subgroup_id": "2"},
         {"date_from": "2026-11-01"},
         {"date_from": "2026-11-02", "date_to": "2026-11-01"},
         {"date_from": "2026-01-01", "date_to": "2026-02-01"},

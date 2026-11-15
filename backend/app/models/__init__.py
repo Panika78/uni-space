@@ -16,7 +16,7 @@ from app.models.schedule import (
     LessonRoom,
     Room,
 )
-from app.models.university import OrgUnit, Program, Student, StudyGroup, Teacher
+from app.models.university import OrgUnit, Program, Student, StudyGroup, Subgroup, Teacher
 
 __all__ = [
     "AuditEvent",
@@ -44,6 +44,7 @@ __all__ = [
     "Student",
     "ServiceType",
     "StudyGroup",
+    "Subgroup",
     "Teacher",
     "User",
     "StaffPermission",
