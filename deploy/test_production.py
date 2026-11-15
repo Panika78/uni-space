@@ -698,9 +698,9 @@ DROP FUNCTION public.existing_function_fixture(), public.future_function_fixture
             ) as static_client:
                 assert_static_delivery(static_client, static_client.get("/"))
                 # Check legal notices before the separate browser smoke test.
-                project_license = static_client.get("/LICENSE")
-                assert project_license.status_code == 200
-                assert "Copyright (c) 2026 Panika78" in project_license.text
+                legacy_license = static_client.get("/LICENSE")
+                assert "MIT License" not in legacy_license.text
+                assert "Permission is hereby granted" not in legacy_license.text
                 licenses = static_client.get("/licenses.md")
                 assert licenses.status_code == 200
                 assert "## react - 19.2.0 (MIT)" in licenses.text
@@ -709,7 +709,7 @@ DROP FUNCTION public.existing_function_fixture(), public.future_function_fixture
                 assert provenance.status_code == 200
                 assert "OpenAI ChatGPT" in provenance.text
             print(
-                "PASS: HTTPS project license, bundled dependency licenses and asset provenance",
+                "PASS: HTTPS no legacy project MIT license, dependency licenses and asset provenance",
                 flush=True,
             )
             browser_env = env | {
