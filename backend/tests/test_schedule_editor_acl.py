@@ -1,5 +1,8 @@
 """Run real editor requests under production uni_space_api ACL."""
 
+import ast
+from pathlib import Path
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
@@ -82,3 +85,20 @@ def test_production_role_can_edit_and_audit_but_cannot_change_academic_records(r
                 db.execute(text(statement))
             # attendance is delivered by #70 and may not exist on this main.
             assert error.value.orig.sqlstate in ("42501", "42P01")
+
+
+def test_production_compose_acl_assertions_match_runtime_grants(runtime_engine):  # noqa: F811
+    # Execute the same assertions used inside the production API container,
+    # under the actual runtime login on a migrated PostgreSQL database.
+    source = (Path(__file__).resolve().parents[2] / "deploy/test_production.py").read_text()
+    scripts = [
+        node.value
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and "PASS: schedule editor grants permitted" in node.value
+    ]
+    assert len(scripts) == 1
+    block = next(node for node in ast.parse(scripts[0]).body if isinstance(node, ast.With))
+    code = compile(ast.Module(body=[block], type_ignores=[]), "production-acl-assertions", "exec")
+    exec(code, {"engine": runtime_engine[1], "text": text})
