@@ -473,3 +473,22 @@ def test_schedule_changes_preserve_works_scores_assignments_and_unlinked_flags(e
     assert snapshot_tables() == before
     e.db.refresh(unrelated)
     assert unrelated.date_needs_confirmation is False and unrelated.lesson_id is None
+
+
+def test_legacy_unassigned_lesson_is_readable_and_can_be_repaired(editor):
+    e = editor
+    lesson = e.lesson(assigned=[], status="cancelled")
+    lesson_id = lesson.id
+    e.db.commit()
+    path = f"/lessons/{lesson_id}"
+    assert e.request_editor("GET", path).json()["participants"] == []
+    result = e.request_editor("POST", path + "/restore", {"version": 1})
+    assert result.status_code == 409, result.text
+    assert result.json()["error"]["details"][0]["code"] == "invalid_participants"
+    # A historical scheduled row without participants can be repaired through
+    # a complete valid proposal rather than failing response/request validation.
+    e.db.execute(text("UPDATE lessons SET status='scheduled' WHERE id=:id"), {"id": lesson_id})
+    e.db.commit()
+    result = e.request_editor("PATCH", path, e.payload(version=1))
+    assert result.status_code == 200, result.text
+    assert result.json()["version"] == 2

@@ -284,13 +284,11 @@ def mutate_lesson(
                     "room_ids": sorted(data.room_ids, key=int),
                 }
             )
-            current = LessonWrite(**old.model_dump(include=LessonWrite.model_fields.keys()))
-            if desired == current:
+            current = old.model_dump(include=LessonWrite.model_fields.keys())
+            if desired.model_dump() == current:
                 return old
         if action in ("update", "move", "restore"):
-            proposed = data or LessonWrite(
-                **old.model_dump(include=LessonWrite.model_fields.keys())
-            )
+            proposed = data or old
             assignment_changed = (
                 action == "move"
                 or any(
