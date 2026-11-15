@@ -324,3 +324,72 @@ type AuthorizationContext = {
 действуют при следующем запросе со старым JWT. Ошибки 401/422/500 используют
 общий `ApiError`. UI не может использовать этот ответ вместо серверной проверки.
 `GET /users/me` и login/refresh/logout сохраняют прежние контракты.
+
+## MVP2-03: защищённое чтение преподавательского журнала
+
+Все маршруты ниже — `GET /api/v1/teaching`, Bearer обязателен. Источник
+scope — только `teaching_assignments` через `teachers.user_id` действующего
+аккаунта с ролью `teacher`. Назначения проверяются в БД на каждом запросе;
+отзыв действует со следующим запросом, включая ранее выданный JWT.
+`lessons.teacher_id`, факультет, кафедра и staff permissions scope не расширяют.
+
+Базовый путь журнала `J = /courses/{course_offering_id}/groups/{group_id}`:
+
+| Путь после `/teaching` | Ответ | Дополнительные фильтры |
+|---|---|---|
+| `/assignments` | `Page<TeachingAssignmentResponse>` | `course_offering_id`, `group_id`, `term_id` |
+| `J/students` | `Page<JournalStudent>` | `student_id` |
+| `J/assessments` | `Page<JournalAssessment>` | `assessment_group_id` |
+| `J/assessments/{assessment_group_id}/results` | `Page<JournalResult>` | `student_id` |
+| `J/lessons` | `Page<JournalLesson>` | `lesson_id`, `starts_from`, `starts_before`, `status` |
+| `J/lessons/{lesson_id}/students` | `Page<JournalStudent>` | `student_id` |
+
+Все списки принимают `limit=20` (1–100), непрозрачный `cursor` и возвращают
+`items`, `next_cursor` без общего количества. Назначения и работы сортируются
+по числовому `id ASC`; студенты и результаты — по `full_name COLLATE "C" ASC,
+student_id ASC` (имена хранятся в порядке ФИО); занятия — по `starts_at ASC,
+id ASC`. Пагинация keyset, SQL ограничен `limit + 1`, scope и фильтры применяются
+до пагинации. Курсор следует использовать с тем же маршрутом и фильтрами;
+перенос курсора не предоставляет доступ к другим данным. Интервал занятий —
+`starts_from <= starts_at < starts_before`, ISO 8601 с часовым поясом; обе
+границы необязательны, при одновременной передаче правая должна быть больше.
+`status`: `scheduled`, `cancelled`, `moved`; по умолчанию видны все статусы.
+Неизвестные параметры, неверные ID/курсор/интервал дают `422 validation_error`.
+
+Схемы полей и nullable-значения определены в OpenAPI (`backend/openapi.json`),
+клиентские типы генерируются в `frontend/src/shared/api/schema.ts`:
+
+- Назначение содержит `id`, `course_offering_id`, `discipline`, `term`, `group`
+  (последние три — `Ref`) и `attestation_type`.
+- Студент: `id`, `full_name`, `subgroup_id`, `academic_status`. Roster включает
+  всех текущих студентов `students.group_id`, без фильтра по академическому
+  статусу. Контактные данные и идентификатор аккаунта не выдаются.
+- Работа: `id` **равен `assessment_groups.id`**, отдельно `assessment_id`,
+  `title`, `type`, `description`, `max_score`, `planned_date`, `lesson_id`,
+  `date_needs_confirmation`. Выдаются существующие заранее утверждённые работы;
+  связь с парой подгруппы не ограничивает список результатов.
+- Результаты: текущий roster плюс студенты с сохранённым результатом этой
+  работы после перевода, без дубликатов; `student_id`, `full_name`, `result_id`,
+  `score`, `graded_at`, `is_current_group_member`. Отсутствующий результат —
+  `result_id/score/graded_at=null`; выставленный `score=0` остаётся нулём.
+  Результаты других назначений работ и текущая группа переведённого студента
+  не раскрываются. Отдельного исторического roster нет.
+- Занятие: `id`, `starts_at`, `ends_at`, `kind`, `status`, `is_additional`,
+  `version`. Список дедуплицирован через `EXISTS lesson_groups`. Не выдаёт
+  остальные группы совместной пары, ссылки на переносы или чужие журналы.
+  Участники — текущие студенты выбранной группы, соответствующие её назначениям
+  `lesson_groups`: вся группа либо объединение формальных подгрупп по #62.
+  Студент без подгруппы участвует только в занятии всей группы.
+
+Ошибки используют общий `ApiError`: `401 invalid_access/session_invalid` при
+отсутствующей/недействительной сессии или неактивном аккаунте; `403 forbidden`
+для другой роли либо отсутствующего teacher profile; `404 not_found` для
+неназначенной пары и отсутствующего/чужого вложенного объекта. Учитель без
+назначений получает пустой `/assignments`, прямой журнал — `404`.
+Чужие ID в фильтрах дают пустую выборку; не раскрываются число записей и курсоры
+чужих данных. Ответы имеют `Cache-Control: no-store`.
+
+Для #69/#70/#71/#72/#80 использовать эти идентификаторы и общий
+`require_teaching_assignment`; новые write-сценарии должны дополнительно
+проверять свою предметную целостность и использовать аудит #87. Этот контракт
+не предоставляет права записи, не создаёт attendance и не меняет расчёт MVP1.

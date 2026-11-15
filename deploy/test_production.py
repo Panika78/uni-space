@@ -574,16 +574,17 @@ with engine.connect() as c:
                   'disciplines','course_offerings','buildings','rooms','lessons','lesson_groups',
                   'lesson_rooms','news','notifications','academic_terms','course_groups',
                   'assessments','assessment_groups','assessment_results','final_results',
-                  'staff_profiles','staff_permissions'):
+                  'staff_profiles','staff_permissions','teaching_assignments'):
         assert c.execute(text("SELECT has_table_privilege(current_user, :table, 'SELECT')"), {'table': table}).scalar_one()
         c.execute(text(f"SELECT * FROM public.{table} LIMIT 1")).all()
     for table in ('study_groups','programs','org_units','teachers','disciplines','course_offerings',
                   'buildings','rooms','lessons','lesson_groups','lesson_rooms',
                   'academic_terms','course_groups','assessments','assessment_groups',
-                  'assessment_results','final_results','staff_profiles','staff_permissions'):
+                  'assessment_results','final_results','staff_profiles','staff_permissions','teaching_assignments'):
         for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
             assert not c.execute(text("SELECT has_table_privilege(current_user, :table, :privilege)"),
                                  {'table': table, 'privilege': privilege}).scalar_one()
+    assert not c.execute(text("SELECT has_sequence_privilege(current_user,'teaching_assignments_id_seq','USAGE')")).scalar_one()
     print('PASS: profile and schedule SELECT permitted; dependent tables remain read-only')
 for statement in (
     "CREATE ROLE forbidden_role", "CREATE DATABASE forbidden_database",
@@ -772,6 +773,70 @@ with SessionLocal.begin() as db:
             )
             # ACL reapplication must retain schedule reads and all existing auth permissions.
             run(["bash", "scripts/configure-postgres.sh"], env=env)
+            # Exercise teacher scope using the real API role after repeated ACL.
+            dc(
+                "run", "--rm", "-T", "migrate", "python", "-c",
+                """
+from sqlalchemy import select
+from app.core.database import SessionLocal
+from app.models import CourseGroup, Teacher, TeachingAssignment, User
+with SessionLocal.begin() as db:
+    password_hash = db.scalar(select(User.password_hash).where(User.login == 'deployment-check'))
+    pairs = db.scalars(select(CourseGroup).order_by(
+        CourseGroup.course_offering_id, CourseGroup.group_id).limit(2)).all()
+    assert len(pairs) == 2
+    for index, pair in enumerate(pairs):
+        user = User(login=f'teaching-acl-{index}', full_name='Fictional Teacher',
+                    role='teacher', is_active=True, password_hash=password_hash)
+        db.add(user)
+        db.flush()
+        teacher = Teacher(user_id=user.id, full_name=user.full_name)
+        db.add(teacher)
+        db.flush()
+        db.add(TeachingAssignment(teacher_id=teacher.id,
+                                 course_offering_id=pair.course_offering_id, group_id=pair.group_id))
+""",
+            )
+            with httpx.Client(
+                base_url=public_origin, verify=context, trust_env=False, timeout=10
+            ) as teacher_client:
+                teacher_scopes = []
+                for index in range(2):
+                    login = teacher_client.post(
+                        "/api/v1/auth/login", headers={"Origin": public_origin},
+                        json={"login": f"teaching-acl-{index}", "password": password},
+                    )
+                    assert login.status_code == 200
+                    headers = {"Authorization": "Bearer " + login.json()["access_token"]}
+                    response = teacher_client.get("/api/v1/teaching/assignments", headers=headers)
+                    assert response.status_code == 200, response.text
+                    assert response.headers["cache-control"] == "no-store"
+                    items = response.json()["items"]
+                    assert len(items) == 1
+                    assignment = items[0]
+                    journal = (f"/api/v1/teaching/courses/{assignment['course_offering_id']}"
+                               f"/groups/{assignment['group']['id']}")
+                    teacher_scopes.append((headers, journal, assignment["id"]))
+                    for suffix in ("students", "assessments", "lessons"):
+                        page = teacher_client.get(journal + "/" + suffix, headers=headers)
+                        assert page.status_code == 200, page.text
+                    works = teacher_client.get(journal + "/assessments", headers=headers).json()
+                    for work in works["items"]:
+                        assert teacher_client.get(
+                            journal + f"/assessments/{work['id']}/results", headers=headers
+                        ).status_code == 200
+                    lessons = teacher_client.get(journal + "/lessons", headers=headers).json()
+                    for lesson in lessons["items"]:
+                        assert teacher_client.get(
+                            journal + f"/lessons/{lesson['id']}/students", headers=headers
+                        ).status_code == 200
+                for index, (headers, journal, _) in enumerate(teacher_scopes):
+                    other_journal = teacher_scopes[1 - index][1]
+                    assert teacher_client.get(other_journal + "/students", headers=headers).status_code == 404
+                headers, journal, assignment_id = teacher_scopes[0]
+                sql(f"DELETE FROM teaching_assignments WHERE id={int(assignment_id)}")
+                assert teacher_client.get(journal + "/students", headers=headers).status_code == 404
+            print("PASS: teacher journal reads, isolation and old-JWT revocation under production ACL", flush=True)
             staff_user_id, staff_unit_id = (
                 sql("""SELECT u.id, p.org_unit_id FROM users u
 JOIN staff_profiles p ON p.user_id=u.id WHERE u.login='rbac-deployment-check';""").split(
