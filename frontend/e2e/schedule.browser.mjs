@@ -563,6 +563,17 @@ async function checkScheduleChanges(page, width) {
 }
 
 async function noOverflow(page) {
+  // Viewport changes trigger the shell's responsive margin transition. Measure
+  // the settled layout so this regression doesn't fail on an intermediate frame.
+  await page.evaluate(() => {
+    const shell = document.querySelector('.student-main-column')
+    return Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.target === shell)
+        .map((animation) => animation.finished.catch(() => {})),
+    )
+  })
   const overflow = await page.evaluate(() => ({
     viewportWidth: window.innerWidth,
     documentWidth: document.documentElement.scrollWidth,
