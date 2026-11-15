@@ -611,7 +611,7 @@ SHARE-блокировок дочерних строк, чтобы не созд
 
 ### Реализация MVP2-03: преподавательские назначения
 
-Миграция `20261115_01` после `20261114_03` создаёт `teaching_assignments`:
+Миграция `20261115_02` после `20261115_01` создаёт `teaching_assignments` (между ними `20261115_01` создаёт `application_history`):
 BIGINT identity PK, NOT NULL `course_offering_id/group_id/teacher_id`, FK
 `teacher_id → teachers.id`, составной FK `(course_offering_id, group_id) →
 course_groups` (его составной PK уже существует), UQ всей тройки и индекс

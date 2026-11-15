@@ -711,9 +711,9 @@ DROP FUNCTION public.existing_function_fixture(), public.future_function_fixture
             ) as static_client:
                 assert_static_delivery(static_client, static_client.get("/"))
                 # Check legal notices before the separate browser smoke test.
-                project_license = static_client.get("/LICENSE")
-                assert project_license.status_code == 200
-                assert "Copyright (c) 2026 Panika78" in project_license.text
+                legacy_license = static_client.get("/LICENSE")
+                assert "MIT License" not in legacy_license.text
+                assert "Permission is hereby granted" not in legacy_license.text
                 licenses = static_client.get("/licenses.md")
                 assert licenses.status_code == 200
                 assert "## react - 19.2.0 (MIT)" in licenses.text
@@ -722,7 +722,7 @@ DROP FUNCTION public.existing_function_fixture(), public.future_function_fixture
                 assert provenance.status_code == 200
                 assert "OpenAI ChatGPT" in provenance.text
             print(
-                "PASS: HTTPS project license, bundled dependency licenses and asset provenance",
+                "PASS: HTTPS no legacy project MIT license, dependency licenses and asset provenance",
                 flush=True,
             )
             browser_env = env | {
@@ -794,9 +794,10 @@ with SessionLocal.begin() as db:
                 "python",
                 "-c",
                 """
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from app.core.database import SessionLocal
-from app.models import CourseGroup, CourseOffering, Discipline, Student, Teacher, TeachingAssignment, User
+from app.models import CourseGroup, CourseOffering, Discipline, Lesson, LessonGroup, Student, Teacher, TeachingAssignment, User
 with SessionLocal.begin() as db:
     password_hash = db.scalar(select(User.password_hash).where(User.login == 'deployment-check'))
     # Pin both teachers to the seeded course with three approved works: positive,
@@ -816,11 +817,19 @@ with SessionLocal.begin() as db:
         db.flush()
         db.add(TeachingAssignment(teacher_id=teacher.id,
                                  course_offering_id=pair.course_offering_id, group_id=pair.group_id))
+        lesson = Lesson(course_offering_id=pair.course_offering_id,
+                        starts_at=datetime.now(timezone.utc),
+                        ends_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                        kind='seminar')
+        db.add(lesson)
+        db.flush()
+        db.add(LessonGroup(lesson_id=lesson.id, group_id=pair.group_id))
 """,
             )
             with ExitStack() as teacher_clients:
                 teacher_scopes = []
                 teacher_work_ids = []
+                teacher_lesson_ids = []
                 for index in range(2):
                     teacher_client = teacher_clients.enter_context(
                         httpx.Client(
@@ -898,19 +907,36 @@ with SessionLocal.begin() as db:
                     lessons = teacher_client.get(
                         journal + "/lessons", headers=headers
                     ).json()
+                    assert lessons["items"], lessons
+                    assert lessons["next_cursor"] is None
+                    expected_student_id = sql(
+                        "SELECT s.id FROM students s JOIN users u ON u.id=s.user_id "
+                        f"WHERE u.login='schedule-fixture-{index + 1}'"
+                    )
+                    lesson_ids = []
                     for lesson in lessons["items"]:
-                        assert (
-                            teacher_client.get(
-                                journal + f"/lessons/{lesson['id']}/students",
-                                headers=headers,
-                            ).status_code
-                            == 200
+                        participants_response = teacher_client.get(
+                            journal + f"/lessons/{lesson['id']}/students",
+                            headers=headers,
                         )
+                        assert participants_response.status_code == 200, (
+                            participants_response.text
+                        )
+                        participants = participants_response.json()
+                        assert participants["items"], participants
+                        assert participants["next_cursor"] is None
+                        assert [student["id"] for student in participants["items"]] == [
+                            expected_student_id
+                        ]
+                        lesson_ids.append(lesson["id"])
+                    assert len(lesson_ids) == 1, lesson_ids
+                    teacher_lesson_ids.append(lesson_ids[0])
                 for index, (headers, journal, _, teacher_client) in enumerate(
                     teacher_scopes
                 ):
                     other_journal = teacher_scopes[1 - index][1]
                     foreign_work_id = teacher_work_ids[1 - index]
+                    foreign_lesson_id = teacher_lesson_ids[1 - index]
                     assert (
                         teacher_client.get(
                             journal + f"/assessments/{foreign_work_id}/results",
@@ -921,6 +947,13 @@ with SessionLocal.begin() as db:
                     assert (
                         teacher_client.get(
                             other_journal + f"/assessments/{foreign_work_id}/results",
+                            headers=headers,
+                        ).status_code
+                        == 404
+                    )
+                    assert (
+                        teacher_client.get(
+                            journal + f"/lessons/{foreign_lesson_id}/students",
                             headers=headers,
                         ).status_code
                         == 404
