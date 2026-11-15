@@ -161,6 +161,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/final-results/courses/{course_offering_id}/students/{student_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Final Result */
+        get: operations["get_final_result_api_v1_final_results_courses__course_offering_id__students__student_id__get"];
+        put?: never;
+        /**
+         * Save Final Result
+         * @description Save supplied fields. Omitted fields remain unchanged. Repeated values are a no-op.
+         */
+        post: operations["save_final_result_api_v1_final_results_courses__course_offering_id__students__student_id__post"];
+        /**
+         * Delete Final Result
+         * @description Remove the entire record, including retake details. To clear only the grade, PATCH its field to null. Absent record is a no-op.
+         */
+        delete: operations["delete_final_result_api_v1_final_results_courses__course_offering_id__students__student_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Save Final Result
+         * @description Omitted fields remain unchanged; null clears a field. Clearing the grade preserves retake details. Empty rows are deleted. Positive results clear both retake fields.
+         */
+        patch: operations["save_final_result_api_v1_final_results_courses__course_offering_id__students__student_id__patch"];
+        trace?: never;
+    };
     "/api/v1/news": {
         parameters: {
             query?: never;
@@ -357,6 +386,23 @@ export interface paths {
         };
         /** List Journal Results */
         get: operations["list_journal_results_api_v1_teaching_courses__course_offering_id__groups__group_id__assessments__assessment_group_id__results_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/final-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Journal Final Results */
+        get: operations["list_journal_final_results_api_v1_teaching_courses__course_offering_id__groups__group_id__final_results_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -635,6 +681,17 @@ export interface components {
             /** Field */
             field: string | null;
         };
+        /** FinalResultPatch */
+        FinalResultPatch: {
+            /** Grade Value */
+            grade_value?: number | null;
+            /** Passed */
+            passed?: boolean | null;
+            /** Retake Date */
+            retake_date?: string | null;
+            /** Retake Location */
+            retake_location?: string | null;
+        };
         /** FinalResultResponse */
         FinalResultResponse: {
             /** Grade Value */
@@ -796,6 +853,25 @@ export interface components {
             /** Session Revoked */
             session_revoked: boolean;
         };
+        /** ManualFinalResultResponse */
+        ManualFinalResultResponse: {
+            /** Course Offering Id */
+            course_offering_id: string;
+            /** Grade Value */
+            grade_value: number | null;
+            /** Has Debt */
+            has_debt: boolean;
+            /** Passed */
+            passed: boolean | null;
+            /** Result Id */
+            result_id: string | null;
+            /** Retake Date */
+            retake_date: string | null;
+            /** Retake Location */
+            retake_location: string | null;
+            /** Student Id */
+            student_id: string;
+        };
         /** News */
         News: {
             /** Body */
@@ -883,6 +959,13 @@ export interface components {
         Page_JournalStudent_: {
             /** Items */
             items: components["schemas"]["JournalStudent"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** Page[ManualFinalResultResponse] */
+        Page_ManualFinalResultResponse_: {
+            /** Items */
+            items: components["schemas"]["ManualFinalResultResponse"][];
             /** Next Cursor */
             next_cursor: string | null;
         };
@@ -1742,6 +1825,322 @@ export interface operations {
             };
         };
     };
+    get_final_result_api_v1_final_results_courses__course_offering_id__students__student_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_offering_id: string;
+                student_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualFinalResultResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    save_final_result_api_v1_final_results_courses__course_offering_id__students__student_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_offering_id: string;
+                student_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FinalResultPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualFinalResultResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    delete_final_result_api_v1_final_results_courses__course_offering_id__students__student_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_offering_id: string;
+                student_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualFinalResultResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    save_final_result_api_v1_final_results_courses__course_offering_id__students__student_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_offering_id: string;
+                student_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FinalResultPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualFinalResultResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     list_news_api_v1_news_get: {
         parameters: {
             query?: {
@@ -2467,6 +2866,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Page_JournalResult_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_journal_final_results_api_v1_teaching_courses__course_offering_id__groups__group_id__final_results_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                student_id?: string | null;
+            };
+            header?: never;
+            path: {
+                course_offering_id: string;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ManualFinalResultResponse_"];
                 };
             };
             /** @description Unauthorized */

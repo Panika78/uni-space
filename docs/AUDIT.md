@@ -81,7 +81,7 @@ except Exception:
 | entity_type | action | Разрешённые поля before/after |
 |---|---|---|
 | `assessment_result` | `create`, `update`, `delete` | `assessment_group_id`, `student_id`, `score` |
-| `final_result` | `create`, `update`, `delete` | `course_offering_id`, `student_id`, `grade_value`, `passed`, `retake_date` |
+| `final_result` | `create`, `update`, `delete` | `course_offering_id`, `student_id`, `grade_value`, `passed`, `retake_date`, `retake_location` |
 | `lesson` | `create`, `update`, `cancel`, `move` | `course_offering_id`, `teacher_id`, `starts_at`, `ends_at`, `kind`, `status`, `previous_lesson_id`, `version`, `group_ids`, `room_ids` |
 | `user` | `create` | `role`, `is_active` |
 | `user` | `set_role` | `role` |
@@ -158,3 +158,29 @@ API `UPDATE`/`DELETE` аудита или широкие default GRANT. Пред
 Прямой SQL и прямое создание `AuditEvent` обходят writer: безопасность снимков —
 контракт серверного кода, не JSONB-фильтрация в БД. Защиты истории от SQL-администратора,
 триггеров автоматического аудита и криптографической неизменности в MVP2-29 нет.
+
+## Итоги аттестации (#72)
+
+`retake_location` сохраняется как простой текст места (1–200 символов, без
+управляющих/служебных Unicode-символов и пустого текста), без обрезания или
+преобразования значения. В поле следует передавать только место пересдачи,
+без ФИО, контактов и иных персональных данных. API и writer используют одну
+валидацию; `NULL` сохраняется как JSON null, отсутствующий ключ не добавляется.
+Изменение только места различимо в before/after (N-02).
+
+Предметный сервис сохраняет все шесть полей снимка. Снятие оценки с известной
+пересдачей — update; очистка всех четырёх значений — delete, before содержит
+прежнее место, after — SQL NULL. Положительный итог очищает оба поля пересдачи
+с аудитом старых значений. Неизменённые значения не создают событие.
+Пара `(course_offering_id, student_id)` сериализуется transaction advisory lock,
+включая случай отсутствующей строки. При retry заново выполняется вся транзакция
+с проверкой актуальных прав; отдельных версий нет.
+
+Доменное событие изменения итоговой аттестации для #86 — зафиксированная запись
+`final_result/create|update|delete` в общей таблице. Её `id` служит идентификатором
+события, ссылки и значения берутся из before/after. Потребитель читает только
+committed-события отдельной транзакцией; до commit ничего не публикуется,
+rollback и no-op не создают события. Рассылка и учёт доставки относятся к #86.
+Runtime получает INSERT и SELECT(id, created_at) аудита, без UPDATE/DELETE.
+Существующий триггер итогов требует UPDATE(id) на course_offerings для FOR SHARE;
+права изменения вида аттестации не выдаются.

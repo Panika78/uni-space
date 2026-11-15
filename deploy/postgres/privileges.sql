@@ -94,4 +94,18 @@ WHERE to_regclass('public.applications') IS NOT NULL \gexec
 -- Grant only the immutable-by-API identifier, not password/role/active fields.
 SELECT 'GRANT UPDATE (id) ON public.users TO uni_space_api'
 WHERE to_regclass('public.users') IS NOT NULL \gexec
+-- Existing final-result trigger uses SELECT FOR SHARE on its offering.
+-- UPDATE on the identifier enables that lock without granting academic edits.
+SELECT 'GRANT UPDATE (id) ON public.course_offerings TO uni_space_api'
+WHERE to_regclass('public.course_offerings') IS NOT NULL \gexec
+-- Manual final results and mandatory append-only audit (#72).
+SELECT 'GRANT UPDATE (grade_value, passed, retake_date, retake_location)
+        ON public.final_results TO uni_space_api'
+WHERE to_regclass('public.final_results') IS NOT NULL \gexec
+SELECT 'GRANT INSERT, DELETE ON public.final_results TO uni_space_api'
+WHERE to_regclass('public.final_results') IS NOT NULL \gexec
+SELECT 'GRANT INSERT ON public.audit_events TO uni_space_api'
+WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
+SELECT 'GRANT SELECT (id, created_at) ON public.audit_events TO uni_space_api'
+WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
 COMMIT;

@@ -60,3 +60,18 @@ def test_unknown_event_and_request_actor_id_are_rejected():
             )
         with pytest.raises(TypeError, match="actor_user_id"):
             write_audit_event(db, actor_user_id=1)
+
+
+@pytest.mark.parametrize("value", [True, 123, {}, "", " ", "A\n101", "A\x00101", "x" * 201])
+def test_retake_location_rejects_invalid_typed_content(value):
+    with pytest.raises(ValueError):
+        _serialize_snapshot({"retake_location": value}, _EVENT_FIELDS["final_result", "update"])
+
+
+def test_retake_location_is_explicit_nullable_allowlisted_text():
+    fields = _EVENT_FIELDS["final_result", "update"]
+    assert _serialize_snapshot({"retake_location": "A-101", "full_name": "secret"}, fields) == {
+        "retake_location": "A-101"
+    }
+    assert _serialize_snapshot({"retake_location": None}, fields) == {"retake_location": None}
+    assert "retake_location" not in _serialize_snapshot({"student_id": 1}, fields)

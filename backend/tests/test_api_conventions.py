@@ -772,6 +772,8 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
     assert "servers" not in openapi.json()
     assert set(openapi.json()["paths"]) == {
         "/api/v1/teaching/assignments",
+        "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/final-results",
+        "/api/v1/final-results/courses/{course_offering_id}/students/{student_id}",
         "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/students",
         "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/assessments",
         "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/assessments/"

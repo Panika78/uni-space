@@ -545,6 +545,62 @@
         "title": "ErrorDetail",
         "type": "object"
       },
+      "FinalResultPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "grade_value": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 2.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grade Value"
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passed"
+          },
+          "retake_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retake Date"
+          },
+          "retake_location": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retake Location"
+          }
+        },
+        "title": "FinalResultPatch",
+        "type": "object"
+      },
       "FinalResultResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1038,6 +1094,94 @@
         "title": "LogoutResponse",
         "type": "object"
       },
+      "ManualFinalResultResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "course_offering_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Course Offering Id",
+            "type": "string"
+          },
+          "grade_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grade Value"
+          },
+          "has_debt": {
+            "title": "Has Debt",
+            "type": "boolean"
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passed"
+          },
+          "result_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Id"
+          },
+          "retake_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retake Date"
+          },
+          "retake_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retake Location"
+          },
+          "student_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Student Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result_id",
+          "course_offering_id",
+          "student_id",
+          "grade_value",
+          "passed",
+          "retake_date",
+          "retake_location",
+          "has_debt"
+        ],
+        "title": "ManualFinalResultResponse",
+        "type": "object"
+      },
       "News": {
         "additionalProperties": false,
         "properties": {
@@ -1314,6 +1458,35 @@
           "next_cursor"
         ],
         "title": "Page[JournalStudent]",
+        "type": "object"
+      },
+      "Page_ManualFinalResultResponse_": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ManualFinalResultResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[ManualFinalResultResponse]",
         "type": "object"
       },
       "Page_NewsPreview_": {
@@ -2840,6 +3013,471 @@
         ]
       }
     },
+    "/api/v1/final-results/courses/{course_offering_id}/students/{student_id}": {
+      "delete": {
+        "description": "Remove the entire record, including retake details. To clear only the grade, PATCH its field to null. Absent record is a no-op.",
+        "operationId": "delete_final_result_api_v1_final_results_courses__course_offering_id__students__student_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Student Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualFinalResultResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Final Result",
+        "tags": [
+          "final-results"
+        ]
+      },
+      "get": {
+        "operationId": "get_final_result_api_v1_final_results_courses__course_offering_id__students__student_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Student Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualFinalResultResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Final Result",
+        "tags": [
+          "final-results"
+        ]
+      },
+      "patch": {
+        "description": "Omitted fields remain unchanged; null clears a field. Clearing the grade preserves retake details. Empty rows are deleted. Positive results clear both retake fields.",
+        "operationId": "save_final_result_api_v1_final_results_courses__course_offering_id__students__student_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Student Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalResultPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualFinalResultResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Save Final Result",
+        "tags": [
+          "final-results"
+        ]
+      },
+      "post": {
+        "description": "Save supplied fields. Omitted fields remain unchanged. Repeated values are a no-op.",
+        "operationId": "save_final_result_api_v1_final_results_courses__course_offering_id__students__student_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Student Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalResultPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualFinalResultResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Save Final Result",
+        "tags": [
+          "final-results"
+        ]
+      }
+    },
     "/api/v1/news": {
       "get": {
         "operationId": "list_news_api_v1_news_get",
@@ -4135,6 +4773,155 @@
           }
         ],
         "summary": "List Journal Results",
+        "tags": [
+          "teaching"
+        ]
+      }
+    },
+    "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/final-results": {
+      "get": {
+        "operationId": "list_journal_final_results_api_v1_teaching_courses__course_offering_id__groups__group_id__final_results_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "student_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Student Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ManualFinalResultResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Journal Final Results",
         "tags": [
           "teaching"
         ]

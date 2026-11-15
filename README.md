@@ -1,5 +1,15 @@
 # uni-space
 
+MVP2-07 (#72): защищённые ручные итоги аттестации (GET/POST/PATCH/DELETE),
+пересдачи, текущий преподавательский scope и корректировка деканатом с
+`grades.edit`. Все изменения атомарны с общим аудитом; no-op не аудируется.
+Контракт — [API](docs/API.md), [аудит](docs/AUDIT.md).
+PostgreSQL-проверки: `pytest -m integration tests/test_final_results_integration.py
+ tests/test_final_results_acl.py` (для ACL нужен `psql` или `POSTGRES_TEST_CONTAINER`).
+После миграций повторно применить `deploy/postgres/privileges.sql` к существующим
+production volumes: права записи итогов, append-only аудита и блокировки проведения.
+
+
 Конкурсный прототип университетского кабинета: расписание, успеваемость, заявки, новости и персональные уведомления.
 
 ## Авторские права
