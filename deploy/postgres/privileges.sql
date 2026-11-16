@@ -157,4 +157,12 @@ SELECT 'GRANT INSERT ON public.audit_events TO uni_space_api'
 WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
 SELECT 'GRANT SELECT (id, created_at) ON public.audit_events TO uni_space_api'
 WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
+-- Attendance uses parent row locks to serialize transfers and schedule changes.
+SELECT 'GRANT SELECT, INSERT, UPDATE, DELETE ON public.attendance TO uni_space_api'
+WHERE to_regclass('public.attendance') IS NOT NULL \gexec
+SELECT format('GRANT UPDATE (id) ON public.%I TO uni_space_api', tablename)
+FROM pg_tables WHERE schemaname='public'
+  AND tablename IN ('lessons', 'students', 'teaching_assignments') \gexec
+SELECT 'GRANT INSERT, SELECT (id, created_at) ON public.audit_events TO uni_space_api'
+WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
 COMMIT;
