@@ -1,4 +1,4 @@
-/* global process, URL, document, window */
+/* global process, URL, document, console */
 // Exercise password flows with the live API/PostgreSQL fixture through Chromium.
 import assert from 'node:assert/strict'
 
@@ -41,7 +41,12 @@ const login = async (page, loginName, password) => {
   await page.getByLabel('Логин', { exact: true }).fill(loginName)
   await page.getByLabel('Пароль', { exact: true }).fill(password)
   await page.getByRole('button', { name: 'Войти', exact: true }).click()
-  await page.getByRole('button', { name: 'Меню пользователя' }).waitFor()
+  try {
+    await page.getByRole('button', { name: 'Меню пользователя' }).waitFor()
+  } catch (error) {
+    console.error(`Login UI did not reach the cabinet: ${await page.locator('body').innerText()}`)
+    throw error
+  }
 }
 const openSettingsFromMenu = async (page) => {
   await page.getByRole('button', { name: 'Меню пользователя' }).click()
@@ -49,9 +54,11 @@ const openSettingsFromMenu = async (page) => {
   await page.getByRole('heading', { name: 'Смена пароля' }).waitFor()
 }
 const fillAndChange = async (page, currentPassword, nextPassword) => {
-  await page.getByLabel('Действующий пароль').fill(currentPassword)
-  await page.getByLabel('Новый пароль').fill(nextPassword)
-  await page.getByLabel('Повторите новый пароль').fill(nextPassword)
+  await page.getByRole('textbox', { name: 'Действующий пароль', exact: true }).fill(currentPassword)
+  await page.getByRole('textbox', { name: 'Новый пароль', exact: true }).fill(nextPassword)
+  await page
+    .getByRole('textbox', { name: 'Повторите новый пароль', exact: true })
+    .fill(nextPassword)
   await page.getByRole('button', { name: 'Сменить пароль' }).click()
   await page.getByRole('heading', { name: 'Вход в систему' }).waitFor()
 }
@@ -63,14 +70,91 @@ try {
     roleContexts[role] = context
     contexts.push(context)
     const page = await context.newPage()
+    let passwordPostCount = 0
+    page.on('request', (request) => {
+      if (
+        new URL(request.url()).pathname === '/api/v1/auth/password' &&
+        request.method() === 'POST'
+      )
+        passwordPostCount += 1
+    })
     await login(page, loginName, initialPassword)
     await assertNoHorizontalOverflow(page, 360, `${role} cabinet`)
     await openSettingsFromMenu(page)
     await assertNoHorizontalOverflow(page, 360, `${role} settings`)
-    assert.equal(await page.getByLabel('Действующий пароль').getAttribute('type'), 'password')
-    await page.getByLabel('Показать пароль').check()
-    assert.equal(await page.getByLabel('Новый пароль').getAttribute('type'), 'text')
-    await page.getByLabel('Показать пароль').uncheck()
+    assert.equal(
+      await page
+        .getByRole('textbox', { name: 'Действующий пароль', exact: true })
+        .getAttribute('type'),
+      'password',
+    )
+    await page
+      .getByRole('textbox', { name: 'Действующий пароль', exact: true })
+      .fill(initialPassword)
+    await page.getByRole('textbox', { name: 'Новый пароль', exact: true }).fill('too short')
+    await page
+      .getByRole('textbox', { name: 'Повторите новый пароль', exact: true })
+      .fill('too short')
+    await page.getByRole('button', { name: 'Сменить пароль' }).click()
+    await page.getByText('Новый пароль должен содержать от 12 до 128 Unicode-символов.').waitFor()
+    assert.equal(
+      await page
+        .getByRole('textbox', { name: 'Новый пароль', exact: true })
+        .evaluate((input) => input === document.activeElement),
+      true,
+    )
+    await page.getByRole('textbox', { name: 'Новый пароль', exact: true }).fill('x'.repeat(129))
+    await page
+      .getByRole('textbox', { name: 'Повторите новый пароль', exact: true })
+      .fill('x'.repeat(129))
+    await page.getByRole('button', { name: 'Сменить пароль' }).click()
+    await page.getByText('Новый пароль должен содержать от 12 до 128 Unicode-символов.').waitFor()
+    assert.equal(passwordPostCount, 0, 'A 129-code-point password must be rejected locally')
+    await page
+      .getByRole('textbox', { name: 'Новый пароль', exact: true })
+      .fill('fictional new phrase')
+    await page.getByRole('textbox', { name: 'Повторите новый пароль', exact: true }).fill('')
+    await page.getByRole('button', { name: 'Сменить пароль' }).click()
+    await page.getByText('Повторите новый пароль.').waitFor()
+    assert.equal(
+      await page
+        .getByRole('textbox', { name: 'Повторите новый пароль', exact: true })
+        .evaluate((input) => input === document.activeElement),
+      true,
+    )
+    await page
+      .getByRole('textbox', { name: 'Повторите новый пароль', exact: true })
+      .fill('mismatched confirmation')
+    await page.getByRole('button', { name: 'Сменить пароль' }).click()
+    await page.getByText('Пароли не совпадают.').waitFor()
+    await page
+      .getByRole('textbox', { name: 'Новый пароль', exact: true })
+      .fill('fictional new phrase')
+    await page
+      .getByRole('textbox', { name: 'Повторите новый пароль', exact: true })
+      .fill('fictional new phrase')
+    await page
+      .getByRole('textbox', { name: 'Действующий пароль', exact: true })
+      .fill('fictional-wrong-current')
+    await page.getByRole('button', { name: 'Сменить пароль' }).click()
+    await page.getByText('Действующий пароль неверен.').waitFor()
+    assert.equal(passwordPostCount, 1, 'Invalid current-password input makes one request')
+    await page.getByRole('button', { name: 'Меню пользователя' }).waitFor()
+    await page
+      .getByRole('textbox', { name: 'Действующий пароль', exact: true })
+      .fill(initialPassword)
+    await page.getByRole('button', { name: 'Показать новый пароль' }).click()
+    assert.equal(
+      await page.getByRole('textbox', { name: 'Новый пароль', exact: true }).getAttribute('type'),
+      'text',
+    )
+    assert.equal(
+      await page
+        .getByRole('textbox', { name: 'Действующий пароль', exact: true })
+        .getAttribute('type'),
+      'password',
+    )
+    await page.getByRole('button', { name: 'Скрыть новый пароль' }).click()
 
     // A second page in this browser storage partition receives the terminal auth epoch.
     const sibling = await context.newPage()
@@ -90,12 +174,38 @@ try {
 
     await devicePage.goto(`${baseURL}/settings`)
     await devicePage.getByRole('heading', { name: 'Вход в систему' }).waitFor()
-    await login(page, loginName, newPassword)
+    if (role === 'teacher') {
+      await login(page, loginName, newPassword)
+      await openSettingsFromMenu(page)
+      let lostSelfChangeCount = 0
+      const uncertainPassword = 'Fictional teacher uncertain result 2026'
+      await page.route('**/api/v1/auth/password', async (route) => {
+        lostSelfChangeCount += 1
+        await route.fetch()
+        await route.abort('failed')
+      })
+      await page.getByRole('textbox', { name: 'Действующий пароль', exact: true }).fill(newPassword)
+      await page.getByRole('textbox', { name: 'Новый пароль', exact: true }).fill(uncertainPassword)
+      await page
+        .getByRole('textbox', { name: 'Повторите новый пароль', exact: true })
+        .fill(uncertainPassword)
+      await page.getByRole('button', { name: 'Сменить пароль' }).click()
+      await page.getByRole('heading', { name: 'Вход в систему' }).waitFor()
+      await page
+        .getByRole('status')
+        .filter({ hasText: 'Результат смены пароля неизвестен' })
+        .waitFor()
+      assert.equal(lostSelfChangeCount, 1, 'A self-change with a lost response must not be retried')
+      await page.unroute('**/api/v1/auth/password')
+      await login(page, loginName, uncertainPassword)
+    } else {
+      await login(page, loginName, newPassword)
+    }
     await page.setViewportSize({ width: 1440, height: 900 })
     await openSettingsFromMenu(page)
     await assertNoHorizontalOverflow(page, 1440, `${role} desktop settings`)
-    assert.ok(await page.getByLabel('Новый пароль').isVisible())
-    check(`${role} self-change, other tabs/devices, and 360/1440 px`)
+    assert.ok(await page.getByRole('textbox', { name: 'Новый пароль', exact: true }).isVisible())
+    check(`${role} invalid-password recovery, self-change, other tabs/devices, and 360/1440 px`)
   }
 
   const admin = roleContexts.admin
@@ -123,10 +233,22 @@ try {
   await page.getByRole('button', { name: 'Сбросить пароль' }).click()
   const secret = await page.locator('.admin-secret').textContent()
   assert.ok(secret && secret.length >= 32)
+  await page.goBack()
+  await page.getByRole('heading', { name: 'Пользователи' }).waitFor()
+  await page.goForward()
+  await page.getByRole('heading', { name: 'Fictional Password E2E teacher' }).waitFor()
+  assert.equal(
+    await page.locator('.admin-secret').count(),
+    0,
+    'Browser Back must discard the reset secret',
+  )
+  await page.getByRole('button', { name: 'Сбросить пароль' }).click()
+  const latestSecret = await page.locator('.admin-secret').textContent()
+  assert.ok(latestSecret && latestSecret.length >= 32)
   await page.getByRole('button', { name: 'Закрыть и удалить пароль с экрана' }).click()
   assert.equal(await page.locator('.admin-secret').count(), 0)
   await page.reload()
-  assert.equal(await page.getByText(secret, { exact: true }).count(), 0)
+  assert.equal(await page.getByText(latestSecret, { exact: true }).count(), 0)
   const verificationContext = await browser.newContext({ viewport: { width: 360, height: 850 } })
   contexts.push(verificationContext)
   const verificationPage = await verificationContext.newPage()
@@ -136,8 +258,11 @@ try {
     .getByLabel('Пароль', { exact: true })
     .fill('Fictional teacher phrase 2 2026')
   await verificationPage.getByRole('button', { name: 'Войти', exact: true }).click()
-  await verificationPage.getByRole('status').filter({ hasText: 'Неверный логин или пароль' }).waitFor()
-  await verificationPage.getByLabel('Пароль', { exact: true }).fill(secret)
+  await verificationPage
+    .getByRole('status')
+    .filter({ hasText: 'Неверный логин или пароль' })
+    .waitFor()
+  await verificationPage.getByLabel('Пароль', { exact: true }).fill(latestSecret)
   await verificationPage.getByRole('button', { name: 'Войти', exact: true }).click()
   await verificationPage.getByRole('button', { name: 'Меню пользователя' }).waitFor()
   check('admin one-time reset, lost-response handling, and no re-display')

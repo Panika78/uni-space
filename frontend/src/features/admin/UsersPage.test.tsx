@@ -284,3 +284,77 @@ it('hides the administrative reset action on the current administrator account',
   await screen.findByRole('heading', { name: 'Вымышленный администратор' })
   expect(screen.queryByRole('button', { name: 'Сбросить пароль' })).not.toBeInTheDocument()
 })
+
+const resetErrorDetail: components['schemas']['UserDetail'] = {
+  id: '9',
+  login: 'fictional-reset-target',
+  full_name: 'Вымышленный пользователь',
+  role: 'student',
+  is_active: true,
+  student_id: '19',
+  group_id: '29',
+  teacher_id: null,
+  staff_profile_id: null,
+  org_unit_id: null,
+  permissions: [],
+  available_permission_codes: [],
+}
+
+it.each([
+  [403, 'Сброс отклонён: недостаточно прав.'],
+  [404, 'Сброс отклонён: учётная запись не найдена.'],
+  [409, 'Сброс отклонён: операция недопустима для этой учётной записи.'],
+  [422, 'Сброс отклонён: проверьте запрос.'],
+  [500, 'Сервер вернул ошибку при сбросе пароля.'],
+])('reports the definitive administrative reset rejection for HTTP %i', async (status, message) => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  vi.mocked(apiFetch).mockImplementation(async (_url, init) => {
+    if (init?.method === 'POST') throw new ApiClientError('rejected', `http_${status}`, status)
+    return resetErrorDetail
+  })
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <RouterProvider
+        router={createMemoryRouter([{ path: '/admin/users/:id', element: <UserDetailPage /> }], {
+          initialEntries: ['/admin/users/9'],
+        })}
+      />
+    </QueryClientProvider>,
+  )
+  const user = userEvent.setup()
+  await screen.findByRole('heading', { name: resetErrorDetail.full_name })
+  await user.click(screen.getByRole('button', { name: 'Сбросить пароль' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent(message)
+  expect(screen.queryByText(/Ответ на сброс не получен/)).not.toBeInTheDocument()
+  expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(
+    1,
+  )
+})
+
+it('shows uncertainty for an administrative reset with no HTTP response and never retries', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  vi.mocked(apiFetch).mockImplementation(async (_url, init) => {
+    if (init?.method === 'POST') throw new TypeError('network failure')
+    return resetErrorDetail
+  })
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <RouterProvider
+        router={createMemoryRouter([{ path: '/admin/users/:id', element: <UserDetailPage /> }], {
+          initialEntries: ['/admin/users/9'],
+        })}
+      />
+    </QueryClientProvider>,
+  )
+  const user = userEvent.setup()
+  await screen.findByRole('heading', { name: resetErrorDetail.full_name })
+  await user.click(screen.getByRole('button', { name: 'Сбросить пароль' }))
+  expect(await screen.findByText(/Ответ на сброс не получен/)).toBeInTheDocument()
+  expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(
+    1,
+  )
+})

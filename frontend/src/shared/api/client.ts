@@ -149,7 +149,15 @@ export async function apiFetch<T>(input: RequestInfo | URL, init: ApiRequestInit
   } catch (error) {
     assertBaseRequestCurrent()
     if (timeoutController?.signal.aborted) throw createRequestTimeoutError()
-    if (error instanceof ApiClientError && error.status === 401) auth.invalidate()
+    // Password verification deliberately returns 401 invalid_credentials while
+    // the authenticated session remains valid. Preserve that form/session; all
+    // other 401s still end an unusable authenticated session.
+    if (
+      error instanceof ApiClientError &&
+      error.status === 401 &&
+      error.code !== 'invalid_credentials'
+    )
+      auth.invalidate()
     throw error
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId)

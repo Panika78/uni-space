@@ -46,6 +46,11 @@ def test_admin_operations_with_production_acl(admin, runtime_engine):  # noqa: F
             assert db.scalar(select(User.id).where(User.id == int(uid)).with_for_update()) == int(
                 uid
             )
+        with engine.begin() as db:
+            assert db.scalar(
+                text("UPDATE users SET password_hash=password_hash WHERE id=:id RETURNING id"),
+                {"id": int(uid)},
+            ) == int(uid)
         with engine.begin() as db, pytest.raises(DBAPIError) as denied:
             db.execute(text("UPDATE users SET id=id WHERE id=:id"), {"id": int(uid)})
         assert denied.value.orig.sqlstate == "42501"
@@ -69,6 +74,8 @@ def test_admin_operations_with_production_acl(admin, runtime_engine):  # noqa: F
         for table, column in [
             ("users", "id"),
             ("users", "role"),
+            ("users", "login"),
+            ("users", "full_name"),
             ("students", "user_id"),
             ("teachers", "full_name"),
             ("staff_profiles", "user_id"),

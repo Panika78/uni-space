@@ -143,14 +143,16 @@ def change_password(db: Session, actor: User, current_password: str, new_passwor
         if user is None or not user.is_active or user.password_hash != snapshot_hash:
             raise HTTPException(401, "invalid_credentials")
         user.password_hash = new_hash
-        now = datetime.now(UTC)
-        sessions = db.scalars(
-            select(AuthSession)
-            .where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None))
-            .order_by(AuthSession.id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
+        sessions = list(
+            db.scalars(
+                select(AuthSession)
+                .where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None))
+                .order_by(AuthSession.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         )
+        now = datetime.now(UTC)
         for session in sessions:
             revoke_session(db, session, now, "password_changed")
         write_audit_event(

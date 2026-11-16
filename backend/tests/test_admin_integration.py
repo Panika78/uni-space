@@ -517,8 +517,13 @@ def test_two_concurrent_admin_resets_leave_only_the_last_password_valid(admin, e
 
 
 @pytest.mark.parametrize("operation", ["refresh", "logout"])
-def test_reset_serializes_refresh_and_logout_without_reviving_tokens(admin, engine, operation):
+def test_reset_serializes_refresh_and_logout_without_reviving_tokens(
+    admin, engine, operation, monkeypatch
+):
     import time
+    from threading import Event
+
+    from app.admin import service as admin_service
 
     created = create(admin, "student", login=f"fictional-reset-{operation}")
     uid = int(created["user"]["id"])
@@ -532,6 +537,43 @@ def test_reset_serializes_refresh_and_logout_without_reviving_tokens(admin, engi
     assert login.status_code == 200
     refresh_token = login.cookies[COOKIE_NAME]
     access = login.json()["access_token"]
+    hash_ready = Event()
+    allow_reset_to_lock = Event()
+    reset_user_locked = Event()
+    original_hasher = admin_service.PASSWORD_HASHER
+    original_get_user = admin_service.get_user
+
+    def pause_after_hash(password):
+        hashed = original_hasher.hash(password)
+        hash_ready.set()
+        assert allow_reset_to_lock.wait(30), "test did not release reset hash barrier"
+        return hashed
+
+    class PausingHasher:
+        def hash(self, password):
+            return pause_after_hash(password)
+
+    def signal_after_target_lock(db, user_id, *, lock=False):
+        user = original_get_user(db, user_id, lock=lock)
+        if lock and user_id == uid:
+            reset_user_locked.set()
+        return user
+
+    database_errors = []
+
+    def capture_database_error(error_context):
+        database_errors.append(
+            {
+                "sqlstate": getattr(error_context.original_exception, "sqlstate", None),
+                "constraint": getattr(
+                    getattr(error_context.original_exception, "diag", None),
+                    "constraint_name",
+                    None,
+                ),
+            }
+        )
+
+    event.listen(engine, "handle_error", capture_database_error)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         with Session(engine) as blocker, blocker.begin():
@@ -549,9 +591,14 @@ def test_reset_serializes_refresh_and_logout_without_reviving_tokens(admin, engi
                 with engine.connect() as monitor:
                     return monitor.execute(
                         text(
-                            "SELECT count(*) FROM pg_stat_activity a "
-                            "WHERE a.wait_event_type='Lock' "
-                            "AND :blocker = ANY(pg_blocking_pids(a.pid))"
+                            "WITH RECURSIVE wait_chain(waiter, blocker) AS ("
+                            "SELECT a.pid, unnest(pg_blocking_pids(a.pid)) "
+                            "FROM pg_stat_activity a WHERE a.wait_event_type='Lock' "
+                            "UNION "
+                            "SELECT chain.waiter, unnest(pg_blocking_pids(chain.blocker)) "
+                            "FROM wait_chain chain) "
+                            "SELECT count(DISTINCT waiter) FROM wait_chain "
+                            "WHERE blocker=:blocker"
                         ),
                         {"blocker": blocker_pid},
                     ).scalar_one()
@@ -560,20 +607,38 @@ def test_reset_serializes_refresh_and_logout_without_reviving_tokens(admin, engi
             while time.monotonic() < deadline and blocked_request_count() < 1:
                 time.sleep(0.01)
             assert blocked_request_count() >= 1
+            monkeypatch.setattr(admin_service, "PASSWORD_HASHER", PausingHasher())
+            monkeypatch.setattr(admin_service, "get_user", signal_after_target_lock)
             pending_reset = pool.submit(
                 client.request,
                 "POST",
                 f"/api/v1/admin/users/{uid}/password-reset",
                 access=admin[1],
             )
+            assert hash_ready.wait(30), "reset did not reach the post-hash barrier"
+            allow_reset_to_lock.set()
+            assert reset_user_locked.wait(30), "reset did not acquire the target user lock"
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline and blocked_request_count() < 2:
                 time.sleep(0.01)
-            assert blocked_request_count() >= 2
+            if blocked_request_count() < 2:
+                with engine.connect() as monitor:
+                    waits = monitor.execute(
+                        text(
+                            "SELECT a.pid, a.application_name, a.wait_event_type, a.wait_event, "
+                            "left(a.query, 180), pg_blocking_pids(a.pid) "
+                            "FROM pg_stat_activity a WHERE a.wait_event_type='Lock'"
+                        ),
+                        {"blocker": blocker_pid},
+                    ).all()
+                pytest.fail(f"reset did not join the expected session lock wait: {waits!r}")
 
         operation_response = pending_operation.result(timeout=10)
         reset_response = pending_reset.result(timeout=10)
-    assert reset_response.status_code == 200, reset_response.text
+    event.remove(engine, "handle_error", capture_database_error)
+    assert reset_response.status_code == 200, (
+        f"{reset_response.text}; DB errors: {database_errors!r}"
+    )
     assert operation_response.status_code in ({200, 401} if operation == "refresh" else {200})
     if operation == "logout":
         assert operation_response.json() == {"session_revoked": True}

@@ -424,6 +424,7 @@ function UserDetailContent({ id }: { id: string }) {
               return
             setResetting(true)
             setResetUncertain(false)
+            setError('')
             try {
               const result = await apiFetch<components['schemas']['ResetUserPassword']>(
                 `${base}/users/${id}/password-reset`,
@@ -432,8 +433,22 @@ function UserDetailContent({ id }: { id: string }) {
               setResetPassword(result.password)
               setError('')
               void query.refetch()
-            } catch {
-              setResetUncertain(true)
+            } catch (resetError) {
+              if (resetError instanceof ApiClientError && resetError.status !== undefined) {
+                const statusMessage =
+                  resetError.status === 403
+                    ? 'Сброс отклонён: недостаточно прав.'
+                    : resetError.status === 404
+                      ? 'Сброс отклонён: учётная запись не найдена.'
+                      : resetError.status === 409
+                        ? 'Сброс отклонён: операция недопустима для этой учётной записи.'
+                        : resetError.status === 422
+                          ? 'Сброс отклонён: проверьте запрос.'
+                          : 'Сервер вернул ошибку при сбросе пароля.'
+                setError(statusMessage)
+              } else {
+                setResetUncertain(true)
+              }
             } finally {
               setResetting(false)
             }

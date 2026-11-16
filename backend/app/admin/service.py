@@ -215,14 +215,18 @@ def reset_user_password(db: Session, actor: User, user_id: int) -> tuple[User, s
         raise HTTPException(409, "self_reset_forbidden")
     user = get_user(db, user_id, lock=True)
     user.password_hash = password_hash
-    now = datetime.now(UTC)
-    sessions = db.scalars(
-        select(AuthSession)
-        .where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None))
-        .order_by(AuthSession.id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
+    sessions = list(
+        db.scalars(
+            select(AuthSession)
+            .where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None))
+            .order_by(AuthSession.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
     )
+    # Refresh may create a token while this query waits on a session lock.
+    # Stamp revocations after every lock is acquired so timestamps stay ordered.
+    now = datetime.now(UTC)
     for session in sessions:
         revoke_session(db, session, now, "password_reset")
     audit_change(

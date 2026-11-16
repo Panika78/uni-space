@@ -16,10 +16,13 @@ VITE_PID=""
 : "${DATABASE_URL:=postgresql+psycopg://uni_space_test:test-only-password@127.0.0.1:55432/uni_space_test}"
 : "${JWT_SIGNING_KEY:=test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ}"
 : "${COOKIE_SECURE:=false}"
-: "${ALLOWED_ORIGINS:=[\"http://localhost:5173\"]}"
+: "${API_PORT:=8000}"
+: "${VITE_PORT:=5173}"
+: "${API_PROXY_TARGET:=http://localhost:$API_PORT}"
+: "${ALLOWED_ORIGINS:=[\"http://localhost:$VITE_PORT\"]}"
 : "${PLAYWRIGHT_MODULE:?Set PLAYWRIGHT_MODULE to the pinned Playwright 1.57.0 module path}"
 : "${PASSWORD_TEST_PYTHON_VERSION:=3.12.16}"
-export APP_ENV DATABASE_URL JWT_SIGNING_KEY COOKIE_SECURE ALLOWED_ORIGINS
+export APP_ENV DATABASE_URL JWT_SIGNING_KEY COOKIE_SECURE ALLOWED_ORIGINS API_PORT VITE_PORT API_PROXY_TARGET
 
 cleanup() {
   local status=$?
@@ -54,9 +57,10 @@ if [[ "$APP_ENV" != test || ! "$DATABASE_URL" =~ ^postgresql\+psycopg://uni_spac
   echo 'Refusing to run password browser E2E outside localhost uni_space_test.' >&2
   exit 2
 fi
-python3 - <<'PY'
+API_PORT="$API_PORT" VITE_PORT="$VITE_PORT" python3 - <<'PY'
+import os
 import socket
-for port in (8000, 5173):
+for port in (int(os.environ["API_PORT"]), int(os.environ["VITE_PORT"])):
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", port))
 PY
@@ -69,18 +73,18 @@ PYTHONPATH=backend uv run --locked --python "$PASSWORD_TEST_PYTHON_VERSION" --pr
 set -a
 source "$FIXTURE_ENV"
 set +a
-export PASSWORD_E2E_URL=http://localhost:5173 PLAYWRIGHT_MODULE
+export PASSWORD_E2E_URL="http://localhost:$VITE_PORT" PLAYWRIGHT_MODULE
 
-(cd backend && exec uv run --locked --python "$PASSWORD_TEST_PYTHON_VERSION" uvicorn \
-  app.main:app --no-access-log --host 127.0.0.1 --port 8000) > "$API_LOG" 2>&1 &
+(cd backend && exec uv run --locked --python "$PASSWORD_TEST_PYTHON_VERSION" python \
+  scripts/password_e2e_server.py) > "$API_LOG" 2>&1 &
 API_PID=$!
-(cd frontend && exec npm run dev -- --host 127.0.0.1 --strictPort) > "$VITE_LOG" 2>&1 &
+(cd frontend && exec npm run dev -- --host 127.0.0.1 --port "$VITE_PORT" --strictPort) > "$VITE_LOG" 2>&1 &
 VITE_PID=$!
 
 ready=false
 for _ in $(seq 1 90); do
-  if curl --silent --fail --max-time 2 http://127.0.0.1:8000/api/openapi.json >/dev/null \
-    && curl --silent --fail --max-time 2 http://127.0.0.1:5173/login >/dev/null; then
+  if curl --silent --fail --max-time 2 "http://127.0.0.1:$API_PORT/api/openapi.json" >/dev/null \
+    && curl --silent --fail --max-time 2 "http://127.0.0.1:$VITE_PORT/login" >/dev/null; then
     ready=true
     break
   fi
