@@ -81,7 +81,7 @@ try {
   }
   for (const [basis, requirement] of Object.entries(attachments)) {
     await page.getByLabel('Основание').selectOption(basis)
-    await page.getByText(requirement).waitFor()
+    await page.locator('.attachment-requirement').getByText(requirement).waitFor()
   }
   await page.getByLabel('Пояснение').fill('Тестовое обстоятельство')
   const starts = page.getByLabel('Дата начала')

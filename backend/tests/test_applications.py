@@ -560,6 +560,7 @@ def test_application_routes_work_with_minimal_postgresql_role(postgresql_engine)
         connection.execute(
             text(f"GRANT SELECT ON academic_terms, org_units, programs, study_groups TO {role}")
         )
+        connection.execute(text(f"GRANT SELECT ON course_offerings, course_groups TO {role}"))
         connection.execute(text(f"GRANT SELECT, INSERT ON applications TO {role}"))
         connection.execute(text(f"GRANT USAGE ON SEQUENCE applications_id_seq TO {role}"))
         connection.execute(text(f"GRANT SELECT, INSERT ON application_history TO {role}"))
@@ -818,8 +819,6 @@ def test_mvp2_service_forms_fix_server_term_and_responsible_units(db_session):
         assert ambiguous.status_code == 409
         assert ambiguous.json()["error"]["code"] == "academic_term_ambiguous"
         db_session.delete(db_session.get(CourseGroup, (second_offering.id, group.id)))
-        db_session.delete(second_offering)
-        db_session.delete(ambiguous_term)
         db_session.flush()
         transcript = client.post(
             "/api/v1/applications", json={"service_code": "academic_transcript", "form_data": {}}
