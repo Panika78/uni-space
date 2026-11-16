@@ -23,6 +23,42 @@ class LessonParticipant(RequestModel):
     subgroup_id: Id | None = None
 
 
+class EditorParticipantDisplay(RequestModel):
+    group_id: Id
+    group_name: str
+    subgroup_id: Id | None = None
+    subgroup_name: str | None = None
+
+
+class EditorRoomDisplay(RequestModel):
+    id: Id
+    name: str
+    building_id: Id
+    building_name: str
+
+
+class EditorCourseOfferingDisplay(RequestModel):
+    id: Id
+    discipline_id: Id
+    discipline_name: str
+    discipline_code: str | None
+    term_id: Id
+    term_name: str
+    attestation_type: Literal["exam", "pass_fail", "graded_pass"]
+
+
+class EditorTeacherDisplay(RequestModel):
+    id: Id
+    full_name: str
+
+
+class EditorLessonDisplay(RequestModel):
+    course_offering: EditorCourseOfferingDisplay
+    teacher: EditorTeacherDisplay | None
+    participants: list[EditorParticipantDisplay]
+    rooms: list[EditorRoomDisplay]
+
+
 class LessonWrite(RequestModel):
     course_offering_id: Id
     teacher_id: Id | None = None
@@ -55,6 +91,7 @@ class EditorLesson(LessonWrite):
     previous_lesson_id: Id | None
     next_lesson_id: Id | None
     created_by_user_id: Id | None
+    display: EditorLessonDisplay
 
 
 class EditorScheduleParams(ScheduleParams):

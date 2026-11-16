@@ -1145,6 +1145,65 @@
         "title": "Direction",
         "type": "object"
       },
+      "EditorCourseOfferingDisplay": {
+        "additionalProperties": false,
+        "properties": {
+          "attestation_type": {
+            "enum": [
+              "exam",
+              "pass_fail",
+              "graded_pass"
+            ],
+            "title": "Attestation Type",
+            "type": "string"
+          },
+          "discipline_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discipline Code"
+          },
+          "discipline_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Discipline Id",
+            "type": "string"
+          },
+          "discipline_name": {
+            "title": "Discipline Name",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "term_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Term Id",
+            "type": "string"
+          },
+          "term_name": {
+            "title": "Term Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "discipline_id",
+          "discipline_name",
+          "discipline_code",
+          "term_id",
+          "term_name",
+          "attestation_type"
+        ],
+        "title": "EditorCourseOfferingDisplay",
+        "type": "object"
+      },
       "EditorLesson": {
         "additionalProperties": false,
         "properties": {
@@ -1164,6 +1223,9 @@
               }
             ],
             "title": "Created By User Id"
+          },
+          "display": {
+            "$ref": "#/components/schemas/EditorLessonDisplay"
           },
           "ends_at": {
             "format": "date-time",
@@ -1268,9 +1330,124 @@
           "status",
           "previous_lesson_id",
           "next_lesson_id",
-          "created_by_user_id"
+          "created_by_user_id",
+          "display"
         ],
         "title": "EditorLesson",
+        "type": "object"
+      },
+      "EditorLessonDisplay": {
+        "additionalProperties": false,
+        "properties": {
+          "course_offering": {
+            "$ref": "#/components/schemas/EditorCourseOfferingDisplay"
+          },
+          "participants": {
+            "items": {
+              "$ref": "#/components/schemas/EditorParticipantDisplay"
+            },
+            "title": "Participants",
+            "type": "array"
+          },
+          "rooms": {
+            "items": {
+              "$ref": "#/components/schemas/EditorRoomDisplay"
+            },
+            "title": "Rooms",
+            "type": "array"
+          },
+          "teacher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditorTeacherDisplay"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "course_offering",
+          "teacher",
+          "participants",
+          "rooms"
+        ],
+        "title": "EditorLessonDisplay",
+        "type": "object"
+      },
+      "EditorParticipantDisplay": {
+        "additionalProperties": false,
+        "properties": {
+          "group_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Group Id",
+            "type": "string"
+          },
+          "group_name": {
+            "title": "Group Name",
+            "type": "string"
+          },
+          "subgroup_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subgroup Id"
+          },
+          "subgroup_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subgroup Name"
+          }
+        },
+        "required": [
+          "group_id",
+          "group_name"
+        ],
+        "title": "EditorParticipantDisplay",
+        "type": "object"
+      },
+      "EditorRoomDisplay": {
+        "additionalProperties": false,
+        "properties": {
+          "building_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Building Id",
+            "type": "string"
+          },
+          "building_name": {
+            "title": "Building Name",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "building_id",
+          "building_name"
+        ],
+        "title": "EditorRoomDisplay",
         "type": "object"
       },
       "EditorSchedule": {
@@ -1301,6 +1478,26 @@
           "next_after_id"
         ],
         "title": "EditorSchedule",
+        "type": "object"
+      },
+      "EditorTeacherDisplay": {
+        "additionalProperties": false,
+        "properties": {
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "full_name"
+        ],
+        "title": "EditorTeacherDisplay",
         "type": "object"
       },
       "EffectivePermission": {

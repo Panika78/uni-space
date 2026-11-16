@@ -33,9 +33,14 @@ from app.schedule.editor_schemas import (
     CatalogItem,
     CatalogPage,
     CatalogParams,
+    EditorCourseOfferingDisplay,
     EditorLesson,
+    EditorLessonDisplay,
+    EditorParticipantDisplay,
+    EditorRoomDisplay,
     EditorSchedule,
     EditorScheduleParams,
+    EditorTeacherDisplay,
     LessonParticipant,
     LessonWrite,
 )
@@ -70,33 +75,99 @@ def get_editor_lesson(db: Session, lesson_id: int) -> EditorLesson:
 
 
 def list_editor_lessons(db: Session, lessons: list[Lesson]) -> list[EditorLesson]:
-    """Load links and continuations in three bounded queries, including details."""
+    """Load links, continuations and display metadata in bounded page queries."""
     if not lessons:
         return []
     ids = [lesson.id for lesson in lessons]
-    participants = defaultdict(list)
+    participant_ids = defaultdict(list)
     for lesson_id, group_id, subgroup_id in db.execute(
         select(LessonGroup.lesson_id, LessonGroup.group_id, LessonGroup.subgroup_id)
         .where(LessonGroup.lesson_id.in_(ids))
         .order_by(LessonGroup.group_id, LessonGroup.subgroup_id.nullsfirst())
     ):
-        participants[lesson_id].append(
-            LessonParticipant(
-                group_id=str(group_id), subgroup_id=str(subgroup_id) if subgroup_id else None
-            )
-        )
+        participant_ids[lesson_id].append((group_id, subgroup_id))
     rooms = defaultdict(list)
     for lesson_id, room_id in db.execute(
         select(LessonRoom.lesson_id, LessonRoom.room_id)
         .where(LessonRoom.lesson_id.in_(ids))
         .order_by(LessonRoom.room_id)
     ):
-        rooms[lesson_id].append(str(room_id))
+        rooms[lesson_id].append(room_id)
     continuations = dict(
         db.execute(
             select(Lesson.previous_lesson_id, Lesson.id).where(Lesson.previous_lesson_id.in_(ids))
         ).all()
     )
+    offering_ids = {lesson.course_offering_id for lesson in lessons}
+    offering_rows = db.execute(
+        select(
+            CourseOffering.id.label("offering_id"),
+            CourseOffering.discipline_id.label("discipline_id"),
+            Discipline.name.label("discipline_name"),
+            Discipline.code,
+            CourseOffering.term_id.label("term_id"),
+            AcademicTerm.name.label("term_name"),
+            CourseOffering.attestation_type,
+        )
+        .join(Discipline, Discipline.id == CourseOffering.discipline_id)
+        .join(AcademicTerm, AcademicTerm.id == CourseOffering.term_id)
+        .where(CourseOffering.id.in_(offering_ids))
+    ).all()
+    offerings = {row.offering_id: row for row in offering_rows}
+    teacher_ids = {lesson.teacher_id for lesson in lessons if lesson.teacher_id is not None}
+    teachers = (
+        dict(
+            db.execute(
+                select(Teacher.id, Teacher.full_name).where(Teacher.id.in_(teacher_ids))
+            ).all()
+        )
+        if teacher_ids
+        else {}
+    )
+    group_ids = {group_id for rows in participant_ids.values() for group_id, _ in rows}
+    groups = (
+        dict(
+            db.execute(
+                select(StudyGroup.id, StudyGroup.name).where(StudyGroup.id.in_(group_ids))
+            ).all()
+        )
+        if group_ids
+        else {}
+    )
+    subgroup_ids = {
+        subgroup_id
+        for rows in participant_ids.values()
+        for _, subgroup_id in rows
+        if subgroup_id is not None
+    }
+    subgroups = (
+        dict(
+            db.execute(
+                select(Subgroup.id, Subgroup.name).where(Subgroup.id.in_(subgroup_ids))
+            ).all()
+        )
+        if subgroup_ids
+        else {}
+    )
+    room_ids = {room_id for rows in rooms.values() for room_id in rows}
+    room_rows = (
+        db.execute(
+            select(Room.id, Room.name, Room.building_id, Building.name.label("building_name"))
+            .join(Building, Building.id == Room.building_id)
+            .where(Room.id.in_(room_ids))
+        ).all()
+        if room_ids
+        else []
+    )
+    room_display = {
+        row.id: EditorRoomDisplay(
+            id=str(row.id),
+            name=row.name,
+            building_id=str(row.building_id),
+            building_name=row.building_name,
+        )
+        for row in room_rows
+    }
     return [
         EditorLesson(
             id=str(lesson.id),
@@ -105,8 +176,14 @@ def list_editor_lessons(db: Session, lessons: list[Lesson]) -> list[EditorLesson
             starts_at=lesson.starts_at,
             ends_at=lesson.ends_at,
             kind=lesson.kind,
-            participants=participants[lesson.id],
-            room_ids=rooms[lesson.id],
+            participants=[
+                LessonParticipant(
+                    group_id=str(group_id),
+                    subgroup_id=str(subgroup_id) if subgroup_id else None,
+                )
+                for group_id, subgroup_id in participant_ids[lesson.id]
+            ],
+            room_ids=[str(room_id) for room_id in rooms[lesson.id]],
             status=lesson.status,
             version=lesson.version,
             previous_lesson_id=str(lesson.previous_lesson_id)
@@ -116,6 +193,34 @@ def list_editor_lessons(db: Session, lessons: list[Lesson]) -> list[EditorLesson
             created_by_user_id=str(lesson.created_by_user_id)
             if lesson.created_by_user_id
             else None,
+            display=EditorLessonDisplay(
+                course_offering=EditorCourseOfferingDisplay(
+                    id=str(lesson.course_offering_id),
+                    discipline_id=str(offerings[lesson.course_offering_id].discipline_id),
+                    discipline_name=offerings[lesson.course_offering_id].discipline_name,
+                    discipline_code=offerings[lesson.course_offering_id].code,
+                    term_id=str(offerings[lesson.course_offering_id].term_id),
+                    term_name=offerings[lesson.course_offering_id].term_name,
+                    attestation_type=offerings[lesson.course_offering_id].attestation_type,
+                ),
+                teacher=(
+                    EditorTeacherDisplay(
+                        id=str(lesson.teacher_id), full_name=teachers[lesson.teacher_id]
+                    )
+                    if lesson.teacher_id is not None
+                    else None
+                ),
+                participants=[
+                    EditorParticipantDisplay(
+                        group_id=str(group_id),
+                        group_name=groups[group_id],
+                        subgroup_id=str(subgroup_id) if subgroup_id else None,
+                        subgroup_name=subgroups[subgroup_id] if subgroup_id is not None else None,
+                    )
+                    for group_id, subgroup_id in participant_ids[lesson.id]
+                ],
+                rooms=[room_display[room_id] for room_id in rooms[lesson.id]],
+            ),
         )
         for lesson in lessons
     ]
