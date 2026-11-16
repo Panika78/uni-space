@@ -238,10 +238,12 @@ try {
         }
       }
       if (route === '/services') {
-        const icon = await page.locator('.service-card__icon-box').boundingBox()
-        const text = await page.locator('.service-card__content').boundingBox()
-        if (icon.y < text.y + text.height && text.y < icon.y + icon.height)
-          assert.ok(icon.x + icon.width <= text.x, 'service icon does not overlap text')
+        for (const card of await page.locator('.service-catalog-grid .service-card').all()) {
+          const icon = await card.locator('.service-card__icon-box').boundingBox()
+          const text = await card.locator('.service-card__content').boundingBox()
+          if (icon.y < text.y + text.height && text.y < icon.y + icon.height)
+            assert.ok(icon.x + icon.width <= text.x, 'service icon does not overlap text')
+        }
 
         const tabs = page.getByRole('navigation', { name: 'Разделы услуг' })
         const top = (await tabs.boundingBox()).y
@@ -249,7 +251,10 @@ try {
         await settle()
         assert.ok(Math.abs((await tabs.boundingBox()).y - top) < 1)
         await page.goBack()
-        await page.getByRole('link', { name: 'Подать заявление' }).waitFor()
+        await page
+          .getByRole('article', { name: 'Справка об обучении' })
+          .getByRole('link', { name: 'Подать заявление', exact: true })
+          .waitFor()
         await page.goForward()
         await tabs.getByRole('link', { name: 'Мои заявления' }).waitFor()
       }
@@ -486,7 +491,10 @@ try {
     await page.getByText('Вы ещё не подавали заявлений', { exact: true }).waitFor()
     await inspect('empty-applications-fixture', width)
     await page.getByRole('link', { name: 'Перейти в каталог услуг' }).click()
-    await page.getByRole('link', { name: 'Подать заявление' }).waitFor()
+    await page
+      .getByRole('article', { name: 'Справка об обучении' })
+      .getByRole('link', { name: 'Подать заявление', exact: true })
+      .waitFor()
   }
   await page.unroute('**/api/v1/applications?*')
   console.log('PASS read-only empty application fixture and catalog transition')

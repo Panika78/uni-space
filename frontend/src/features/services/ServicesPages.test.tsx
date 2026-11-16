@@ -53,9 +53,56 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
+const catalogService = (id: string, title: string) => ({
+  id,
+  code: 'study_certificate',
+  title,
+  description: 'Описание услуги',
+  processing_mode: 'automatic',
+  produces_document: true,
+  action_available: true,
+  unavailable_reason: null,
+  requirements: ['Место предоставления'],
+})
+
+const additionalService = (code: string, title: string) => ({
+  ...catalogService('8', title),
+  code,
+  processing_mode: code === 'academic_transcript' ? 'automatic' : 'manual',
+  produces_document: code !== 'academic_leave',
+  action_available: true,
+  unavailable_reason: null,
+  requirements: code === 'academic_leave' ? ['Подтверждающие документы'] : [],
+})
+
+const additionalApplication = (
+  service: ReturnType<typeof additionalService>,
+  formData: Record<string, unknown>,
+  documentStatus: 'pending' | 'not_required' = 'pending',
+) => ({
+  id: '81',
+  version: 1,
+  service,
+  form_data: formData,
+  review_status: 'submitted',
+  document_status: documentStatus,
+  feedback: null,
+  created_at: '2026-11-10T00:00:00Z',
+  updated_at: '2026-11-10T00:00:00Z',
+})
+
+function mountAdditionalForm(serviceCode: string) {
+  const router = createMemoryRouter(
+    [{ path: '/services/:serviceCode', element: <ApplicationFormPage /> }],
+    { initialEntries: [`/services/${serviceCode}`] },
+  )
+  render(<RouterProvider router={router} />)
+  return router
+}
+
 it('loads the real service catalog and offers the separate application form', async () => {
   apiFetch.mockResolvedValue({
-    items: [{ id: '4', code: 'study_certificate', title: 'Справка об обучении' }],
+    items: [catalogService('4', 'Справка об обучении')],
   })
   const router = createMemoryRouter(
     [
@@ -123,7 +170,7 @@ it('shows neutral help until an invalid field is blurred, then restores help aft
 it('focuses the required field and submits once with trimmed Unicode text', async () => {
   apiFetch.mockResolvedValueOnce({
     id: '73',
-    service: { id: '4', code: 'study_certificate', title: 'Справка об обучении' },
+    service: catalogService('4', 'Справка об обучении'),
     form_data: { place_of_submission: '東京' },
     review_status: 'submitted',
     document_status: 'pending',
@@ -221,7 +268,7 @@ it('shows server validation under the field and focuses it', async () => {
 it('uses Python whitespace and Unicode code point boundaries in the form', async () => {
   apiFetch.mockResolvedValueOnce({
     id: '75',
-    service: { id: '4', code: 'study_certificate', title: 'Справка об обучении' },
+    service: catalogService('4', 'Справка об обучении'),
     form_data: { place_of_submission: 'A'.repeat(299) + '😀' },
     review_status: 'submitted',
     document_status: 'pending',
@@ -306,7 +353,7 @@ it('sends only one request while submission is pending', async () => {
   expect(screen.getByRole('button', { name: 'Отправляем…' })).toBeDisabled()
   resolveResponse({
     id: '74',
-    service: { id: '4', code: 'study_certificate', title: 'Справка об обучении' },
+    service: catalogService('4', 'Справка об обучении'),
     form_data: { place_of_submission: 'Деканат' },
     review_status: 'submitted',
     document_status: 'pending',
@@ -354,7 +401,7 @@ it('blocks router and Back navigation while a POST is pending and allows waiting
   fireEvent.click(screen.getByRole('button', { name: 'Продолжить заполнение' }))
   resolveResponse({
     id: '76',
-    service: { id: '4', code: 'study_certificate', title: 'Справка об обучении' },
+    service: catalogService('4', 'Справка об обучении'),
     form_data: { place_of_submission: 'Деканат' },
     review_status: 'submitted',
     document_status: 'pending',
@@ -415,7 +462,7 @@ function mountCatalog(client = new QueryClient({ defaultOptions: { queries: { re
 
 it('shows catalog access denial without cached services or a network retry', async () => {
   apiFetch.mockResolvedValueOnce({
-    items: [{ id: '4', code: 'study_certificate', title: 'Справка об обучении' }],
+    items: [catalogService('4', 'Справка об обучении')],
   })
   const { client } = mountCatalog()
   await screen.findByRole('heading', { name: 'Справка об обучении' })
@@ -476,7 +523,7 @@ it('retries a catalog GET through loading and success without reloading the docu
   fireEvent.click(await screen.findByRole('button', { name: 'Повторить' }))
   expect(await screen.findByText('Загружаем каталог…')).toBeInTheDocument()
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-  finish({ items: [{ id: '1', code: 'study_certificate', title: 'Справка об обучении' }] })
+  finish({ items: [catalogService('1', 'Справка об обучении')] })
   expect(await screen.findByRole('link', { name: 'Подать заявление' })).toHaveAttribute(
     'href',
     '/services/study_certificate',
@@ -506,9 +553,7 @@ it('cancels the catalog request on route change and does not render a late respo
   const signal = apiFetch.mock.calls[0][1].signal as AbortSignal
   await act(() => router.navigate('/elsewhere'))
   expect(signal.aborted).toBe(true)
-  await act(async () =>
-    finish({ items: [{ id: '1', code: 'study_certificate', title: 'Поздний каталог' }] }),
-  )
+  await act(async () => finish({ items: [catalogService('1', 'Поздний каталог')] }))
   expect(screen.getByText('Другой раздел')).toBeInTheDocument()
   expect(screen.queryByText('Поздний каталог')).not.toBeInTheDocument()
 })
@@ -524,15 +569,339 @@ it('isolates the next student catalog when a cleared query receives an old respo
   const first = mountCatalog()
   first.unmount()
   first.client.clear() // AuthSession clears this same query cache on account changes.
-  const next = { items: [{ id: '2', code: 'study_certificate', title: 'Каталог нового студента' }] }
+  const next = { items: [catalogService('2', 'Каталог нового студента')] }
   apiFetch.mockResolvedValueOnce(next)
   mountCatalog(first.client)
   expect(
     await screen.findByRole('article', { name: 'Каталог нового студента' }),
   ).toBeInTheDocument()
-  await act(async () =>
-    finishOld({ items: [{ id: '1', code: 'study_certificate', title: 'Старый каталог' }] }),
-  )
+  await act(async () => finishOld({ items: [catalogService('1', 'Старый каталог')] }))
   expect(screen.queryByText('Старый каталог')).not.toBeInTheDocument()
   expect(first.client.getQueryData(['services'])).toEqual(next)
+})
+
+it('uses the future academic leave response contract in a controlled fixture only', async () => {
+  const leaveService = additionalService('academic_leave', 'Академический отпуск')
+  // Controlled 201 fixture only: this test does not call a live API or exercise file uploads.
+  apiFetch.mockResolvedValueOnce({ items: [leaveService] }).mockResolvedValueOnce(
+    additionalApplication(
+      leaveService,
+      {
+        basis: 'medical',
+        starts_on: '2028-02-29',
+        ends_on: '2028-03-01',
+        explanation: null,
+      },
+      'not_required',
+    ),
+  )
+  mountAdditionalForm('academic_leave')
+  const starts = await screen.findByLabelText(/Дата начала/)
+  const ends = screen.getByLabelText(/Дата окончания/)
+  fireEvent.change(starts, { target: { value: '31.02.2028' } })
+  fireEvent.blur(starts)
+  expect(
+    await screen.findByText(/существующую дату/, { selector: '#leave-start-error' }),
+  ).toBeInTheDocument()
+  fireEvent.change(starts, { target: { value: '29.02.2028' } })
+  fireEvent.change(ends, { target: { value: '01.03.2028' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+  expect(await screen.findByText(/Заявление № 81/)).toBeInTheDocument()
+  expect(screen.queryByText(/заявление могло сохраниться/i)).not.toBeInTheDocument()
+  expect(JSON.parse(apiFetch.mock.calls[1][1].body)).toEqual({
+    service_code: 'academic_leave',
+    form_data: {
+      basis: 'medical',
+      starts_on: '2028-02-29',
+      ends_on: '2028-03-01',
+      explanation: null,
+    },
+  })
+})
+
+it('does not accept pending document status for academic leave', async () => {
+  const leaveService = additionalService('academic_leave', 'Академический отпуск')
+  apiFetch.mockResolvedValueOnce({ items: [leaveService] }).mockResolvedValueOnce(
+    additionalApplication(leaveService, {
+      basis: 'medical',
+      starts_on: '2028-02-29',
+      ends_on: '2028-03-01',
+      explanation: null,
+    }),
+  )
+  mountAdditionalForm('academic_leave')
+  fireEvent.change(await screen.findByLabelText(/Дата начала/), {
+    target: { value: '29.02.2028' },
+  })
+  fireEvent.change(screen.getByLabelText(/Дата окончания/), {
+    target: { value: '01.03.2028' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent(/ответ не получен/i)
+  expect(screen.queryByText(/Заявление № 81/)).not.toBeInTheDocument()
+  expect(
+    screen.getByRole('link', { name: 'Проверить результат в моих заявлениях' }),
+  ).toBeInTheDocument()
+  expect(apiFetch).toHaveBeenCalledTimes(2)
+})
+
+it('normalizes accounting purpose with Python whitespace and confirms the saved 201 value', async () => {
+  const service = additionalService('accounting_certificate', 'Бухгалтерская справка')
+  apiFetch
+    .mockResolvedValueOnce({ items: [service] })
+    .mockResolvedValueOnce(additionalApplication(service, { purpose: 'Цель' }))
+  mountAdditionalForm('accounting_certificate')
+  const purpose = await screen.findByLabelText(/Цель получения/)
+  fireEvent.change(purpose, { target: { value: ' \u001c\u00a0Цель\u2003\u001c ' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+  expect(await screen.findByText(/Заявление № 81/)).toBeInTheDocument()
+  expect(screen.queryByText(/заявление могло сохраниться/i)).not.toBeInTheDocument()
+  expect(JSON.parse(apiFetch.mock.calls[1][1].body)).toEqual({
+    service_code: 'accounting_certificate',
+    form_data: { purpose: 'Цель' },
+  })
+})
+
+it('sends an empty optional purpose as null after Python whitespace normalization', async () => {
+  const service = additionalService('accounting_certificate', 'Бухгалтерская справка')
+  apiFetch
+    .mockResolvedValueOnce({ items: [service] })
+    .mockResolvedValueOnce(additionalApplication(service, { purpose: null }))
+  mountAdditionalForm('accounting_certificate')
+  fireEvent.change(await screen.findByLabelText(/Цель получения/), {
+    target: { value: ' \u001c\u00a0\u2003 ' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+  expect(await screen.findByText(/Заявление № 81/)).toBeInTheDocument()
+  expect(JSON.parse(apiFetch.mock.calls[1][1].body)).toEqual({
+    service_code: 'accounting_certificate',
+    form_data: { purpose: null },
+  })
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+})
+
+it('normalizes other-basis explanation and validates the controlled future response', async () => {
+  const service = additionalService('academic_leave', 'Академический отпуск')
+  // Controlled response fixture verifies the agreed form only; no attachment route is exercised.
+  apiFetch.mockResolvedValueOnce({ items: [service] }).mockResolvedValueOnce(
+    additionalApplication(
+      service,
+      {
+        basis: 'other',
+        starts_on: '2028-02-29',
+        ends_on: '2028-03-01',
+        explanation: 'Обстоятельство',
+      },
+      'not_required',
+    ),
+  )
+  mountAdditionalForm('academic_leave')
+  fireEvent.change(await screen.findByLabelText(/Основание/), { target: { value: 'other' } })
+  fireEvent.change(screen.getByLabelText(/Дата начала/), { target: { value: '29.02.2028' } })
+  fireEvent.change(screen.getByLabelText(/Дата окончания/), { target: { value: '01.03.2028' } })
+  fireEvent.change(screen.getByLabelText(/Пояснение/), {
+    target: { value: ' \u001c\u00a0Обстоятельство\u2003\u001c ' },
+  })
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+  expect(await screen.findByText(/Заявление № 81/)).toBeInTheDocument()
+  expect(JSON.parse(apiFetch.mock.calls[1][1].body)).toEqual({
+    service_code: 'academic_leave',
+    form_data: {
+      basis: 'other',
+      starts_on: '2028-02-29',
+      ends_on: '2028-03-01',
+      explanation: 'Обстоятельство',
+    },
+  })
+})
+
+it.each([
+  {
+    serviceCode: 'accounting_certificate',
+    title: 'Бухгалтерская справка',
+    field: 'purpose',
+    path: 'form_data.purpose',
+    message: 'Проверьте цель получения.',
+  },
+  {
+    serviceCode: 'academic_leave',
+    title: 'Академический отпуск',
+    field: 'starts_on',
+    path: 'body.academic_leave.form_data.starts_on',
+    message: 'Введите корректную дату начала.',
+  },
+  {
+    serviceCode: 'academic_leave',
+    title: 'Академический отпуск',
+    field: 'ends_on',
+    path: 'academic_leave.form_data.ends_on',
+    message: 'Проверьте дату окончания и порядок дат.',
+  },
+  {
+    serviceCode: 'academic_leave',
+    title: 'Академический отпуск',
+    field: 'explanation',
+    path: 'body.academic_leave.form_data.explanation',
+    message: 'Проверьте пояснение.',
+  },
+  {
+    serviceCode: 'academic_leave',
+    title: 'Академический отпуск',
+    field: 'basis',
+    path: 'form_data.basis',
+    message: 'Выберите допустимое основание.',
+  },
+])('attaches a 422 $field error to the field for API path $path', async (scenario) => {
+  const service = additionalService(scenario.serviceCode, scenario.title)
+  apiFetch
+    .mockResolvedValueOnce({ items: [service] })
+    .mockRejectedValueOnce(
+      new ApiClientError('Проверьте введённые данные', 'validation_error', 422, [
+        { field: scenario.path, code: 'invalid_value' },
+      ]),
+    )
+  mountAdditionalForm(scenario.serviceCode)
+
+  let field: HTMLElement
+  if (scenario.field === 'purpose') {
+    field = await screen.findByLabelText(/Цель получения/)
+    fireEvent.change(field, { target: { value: 'Первичная цель' } })
+  } else if (scenario.field === 'basis') {
+    field = await screen.findByLabelText(/Основание/)
+    fireEvent.change(screen.getByLabelText(/Дата начала/), { target: { value: '01.03.2028' } })
+    fireEvent.change(screen.getByLabelText(/Дата окончания/), { target: { value: '02.03.2028' } })
+  } else {
+    if (scenario.field === 'explanation') {
+      fireEvent.change(await screen.findByLabelText(/Основание/), { target: { value: 'other' } })
+      fireEvent.change(screen.getByLabelText(/Пояснение/), { target: { value: 'Пояснение' } })
+    }
+    fireEvent.change(await screen.findByLabelText(/Дата начала/), {
+      target: { value: '01.03.2028' },
+    })
+    fireEvent.change(screen.getByLabelText(/Дата окончания/), { target: { value: '02.03.2028' } })
+    field = screen.getByLabelText(
+      scenario.field === 'starts_on'
+        ? /Дата начала/
+        : scenario.field === 'ends_on'
+          ? /Дата окончания/
+          : /Пояснение/,
+    )
+  }
+
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+  expect(await screen.findByText(scenario.message)).toBeInTheDocument()
+  expect(field).toHaveAttribute('aria-invalid', 'true')
+  const describedBy = field.getAttribute('aria-describedby')
+  expect(describedBy).toBeTruthy()
+  expect(document.getElementById(describedBy!)).toHaveTextContent(scenario.message)
+  await waitFor(() => expect(field).toHaveFocus())
+  expect(screen.queryByRole('link', { name: /Проверить результат/ })).not.toBeInTheDocument()
+
+  fireEvent.change(field, {
+    target: {
+      value:
+        scenario.field === 'basis'
+          ? 'family'
+          : scenario.field === 'starts_on'
+            ? '03.03.2028'
+            : scenario.field === 'ends_on'
+              ? '04.03.2028'
+              : 'Исправлено',
+    },
+  })
+  expect(screen.queryByText(scenario.message)).not.toBeInTheDocument()
+  expect(field).toHaveAttribute('aria-invalid', 'false')
+})
+
+it('keeps a subject 409 at form level without marking fields or retrying', async () => {
+  const service = additionalService('accounting_certificate', 'Бухгалтерская справка')
+  apiFetch
+    .mockResolvedValueOnce({ items: [service] })
+    .mockRejectedValueOnce(
+      new ApiClientError(
+        'Для факультета не настроено ответственное подразделение.',
+        'responsible_unit_unavailable',
+        409,
+      ),
+    )
+  mountAdditionalForm('accounting_certificate')
+  fireEvent.click(await screen.findByRole('button', { name: 'Отправить заявление' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Для факультета не настроено ответственное подразделение.',
+  )
+  expect(screen.getByLabelText(/Цель получения/)).toHaveAttribute('aria-invalid', 'false')
+  expect(screen.queryByRole('link', { name: /Проверить результат/ })).not.toBeInTheDocument()
+  expect(apiFetch).toHaveBeenCalledTimes(2)
+})
+
+it('protects a basis-only draft from internal navigation', async () => {
+  apiFetch.mockResolvedValueOnce({
+    items: [
+      {
+        ...catalogService('8', 'Академический отпуск'),
+        code: 'academic_leave',
+        action_available: false,
+        unavailable_reason: 'Подача недоступна',
+        requirements: ['Подтверждающие документы'],
+      },
+    ],
+  })
+  const router = createMemoryRouter(
+    [
+      { path: '/services/:serviceCode', element: <ApplicationFormPage /> },
+      { path: '/services', element: <p>Каталог</p> },
+    ],
+    { initialEntries: ['/services/academic_leave'] },
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.change(await screen.findByLabelText(/Основание/), { target: { value: 'family' } })
+  fireEvent.click(screen.getByRole('link', { name: 'К каталогу услуг' }))
+  expect(await screen.findByRole('alertdialog')).toHaveTextContent('Выйти без сохранения?')
+  expect(screen.getByRole('alertdialog')).toHaveTextContent('Введённые данные ещё не отправлены')
+})
+
+it('blocks leaving an uncertain POST result until the student confirms', async () => {
+  const transcriptService = {
+    ...catalogService('9', 'Выписка об успеваемости'),
+    code: 'academic_transcript',
+  }
+  apiFetch
+    .mockResolvedValueOnce({ items: [transcriptService] })
+    .mockRejectedValueOnce(new TypeError('lost response'))
+  const router = createMemoryRouter(
+    [
+      { path: '/services/:serviceCode', element: <ApplicationFormPage /> },
+      { path: '/services', element: <p>Каталог</p> },
+    ],
+    { initialEntries: ['/services/academic_transcript'] },
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Отправить заявление' }))
+  fireEvent.click(await screen.findByRole('link', { name: /Проверить результат/ }))
+  expect(await screen.findByRole('alertdialog')).toHaveTextContent(
+    'Результат отправки не подтверждён',
+  )
+  expect(apiFetch).toHaveBeenCalledTimes(2)
+})
+
+it('does not confirm a malformed 201 response for an additional service', async () => {
+  const accountingService = {
+    ...catalogService('10', 'Бухгалтерская справка'),
+    code: 'accounting_certificate',
+  }
+  apiFetch.mockResolvedValueOnce({ items: [accountingService] }).mockResolvedValueOnce({
+    id: '91',
+    service: accountingService,
+    review_status: 'submitted',
+    document_status: 'pending',
+  })
+  const router = createMemoryRouter(
+    [{ path: '/services/:serviceCode', element: <ApplicationFormPage /> }],
+    { initialEntries: ['/services/accounting_certificate'] },
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Отправить заявление' }))
+  expect(await screen.findByText(/заявление могло сохраниться/i)).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'Заявление создано' })).not.toBeInTheDocument()
+  expect(apiFetch).toHaveBeenCalledTimes(2)
 })

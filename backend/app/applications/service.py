@@ -1,12 +1,35 @@
 """Application transitions share the caller's transaction with their history."""
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from fastapi import HTTPException
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import MultipleResultsFound
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import ColumnElement
 
-from app.applications.schemas import ApplicationFormData, ReviewApplicationRequest
-from app.models import Application, ApplicationHistory, ServiceType, Student, User
+from app.applications.schemas import (
+    AcademicLeaveFormData,
+    AcademicTranscriptFormData,
+    AcademicTranscriptInput,
+    AccountingCertificateFormData,
+    ReviewApplicationRequest,
+    StudyCertificateFormData,
+)
+from app.models import (
+    AcademicTerm,
+    Application,
+    ApplicationHistory,
+    CourseGroup,
+    CourseOffering,
+    OrgUnit,
+    Program,
+    ServiceType,
+    Student,
+    StudyGroup,
+    User,
+)
 from app.permissions import (
     PermissionCode,
     get_application_scope,
@@ -14,7 +37,160 @@ from app.permissions import (
     require_application_review,
 )
 
-APPLICATION_FORMS = {"study_certificate": ApplicationFormData}
+APPLICATION_FORMS = {
+    "study_certificate": StudyCertificateFormData,
+    "academic_transcript": AcademicTranscriptInput,
+    "academic_leave": AcademicLeaveFormData,
+    "accounting_certificate": AccountingCertificateFormData,
+}
+SERVICE_DETAILS = {
+    "study_certificate": (
+        "Подтверждает факт обучения. Укажите место предоставления.",
+        ["Место предоставления"],
+    ),
+    "academic_transcript": (
+        "Выписка по текущему учебному периоду.",
+        ["Период определяется автоматически при подаче"],
+    ),
+    "academic_leave": (
+        "Заявление рассматривается деканатом; решение не меняет статус студента автоматически.",
+        [
+            "Подтверждающий документ будет обязателен после подключения загрузки файлов",
+            "Отправка станет доступна после подключения безопасного хранения файлов",
+        ],
+    ),
+    "accounting_certificate": (
+        "Справка без обращения к реальным финансовым данным.",
+        ["Цель получения — необязательно"],
+    ),
+}
+
+
+def get_current_academic_term(db: Session, student: Student) -> AcademicTerm | None:
+    today = datetime.now(ZoneInfo("Europe/Moscow")).date()
+    return db.scalars(
+        select(AcademicTerm)
+        .join(CourseOffering, CourseOffering.term_id == AcademicTerm.id)
+        .join(CourseGroup, CourseGroup.course_offering_id == CourseOffering.id)
+        .where(
+            CourseGroup.group_id == student.group_id,
+            AcademicTerm.starts_on <= today,
+            AcademicTerm.ends_on >= today,
+        )
+        .distinct()
+    ).one_or_none()
+
+
+def resolve_dean_office(db: Session, student: Student) -> OrgUnit | None:
+    group = db.get(StudyGroup, student.group_id)
+    program = db.get(Program, group.program_id) if group else None
+    faculty = db.get(OrgUnit, program.faculty_id) if program else None
+    if faculty is None or faculty.type != "faculty":
+        return None
+    units = db.scalars(select(OrgUnit)).all()
+    by_id = {unit.id: unit for unit in units}
+    local = []
+    for unit in units:
+        if unit.type != "dean_office":
+            continue
+        parent_id = unit.parent_id
+        visited = set()
+        while parent_id is not None and parent_id not in visited:
+            if parent_id == faculty.id:
+                local.append(unit)
+                break
+            visited.add(parent_id)
+            parent = by_id.get(parent_id)
+            parent_id = parent.parent_id if parent else None
+    if len(local) == 1:
+        return local[0]
+    if local:
+        return None
+    # A single root-level office is the only unambiguous university-wide setup.
+    universal = [unit for unit in units if unit.type == "dean_office" and unit.parent_id is None]
+    return (
+        universal[0]
+        if len(universal) == 1 and len([u for u in units if u.type == "dean_office"]) == 1
+        else None
+    )
+
+
+def get_service_availability(
+    db: Session, service: ServiceType, student: Student | None = None
+) -> tuple[bool, str | None]:
+    if service.code == "academic_leave":
+        if student is not None and resolve_dean_office(db, student) is None:
+            return False, "Для факультета студента не настроен единственный ответственный деканат."
+        return (
+            False,
+            "Отправка станет доступна после подключения безопасной загрузки подтверждающих файлов.",
+        )
+    if service.code == "academic_transcript":
+        try:
+            if student is None or get_current_academic_term(db, student) is None:
+                return False, "Сейчас не настроен единственный текущий учебный период."
+        except MultipleResultsFound:
+            return False, "Текущие учебные периоды настроены неоднозначно."
+    if service.code == "accounting_certificate":
+        units = db.scalars(select(OrgUnit).where(OrgUnit.type == "accounting")).all()
+        if len(units) != 1 or service.responsible_org_unit_id != units[0].id:
+            return False, "Ответственное подразделение бухгалтерии не настроено однозначно."
+    return True, None
+
+
+def validate_and_store_form(
+    db: Session,
+    service: ServiceType,
+    data: dict,
+    *,
+    student: Student,
+    existing: dict | None = None,
+) -> tuple[dict, int | None]:
+    form_type = APPLICATION_FORMS.get(service.code)
+    if form_type is None:
+        raise HTTPException(422, "validation_error")
+    try:
+        parsed = form_type.model_validate(data)
+    except Exception as exc:
+        raise HTTPException(422, "validation_error") from exc
+    assigned_org_unit_id = None
+    if service.code == "academic_leave":
+        unit = resolve_dean_office(db, student)
+        if unit is None:
+            raise HTTPException(409, "responsible_unit_unavailable")
+        raise HTTPException(409, "service_unavailable")
+    if service.code == "academic_transcript":
+        try:
+            term = get_current_academic_term(db, student) if existing is None else None
+        except MultipleResultsFound as exc:
+            raise HTTPException(409, "academic_term_ambiguous") from exc
+        if existing is not None:
+            term_id = existing.get("academic_term_id")
+            if not term_id:
+                raise HTTPException(409, "academic_term_unavailable")
+            term = db.get(AcademicTerm, int(term_id))
+            if term is None:
+                raise HTTPException(409, "academic_term_unavailable")
+            try:
+                saved_form = AcademicTranscriptFormData.model_validate(existing)
+            except Exception as exc:
+                raise HTTPException(409, "academic_term_unavailable") from exc
+            return saved_form.model_dump(mode="json"), None
+        if term is None:
+            raise HTTPException(409, "academic_term_unavailable")
+        return AcademicTranscriptFormData(
+            academic_term_id=str(term.id),
+            academic_term_name=term.name,
+            starts_on=term.starts_on,
+            ends_on=term.ends_on,
+        ).model_dump(mode="json"), None
+    if service.code == "accounting_certificate":
+        units = db.scalars(select(OrgUnit).where(OrgUnit.type == "accounting")).all()
+        if len(units) != 1 or service.responsible_org_unit_id != units[0].id:
+            raise HTTPException(409, "service_unavailable")
+        assigned_org_unit_id = units[0].id
+    return parsed.model_dump(mode="json"), assigned_org_unit_id
+
 
 REVIEW_TRANSITIONS = {
     "start_review": ({"submitted", "resubmitted"}, "in_review"),
@@ -140,15 +316,15 @@ def resubmit_application(
     application_id: int,
     *,
     expected_version: int,
-    form_data: ApplicationFormData,
+    form_data: dict,
 ) -> Application:
     application = get_owned_application(db, student, application_id)
     service = db.get(ServiceType, application.service_type_id)
     # Only the existing form contract is supported. #67 extends this dispatch
     # together with its real service schemas; unknown forms fail closed.
-    form_type = APPLICATION_FORMS.get(service.code)
-    if form_type is None:
-        raise HTTPException(422, "validation_error")
+    stored_form, _assigned_org_unit_id = validate_and_store_form(
+        db, service, form_data, student=student, existing=application.form_data
+    )
     return update_application(
         db,
         application,
@@ -157,5 +333,5 @@ def resubmit_application(
         access_predicate=Application.student_id == student.id,
         from_statuses={"needs_correction"},
         to_status="resubmitted",
-        form_data=form_type.model_validate(form_data.model_dump()).model_dump(),
+        form_data=stored_form,
     )

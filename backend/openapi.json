@@ -54,6 +54,49 @@
         "title": "AcademicItem",
         "type": "object"
       },
+      "AcademicLeaveFormData": {
+        "additionalProperties": false,
+        "properties": {
+          "basis": {
+            "enum": [
+              "medical",
+              "family",
+              "other"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "ends_on": {
+            "format": "date",
+            "title": "Ends On",
+            "type": "string"
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "maxLength": 3000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation"
+          },
+          "starts_on": {
+            "format": "date",
+            "title": "Starts On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "basis",
+          "starts_on",
+          "ends_on"
+        ],
+        "title": "AcademicLeaveFormData",
+        "type": "object"
+      },
       "AcademicTermResponse": {
         "additionalProperties": false,
         "properties": {
@@ -86,6 +129,44 @@
         "title": "AcademicTermResponse",
         "type": "object"
       },
+      "AcademicTranscriptFormData": {
+        "additionalProperties": false,
+        "properties": {
+          "academic_term_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Academic Term Id",
+            "type": "string"
+          },
+          "academic_term_name": {
+            "title": "Academic Term Name",
+            "type": "string"
+          },
+          "ends_on": {
+            "format": "date",
+            "title": "Ends On",
+            "type": "string"
+          },
+          "starts_on": {
+            "format": "date",
+            "title": "Starts On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "academic_term_id",
+          "academic_term_name",
+          "starts_on",
+          "ends_on"
+        ],
+        "title": "AcademicTranscriptFormData",
+        "type": "object"
+      },
+      "AcademicTranscriptInput": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "AcademicTranscriptInput",
+        "type": "object"
+      },
       "AcademicsResponse": {
         "additionalProperties": false,
         "properties": {
@@ -114,6 +195,25 @@
         "title": "AcademicsResponse",
         "type": "object"
       },
+      "AccountingCertificateFormData": {
+        "additionalProperties": false,
+        "properties": {
+          "purpose": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose"
+          }
+        },
+        "title": "AccountingCertificateFormData",
+        "type": "object"
+      },
       "ApiError": {
         "additionalProperties": false,
         "properties": {
@@ -125,20 +225,6 @@
           "error"
         ],
         "title": "ApiError",
-        "type": "object"
-      },
-      "ApplicationFormData": {
-        "additionalProperties": false,
-        "properties": {
-          "place_of_submission": {
-            "title": "Place Of Submission",
-            "type": "string"
-          }
-        },
-        "required": [
-          "place_of_submission"
-        ],
-        "title": "ApplicationFormData",
         "type": "object"
       },
       "ApplicationHistoryEvent": {
@@ -308,7 +394,21 @@
             "title": "Feedback"
           },
           "form_data": {
-            "$ref": "#/components/schemas/ApplicationFormData"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StudyCertificateFormData"
+              },
+              {
+                "$ref": "#/components/schemas/AcademicTranscriptFormData"
+              },
+              {
+                "$ref": "#/components/schemas/AcademicLeaveFormData"
+              },
+              {
+                "$ref": "#/components/schemas/AccountingCertificateFormData"
+              }
+            ],
+            "title": "Form Data"
           },
           "id": {
             "pattern": "^[1-9][0-9]*$",
@@ -551,11 +651,68 @@
         "title": "CourseOfferingRef",
         "type": "object"
       },
-      "CreateApplicationRequest": {
+      "CreateAcademicLeaveRequest": {
         "additionalProperties": false,
         "properties": {
           "form_data": {
-            "$ref": "#/components/schemas/ApplicationFormData"
+            "$ref": "#/components/schemas/AcademicLeaveFormData"
+          },
+          "service_code": {
+            "const": "academic_leave",
+            "title": "Service Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service_code",
+          "form_data"
+        ],
+        "title": "CreateAcademicLeaveRequest",
+        "type": "object"
+      },
+      "CreateAcademicTranscriptRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "form_data": {
+            "$ref": "#/components/schemas/AcademicTranscriptInput"
+          },
+          "service_code": {
+            "const": "academic_transcript",
+            "title": "Service Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service_code",
+          "form_data"
+        ],
+        "title": "CreateAcademicTranscriptRequest",
+        "type": "object"
+      },
+      "CreateAccountingCertificateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "form_data": {
+            "$ref": "#/components/schemas/AccountingCertificateFormData"
+          },
+          "service_code": {
+            "const": "accounting_certificate",
+            "title": "Service Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service_code",
+          "form_data"
+        ],
+        "title": "CreateAccountingCertificateRequest",
+        "type": "object"
+      },
+      "CreateStudyCertificateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "form_data": {
+            "$ref": "#/components/schemas/StudyCertificateFormData"
           },
           "service_code": {
             "const": "study_certificate",
@@ -567,7 +724,7 @@
           "service_code",
           "form_data"
         ],
-        "title": "CreateApplicationRequest",
+        "title": "CreateStudyCertificateRequest",
         "type": "object"
       },
       "CreateUser": {
@@ -1990,7 +2147,21 @@
             "type": "integer"
           },
           "form_data": {
-            "$ref": "#/components/schemas/ApplicationFormData"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StudyCertificateFormData"
+              },
+              {
+                "$ref": "#/components/schemas/AcademicTranscriptInput"
+              },
+              {
+                "$ref": "#/components/schemas/AcademicLeaveFormData"
+              },
+              {
+                "$ref": "#/components/schemas/AccountingCertificateFormData"
+              }
+            ],
+            "title": "Form Data"
           }
         },
         "required": [
@@ -2099,9 +2270,18 @@
         "type": "object"
       },
       "Service": {
+        "additionalProperties": false,
         "properties": {
+          "action_available": {
+            "title": "Action Available",
+            "type": "boolean"
+          },
           "code": {
             "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
             "type": "string"
           },
           "id": {
@@ -2109,15 +2289,51 @@
             "title": "Id",
             "type": "string"
           },
+          "processing_mode": {
+            "enum": [
+              "automatic",
+              "manual"
+            ],
+            "title": "Processing Mode",
+            "type": "string"
+          },
+          "produces_document": {
+            "title": "Produces Document",
+            "type": "boolean"
+          },
+          "requirements": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Requirements",
+            "type": "array"
+          },
           "title": {
             "title": "Title",
             "type": "string"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unavailable Reason"
           }
         },
         "required": [
           "id",
           "code",
-          "title"
+          "title",
+          "description",
+          "processing_mode",
+          "produces_document",
+          "action_available",
+          "unavailable_reason",
+          "requirements"
         ],
         "title": "Service",
         "type": "object"
@@ -2228,7 +2444,21 @@
             "title": "Feedback"
           },
           "form_data": {
-            "$ref": "#/components/schemas/ApplicationFormData"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StudyCertificateFormData"
+              },
+              {
+                "$ref": "#/components/schemas/AcademicTranscriptFormData"
+              },
+              {
+                "$ref": "#/components/schemas/AcademicLeaveFormData"
+              },
+              {
+                "$ref": "#/components/schemas/AccountingCertificateFormData"
+              }
+            ],
+            "title": "Form Data"
           },
           "id": {
             "pattern": "^[1-9][0-9]*$",
@@ -2354,6 +2584,20 @@
           "academic_status"
         ],
         "title": "StudentProfile",
+        "type": "object"
+      },
+      "StudyCertificateFormData": {
+        "additionalProperties": false,
+        "properties": {
+          "place_of_submission": {
+            "title": "Place Of Submission",
+            "type": "string"
+          }
+        },
+        "required": [
+          "place_of_submission"
+        ],
+        "title": "StudyCertificateFormData",
         "type": "object"
       },
       "TeachingAssignmentResponse": {
@@ -3687,7 +3931,30 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateApplicationRequest"
+                "discriminator": {
+                  "mapping": {
+                    "academic_leave": "#/components/schemas/CreateAcademicLeaveRequest",
+                    "academic_transcript": "#/components/schemas/CreateAcademicTranscriptRequest",
+                    "accounting_certificate": "#/components/schemas/CreateAccountingCertificateRequest",
+                    "study_certificate": "#/components/schemas/CreateStudyCertificateRequest"
+                  },
+                  "propertyName": "service_code"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateStudyCertificateRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateAcademicTranscriptRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateAcademicLeaveRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateAccountingCertificateRequest"
+                  }
+                ],
+                "title": "Request"
               }
             }
           },
