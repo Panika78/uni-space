@@ -17,6 +17,9 @@ type CreateApplicationRequest =
   | components['schemas']['CreateAcademicLeaveRequest']
   | components['schemas']['CreateAccountingCertificateRequest']
 
+type AdditionalFormField = 'basis' | 'starts_on' | 'ends_on' | 'explanation' | 'purpose'
+type AdditionalFormErrors = Partial<Record<AdditionalFormField, string>>
+
 const isPythonWhitespace = (character: string) => {
   const codePoint = character.codePointAt(0) ?? 0
   return (
@@ -85,6 +88,7 @@ function isAdditionalApplicationResponse(
     /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(date) &&
     isIsoDate(date.slice(0, 10)) &&
     !Number.isNaN(Date.parse(date))
+  const expectedDocumentStatus = serviceCode === 'academic_leave' ? 'not_required' : 'pending'
   if (!service || typeof service !== 'object' || !form || typeof form !== 'object') return false
   const svc = service as Record<string, unknown>
   const data = form as Record<string, unknown>
@@ -95,7 +99,7 @@ function isAdditionalApplicationResponse(
     !isDateTime(app.created_at) ||
     !isDateTime(app.updated_at) ||
     app.review_status !== 'submitted' ||
-    app.document_status !== 'pending' ||
+    app.document_status !== expectedDocumentStatus ||
     app.feedback !== null ||
     !isId(svc.id) ||
     svc.code !== serviceCode ||
@@ -124,6 +128,50 @@ function isAdditionalApplicationResponse(
     keys.length === Object.keys(expectedForm).length &&
     Object.entries(expectedForm).every(([key, expected]) => data[key] === expected)
   )
+}
+
+function getAdditionalFormErrors(
+  details: ApiClientError['details'],
+): { errors: AdditionalFormErrors; firstField: AdditionalFormField; hasUnmapped: boolean } | null {
+  const supportedFields: AdditionalFormField[] = [
+    'basis',
+    'starts_on',
+    'ends_on',
+    'explanation',
+    'purpose',
+  ]
+  const errors: AdditionalFormErrors = {}
+  let firstField: AdditionalFormField | null = null
+  let hasUnmapped = false
+  for (const detail of details) {
+    const parts = (detail.field ?? '')
+      .replace(/\[(\d+)\]/g, '.$1')
+      .split(/[./]/)
+      .filter(Boolean)
+    const formDataIndex = parts.lastIndexOf('form_data')
+    const field = formDataIndex === parts.length - 2 ? parts.at(-1) : null
+    if (!field || !supportedFields.includes(field as AdditionalFormField)) {
+      hasUnmapped = true
+      continue
+    }
+    const mappedField = field as AdditionalFormField
+    if (errors[mappedField]) continue
+    const messages: Record<AdditionalFormField, string> = {
+      basis: detail.code === 'required' ? 'Выберите основание.' : 'Выберите допустимое основание.',
+      starts_on:
+        detail.code === 'required' ? 'Укажите дату начала.' : 'Введите корректную дату начала.',
+      ends_on:
+        detail.code === 'required'
+          ? 'Укажите дату окончания.'
+          : 'Проверьте дату окончания и порядок дат.',
+      explanation: detail.code === 'required' ? 'Добавьте пояснение.' : 'Проверьте пояснение.',
+      purpose:
+        detail.code === 'required' ? 'Проверьте цель получения.' : 'Проверьте цель получения.',
+    }
+    errors[mappedField] = messages[mappedField]
+    firstField ??= mappedField
+  }
+  return firstField ? { errors, firstField, hasUnmapped } : null
 }
 
 function getApplicationErrorMessage(cause: unknown): string {
@@ -323,11 +371,17 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
   const [pending, setPending] = useState(false)
   const [applicationId, setApplicationId] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [serverFieldErrors, setServerFieldErrors] = useState<AdditionalFormErrors>({})
+  const [firstServerErrorField, setFirstServerErrorField] = useState<AdditionalFormField | null>(
+    null,
+  )
   const [uncertain, setUncertain] = useState(false)
   const queryClient = useQueryClient()
+  const basisInput = useRef<HTMLSelectElement>(null)
   const startsOnInput = useRef<HTMLInputElement>(null)
   const endsOnInput = useRef<HTMLInputElement>(null)
   const explanationInput = useRef<HTMLTextAreaElement>(null)
+  const purposeInput = useRef<HTMLInputElement>(null)
   const { setStatus: setExitStatus } = useUnsavedChanges()
   const [initialValues] = useState(() =>
     JSON.stringify({ basis, startsText, endsText, explanation, purpose }),
@@ -360,14 +414,50 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
     )
     return () => setExitStatus('none')
   }, [applicationId, draft, pending, setExitStatus, uncertain])
+  useLayoutEffect(() => {
+    if (!firstServerErrorField) return
+    const inputs: Record<AdditionalFormField, { current: HTMLElement | null }> = {
+      basis: basisInput,
+      starts_on: startsOnInput,
+      ends_on: endsOnInput,
+      explanation: explanationInput,
+      purpose: purposeInput,
+    }
+    inputs[firstServerErrorField].current?.focus()
+  }, [firstServerErrorField])
+  function clearServerFieldError(field: AdditionalFormField) {
+    setServerFieldErrors((current) => {
+      if (!(field in current)) return current
+      const next = { ...current }
+      delete next[field]
+      return next
+    })
+    setFirstServerErrorField((current) => (current === field ? null : current))
+  }
   const invalidDates = isLeave && (!startsOn || !endsOn || startsOn > endsOn)
-  const invalidExplanation = isLeave && basis === 'other' && explanation.trim().length === 0
+  const normalizedPurpose = trimPythonWhitespace(purpose)
+  const normalizedExplanation = trimPythonWhitespace(explanation)
+  const invalidExplanation = isLeave && basis === 'other' && normalizedExplanation.length === 0
+  const startsLocalError =
+    (touched || touchedFields.startsOn) && !startsOn
+      ? 'Введите существующую дату в формате ДД.ММ.ГГГГ.'
+      : undefined
+  const endsLocalError =
+    (touched || touchedFields.endsOn) && (!endsOn || startsOn > endsOn)
+      ? startsOn && endsOn && startsOn > endsOn
+        ? 'Окончание должно быть не раньше начала.'
+        : 'Введите существующую дату в формате ДД.ММ.ГГГГ.'
+      : undefined
+  const explanationLocalError =
+    (touched || touchedFields.explanation) && invalidExplanation ? 'Добавьте пояснение.' : undefined
   const invalid = invalidDates || invalidExplanation
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setTouched(true)
     setTouchedFields({ startsOn: true, endsOn: true, explanation: true })
     setError('')
+    setServerFieldErrors({})
+    setFirstServerErrorField(null)
     if (invalid) {
       if (isLeave && !startsOn) startsOnInput.current?.focus()
       else if (isLeave && (!endsOn || startsOn > endsOn)) endsOnInput.current?.focus()
@@ -380,12 +470,12 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
       const formData = isTranscript
         ? {}
         : isAccounting
-          ? { purpose: purpose.trim() || null }
+          ? { purpose: normalizedPurpose || null }
           : {
               basis,
               starts_on: startsOn,
               ends_on: endsOn,
-              explanation: basis === 'other' ? explanation.trim() : null,
+              explanation: basis === 'other' ? normalizedExplanation : null,
             }
       const result = await apiFetch<unknown>('/api/v1/applications', {
         method: 'POST',
@@ -396,12 +486,12 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
       const expectedForm = isTranscript
         ? {}
         : isAccounting
-          ? { purpose: purpose.trim() || null }
+          ? { purpose: normalizedPurpose || null }
           : {
               basis,
               starts_on: startsOn,
               ends_on: endsOn,
-              explanation: basis === 'other' ? explanation.trim() : null,
+              explanation: basis === 'other' ? normalizedExplanation : null,
             }
       if (!isAdditionalApplicationResponse(result, serviceCode, expectedForm)) {
         throw new ApiClientError(
@@ -420,13 +510,25 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
         cause.status >= 500 ||
         cause.code === 'invalid_response'
       setUncertain(isUncertain)
-      setError(
-        isUncertain && cause instanceof ApiClientError && cause.status === 503
-          ? 'Сервис временно недоступен. Заявление могло сохраниться; проверьте список заявлений перед повтором.'
-          : isUncertain
-            ? 'Ответ не получен. Заявление могло сохраниться; проверьте список заявлений перед повтором.'
-            : getApplicationErrorMessage(cause),
-      )
+      const fieldErrorResult =
+        cause instanceof ApiClientError && cause.status === 422
+          ? getAdditionalFormErrors(cause.details)
+          : null
+      if (fieldErrorResult) {
+        setServerFieldErrors(fieldErrorResult.errors)
+        setFirstServerErrorField(fieldErrorResult.firstField)
+        setError(fieldErrorResult.hasUnmapped ? getApplicationErrorMessage(cause) : '')
+      } else {
+        setServerFieldErrors({})
+        setFirstServerErrorField(null)
+        setError(
+          isUncertain && cause instanceof ApiClientError && cause.status === 503
+            ? 'Сервис временно недоступен. Заявление могло сохраниться; проверьте список заявлений перед повтором.'
+            : isUncertain
+              ? 'Ответ не получен. Заявление могло сохраниться; проверьте список заявлений перед повтором.'
+              : getApplicationErrorMessage(cause),
+        )
+      }
     } finally {
       setPending(false)
     }
@@ -485,14 +587,28 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
                 Основание <span aria-hidden="true">*</span>
               </label>
               <select
+                ref={basisInput}
                 id="leave-basis"
                 value={basis}
-                onChange={(event) => setBasis(event.target.value as typeof basis)}
+                disabled={pending}
+                onChange={(event) => {
+                  setBasis(event.target.value as typeof basis)
+                  clearServerFieldError('basis')
+                  clearServerFieldError('explanation')
+                  setError('')
+                }}
+                aria-invalid={Boolean(serverFieldErrors.basis)}
+                aria-describedby={serverFieldErrors.basis ? 'leave-basis-server-error' : undefined}
               >
                 <option value="medical">Медицинское</option>
                 <option value="family">Семейные обстоятельства</option>
                 <option value="other">Иное</option>
               </select>
+              {serverFieldErrors.basis && (
+                <small id="leave-basis-server-error" role="alert">
+                  {serverFieldErrors.basis}
+                </small>
+              )}
               <label htmlFor="leave-start">
                 Дата начала <span aria-hidden="true">*</span>
               </label>
@@ -502,11 +618,19 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
                 inputMode="numeric"
                 placeholder="ДД.ММ.ГГГГ"
                 value={startsText}
-                onChange={(event) => setStartsText(event.target.value)}
+                disabled={pending}
+                onChange={(event) => {
+                  setStartsText(event.target.value)
+                  clearServerFieldError('starts_on')
+                }}
                 onBlur={() => setTouchedFields((fields) => ({ ...fields, startsOn: true }))}
-                aria-invalid={(touched || touchedFields.startsOn) && !startsOn}
+                aria-invalid={Boolean(serverFieldErrors.starts_on || startsLocalError)}
                 aria-describedby={
-                  (touched || touchedFields.startsOn) && !startsOn ? 'leave-start-error' : undefined
+                  serverFieldErrors.starts_on
+                    ? 'leave-start-server-error'
+                    : startsLocalError
+                      ? 'leave-start-error'
+                      : undefined
                 }
               />
               <label htmlFor="leave-start-calendar">Выбрать дату начала</label>
@@ -514,11 +638,28 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
                 id="leave-start-calendar"
                 type="date"
                 value={startsOn}
-                onChange={(event) => setStartsText(formatRussianDate(event.target.value))}
+                disabled={pending}
+                onChange={(event) => {
+                  setStartsText(formatRussianDate(event.target.value))
+                  clearServerFieldError('starts_on')
+                }}
+                aria-invalid={Boolean(serverFieldErrors.starts_on || startsLocalError)}
+                aria-describedby={
+                  serverFieldErrors.starts_on
+                    ? 'leave-start-server-error'
+                    : startsLocalError
+                      ? 'leave-start-error'
+                      : undefined
+                }
               />
-              {(touched || touchedFields.startsOn) && !startsOn && (
-                <small id="leave-start-error" role="alert">
-                  Введите существующую дату в формате ДД.ММ.ГГГГ.
+              {(serverFieldErrors.starts_on || startsLocalError) && (
+                <small
+                  id={
+                    serverFieldErrors.starts_on ? 'leave-start-server-error' : 'leave-start-error'
+                  }
+                  role="alert"
+                >
+                  {serverFieldErrors.starts_on ?? startsLocalError}
                 </small>
               )}
               <label htmlFor="leave-end">
@@ -530,13 +671,19 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
                 inputMode="numeric"
                 placeholder="ДД.ММ.ГГГГ"
                 value={endsText}
-                onChange={(event) => setEndsText(event.target.value)}
+                disabled={pending}
+                onChange={(event) => {
+                  setEndsText(event.target.value)
+                  clearServerFieldError('ends_on')
+                }}
                 onBlur={() => setTouchedFields((fields) => ({ ...fields, endsOn: true }))}
-                aria-invalid={(touched || touchedFields.endsOn) && (!endsOn || startsOn > endsOn)}
+                aria-invalid={Boolean(serverFieldErrors.ends_on || endsLocalError)}
                 aria-describedby={
-                  (touched || touchedFields.endsOn) && (!endsOn || startsOn > endsOn)
-                    ? 'leave-end-error'
-                    : undefined
+                  serverFieldErrors.ends_on
+                    ? 'leave-end-server-error'
+                    : endsLocalError
+                      ? 'leave-end-error'
+                      : undefined
                 }
               />
               <label htmlFor="leave-end-calendar">Выбрать дату окончания</label>
@@ -544,13 +691,26 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
                 id="leave-end-calendar"
                 type="date"
                 value={endsOn}
-                onChange={(event) => setEndsText(formatRussianDate(event.target.value))}
+                disabled={pending}
+                onChange={(event) => {
+                  setEndsText(formatRussianDate(event.target.value))
+                  clearServerFieldError('ends_on')
+                }}
+                aria-invalid={Boolean(serverFieldErrors.ends_on || endsLocalError)}
+                aria-describedby={
+                  serverFieldErrors.ends_on
+                    ? 'leave-end-server-error'
+                    : endsLocalError
+                      ? 'leave-end-error'
+                      : undefined
+                }
               />
-              {(touched || touchedFields.endsOn) && (!endsOn || startsOn > endsOn) && (
-                <small id="leave-end-error" role="alert">
-                  {startsOn && endsOn && startsOn > endsOn
-                    ? 'Окончание должно быть не раньше начала.'
-                    : 'Введите существующую дату в формате ДД.ММ.ГГГГ.'}
+              {(serverFieldErrors.ends_on || endsLocalError) && (
+                <small
+                  id={serverFieldErrors.ends_on ? 'leave-end-server-error' : 'leave-end-error'}
+                  role="alert"
+                >
+                  {serverFieldErrors.ends_on ?? endsLocalError}
                 </small>
               )}
               {basis === 'other' && (
@@ -562,18 +722,31 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
                     ref={explanationInput}
                     id="leave-explanation"
                     value={explanation}
-                    onChange={(event) => setExplanation(event.target.value)}
+                    disabled={pending}
+                    onChange={(event) => {
+                      setExplanation(event.target.value)
+                      clearServerFieldError('explanation')
+                    }}
                     onBlur={() => setTouchedFields((fields) => ({ ...fields, explanation: true }))}
-                    aria-invalid={(touched || touchedFields.explanation) && !explanation.trim()}
+                    aria-invalid={Boolean(serverFieldErrors.explanation || explanationLocalError)}
                     aria-describedby={
-                      (touched || touchedFields.explanation) && !explanation.trim()
-                        ? 'leave-explanation-error'
-                        : undefined
+                      serverFieldErrors.explanation
+                        ? 'leave-explanation-server-error'
+                        : explanationLocalError
+                          ? 'leave-explanation-error'
+                          : undefined
                     }
                   />
-                  {(touched || touchedFields.explanation) && !explanation.trim() && (
-                    <small id="leave-explanation-error" role="alert">
-                      Добавьте пояснение.
+                  {(serverFieldErrors.explanation || explanationLocalError) && (
+                    <small
+                      id={
+                        serverFieldErrors.explanation
+                          ? 'leave-explanation-server-error'
+                          : 'leave-explanation-error'
+                      }
+                      role="alert"
+                    >
+                      {serverFieldErrors.explanation ?? explanationLocalError}
                     </small>
                   )}
                 </>
@@ -598,11 +771,25 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
             <>
               <label htmlFor="accounting-purpose">Цель получения (необязательно)</label>
               <input
+                ref={purposeInput}
                 id="accounting-purpose"
                 value={purpose}
-                onChange={(event) => setPurpose(event.target.value)}
+                disabled={pending}
+                onChange={(event) => {
+                  setPurpose(event.target.value)
+                  clearServerFieldError('purpose')
+                }}
                 maxLength={300}
+                aria-invalid={Boolean(serverFieldErrors.purpose)}
+                aria-describedby={
+                  serverFieldErrors.purpose ? 'accounting-purpose-error' : undefined
+                }
               />
+              {serverFieldErrors.purpose && (
+                <small id="accounting-purpose-error" role="alert">
+                  {serverFieldErrors.purpose}
+                </small>
+              )}
             </>
           )}
           {touched && invalid && <p role="alert">Проверьте обязательные поля и даты.</p>}

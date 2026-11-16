@@ -1,6 +1,7 @@
+from datetime import date
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 
 from app.core.schemas import Date, DateTime, Id, Page, RequestModel
 
@@ -62,27 +63,33 @@ class AcademicLeaveFormData(RequestModel):
     basis: Literal["medical", "family", "other"]
     starts_on: Date
     ends_on: Date
-    explanation: str | None = Field(default=None, strict=True, max_length=3000)
+    explanation: str | None = Field(
+        default=None, strict=True, max_length=3000, validate_default=True
+    )
+
+    @field_validator("ends_on")
+    @classmethod
+    def validate_end_date(cls, value: date, info: ValidationInfo) -> date:
+        starts_on = info.data.get("starts_on")
+        if starts_on is not None and starts_on > value:
+            raise ValueError("start date must not follow end date")
+        return value
 
     @field_validator("explanation")
     @classmethod
-    def validate_explanation(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        value = value.strip()
-        if not value or "\x00" in value or any(0xD800 <= ord(c) <= 0xDFFF for c in value):
+    def validate_explanation(cls, value: str | None, info: ValidationInfo) -> str | None:
+        basis = info.data.get("basis")
+        if value is not None:
+            value = value.strip()
+        if basis == "other" and value is None:
+            raise ValueError("explanation required for other basis")
+        if basis != "other" and value is not None:
+            raise ValueError("explanation is only accepted for other basis")
+        if value is not None and (
+            not value or "\x00" in value or any(0xD800 <= ord(c) <= 0xDFFF for c in value)
+        ):
             raise ValueError("invalid explanation")
         return value
-
-    @model_validator(mode="after")
-    def validate_dates_and_explanation(self) -> Self:
-        if self.starts_on > self.ends_on:
-            raise ValueError("start date must not follow end date")
-        if self.basis == "other" and self.explanation is None:
-            raise ValueError("explanation required for other basis")
-        if self.basis != "other" and self.explanation is not None:
-            raise ValueError("explanation is only accepted for other basis")
-        return self
 
 
 class AccountingCertificateFormData(RequestModel):

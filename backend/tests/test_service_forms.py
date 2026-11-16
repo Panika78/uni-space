@@ -55,6 +55,84 @@ def test_academic_leave_requires_a_valid_basis_dates_and_other_explanation():
         )
 
 
+@pytest.mark.parametrize(
+    ("form_data", "field"),
+    [
+        (
+            {
+                "basis": "medical",
+                "starts_on": "2026-12-02",
+                "ends_on": "2026-12-01",
+            },
+            "ends_on",
+        ),
+        (
+            {
+                "basis": "other",
+                "starts_on": "2026-12-01",
+                "ends_on": "2026-12-02",
+            },
+            "explanation",
+        ),
+    ],
+)
+def test_academic_leave_validation_errors_are_attached_to_the_field(form_data, field):
+    with pytest.raises(ValidationError) as exc_info:
+        AcademicLeaveFormData.model_validate(form_data)
+    assert exc_info.value.errors()[0]["loc"] == (field,)
+
+
+def test_create_application_422_details_identify_additional_form_fields():
+    from fastapi.testclient import TestClient
+
+    from app.dependencies.auth import get_current_student
+    from app.dependencies.database import get_db_session
+    from app.main import app
+
+    app.dependency_overrides[get_current_student] = lambda: None
+    app.dependency_overrides[get_db_session] = lambda: None
+    cases = (
+        (
+            {"service_code": "accounting_certificate", "form_data": {"purpose": "\u001c"}},
+            "form_data.purpose",
+        ),
+        (
+            {
+                "service_code": "academic_leave",
+                "form_data": {
+                    "basis": "medical",
+                    "starts_on": "2026-12-02",
+                    "ends_on": "2026-12-01",
+                },
+            },
+            "form_data.ends_on",
+        ),
+        (
+            {
+                "service_code": "academic_leave",
+                "form_data": {
+                    "basis": "other",
+                    "starts_on": "2026-12-01",
+                    "ends_on": "2026-12-02",
+                },
+            },
+            "form_data.explanation",
+        ),
+    )
+    try:
+        client = TestClient(app)
+        for payload, expected_field in cases:
+            response = client.post("/api/v1/applications", json=payload)
+            assert response.status_code == 422, response.text
+            assert response.json()["error"]["code"] == "validation_error"
+            assert any(
+                detail["field"] == expected_field for detail in response.json()["error"]["details"]
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_student, None)
+        app.dependency_overrides.pop(get_db_session, None)
+
+
 def test_accounting_purpose_is_optional_but_strict():
     assert AccountingCertificateFormData().purpose is None
     assert AccountingCertificateFormData(purpose="  For study  ").purpose == "For study"
