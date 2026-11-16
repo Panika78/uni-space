@@ -7,7 +7,7 @@ subgroups; different known subgroups do not intersect. No discipline allocation.
 
 from dataclasses import dataclass
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import exists, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models import CourseGroup, Lesson, LessonGroup, Subgroup
@@ -85,8 +85,9 @@ def replace_lesson_participants(
 ) -> None:
     """Validate complete set and flush in caller's transaction; no public write API.
 
-    Lock the lesson to serialize cooperating writers. Direct SQL is constrained
-    by FKs and unique indexes; whole-group/subgroup redundancy is a service rule.
+    Lock the lesson to serialize cooperating writers. DB statement triggers
+    version direct link writes; this helper normalizes its aggregate operation.
+    Whole-group/subgroup redundancy remains a service rule.
     A changed set increments the lesson version once; an identical set is a no-op.
     Prelock children NOWAIT: a raw writer may hold a child while waiting for our
     parent. On 55P03 the caller must roll back and retry the whole transaction.
@@ -97,6 +98,7 @@ def replace_lesson_participants(
         .with_for_update()
         .execution_options(populate_existing=True)
     ).one()
+    version = lesson.version
     validate_lesson_participants(db, lesson, participants)
     existing = {
         Participant(row.group_id, row.subgroup_id): row
@@ -124,5 +126,8 @@ def replace_lesson_participants(
     for participant, row in existing.items():
         if participant not in wanted:
             db.delete(row)
-    lesson.version += 1
     db.flush()
+    # SQL triggers version every changed statement, including raw SQL. This
+    # helper is one aggregate operation under the already-held parent lock.
+    db.execute(update(Lesson).where(Lesson.id == lesson_id).values(version=version + 1))
+    db.refresh(lesson)

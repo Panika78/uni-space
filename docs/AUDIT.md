@@ -84,11 +84,16 @@ except Exception:
 | `attendance` | `create`, `update`, `delete` | обязательные `student_id` (положительный integer), `status` (`attended`/`absent`) |
 | `assessment_result` | `create`, `update`, `delete` | `assessment_group_id`, `student_id`, `score` |
 | `final_result` | `create`, `update`, `delete` | `course_offering_id`, `student_id`, `grade_value`, `passed`, `retake_date`, `retake_location` |
-| `lesson` | `create`, `update`, `cancel`, `move` | `course_offering_id`, `teacher_id`, `starts_at`, `ends_at`, `kind`, `status`, `previous_lesson_id`, `version`, `group_ids`, `room_ids` |
+| `lesson` | `create`, `update`, `cancel`, `move`, `restore` | `course_offering_id`, `teacher_id`, `starts_at`, `ends_at`, `kind`, `status`, `previous_lesson_id`, `version`, `group_ids`, `participants`, `room_ids` |
 | `user` | `create` | `role`, `is_active` |
 | `user` | `set_role` | `role` |
 | `user` | `set_active` | `is_active` |
 | `student` | `set_academic_status` | `academic_status` |
+| `student` | `create` | `user_id`, `group_id`, `academic_status` (`enrolled`) |
+| `teacher` | `link_user` | `user_id` |
+| `staff_profile` | `create` | `user_id`, `org_unit_id` |
+| `staff_profile` | `set_org_unit` | `org_unit_id` |
+| `staff_permission` | `create`, `delete` | `staff_profile_id`, `permission_code` (из `PermissionCode`), `scope_org_unit_id` |
 
 Для `attendance` действует явное исключение: `entity_id=lesson_id`, полный
 идентификатор отметки — `(lesson_id, student_id)`, а не один `entity_id`.
@@ -283,3 +288,42 @@ after_data={"role":"admin","is_active":true})` в той же транзакци
 
 Runtime ACL теперь разрешают append-only INSERT/sequence и SELECT(id,created_at)
 для RETURNING. Чтение снимков, UPDATE/DELETE/TRUNCATE аудита по-прежнему запрещены.
+
+## Официальный редактор расписания (#74)
+
+`participants` — строго список объектов с ровно двумя полями: положительный целый
+`group_id` и положительный целый либо NULL `subgroup_id`. Снимок сортируется по
+группе и подгруппе (NULL первым); дубликаты, bool, строки вместо ID и дополнительные
+поля запрещены. Объекты копируются. Поэтому смена подгруппы А→Б различима даже при
+неизменном `group_ids`. Произвольные вложенные JSON по-прежнему запрещены.
+
+Операции create/update/cancel/move/restore сохраняют состав участников и аудитории
+в снимках lesson. Перенос пишет move старого занятия и create нового. No-op не
+создаёт события и не меняет version. Для cancel/move каждое фактическое изменение
+флага связанной работы записывается как assessment_group/update с тремя полями
+контракта #71; дата и lesson_id сохраняются. Все события и данные фиксируются
+единственным commit; ошибка любого writer откатывает всю операцию.
+
+Блокировки: сначала актуальная строка lessons, затем дочерние строки NOWAIT;
+#62 уже сохраняет последнюю групповую связь при удалении участников. Миграция
+20261116_04 дополнительно проверяет course_groups при SQL-записи участников и
+запрещает подтверждение отменённой/перенесённой связи работы. Триггеры касаются
+версии строки родителя без изменения значения version, чтобы отвергать устаревший
+REPEATABLE READ snapshot. Обратный порядок блокировок при подтверждении #71
+может дать 55P03; редактор откатывает запрос и возвращает 409 concurrent_change.
+Автоматического повтора с обходом RBAC/version нет.
+Миграция 20261116_05 добавляет statement-триггеры публичной версии для прямых
+изменений lesson_groups/lesson_rooms. Сервис нормализует версию составной операции
+до исходной + 1 под той же блокировкой родителя; аудит снимается после нормализации.
+Прямой SQL не создаёт фиктивных событий от имени HTTP-пользователя. Устаревший PATCH
+после такого SQL получает 409, не создавая события и не перезаписывая связи.
+При неизменном времени move отклоняется без аудита и без пометок работ.
+
+Production ACL разрешают INSERT аудита и SELECT только id/created_at для RETURNING;
+UPDATE/DELETE аудита и чтение его payload runtime-роли запрещены. Даты/связи работ,
+баллы и посещаемость редактору не предоставляются. UPDATE идентификатора assessments
+и ключа course_groups нужны существующим invoker-триггерам для SELECT FOR SHARE;
+UPDATE (room_id) у lesson_rooms требуется для FOR UPDATE NOWAIT перед заменой
+аудиторий; полное UPDATE таблицы не предоставлено. Значимые свойства работ
+не разрешены. Эти GRANT должны сохраняться вместе с
+дополнениями #70/#71 при интеграции.

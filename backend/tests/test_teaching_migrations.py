@@ -42,7 +42,7 @@ def test_upgrade_populated_schema_preserves_results_and_has_single_head(migratio
     run_migration(engine, "check")
     with engine.connect() as db:
         assert db.scalar(text(SNAPSHOT)) == before
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261116_03"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261116_05"
         assert not db.scalar(
             text(
                 "SELECT prosecdef FROM pg_proc WHERE oid="

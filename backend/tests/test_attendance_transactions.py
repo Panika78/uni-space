@@ -171,7 +171,7 @@ def test_real_production_acl_supports_attendance_and_append_only_audit(runtime_e
             "UPDATE audit_events SET action='delete'",
             "DELETE FROM audit_events",
             "SELECT before_data FROM audit_events",
-            "UPDATE lessons SET status='cancelled'",
+            "DELETE FROM lessons",
             "UPDATE students SET group_id=group_id",
             "UPDATE students SET membership_version=0",
             "UPDATE students SET membership_changed_at=clock_timestamp()",

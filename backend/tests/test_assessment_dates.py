@@ -89,6 +89,7 @@ def test_group_dates_confirmation_audit_noop_and_student_regression(dates_contex
     assert schedule_before.status_code == 200, schedule_before.text
     assert len(schedule_before.json()["items"]) == 1
     students_before = s.get().json()
+    version_before = s.db.get(Lesson, s.lesson.id).version
     s.work.date_needs_confirmation = True
     s.db.commit()
     request = [item(s.work, lesson_id=s.lesson.id)]
@@ -112,7 +113,7 @@ def test_group_dates_confirmation_audit_noop_and_student_regression(dates_contex
     assert schedule().json() == schedule_before.json()
     assert s.get(f"assessments/{s.work.id}/results").json()["items"][0]["score"] == 7
     assert s.db.get(Assessment, s.work.assessment_id).max_score == 10
-    assert s.db.get(Lesson, s.lesson.id).version == 1
+    assert s.db.get(Lesson, s.lesson.id).version == version_before
     assert s.get("assessments").json()["items"][0]["planned_date"] == "2026-09-02"
     assert s.patch([item(s.work, None)]).status_code == 200
     assert s.db.get(AssessmentGroup, s.work.id).lesson_id is None
