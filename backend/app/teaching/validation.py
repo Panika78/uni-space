@@ -25,7 +25,15 @@ TeachingId = Annotated[
 ]
 ID_ADAPTER = TypeAdapter(TeachingId)
 ID_FIELDS = frozenset(
-    {"course_offering_id", "group_id", "term_id", "student_id", "assessment_group_id", "lesson_id"}
+    {
+        "course_offering_id",
+        "group_id",
+        "term_id",
+        "student_id",
+        "assessment_group_id",
+        "assessment_id",
+        "lesson_id",
+    }
 )
 
 

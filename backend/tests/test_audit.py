@@ -60,3 +60,33 @@ def test_unknown_event_and_request_actor_id_are_rejected():
             )
         with pytest.raises(TypeError, match="actor_user_id"):
             write_audit_event(db, actor_user_id=1)
+
+
+def test_assessment_date_snapshot_preserves_null_and_typed_fields():
+    fields = _EVENT_FIELDS["assessment_group", "update"]
+    assert _serialize_snapshot(
+        {
+            "planned_date": date(2026, 9, 2),
+            "lesson_id": 123,
+            "date_needs_confirmation": False,
+            "token": "excluded",
+        },
+        fields,
+    ) == {"planned_date": "2026-09-02", "lesson_id": 123, "date_needs_confirmation": False}
+    assert _serialize_snapshot(
+        {"planned_date": None, "lesson_id": None, "date_needs_confirmation": True}, fields
+    ) == {"planned_date": None, "lesson_id": None, "date_needs_confirmation": True}
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"planned_date": "2026-09-02"},
+        {"lesson_id": True},
+        {"lesson_id": {"token": "secret"}},
+        {"date_needs_confirmation": "false"},
+    ],
+)
+def test_assessment_date_snapshot_rejects_untyped_values(data):
+    with pytest.raises(ValueError):
+        _serialize_snapshot(data, _EVENT_FIELDS["assessment_group", "update"])

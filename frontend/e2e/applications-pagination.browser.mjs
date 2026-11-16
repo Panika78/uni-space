@@ -147,6 +147,10 @@ try {
     await tabTo(page.getByRole('link', { name: /К моим заявлениям/ }))
     await page.keyboard.press('Enter')
     await target.waitFor()
+    await page.waitForFunction(
+      (id) => document.activeElement?.getAttribute('data-application-id') === id,
+      '10',
+    )
     assert.equal(await target.evaluate((element) => element === document.activeElement), true)
     await page.getByText('Обновляем заявления…', { exact: true }).waitFor({ state: 'hidden' })
     await expectIds(rows)

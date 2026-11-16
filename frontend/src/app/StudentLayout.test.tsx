@@ -136,7 +136,7 @@ describe('student dashboard navigation', () => {
       expect(document.body.style.overflow).toBe('')
     })
     expect(window.matchMedia('(min-width: 721px)').matches).toBe(true)
-    expect(screen.getByRole('main')).toHaveFocus()
+    await waitFor(() => expect(screen.getByRole('main')).toHaveFocus())
     expect(trigger).not.toHaveFocus()
 
     setViewport(360)

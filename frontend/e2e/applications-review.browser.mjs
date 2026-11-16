@@ -98,6 +98,10 @@ try {
     await tabTo(page.getByRole('link', { name: /К моим заявлениям/ }))
     await page.keyboard.press('Enter')
     await target.waitFor()
+    await page.waitForFunction(
+      (id) => document.activeElement?.getAttribute('data-application-id') === id,
+      '65',
+    )
     const restored = await target.evaluate((element) => element === document.activeElement)
     assert.equal(restored, true, 'Return restores keyboard focus to the source record')
     await page.waitForFunction((y) => Math.abs(window.scrollY - y) < 5, scroll)
