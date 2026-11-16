@@ -515,6 +515,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/assessments/{assessment_group_id}/results/{student_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Write Journal Result */
+        put: operations["write_journal_result_api_v1_teaching_courses__course_offering_id__groups__group_id__assessments__assessment_group_id__results__student_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/final-results": {
         parameters: {
             query?: never;
@@ -1348,6 +1365,20 @@ export interface components {
              * @constant
              */
             timezone: "Europe/Moscow";
+        };
+        /** ScoreWriteRequest */
+        ScoreWriteRequest: {
+            /** Score */
+            score: number | null;
+        };
+        /** ScoreWriteResponse */
+        ScoreWriteResponse: {
+            /** Graded At */
+            graded_at: string | null;
+            /** Result Id */
+            result_id: string | null;
+            /** Score */
+            score: number | null;
         };
         /** Service */
         Service: {
@@ -3756,6 +3787,15 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
     update_assessment_dates_api_v1_teaching_courses__course_offering_id__assessments__assessment_id__dates_patch: {
@@ -3837,6 +3877,15 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
     list_journal_assessments_api_v1_teaching_courses__course_offering_id__groups__group_id__assessments_get: {
@@ -3902,6 +3951,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3975,6 +4033,98 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    write_journal_result_api_v1_teaching_courses__course_offering_id__groups__group_id__assessments__assessment_group_id__results__student_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_offering_id: string;
+                group_id: string;
+                assessment_group_id: string;
+                student_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoreWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoreWriteResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4129,6 +4279,15 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
     list_lesson_students_api_v1_teaching_courses__course_offering_id__groups__group_id__lessons__lesson_id__students_get: {
@@ -4202,6 +4361,15 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
         };
     };
     list_journal_students_api_v1_teaching_courses__course_offering_id__groups__group_id__students_get: {
@@ -4267,6 +4435,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

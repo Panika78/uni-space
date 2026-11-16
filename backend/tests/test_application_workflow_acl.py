@@ -117,6 +117,61 @@ def runtime_engine(migration_database):  # noqa: F811
                     "current_user,'application_history_id_seq','USAGE')"
                 )
             )
+            for privilege in ("INSERT", "UPDATE", "DELETE"):
+                assert db.scalar(
+                    text("SELECT has_table_privilege(current_user,'assessment_results',:p)"),
+                    {"p": privilege},
+                )
+            assert db.scalar(
+                text("SELECT has_column_privilege(current_user,'assessments','max_score','UPDATE')")
+            )
+            assert db.scalar(
+                text("SELECT has_column_privilege(current_user,'assessment_groups','id','UPDATE')")
+            )
+            assert db.scalar(
+                text(
+                    "SELECT has_column_privilege(current_user,'course_groups','group_id','UPDATE')"
+                )
+            )
+            assert db.scalar(
+                text("SELECT has_column_privilege(current_user,'students','id','UPDATE')")
+            )
+            assert not db.scalar(
+                text("SELECT has_column_privilege(current_user,'assessments','title','UPDATE')")
+            )
+            assert db.scalar(
+                text("SELECT has_table_privilege(current_user,'audit_events','INSERT')")
+            )
+            assert not db.scalar(
+                text("SELECT has_table_privilege(current_user,'audit_events','UPDATE')")
+            )
+            assert not db.scalar(
+                text("SELECT has_table_privilege(current_user,'audit_events','DELETE')")
+            )
+            for column in ("id", "created_at"):
+                assert db.scalar(
+                    text(
+                        "SELECT has_column_privilege(current_user,'audit_events',:column,'SELECT')"
+                    ),
+                    {"column": column},
+                )
+            for column in ("entity_type", "entity_id", "before_data", "after_data"):
+                assert not db.scalar(
+                    text(
+                        "SELECT has_column_privilege(current_user,'audit_events',:column,'SELECT')"
+                    ),
+                    {"column": column},
+                )
+            returned = db.execute(
+                text(
+                    "INSERT INTO audit_events "
+                    "(actor_user_id,entity_type,entity_id,action,after_data) "
+                    "VALUES (NULL,'assessment_result',1,'create',"
+                    "jsonb_build_object('assessment_group_id',1,'student_id',1,'score',0)) "
+                    "RETURNING id,created_at"
+                )
+            ).one()
+            assert returned.id > 0 and returned.created_at is not None
         yield admin_engine, api_engine
     finally:
         if api_engine:
@@ -192,3 +247,85 @@ def test_production_acl_supports_authenticated_workflow_and_denies_extra_writes(
             )
             == 5
         )
+
+
+def test_production_acl_runs_score_api_and_keeps_audit_append_only(runtime_engine):
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy.orm import Session
+    from test_academics_integration import academics as academics_fixture
+
+    from app.auth.security import create_access_token
+    from app.models import (
+        AuthSession,
+        Teacher,
+        TeachingAssignment,
+        User,
+    )
+    from app.teaching.router import router as teaching_router
+
+    admin_engine, api_engine = runtime_engine
+    with Session(admin_engine, expire_on_commit=False) as db:
+        s = academics_fixture.__wrapped__(db)
+        s.app.include_router(teaching_router)
+        user = s.add(
+            User,
+            login="production-score-" + os.urandom(8).hex(),
+            password_hash="unused",
+            full_name="Fictional Teacher",
+            role="teacher",
+            is_active=True,
+        )
+        teacher = s.add(Teacher, user_id=user.id, full_name=user.full_name)
+        auth_session = s.add(
+            AuthSession, user_id=user.id, expires_at=datetime.now(UTC) + timedelta(days=1)
+        )
+        course = s.offering()
+        work = s.assignment(course)
+        s.add(
+            TeachingAssignment,
+            teacher_id=teacher.id,
+            course_offering_id=course.id,
+            group_id=s.groups[0].id,
+        )
+        db.commit()
+
+        def runtime_session():
+            with Session(api_engine) as runtime_db:
+                yield runtime_db
+
+        s.app.dependency_overrides[get_db_session] = runtime_session
+        token = create_access_token(auth_session, s.settings)["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        path = (
+            f"/api/v1/teaching/courses/{course.id}/groups/{s.groups[0].id}"
+            f"/assessments/{work.id}/results/{s.students[0].id}"
+        )
+        created = s.client.put(path, json={"score": 0}, headers=headers)
+        assert created.status_code == 200, created.text
+        result_id = int(created.json()["result_id"])
+        assert s.client.put(path, json={"score": 0}, headers=headers).status_code == 200
+        assert s.client.put(path, json={"score": 1}, headers=headers).status_code == 200
+        assert s.client.put(path, json={"score": None}, headers=headers).status_code == 200
+
+        with admin_engine.connect() as admin:
+            events = (
+                admin.execute(
+                    text(
+                        "SELECT action FROM audit_events WHERE entity_type='assessment_result' "
+                        "AND entity_id=:id ORDER BY id"
+                    ),
+                    {"id": result_id},
+                )
+                .scalars()
+                .all()
+            )
+            assert events == ["create", "update", "delete"]
+        for sql in (
+            "UPDATE audit_events SET entity_id=entity_id",
+            "DELETE FROM audit_events",
+        ):
+            with api_engine.connect() as runtime_db:
+                with pytest.raises(DBAPIError) as rejected:
+                    runtime_db.execute(text(sql))
+                assert rejected.value.orig.sqlstate == "42501"
