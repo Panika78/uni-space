@@ -86,14 +86,18 @@ function StatusEditor({
   const [externalCheck, setExternalCheck] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState<AcademicStatus | null>(null)
+  const [receiptConfirmed, setReceiptConfirmed] = useState(false)
   const [known, setKnown] = useState(student)
+  const [currentStateVerified, setCurrentStateVerified] = useState(!!student)
+  const [needsRefresh, setNeedsRefresh] = useState(false)
   const [loadedStatus, setLoadedStatus] = useState<{
     studentId: string
     academicStatus: AcademicStatus
   } | null>(null)
-  const currentStatus =
-    known?.academic_status ??
-    (loadedStatus?.studentId === studentId ? loadedStatus.academicStatus : null)
+  const currentStatus = currentStateVerified
+    ? (known?.academic_status ??
+      (loadedStatus?.studentId === studentId ? loadedStatus.academicStatus : null))
+    : null
   const [statusLoading, setStatusLoading] = useState(!student)
   const [reconciling, setReconciling] = useState(false)
   const [reconciled, setReconciled] = useState(false)
@@ -111,14 +115,17 @@ function StatusEditor({
     }
   }, [])
   useEffect(() => {
-    onCriticalChange?.(pending || uncertain)
-  }, [onCriticalChange, pending, uncertain])
+    onCriticalChange?.(pending || uncertain || needsRefresh)
+  }, [onCriticalChange, pending, uncertain, needsRefresh])
   useEffect(() => {
     if (student) return
     const controller = new AbortController()
     readAcademicStatus(studentId, controller.signal)
       .then((result) => {
-        if (alive.current) setLoadedStatus({ studentId, academicStatus: result.academic_status })
+        if (alive.current) {
+          setLoadedStatus({ studentId, academicStatus: result.academic_status })
+          setCurrentStateVerified(true)
+        }
       })
       .catch((cause) => {
         if (!alive.current) return
@@ -138,11 +145,20 @@ function StatusEditor({
 
   function resetSuccess() {
     setSaved(null)
+    setReceiptConfirmed(false)
     setError('')
     setBasis(false)
   }
   async function submit() {
-    if (!target || !basis || busy.current || uncertain || target === currentStatus) return
+    if (
+      !target ||
+      !basis ||
+      !currentStateVerified ||
+      busy.current ||
+      uncertain ||
+      target === currentStatus
+    )
+      return
     const operation = operationId || crypto.randomUUID()
     setOperationId(operation)
     sessionStorage.setItem(
@@ -152,6 +168,7 @@ function StatusEditor({
     busy.current = true
     setPending(true)
     setSaved(null)
+    setReceiptConfirmed(false)
     setError('')
     const controller = new AbortController()
     request.current = controller
@@ -221,31 +238,71 @@ function StatusEditor({
       }
       sessionStorage.removeItem(pendingKey(actorId, studentId))
       setUncertain(false)
-      onCriticalChange?.(false)
+      onCriticalChange?.(true)
       setSaved(target)
-      setLoadedStatus({ studentId, academicStatus: target })
-      if (canRead) {
-        try {
-          const actual = await readStudent(studentId, controller.signal)
-          if (!alive.current) return
-          setKnown(actual)
-          setLoadedStatus({ studentId, academicStatus: actual.academic_status })
-          setReconciled(true)
-        } catch (cause) {
-          if (cause instanceof ApiClientError && cause.status === 403) {
-            setReadRevoked(true)
-            setKnown(undefined)
-            setLoadedStatus(null)
-            onReadDenied?.()
-          } else setError('Операция подтверждена. Текущее состояние не удалось перечитать.')
-        }
-      }
+      setReceiptConfirmed(true)
+      setKnown(undefined)
+      setLoadedStatus(null)
+      setCurrentStateVerified(false)
+      setNeedsRefresh(true)
       void queryClient.invalidateQueries({ queryKey: ['staff-students'] })
+      await refreshCurrentState(controller, true)
     } catch (cause) {
       if (cause instanceof ApiClientError && cause.status === 403) {
         setDenied(true)
         setError('Доступ к сверке операции отозван.')
       } else setError('Не удалось сверить квитанцию. Повторной записи не было.')
+    } finally {
+      if (alive.current) setReconciling(false)
+    }
+  }
+
+  async function refreshCurrentState(
+    controller = new AbortController(),
+    confirmedOperation = false,
+  ) {
+    request.current = controller
+    setReconciling(true)
+    setError('')
+    try {
+      if (canRead) {
+        const actual = await readStudent(studentId, controller.signal)
+        if (!alive.current) return
+        if (actual.id !== studentId) throw new Error('invalid_student_response')
+        setKnown(actual)
+        setLoadedStatus({ studentId, academicStatus: actual.academic_status })
+      } else {
+        const actual = await readAcademicStatus(studentId, controller.signal)
+        if (!alive.current) return
+        setKnown(undefined)
+        setLoadedStatus({ studentId, academicStatus: actual.academic_status })
+      }
+      setCurrentStateVerified(true)
+      setNeedsRefresh(false)
+      setReconciled(true)
+      onCriticalChange?.(false)
+      await queryClient.invalidateQueries({ queryKey: ['staff-students'] })
+    } catch (cause) {
+      if (!alive.current) return
+      if (cause instanceof ApiClientError && cause.status === 403) {
+        setReadRevoked(true)
+        setKnown(undefined)
+        setLoadedStatus(null)
+        setCurrentStateVerified(false)
+        setError(
+          canRead
+            ? 'Разрешение на чтение отозвано. Персональные данные скрыты.'
+            : 'Право читать текущий статус отозвано. Обратитесь к уполномоченному сотруднику.',
+        )
+        onReadDenied?.()
+        void queryClient.invalidateQueries({ queryKey: ['authorization-context'] })
+      } else {
+        setError(
+          confirmedOperation || receiptConfirmed
+            ? 'Операция подтверждена. Актуальное состояние не удалось проверить; повторите чтение перед новым изменением.'
+            : 'Не удалось сверить актуальное состояние. Повторной записи не было.',
+        )
+      }
     } finally {
       if (alive.current) setReconciling(false)
     }
@@ -262,6 +319,9 @@ function StatusEditor({
       if (!alive.current) return
       if (actual.id !== studentId) throw new Error('invalid_student_response')
       setKnown(actual)
+      setLoadedStatus({ studentId, academicStatus: actual.academic_status })
+      setCurrentStateVerified(true)
+      setNeedsRefresh(false)
       setReconciled(true)
       await queryClient.invalidateQueries({ queryKey: ['staff-students'] })
     } catch (cause) {
@@ -269,6 +329,8 @@ function StatusEditor({
       if (cause instanceof ApiClientError && cause.status === 403) {
         setReadRevoked(true)
         setKnown(undefined)
+        setLoadedStatus(null)
+        setCurrentStateVerified(false)
         void queryClient.invalidateQueries({ queryKey: ['authorization-context'] })
         onReadDenied?.()
       } else setError('Не удалось сверить актуальное состояние. Повторной записи не было.')
@@ -361,6 +423,7 @@ function StatusEditor({
           onChange={(e) => {
             setBasis(e.target.checked)
             setSaved(null)
+            setReceiptConfirmed(false)
           }}
         />
         Подтверждаю, что внешнее основание оформлено
@@ -377,8 +440,17 @@ function StatusEditor({
       )}
       {saved && (
         <p role="status">
-          Статус сохранён: {statusLabels[saved]}. Студент ID {studentId}.
+          {receiptConfirmed ? 'Операция подтверждена' : 'Статус сохранён'}: {statusLabels[saved]}.
+          Студент ID {studentId}.
         </p>
+      )}
+      {needsRefresh && !readRevoked && (
+        <div>
+          <p role="status">Актуальный статус ещё не подтверждён. Новое изменение заблокировано.</p>
+          <button type="button" disabled={reconciling} onClick={() => void refreshCurrentState()}>
+            Повторно проверить актуальное состояние
+          </button>
+        </div>
       )}
       {uncertain && (
         <div role="alert">
@@ -436,8 +508,17 @@ function StatusEditor({
       )}
       <div className="student-form-actions">
         {onClose && (
-          <button type="button" className="button-secondary" onClick={onClose}>
-            {pending || uncertain ? 'Закрыть окно (результат не подтверждён)' : 'Отмена'}
+          <button
+            type="button"
+            className="button-secondary"
+            disabled={needsRefresh}
+            onClick={onClose}
+          >
+            {needsRefresh
+              ? 'Проверка состояния обязательна'
+              : pending || uncertain
+                ? 'Закрыть окно (результат не подтверждён)'
+                : 'Отмена'}
           </button>
         )}
         <button

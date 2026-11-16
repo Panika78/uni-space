@@ -90,6 +90,13 @@ with SessionLocal.begin() as db:
                     session_id=session.id, token_hash=b"r" * 32, expires_at=expiry
                 )
             )
+    elif mode == "prepare-enrolled":
+        db.execute(
+            delete(AuditEvent).where(
+                AuditEvent.entity_type == "student", AuditEvent.entity_id == student.id
+            )
+        )
+        student.academic_status = "enrolled"
     elif mode.startswith("check:"):
         _, expected, count = mode.split(":")
         assert student.academic_status == expected

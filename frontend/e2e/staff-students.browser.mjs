@@ -149,6 +149,7 @@ try {
   // Real PostgreSQL COMMIT, then abort only delivery. No mock write response.
   let lostWrites = 0
   await statusPage.route('**/academic-status', async (route) => {
+    if (route.request().method() !== 'PATCH') return route.continue()
     lostWrites++
     const response = await route.fetch()
     assert.equal(response.status(), 200)
@@ -160,7 +161,7 @@ try {
   verify('check:graduated:4')
   assert.equal(lostWrites, 1)
   await statusPage.getByRole('button', { name: 'Проверить квитанцию операции' }).click()
-  await statusPage.getByText(/Квитанция подтверждена|Статус сохранён: Выпускник/).waitFor()
+  await statusPage.getByText(/Операция подтверждена: Выпускник/).waitFor()
   assert.equal(lostWrites, 1)
   assert.equal(hiddenReads, 0)
   assert.equal(
@@ -206,7 +207,7 @@ try {
   verify('check:academic_leave:5')
   assert.equal(hangingWrites, 1)
   await dialog.getByRole('button', { name: 'Проверить квитанцию операции' }).click()
-  await dialog.getByText(/Статус сохранён: В академическом отпуске/).waitFor()
+  await dialog.getByText(/Операция подтверждена: В академическом отпуске/).waitFor()
   assert.equal(hangingWrites, 1)
   await dialog.getByText('Предыдущий статус: В академическом отпуске', { exact: true }).waitFor()
   assert.equal(hangingWrites, 1)
@@ -214,6 +215,102 @@ try {
   await page.keyboard.press('Escape')
   await page.unroute('**/academic-status')
   console.log('PASS bounded hanging PATCH, real read reconciliation and no replay')
+
+  // A receipt confirms the write only. A failed subsequent GET must invalidate the old list row.
+  verify('prepare-enrolled')
+  await page.goto(`${baseURL}/staff/students?q=Ёжова`)
+  await heading(page, 'Поиск студентов')
+  await page.getByRole('heading', { name: 'Ёжова Елена E2E' }).waitFor()
+  const studentDetailPath = `/api/v1/staff/students/${studentId}`
+  for (const [target, failure, auditCount, previousLabel] of [
+    ['academic_leave', '500', 1, 'Обучается'],
+    ['graduated', 'network', 2, 'В академическом отпуске'],
+  ]) {
+    await page.getByRole('button', { name: 'Изменить статус' }).click()
+    let dialog = page.getByRole('dialog', { name: 'Изменение статуса' })
+    await dialog.getByText(`Предыдущий статус: ${previousLabel}`, { exact: true }).waitFor()
+    let droppedPatchCount = 0
+    await page.route('**/academic-status', async (route) => {
+      if (route.request().method() !== 'PATCH') return route.continue()
+      droppedPatchCount++
+      const response = await route.fetch()
+      assert.equal(response.status(), 200)
+      await route.abort('failed')
+    })
+    await dialog.getByLabel('Новый статус').selectOption(target)
+    await dialog.getByLabel('Подтверждаю, что внешнее основание оформлено').check()
+    await dialog.getByRole('button', { name: 'Подтвердить изменение' }).click()
+    await dialog.getByText(/Результат изменения неизвестен/).waitFor()
+    verify(`check:${target}:${auditCount}`)
+    await page.route(`**${studentDetailPath}`, async (route) => {
+      if (failure === '500') await route.fulfill({ status: 500, body: 'injected GET failure' })
+      else await route.abort('failed')
+    })
+    await dialog.getByRole('button', { name: 'Проверить квитанцию операции' }).click()
+    await dialog
+      .getByText(
+        `Операция подтверждена: ${target === 'academic_leave' ? 'В академическом отпуске' : 'Выпускник'}. Студент ID ${studentId}.`,
+        { exact: true },
+      )
+      .waitFor()
+    await dialog
+      .getByText('Актуальный статус ещё не подтверждён. Новое изменение заблокировано.')
+      .waitFor()
+    assert.equal(
+      await dialog.getByText(`Предыдущий статус: ${previousLabel}`, { exact: true }).count(),
+      0,
+    )
+    assert.equal(await dialog.getByLabel('Новый статус').isDisabled(), true)
+    assert.equal(
+      await dialog.getByRole('button', { name: 'Подтвердить изменение' }).isDisabled(),
+      true,
+    )
+    await page.keyboard.press('Escape')
+    assert.equal(await dialog.isVisible(), true)
+    assert.equal(
+      await dialog.getByRole('button', { name: 'Проверка состояния обязательна' }).isDisabled(),
+      true,
+    )
+    assert.equal(droppedPatchCount, 1)
+    await page.unroute(`**${studentDetailPath}`)
+    await dialog.getByRole('button', { name: 'Повторно проверить актуальное состояние' }).click()
+    const actualLabel = target === 'academic_leave' ? 'В академическом отпуске' : 'Выпускник'
+    await dialog.getByText(`Предыдущий статус: ${actualLabel}`, { exact: true }).waitFor()
+    assert.equal(await dialog.getByLabel('Новый статус').isEnabled(), true)
+    assert.equal(droppedPatchCount, 1)
+    await page.keyboard.press('Escape')
+    await page.unroute('**/academic-status')
+    verify(`check:${target}:${auditCount}`)
+  }
+  await page.getByRole('button', { name: 'Изменить статус' }).click()
+  let privacyDialog = page.getByRole('dialog', { name: 'Изменение статуса' })
+  await privacyDialog.getByText('Предыдущий статус: Выпускник', { exact: true }).waitFor()
+  let finalPatchCount = 0
+  await page.route('**/academic-status', async (route) => {
+    if (route.request().method() !== 'PATCH') return route.continue()
+    finalPatchCount++
+    const response = await route.fetch()
+    assert.equal(response.status(), 200)
+    await route.abort('failed')
+  })
+  await privacyDialog.getByLabel('Новый статус').selectOption('expelled')
+  await privacyDialog.getByLabel('Подтверждаю, что внешнее основание оформлено').check()
+  await privacyDialog.getByRole('button', { name: 'Подтвердить изменение' }).click()
+  await privacyDialog.getByText(/Результат изменения неизвестен/).waitFor()
+  verify('check:expelled:3')
+  await page.route(`**${studentDetailPath}`, async (route) =>
+    route.fulfill({ status: 403, body: 'permission revoked' }),
+  )
+  await privacyDialog.getByRole('button', { name: 'Проверить квитанцию операции' }).click()
+  await page.getByRole('alert').getByText('Доступ запрещён').waitFor()
+  assert.equal(await page.getByText('Ёжова Елена E2E').count(), 0)
+  assert.equal(finalPatchCount, 1)
+  verify('check:expelled:3')
+  await page.unroute('**/academic-status')
+  await page.unroute(`**${studentDetailPath}`)
+  console.log(
+    'PASS receipt confirmation, failed GET lock/retry, real current-state refresh and 403 privacy',
+  )
 
   // Exactly 45 real PostgreSQL rows and deterministic pages; URL is the history.
   await page.goto(`${baseURL}/staff/students?q=Ревью27`)

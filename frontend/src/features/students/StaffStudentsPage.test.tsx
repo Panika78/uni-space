@@ -242,6 +242,54 @@ it.each([undefined, 500])(
   },
 )
 
+it('does not reuse a stale list status after a completed receipt and failed refresh', async () => {
+  let detailReads = 0
+  const user = userEvent.setup()
+  vi.mocked(apiFetch).mockImplementation(async (input, init) => {
+    const url = String(input)
+    if (url.endsWith('/auth/context')) return context as never
+    if (url.endsWith('/staff/students/filters'))
+      return { faculties: [], programs: [], course_numbers: [] } as never
+    if (url.startsWith('/api/v1/staff/students?'))
+      return { items: [student], next_cursor: null } as never
+    if (init?.method === 'PATCH') throw new Error('response lost after commit')
+    if (url.includes('/status-operations/'))
+      return { completed: true, academic_status: 'academic_leave' } as never
+    if (url === '/api/v1/staff/students/21') {
+      detailReads++
+      if (detailReads === 1) throw new ApiClientError('', 'internal_error', 500)
+      return { ...student, academic_status: 'academic_leave' } as never
+    }
+    return undefined as never
+  })
+  mount()
+  await screen.findByText(student.full_name)
+  await user.click(screen.getByRole('button', { name: 'Изменить статус' }))
+  const dialog = screen.getByRole('dialog', { name: 'Изменение статуса' })
+  expect(within(dialog).getByText('Предыдущий статус: Обучается')).toBeInTheDocument()
+  await user.selectOptions(within(dialog).getByLabelText('Новый статус'), 'academic_leave')
+  await user.click(within(dialog).getByLabelText('Подтверждаю, что внешнее основание оформлено'))
+  await user.click(within(dialog).getByRole('button', { name: 'Подтвердить изменение' }))
+  await within(dialog).findByText(/Результат изменения неизвестен/)
+  await user.click(within(dialog).getByRole('button', { name: 'Проверить квитанцию операции' }))
+  await within(dialog).findByText(/Операция подтверждена: В академическом отпуске/)
+  expect(within(dialog).queryByText('Предыдущий статус: Обучается')).not.toBeInTheDocument()
+  expect(within(dialog).getByText(/Актуальный статус ещё не подтверждён/)).toBeInTheDocument()
+  expect(within(dialog).getByLabelText('Новый статус')).toBeDisabled()
+  expect(within(dialog).getByRole('button', { name: 'Подтвердить изменение' })).toBeDisabled()
+  expect(
+    vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'PATCH'),
+  ).toHaveLength(1)
+  await user.click(
+    within(dialog).getByRole('button', { name: 'Повторно проверить актуальное состояние' }),
+  )
+  await within(dialog).findByText('Предыдущий статус: В академическом отпуске')
+  expect(within(dialog).getByLabelText('Новый статус')).toBeEnabled()
+  expect(
+    vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'PATCH'),
+  ).toHaveLength(1)
+})
+
 it.each([403, 404])(
   'renders direct detail GET error %s without stale student data',
   async (status) => {
