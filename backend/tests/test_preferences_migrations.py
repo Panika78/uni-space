@@ -9,9 +9,13 @@ def test_preferences_upgrade_downgrade_and_metadata(migration_database):  # noqa
     engine = migration_database
     run_migration(engine, "upgrade", "20261114_03")
     run_migration(engine, "upgrade", "20261115_03")
+    assert "user_preferences" in inspect(engine).get_table_names()
+    assert "student_status_operations" not in inspect(engine).get_table_names()
+    audit_columns = {column["name"] for column in inspect(engine).get_columns("audit_events")}
+    assert not {"operation_id", "operation_fingerprint"} & audit_columns
     run_migration(engine, "upgrade", "head")
     run_migration(engine, "check")
-    assert "user_preferences" in inspect(engine).get_table_names()
+    assert "student_status_operations" in inspect(engine).get_table_names()
     with engine.begin() as db:
         user = db.scalar(
             text(
@@ -28,7 +32,9 @@ def test_preferences_upgrade_downgrade_and_metadata(migration_database):  # noqa
         )
     run_migration(engine, "downgrade", "20261115_02")
     assert "user_preferences" not in inspect(engine).get_table_names()
+    assert "student_status_operations" not in inspect(engine).get_table_names()
     with engine.connect() as db:
         assert db.scalar(text("SELECT count(*) FROM users WHERE id=:id"), {"id": user}) == 1
     run_migration(engine, "upgrade", "head")
+    assert "student_status_operations" in inspect(engine).get_table_names()
     run_migration(engine, "check")

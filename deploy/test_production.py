@@ -33,7 +33,13 @@ def run(args, *, input=None, env=None, success=True, timeout=180):
     if success and result.returncode:
         # Retain private diagnostics locally; never dump tokens or secret values.
         (ROOT / "work" / "production-command-error.log").write_text(result.stderr)
-        raise AssertionError(f"Command failed ({result.returncode}): {args}")
+        detail = ""
+        # The embedded API-role ACL assertions otherwise hide their actual
+        # assertion in the outer compose test traceback. This script is static
+        # test code and contains no injected credentials.
+        if "exec" in args and "api" in args and "python" in args:
+            detail = "\nEmbedded API check stderr:\n" + result.stderr[-4000:]
+        raise AssertionError(f"Command failed ({result.returncode}): {args}{detail}")
     return result
 
 
@@ -608,6 +614,22 @@ with engine.connect() as c:
                           ('lessons','created_by_user_id')):
         assert not c.execute(text("SELECT has_column_privilege(current_user,:table,:column,'UPDATE')"),
                              {'table': table, 'column': column}).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'audit_events','INSERT')")).scalar_one()
+    assert c.execute(text("SELECT has_column_privilege(current_user,'audit_events','id','SELECT')")).scalar_one()
+    assert c.execute(text("SELECT has_column_privilege(current_user,'audit_events','created_at','SELECT')")).scalar_one()
+    for column in ('actor_user_id', 'entity_id', 'action', 'before_data', 'after_data', 'reason'):
+        assert not c.execute(text("SELECT has_column_privilege(current_user,'audit_events',:column,'SELECT')"), {'column': column}).scalar_one()
+    for privilege in ('SELECT','UPDATE','DELETE','TRUNCATE'):
+        assert not c.execute(text("SELECT has_table_privilege(current_user,'audit_events',:privilege)"), {'privilege': privilege}).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'student_status_operations','SELECT')")).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'student_status_operations','INSERT')")).scalar_one()
+    for privilege in ('UPDATE','DELETE','TRUNCATE'):
+        assert not c.execute(text("SELECT has_table_privilege(current_user,'student_status_operations',:privilege)"), {'privilege': privilege}).scalar_one()
+    c.execute(text("SELECT operation_id, actor_user_id, student_id, target_status, previous_status, reason, changed, created_at FROM student_status_operations LIMIT 0")).all()
+    assert not c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
+    assert c.execute(text("SELECT has_column_privilege(current_user,'students','academic_status','UPDATE')")).scalar_one()
+    for column in ('user_id','group_id','subgroup_id'):
+        assert not c.execute(text("SELECT has_column_privilege(current_user,'students',:column,'UPDATE')"), {'column': column}).scalar_one()
     for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'news',:privilege)"), {'privilege': privilege}).scalar_one()
     for privilege in ('SELECT','INSERT','UPDATE'):
@@ -687,6 +709,12 @@ for statement in (
     "SELECT nextval('public.org_units_id_seq')", "SELECT nextval('public.programs_id_seq')",
     "DELETE FROM lessons", "UPDATE lessons SET previous_lesson_id=NULL",
     "UPDATE lessons SET created_by_user_id=NULL",
+    "SELECT * FROM audit_events", "SELECT before_data FROM audit_events LIMIT 1",
+    "UPDATE student_status_operations SET changed=true",
+    "DELETE FROM student_status_operations",
+    "SELECT nextval('public.audit_events_id_seq')",
+    "SELECT nextval('public.org_units_id_seq')", "SELECT nextval('public.programs_id_seq')",
+    "UPDATE students SET group_id=group_id", "UPDATE students SET subgroup_id=subgroup_id",
     "INSERT INTO assessments (course_offering_id,title,type,max_score) VALUES (1,'forbidden','test',10)",
     "UPDATE assessment_groups SET assessment_id=assessment_id",
     "UPDATE final_results SET student_id=student_id", "UPDATE course_offerings SET attestation_type='exam'", "SELECT nextval('public.final_results_id_seq')",
