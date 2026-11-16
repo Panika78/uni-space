@@ -1,4 +1,4 @@
-/* global process, console, document, window, URL, Event */
+/* global process, console, document, window, URL, Event, Element */
 // Real backend and fictional deploy/schedule_fixtures.py; faults are scoped to schedule reads.
 import assert from 'node:assert/strict'
 import { setTimeout as delay } from 'node:timers/promises'
