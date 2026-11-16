@@ -557,6 +557,7 @@ def test_application_routes_work_with_minimal_postgresql_role(postgresql_engine)
         connection.execute(text(f"GRANT CONNECT ON DATABASE uni_space_test TO {role}"))
         connection.execute(text(f"GRANT USAGE ON SCHEMA public TO {role}"))
         connection.execute(text(f"GRANT SELECT ON service_types TO {role}"))
+        connection.execute(text(f"GRANT SELECT ON application_attachments TO {role}"))
         connection.execute(
             text(f"GRANT SELECT ON academic_terms, org_units, programs, study_groups TO {role}")
         )

@@ -743,7 +743,6 @@ async def resubmit_application(
         application = db.scalar(
             select(Application)
             .where(Application.id == identifier, Application.student_id == student.id)
-            .with_for_update()
             .execution_options(populate_existing=True)
         )
         if application is None:
@@ -751,6 +750,19 @@ async def resubmit_application(
         service = db.get(ServiceType, application.service_type_id)
         if service.code != "academic_leave" and (uploaded or resubmission.keep_attachment_ids):
             raise HTTPException(422, "validation_error")
+        if service.code == "academic_leave":
+            # Concurrent leave resubmissions serialize while they replace the
+            # current attachment set. Other service workflows keep their
+            # existing optimistic access-race behavior.
+            application = db.scalar(
+                select(Application)
+                .where(Application.id == identifier, Application.student_id == student.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if application is None:
+                raise HTTPException(404, "not_found")
+            service = db.get(ServiceType, application.service_type_id)
         current = db.scalars(
             select(ApplicationAttachment)
             .where(
