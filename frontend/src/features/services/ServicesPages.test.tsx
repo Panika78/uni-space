@@ -544,3 +544,124 @@ it('isolates the next student catalog when a cleared query receives an old respo
   expect(screen.queryByText('Старый каталог')).not.toBeInTheDocument()
   expect(first.client.getQueryData(['services'])).toEqual(next)
 })
+
+it('parses manual dates, rejects impossible dates, and submits a leap day as ISO', async () => {
+  const leaveService = {
+    ...catalogService('8', 'Академический отпуск'),
+    code: 'academic_leave',
+    action_available: true,
+    requirements: ['Подтверждающие документы'],
+  }
+  apiFetch.mockResolvedValueOnce({ items: [leaveService] }).mockResolvedValueOnce({
+    id: '81',
+    version: 1,
+    service: leaveService,
+    form_data: {
+      basis: 'medical',
+      starts_on: '2028-02-29',
+      ends_on: '2028-03-01',
+      explanation: null,
+    },
+    review_status: 'submitted',
+    document_status: 'pending',
+    feedback: null,
+    created_at: '2026-11-10T00:00:00Z',
+    updated_at: '2026-11-10T00:00:00Z',
+  })
+  const router = createMemoryRouter(
+    [{ path: '/services/:serviceCode', element: <ApplicationFormPage /> }],
+    { initialEntries: ['/services/academic_leave'] },
+  )
+  render(<RouterProvider router={router} />)
+  const starts = await screen.findByLabelText(/Дата начала/)
+  const ends = screen.getByLabelText(/Дата окончания/)
+  fireEvent.change(starts, { target: { value: '31.02.2028' } })
+  fireEvent.blur(starts)
+  expect(
+    await screen.findByText(/существующую дату/, { selector: '#leave-start-error' }),
+  ).toBeInTheDocument()
+  fireEvent.change(starts, { target: { value: '29.02.2028' } })
+  fireEvent.change(ends, { target: { value: '01.03.2028' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
+  expect(await screen.findByText(/Заявление № 81/)).toBeInTheDocument()
+  expect(JSON.parse(apiFetch.mock.calls[1][1].body)).toEqual({
+    service_code: 'academic_leave',
+    form_data: {
+      basis: 'medical',
+      starts_on: '2028-02-29',
+      ends_on: '2028-03-01',
+      explanation: null,
+    },
+  })
+})
+
+it('protects a basis-only draft from internal navigation', async () => {
+  apiFetch.mockResolvedValueOnce({
+    items: [
+      {
+        ...catalogService('8', 'Академический отпуск'),
+        code: 'academic_leave',
+        action_available: false,
+        unavailable_reason: 'Подача недоступна',
+        requirements: ['Подтверждающие документы'],
+      },
+    ],
+  })
+  const router = createMemoryRouter(
+    [
+      { path: '/services/:serviceCode', element: <ApplicationFormPage /> },
+      { path: '/services', element: <p>Каталог</p> },
+    ],
+    { initialEntries: ['/services/academic_leave'] },
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.change(await screen.findByLabelText(/Основание/), { target: { value: 'family' } })
+  fireEvent.click(screen.getByRole('link', { name: 'К каталогу услуг' }))
+  expect(await screen.findByRole('alertdialog')).toHaveTextContent('Выйти без сохранения?')
+  expect(screen.getByRole('alertdialog')).toHaveTextContent('Введённые данные ещё не отправлены')
+})
+
+it('blocks leaving an uncertain POST result until the student confirms', async () => {
+  const transcriptService = {
+    ...catalogService('9', 'Выписка об успеваемости'),
+    code: 'academic_transcript',
+  }
+  apiFetch
+    .mockResolvedValueOnce({ items: [transcriptService] })
+    .mockRejectedValueOnce(new TypeError('lost response'))
+  const router = createMemoryRouter(
+    [
+      { path: '/services/:serviceCode', element: <ApplicationFormPage /> },
+      { path: '/services', element: <p>Каталог</p> },
+    ],
+    { initialEntries: ['/services/academic_transcript'] },
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Отправить заявление' }))
+  fireEvent.click(await screen.findByRole('link', { name: /Проверить результат/ }))
+  expect(await screen.findByRole('alertdialog')).toHaveTextContent(
+    'Результат отправки не подтверждён',
+  )
+  expect(apiFetch).toHaveBeenCalledTimes(2)
+})
+
+it('does not confirm a malformed 201 response for an additional service', async () => {
+  const accountingService = {
+    ...catalogService('10', 'Бухгалтерская справка'),
+    code: 'accounting_certificate',
+  }
+  apiFetch
+    .mockResolvedValueOnce({ items: [accountingService] })
+    .mockResolvedValueOnce({
+      id: '91', service: accountingService, review_status: 'submitted', document_status: 'pending',
+    })
+  const router = createMemoryRouter(
+    [{ path: '/services/:serviceCode', element: <ApplicationFormPage /> }],
+    { initialEntries: ['/services/accounting_certificate'] },
+  )
+  render(<RouterProvider router={router} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Отправить заявление' }))
+  expect(await screen.findByText(/заявление могло сохраниться/i)).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'Заявление создано' })).not.toBeInTheDocument()
+  expect(apiFetch).toHaveBeenCalledTimes(2)
+})

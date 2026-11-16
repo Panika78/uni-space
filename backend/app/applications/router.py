@@ -102,7 +102,7 @@ def submit_application(
     stored_form, assigned_org_unit_id = workflow.validate_and_store_form(
         db, service, request.form_data.model_dump(), student=student
     )
-    available, _reason = workflow.get_service_availability(db, service)
+    available, _reason = workflow.get_service_availability(db, service, student)
     if not available:
         raise HTTPException(409, "service_unavailable")
     application = Application(

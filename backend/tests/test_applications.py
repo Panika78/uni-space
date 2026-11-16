@@ -13,7 +13,11 @@ from app.dependencies.database import get_db_session
 from app.models import (
     AcademicTerm,
     Application,
+    ApplicationHistory,
     AuthSession,
+    CourseGroup,
+    CourseOffering,
+    Discipline,
     OrgUnit,
     Program,
     RefreshToken,
@@ -704,7 +708,8 @@ def test_mvp2_service_forms_fix_server_term_and_responsible_units(db_session):
     assert resolve_dean_office(db_session, student).id == dean.id
 
     app.dependency_overrides[get_db_session] = lambda: db_session
-    app.dependency_overrides[get_current_student] = lambda: student
+    active_student = [student]
+    app.dependency_overrides[get_current_student] = lambda: active_student[0]
     client = TestClient(app)
     before = db_session.scalar(select(func.count()).select_from(Application))
     try:
@@ -719,14 +724,77 @@ def test_mvp2_service_forms_fix_server_term_and_responsible_units(db_session):
         assert spoofed.status_code == 422
         assert db_session.scalar(select(func.count()).select_from(Application)) == before
 
-        db_session.add(
-            AcademicTerm(
-                name="Current forms term",
-                starts_on=today - timedelta(days=1),
-                ends_on=today + timedelta(days=1),
-            )
+        # A global current term is not available until the student's group is linked to it.
+        first_term = AcademicTerm(
+            name="Current forms term",
+            starts_on=today - timedelta(days=1),
+            ends_on=today + timedelta(days=1),
         )
+        db_session.add(first_term)
         db_session.flush()
+        empty_catalog = client.get("/api/v1/services")
+        assert (
+            next(
+                item
+                for item in empty_catalog.json()["items"]
+                if item["code"] == "academic_transcript"
+            )["action_available"]
+            is False
+        )
+        discipline = Discipline(name=f"Forms {uuid4().hex}")
+        db_session.add(discipline)
+        db_session.flush()
+        offering = CourseOffering(
+            discipline_id=discipline.id, term_id=first_term.id, attestation_type="exam"
+        )
+        db_session.add(offering)
+        db_session.flush()
+        db_session.add(CourseGroup(course_offering_id=offering.id, group_id=group.id))
+        db_session.flush()
+        available_catalog = client.get("/api/v1/services")
+        assert (
+            next(
+                item
+                for item in available_catalog.json()["items"]
+                if item["code"] == "academic_transcript"
+            )["action_available"]
+            is True
+        )
+        other_term = AcademicTerm(
+            name="Another student's current term",
+            starts_on=today - timedelta(days=2),
+            ends_on=today + timedelta(days=2),
+        )
+        other_group = StudyGroup(
+            name=f"MVP2 other group {uuid4().hex}", program_id=program.id, course_number=1
+        )
+        other_user = User(
+            login=f"mvp2-other-{uuid4().hex}",
+            password_hash="fixture",
+            full_name="Other fictional student",
+            role="student",
+            is_active=True,
+        )
+        db_session.add_all([other_term, other_group, other_user])
+        db_session.flush()
+        other_student = Student(
+            user_id=other_user.id, group_id=other_group.id, academic_status="enrolled"
+        )
+        other_offering = CourseOffering(
+            discipline_id=discipline.id, term_id=other_term.id, attestation_type="exam"
+        )
+        db_session.add_all([other_student, other_offering])
+        db_session.flush()
+        db_session.add(CourseGroup(course_offering_id=other_offering.id, group_id=other_group.id))
+        db_session.flush()
+        active_student[0] = other_student
+        other_transcript = client.post(
+            "/api/v1/applications",
+            json={"service_code": "academic_transcript", "form_data": {}},
+        )
+        assert other_transcript.status_code == 201, other_transcript.text
+        assert other_transcript.json()["form_data"]["academic_term_id"] == str(other_term.id)
+        active_student[0] = student
         ambiguous_term = AcademicTerm(
             name="Ambiguous current forms term",
             starts_on=today,
@@ -734,11 +802,23 @@ def test_mvp2_service_forms_fix_server_term_and_responsible_units(db_session):
         )
         db_session.add(ambiguous_term)
         db_session.flush()
+        second_offering = CourseOffering(
+            discipline_id=discipline.id,
+            term_id=ambiguous_term.id,
+            attestation_type="exam",
+        )
+        db_session.add(second_offering)
+        db_session.flush()
+        db_session.add(CourseGroup(course_offering_id=second_offering.id, group_id=group.id))
+        db_session.flush()
         ambiguous = client.post(
             "/api/v1/applications",
             json={"service_code": "academic_transcript", "form_data": {}},
         )
         assert ambiguous.status_code == 409
+        assert ambiguous.json()["error"]["code"] == "academic_term_ambiguous"
+        db_session.delete(db_session.get(CourseGroup, (second_offering.id, group.id)))
+        db_session.delete(second_offering)
         db_session.delete(ambiguous_term)
         db_session.flush()
         transcript = client.post(
@@ -758,6 +838,54 @@ def test_mvp2_service_forms_fix_server_term_and_responsible_units(db_session):
             db_session, transcript_service, {}, student=student, existing=saved_form
         )
         assert preserved == saved_form
+        saved_application.review_status = "needs_correction"
+        saved_application.feedback = "Please confirm details"
+        saved_application.version = 2
+        db_session.add(
+            ApplicationHistory(
+                application_id=saved_application.id,
+                actor_user_id=student.user_id,
+                from_status="in_review",
+                to_status="needs_correction",
+                comment="Please confirm details",
+            )
+        )
+        db_session.flush()
+        history_count = db_session.scalar(
+            select(func.count())
+            .select_from(ApplicationHistory)
+            .where(ApplicationHistory.application_id == saved_application.id)
+        )
+        resubmitted = client.post(
+            f"/api/v1/applications/{saved_application.id}/resubmit",
+            json={"expected_version": 2, "form_data": {}},
+        )
+        assert resubmitted.status_code == 200, resubmitted.text
+        assert resubmitted.json()["id"] == transcript.json()["id"]
+        assert resubmitted.json()["version"] == 3
+        assert resubmitted.json()["form_data"] == saved_form
+        assert (
+            db_session.scalar(
+                select(func.count())
+                .select_from(ApplicationHistory)
+                .where(ApplicationHistory.application_id == saved_application.id)
+            )
+            == history_count + 1
+        )
+        stale_resubmit = client.post(
+            f"/api/v1/applications/{saved_application.id}/resubmit",
+            json={"expected_version": 2, "form_data": {}},
+        )
+        assert stale_resubmit.status_code == 409
+        assert stale_resubmit.json()["error"]["code"] == "version_conflict"
+        assert (
+            db_session.scalar(
+                select(func.count())
+                .select_from(ApplicationHistory)
+                .where(ApplicationHistory.application_id == saved_application.id)
+            )
+            == history_count + 1
+        )
 
         accounting_response = client.post(
             "/api/v1/applications",

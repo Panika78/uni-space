@@ -21,6 +21,8 @@ from app.models import (
     AcademicTerm,
     Application,
     ApplicationHistory,
+    CourseGroup,
+    CourseOffering,
     OrgUnit,
     Program,
     ServiceType,
@@ -64,10 +66,18 @@ SERVICE_DETAILS = {
 }
 
 
-def get_current_academic_term(db: Session) -> AcademicTerm | None:
+def get_current_academic_term(db: Session, student: Student) -> AcademicTerm | None:
     today = datetime.now(ZoneInfo("Europe/Moscow")).date()
     return db.scalars(
-        select(AcademicTerm).where(AcademicTerm.starts_on <= today, AcademicTerm.ends_on >= today)
+        select(AcademicTerm)
+        .join(CourseOffering, CourseOffering.term_id == AcademicTerm.id)
+        .join(CourseGroup, CourseGroup.course_offering_id == CourseOffering.id)
+        .where(
+            CourseGroup.group_id == student.group_id,
+            AcademicTerm.starts_on <= today,
+            AcademicTerm.ends_on >= today,
+        )
+        .distinct()
     ).one_or_none()
 
 
@@ -117,7 +127,7 @@ def get_service_availability(
         )
     if service.code == "academic_transcript":
         try:
-            if get_current_academic_term(db) is None:
+            if student is None or get_current_academic_term(db, student) is None:
                 return False, "Сейчас не настроен единственный текущий учебный период."
         except MultipleResultsFound:
             return False, "Текущие учебные периоды настроены неоднозначно."
@@ -151,7 +161,7 @@ def validate_and_store_form(
         raise HTTPException(409, "service_unavailable")
     if service.code == "academic_transcript":
         try:
-            term = get_current_academic_term(db) if existing is None else None
+            term = get_current_academic_term(db, student) if existing is None else None
         except MultipleResultsFound as exc:
             raise HTTPException(409, "academic_term_ambiguous") from exc
         if existing is not None:

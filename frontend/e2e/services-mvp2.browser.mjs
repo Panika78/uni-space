@@ -37,7 +37,16 @@ try {
       `Catalog fits ${width}px`,
     )
   }
-  assert.equal(await page.getByRole('button', { name: 'Пока недоступно' }).isDisabled(), true)
+  for (const title of [
+    'Справка об обучении',
+    'Выписка об успеваемости',
+    'Академический отпуск',
+    'Бухгалтерская справка',
+  ]) {
+    const requirements = page.getByRole('article', { name: title }).locator('details')
+    await requirements.locator('summary').click()
+    assert.ok((await requirements.locator('li').count()) > 0, `${title} requirements are visible`)
+  }
 
   await page.getByRole('article', { name: 'Выписка об успеваемости' }).getByRole('link').click()
   await page.getByText(/период будет выбран сервером автоматически/i).waitFor()
@@ -59,11 +68,43 @@ try {
   await page.getByRole('button', { name: 'Отправить заявление' }).click()
   await page.getByRole('heading', { name: 'Заявление создано' }).waitFor()
 
-  await page.goto(`${baseURL}/services/academic_leave`)
+  await page.goto(`${baseURL}/services`)
+  await page
+    .getByRole('article', { name: 'Академический отпуск' })
+    .getByRole('link', { name: /Требования и форма/ })
+    .click()
   await page.getByLabel('Основание').waitFor()
-  await page.getByLabel('Основание').selectOption('other')
+  const attachments = {
+    medical: /медицинская справка/i,
+    family: /семейные обстоятельства/i,
+    other: /указанное обстоятельство/i,
+  }
+  for (const [basis, requirement] of Object.entries(attachments)) {
+    await page.getByLabel('Основание').selectOption(basis)
+    await page.getByText(requirement).waitFor()
+  }
   await page.getByLabel('Пояснение').fill('Тестовое обстоятельство')
-  await page.getByText(/подтверждение обязательно/i).waitFor()
+  const starts = page.getByLabel('Дата начала')
+  const ends = page.getByLabel('Дата окончания')
+  await starts.fill('31.02.2028')
+  await starts.press('Tab')
+  await page.locator('#leave-start-error').waitFor()
+  await page.locator('#leave-start-calendar').fill('2028-02-29')
+  assert.equal(await starts.inputValue(), '29.02.2028')
+  await ends.fill('28.02.2028')
+  await ends.press('Tab')
+  await page
+    .locator('#leave-end-error')
+    .getByText(/окончание должно быть не раньше начала/i)
+    .waitFor()
+  await ends.fill('01.03.2028')
+  const reloadDialogPromise = page.waitForEvent('dialog')
+  const reloadPromise = page.reload()
+  const reloadDialog = await reloadDialogPromise
+  assert.equal(reloadDialog.type(), 'beforeunload')
+  await reloadDialog.dismiss()
+  await reloadPromise
+  assert.equal(await page.getByLabel('Основание').inputValue(), 'other')
   assert.equal(
     await page.getByRole('button', { name: 'Подача пока недоступна' }).isDisabled(),
     true,

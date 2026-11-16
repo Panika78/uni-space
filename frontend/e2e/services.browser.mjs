@@ -128,7 +128,7 @@ try {
   ]) {
     await page.getByRole('heading', { name: title }).waitFor()
   }
-  assert.equal(await page.getByRole('button', { name: 'Пока недоступно' }).isDisabled(), true)
+  assert.equal(await page.getByRole('link', { name: /Требования и форма/ }).isVisible(), true)
   for (const width of [360, 1440]) {
     await page.setViewportSize({ width, height: 900 })
     await page.waitForTimeout(150)

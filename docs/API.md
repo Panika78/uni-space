@@ -166,22 +166,48 @@ type AcademicsResponse = {
 ```ts
 type Service = {
   id: Id;
-  code: string; // создание MVP1 по-прежнему принимает только study_certificate
+  code: "study_certificate" | "academic_transcript" | "academic_leave" | "accounting_certificate";
   title: string;
+  description: string;
+  processing_mode: "automatic" | "manual";
+  produces_document: boolean;
+  action_available: boolean;
+  unavailable_reason: string | null;
+  requirements: string[];
 };
 
-type CreateApplicationRequest = {
+type CreateStudyCertificateRequest = {
   service_code: "study_certificate";
-  form_data: {
-    place_of_submission: string;
-  };
+  form_data: { place_of_submission: string };
 };
+type CreateAcademicTranscriptRequest = {
+  service_code: "academic_transcript";
+  form_data: Record<string, never>; // academic_term_id запрещён во входе
+};
+type CreateAcademicLeaveRequest = {
+  service_code: "academic_leave";
+  form_data: { basis: "medical" | "family" | "other"; starts_on: Date; ends_on: Date; explanation?: string | null };
+};
+type CreateAccountingCertificateRequest = {
+  service_code: "accounting_certificate";
+  form_data: { purpose?: string | null };
+};
+type CreateApplicationRequest = CreateStudyCertificateRequest | CreateAcademicTranscriptRequest
+  | CreateAcademicLeaveRequest | CreateAccountingCertificateRequest; // discriminator: service_code
+type AcademicTranscriptFormData = {
+  academic_term_id: Id; academic_term_name: string; starts_on: Date; ends_on: Date;
+}; // только сохранённая форма ответа; период выбирается сервером по группе студента
+type AcademicLeaveFormData = {
+  basis: "medical" | "family" | "other"; starts_on: Date; ends_on: Date; explanation: string | null;
+};
+type AccountingCertificateFormData = { purpose: string | null };
 
 type Application = {
   id: Id;
   version: number; // версия для изменяющих запросов MVP2
   service: Service;
-  form_data: { place_of_submission: string };
+  form_data: { place_of_submission: string } | AcademicTranscriptFormData
+    | AcademicLeaveFormData | AccountingCertificateFormData;
   review_status:
     | "submitted" | "in_review" | "needs_correction"
     | "resubmitted" | "approved" | "rejected";
@@ -192,7 +218,11 @@ type Application = {
 };
 ```
 
-В MVP 1 создаётся `submitted/pending`, обработки и скачивания PDF нет. Место предоставления — обязательный обычный текст, 1–300 символов после обрезки крайних пробелов. Повторные самостоятельные заявки разрешены.
+`study_certificate` сохраняет контракт MVP1: `place_of_submission` обязателен, 1–300 символов после trim. Для выписки входная форма пуста, сохранённый период определяется сервером из текущих периодов, связанных с группой студента через `course_groups` и `course_offerings`; при нуле или нескольких применимых периодах возвращается `409 academic_term_unavailable` или `409 academic_term_ambiguous`. При resubmit период сохраняется прежним.
+
+Академический отпуск принимает основание, даты и пояснение для `other`, но до интеграции защищённой загрузки файлов API отвечает `409 service_unavailable` (или `responsible_unit_unavailable`, если деканат не определён); `submitted` не создаётся. Бухгалтерская справка принимает необязательную цель, ответственное подразделение назначается сервером. Неизвестные поля и клиентские ID/статусы запрещены. Недоступность и требования возвращаются в полях `Service` и доступны для просмотра.
+
+Создание доступных услуг возвращает `201 submitted/pending`, без автоматического одобрения или PDF. Ошибки конфигурации — `409 service_unavailable`, `academic_term_unavailable`, `academic_term_ambiguous`, `responsible_unit_unavailable`; ошибки формы — `422 validation_error`.
 
 ### Новости и уведомления
 
@@ -439,7 +469,7 @@ type ReviewApplicationRequest = {
 };
 type ResubmitApplicationRequest = {
   expected_version: number;
-  form_data: { place_of_submission: string }; // действующий строгий контракт формы
+  form_data: { place_of_submission: string } | Record<string, never> | AcademicLeaveFormData | AccountingCertificateFormData;
 };
 type ApplicationHistoryEvent = {
   id: Id;
@@ -455,9 +485,10 @@ type ApplicationHistoryEvent = {
 затем `approve/reject/return_for_correction` — соответственно
 `approved/rejected/needs_correction`. Студент-владелец может атомарно отправить
 исправленную форму только из `needs_correction → resubmitted` с прежним ID.
-Неизвестные поля формы запрещены. В production пока поддерживается только форма
-`study_certificate`; новые формы и ручные услуги добавляет #67 вместе с расширением
-схем запросов/ответов и `APPLICATION_FORMS`. Тестовые ручные услуги не входят в seed.
+Неизвестные поля формы запрещены; сервер проверяет форму по коду услуги и сохраняет
+ID заявления. Для выписки при resubmit вход остаётся пустым, а сохранённые сведения
+о периоде не вычисляются заново. Для академического отпуска resubmit также остаётся
+недоступен, пока услуга закрыта до #75. Тестовые ручные услуги не входят в seed.
 
 `reviewer_user_id` берётся из авторизации при рассмотрении/решении; сотрудники
 одного разрешённого подразделения могут продолжить рассмотрение друг друга.

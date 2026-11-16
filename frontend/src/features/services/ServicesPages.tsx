@@ -43,6 +43,111 @@ const trimPythonWhitespace = (text: string) => {
   return characters.slice(start, end).join('')
 }
 
+function parseRussianDate(value: string): string | null {
+  const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(value)
+  if (!match) return null
+  const [, dayText, monthText, yearText] = match
+  const day = Number(dayText),
+    month = Number(monthText),
+    year = Number(yearText)
+  if (year < 1) return null
+  const date = new Date(`${yearText}-${monthText}-${dayText}T00:00:00.000Z`)
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  )
+    return null
+  return `${yearText}-${monthText}-${dayText}`
+}
+
+function formatRussianDate(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : ''
+}
+
+function isAdditionalApplicationResponse(
+  value: unknown,
+  serviceCode: string,
+  expectedForm: Record<string, unknown>,
+): value is Application {
+  if (!value || typeof value !== 'object') return false
+  const app = value as Record<string, unknown>
+  const service = app.service
+  const form = app.form_data
+  const isId = (id: unknown) => typeof id === 'string' && /^[1-9][0-9]*$/.test(id)
+  const isIsoDate = (date: unknown) => {
+    if (typeof date !== 'string' || !/^\d{4}-\d\d-\d\d$/.test(date)) return false
+    return parseRussianDate(`${date.slice(8, 10)}.${date.slice(5, 7)}.${date.slice(0, 4)}`) !== null
+  }
+  const isDateTime = (date: unknown) =>
+    typeof date === 'string' &&
+    /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(date) &&
+    isIsoDate(date.slice(0, 10)) &&
+    !Number.isNaN(Date.parse(date))
+  if (!service || typeof service !== 'object' || !form || typeof form !== 'object') return false
+  const svc = service as Record<string, unknown>
+  const data = form as Record<string, unknown>
+  if (
+    !isId(app.id) ||
+    !Number.isSafeInteger(app.version) ||
+    app.version !== 1 ||
+    !isDateTime(app.created_at) ||
+    !isDateTime(app.updated_at) ||
+    app.review_status !== 'submitted' ||
+    app.document_status !== 'pending' ||
+    app.feedback !== null ||
+    !isId(svc.id) ||
+    svc.code !== serviceCode ||
+    typeof svc.title !== 'string' ||
+    typeof svc.description !== 'string' ||
+    !['automatic', 'manual'].includes(String(svc.processing_mode)) ||
+    typeof svc.produces_document !== 'boolean' ||
+    !Array.isArray(svc.requirements) ||
+    !svc.requirements.every((item) => typeof item === 'string') ||
+    typeof svc.action_available !== 'boolean' ||
+    !(svc.unavailable_reason === null || typeof svc.unavailable_reason === 'string')
+  )
+    return false
+  const keys = Object.keys(data)
+  if (serviceCode === 'academic_transcript') {
+    return (
+      keys.length === 4 &&
+      isId(data.academic_term_id) &&
+      typeof data.academic_term_name === 'string' &&
+      isIsoDate(data.starts_on) &&
+      isIsoDate(data.ends_on) &&
+      String(data.starts_on) <= String(data.ends_on)
+    )
+  }
+  return (
+    keys.length === Object.keys(expectedForm).length &&
+    Object.entries(expectedForm).every(([key, expected]) => data[key] === expected)
+  )
+}
+
+function getApplicationErrorMessage(cause: unknown): string {
+  if (!(cause instanceof ApiClientError)) return 'Не удалось связаться с сервером.'
+  const messages: Record<string, string> = {
+    academic_term_unavailable: 'Для вашей учебной группы сейчас не настроен учебный период.',
+    academic_term_ambiguous: 'Для вашей учебной группы найдено несколько текущих периодов.',
+    responsible_unit_unavailable: 'Для факультета не настроено ответственное подразделение.',
+    service_unavailable: 'Эта услуга временно недоступна для подачи.',
+    validation_error: 'Проверьте заполненные поля и повторите попытку.',
+    version_conflict: 'Данные изменились. Обновите список заявлений и проверьте результат.',
+    forbidden: 'У вас нет доступа к созданию заявления.',
+    invalid_access: 'Сеанс завершён. Войдите в систему заново.',
+    session_invalid: 'Сеанс завершён. Войдите в систему заново.',
+  }
+  if (messages[cause.code]) return messages[cause.code]
+  if (cause.status === 401) return 'Сеанс завершён. Войдите в систему заново.'
+  if (cause.status === 403) return 'У вас нет доступа к созданию заявления.'
+  if (cause.status === 409) return 'Услуга или её настройки сейчас недоступны.'
+  if (cause.status === 422) return 'Проверьте заполненные поля и повторите попытку.'
+  if (cause.status === 503) return 'Сервис временно недоступен.'
+  return 'Не удалось создать заявление. Повторите попытку позже.'
+}
+
 function isApplicationResponse(value: unknown, placeOfSubmission: string): value is Application {
   if (typeof value !== 'object' || value === null) return false
   const application = value as Record<string, unknown>
@@ -144,10 +249,21 @@ function ServiceCatalog() {
                 {service.action_available === false && (
                   <p className="service-unavailable">{service.unavailable_reason}</p>
                 )}
+                {service.requirements.length > 0 && (
+                  <details className="service-requirements">
+                    <summary>Требования к услуге</summary>
+                    <ul>
+                      {service.requirements.map((requirement) => (
+                        <li key={requirement}>{requirement}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
               </div>
-              {service.action_available === true ? (
+              {service.action_available === true || service.code === 'academic_leave' ? (
                 <Link className="service-action" to={`/services/${service.code}`}>
-                  Подать заявление <Icon name="arrow" />
+                  {service.action_available ? 'Подать заявление' : 'Требования и форма'}{' '}
+                  <Icon name="arrow" />
                 </Link>
               ) : (
                 <button className="service-action" type="button" disabled>
@@ -192,11 +308,18 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
         ? 'Академический отпуск'
         : 'Бухгалтерская справка')
   const [basis, setBasis] = useState<'medical' | 'family' | 'other'>('medical')
-  const [startsOn, setStartsOn] = useState('')
-  const [endsOn, setEndsOn] = useState('')
+  const [startsText, setStartsText] = useState('')
+  const [endsText, setEndsText] = useState('')
+  const startsOn = parseRussianDate(startsText) ?? ''
+  const endsOn = parseRussianDate(endsText) ?? ''
   const [explanation, setExplanation] = useState('')
   const [purpose, setPurpose] = useState('')
   const [touched, setTouched] = useState(false)
+  const [touchedFields, setTouchedFields] = useState({
+    startsOn: false,
+    endsOn: false,
+    explanation: false,
+  })
   const [pending, setPending] = useState(false)
   const [applicationId, setApplicationId] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -206,11 +329,23 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
   const endsOnInput = useRef<HTMLInputElement>(null)
   const explanationInput = useRef<HTMLTextAreaElement>(null)
   const { setStatus: setExitStatus } = useUnsavedChanges()
-  const draft =
-    !applicationId &&
-    !uncertain &&
-    (isLeave ? Boolean(startsOn || endsOn || explanation) : isAccounting && Boolean(purpose))
-  const blocker = useBlocker(draft || pending)
+  const [initialValues] = useState(() =>
+    JSON.stringify({ basis, startsText, endsText, explanation, purpose }),
+  )
+  const hasChanges =
+    JSON.stringify({ basis, startsText, endsText, explanation, purpose }) !== initialValues
+  const draft = !applicationId && !uncertain && hasChanges
+  const blocker = useBlocker(draft || pending || uncertain)
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (draft || pending || uncertain) {
+        event.preventDefault()
+        event.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
+  }, [draft, pending, uncertain])
   useEffect(() => {
     setExitStatus(
       applicationId
@@ -231,6 +366,7 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setTouched(true)
+    setTouchedFields({ startsOn: true, endsOn: true, explanation: true })
     setError('')
     if (invalid) {
       if (isLeave && !startsOn) startsOnInput.current?.focus()
@@ -257,25 +393,27 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
         signal: AbortSignal.timeout(30_000),
         body: JSON.stringify({ service_code: serviceCode, form_data: formData }),
       })
-      const response = result as Application
-      if (
-        !response ||
-        typeof response !== 'object' ||
-        !response.service ||
-        response.service.code !== serviceCode ||
-        response.review_status !== 'submitted' ||
-        response.document_status !== (isLeave ? 'not_required' : 'pending')
-      ) {
+      const expectedForm = isTranscript
+        ? {}
+        : isAccounting
+          ? { purpose: purpose.trim() || null }
+          : {
+              basis,
+              starts_on: startsOn,
+              ends_on: endsOn,
+              explanation: basis === 'other' ? explanation.trim() : null,
+            }
+      if (!isAdditionalApplicationResponse(result, serviceCode, expectedForm)) {
         throw new ApiClientError(
           'Сервер вернул некорректное подтверждение',
           'invalid_response',
           201,
         )
       }
+      const response = result
       setApplicationId(response.id)
       queryClient.removeQueries({ queryKey: applicationsKey })
     } catch (cause) {
-      if (cause instanceof DOMException && cause.name === 'AbortError') return
       const isUncertain =
         !(cause instanceof ApiClientError) ||
         cause.status === undefined ||
@@ -283,9 +421,11 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
         cause.code === 'invalid_response'
       setUncertain(isUncertain)
       setError(
-        isUncertain
-          ? 'Ответ не получен. Заявление могло сохраниться; проверьте список заявлений перед повтором.'
-          : 'Не удалось создать заявление. Проверьте данные и попробуйте ещё раз.',
+        isUncertain && cause instanceof ApiClientError && cause.status === 503
+          ? 'Сервис временно недоступен. Заявление могло сохраниться; проверьте список заявлений перед повтором.'
+          : isUncertain
+            ? 'Ответ не получен. Заявление могло сохраниться; проверьте список заявлений перед повтором.'
+            : getApplicationErrorMessage(cause),
       )
     } finally {
       setPending(false)
@@ -314,10 +454,25 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
             Открыть заявление
           </Link>
         </div>
+      ) : servicesQuery.isPending ? (
+        <LoadingState title="Загружаем доступность услуги…" />
+      ) : servicesQuery.isError ? (
+        <ErrorState
+          title="Не удалось проверить доступность услуги"
+          description="Повторите загрузку перед заполнением формы."
+          onRetry={() => void servicesQuery.refetch()}
+        />
+      ) : !service ? (
+        <ErrorState title="Услуга не найдена в каталоге" description="Вернитесь в каталог услуг." />
       ) : (
         <form className="application-form" onSubmit={handleSubmit} noValidate>
           <h2>Данные заявления</h2>
           <p>* — обязательные поля</p>
+          {service.action_available === false && service.unavailable_reason && (
+            <p className="service-unavailable" role="status">
+              {service.unavailable_reason}
+            </p>
+          )}
           {isTranscript && (
             <p>
               Текущий учебный период будет выбран сервером автоматически. Выбор периода не
@@ -344,15 +499,26 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
               <input
                 ref={startsOnInput}
                 id="leave-start"
+                inputMode="numeric"
+                placeholder="ДД.ММ.ГГГГ"
+                value={startsText}
+                onChange={(event) => setStartsText(event.target.value)}
+                onBlur={() => setTouchedFields((fields) => ({ ...fields, startsOn: true }))}
+                aria-invalid={(touched || touchedFields.startsOn) && !startsOn}
+                aria-describedby={
+                  (touched || touchedFields.startsOn) && !startsOn ? 'leave-start-error' : undefined
+                }
+              />
+              <label htmlFor="leave-start-calendar">Выбрать дату начала</label>
+              <input
+                id="leave-start-calendar"
                 type="date"
                 value={startsOn}
-                onChange={(event) => setStartsOn(event.target.value)}
-                aria-invalid={touched && !startsOn}
-                aria-describedby={touched && !startsOn ? 'leave-start-error' : undefined}
+                onChange={(event) => setStartsText(formatRussianDate(event.target.value))}
               />
-              {touched && !startsOn && (
+              {(touched || touchedFields.startsOn) && !startsOn && (
                 <small id="leave-start-error" role="alert">
-                  Укажите дату начала.
+                  Введите существующую дату в формате ДД.ММ.ГГГГ.
                 </small>
               )}
               <label htmlFor="leave-end">
@@ -361,19 +527,30 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
               <input
                 ref={endsOnInput}
                 id="leave-end"
-                type="date"
-                value={endsOn}
-                onChange={(event) => setEndsOn(event.target.value)}
-                aria-invalid={touched && (!endsOn || startsOn > endsOn)}
+                inputMode="numeric"
+                placeholder="ДД.ММ.ГГГГ"
+                value={endsText}
+                onChange={(event) => setEndsText(event.target.value)}
+                onBlur={() => setTouchedFields((fields) => ({ ...fields, endsOn: true }))}
+                aria-invalid={(touched || touchedFields.endsOn) && (!endsOn || startsOn > endsOn)}
                 aria-describedby={
-                  touched && (!endsOn || startsOn > endsOn) ? 'leave-end-error' : undefined
+                  (touched || touchedFields.endsOn) && (!endsOn || startsOn > endsOn)
+                    ? 'leave-end-error'
+                    : undefined
                 }
               />
-              {touched && (!endsOn || startsOn > endsOn) && (
+              <label htmlFor="leave-end-calendar">Выбрать дату окончания</label>
+              <input
+                id="leave-end-calendar"
+                type="date"
+                value={endsOn}
+                onChange={(event) => setEndsText(formatRussianDate(event.target.value))}
+              />
+              {(touched || touchedFields.endsOn) && (!endsOn || startsOn > endsOn) && (
                 <small id="leave-end-error" role="alert">
-                  {startsOn > endsOn
+                  {startsOn && endsOn && startsOn > endsOn
                     ? 'Окончание должно быть не раньше начала.'
-                    : 'Укажите дату окончания.'}
+                    : 'Введите существующую дату в формате ДД.ММ.ГГГГ.'}
                 </small>
               )}
               {basis === 'other' && (
@@ -386,12 +563,15 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
                     id="leave-explanation"
                     value={explanation}
                     onChange={(event) => setExplanation(event.target.value)}
-                    aria-invalid={touched && !explanation.trim()}
+                    onBlur={() => setTouchedFields((fields) => ({ ...fields, explanation: true }))}
+                    aria-invalid={(touched || touchedFields.explanation) && !explanation.trim()}
                     aria-describedby={
-                      touched && !explanation.trim() ? 'leave-explanation-error' : undefined
+                      (touched || touchedFields.explanation) && !explanation.trim()
+                        ? 'leave-explanation-error'
+                        : undefined
                     }
                   />
-                  {touched && !explanation.trim() && (
+                  {(touched || touchedFields.explanation) && !explanation.trim() && (
                     <small id="leave-explanation-error" role="alert">
                       Добавьте пояснение.
                     </small>
@@ -467,10 +647,12 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
             aria-modal="true"
           >
             <h2 id="additional-unsaved-title">
-              {pending ? 'Запрос уже отправлен. Покинуть форму?' : 'Выйти без сохранения?'}
+              {pending || uncertain
+                ? 'Результат отправки не подтверждён. Покинуть форму?'
+                : 'Выйти без сохранения?'}
             </h2>
             <p>
-              {pending
+              {pending || uncertain
                 ? 'Заявление может сохраниться; проверьте его в списке заявлений.'
                 : 'Введённые данные ещё не отправлены и будут потеряны.'}
             </p>
@@ -479,7 +661,7 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
                 Продолжить заполнение
               </button>
               <button type="button" onClick={() => blocker.proceed()}>
-                {pending ? 'Покинуть форму' : 'Выйти'}
+                {pending || uncertain ? 'Покинуть форму' : 'Выйти'}
               </button>
             </div>
           </section>
