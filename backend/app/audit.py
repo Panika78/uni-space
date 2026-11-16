@@ -11,7 +11,7 @@ from app.models import AuditEvent, User
 
 
 def validate_retake_location(value: object) -> str:
-    """Bounded plain location text, shared by API and audit snapshots."""
+    """Validate new API input; historical database text has a separate serializer."""
     if (
         type(value) is not str
         or not 1 <= len(value) <= 200
@@ -19,6 +19,14 @@ def validate_retake_location(value: object) -> str:
         or any(unicodedata.category(c).startswith("C") for c in value)
     ):
         raise ValueError("Retake location requires 1..200 printable characters")
+    return value
+
+
+def _retake_location(value: object) -> str:
+    # PostgreSQL TEXT may predate the request limits. JSONB stores it as a
+    # string, escaping control characters without truncation or reinterpretation.
+    if type(value) is not str:
+        raise ValueError("Audit retake location requires a string")
     return value
 
 
@@ -70,7 +78,7 @@ _FINAL_FIELDS = {
     "grade_value": _integer,
     "passed": _boolean,
     "retake_date": _date,
-    "retake_location": validate_retake_location,
+    "retake_location": _retake_location,
 }
 _LESSON_FIELDS = {
     "course_offering_id": _integer,

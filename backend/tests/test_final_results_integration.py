@@ -1,13 +1,23 @@
 """Manual result API and mandatory audit on real PostgreSQL."""
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
 from test_teaching_integration import journal as journal_fixture
 
+from app.auth.security import create_access_token
 from app.final_results import journal_router, router
-from app.models import AuditEvent, FinalResult, OrgUnit, StaffPermission, StaffProfile
+from app.models import (
+    AuditEvent,
+    AuthSession,
+    FinalResult,
+    OrgUnit,
+    StaffPermission,
+    StaffProfile,
+    User,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -18,13 +28,13 @@ def results(db_session):
     s.app.include_router(router)
     s.app.include_router(journal_router)
 
-    def request(method="PATCH", body=None, teacher=0, course=0, student=0):
+    def request(method="PATCH", body=None, teacher=0, course=0, student=0, token=None):
         s.db.commit()
         return s.client.request(
             method,
             f"/api/v1/final-results/courses/{s.courses[course].id}/students/{s.students[student].id}",
             json=body,
-            headers={"Authorization": f"Bearer {s.teacher_tokens[teacher]}"},
+            headers={"Authorization": f"Bearer {token or s.teacher_tokens[teacher]}"},
         )
 
     s.save = request
@@ -109,7 +119,29 @@ def test_scales_retake_clear_delete_and_audit(results, kind):
 
 
 def test_transfer_read_scope_revocation_and_historical_staff(results):
-    s = results
+    verify_transfer_and_staff_scope(results)
+
+
+def create_result_actor(s, role, *, unit_type=None, permission=None):
+    user = s.add(
+        User,
+        login=uuid4().hex,
+        password_hash="unused",
+        full_name="Вымышленный сотрудник",
+        role=role,
+        is_active=True,
+    )
+    grant = None
+    if role == "staff":
+        unit = s.add(OrgUnit, name="Вымышленное подразделение", type=unit_type)
+        profile = s.add(StaffProfile, user_id=user.id, org_unit_id=unit.id)
+        if permission:
+            grant = s.add(StaffPermission, staff_profile_id=profile.id, permission_code=permission)
+    session = s.add(AuthSession, user_id=user.id, expires_at=datetime.now(UTC) + timedelta(days=1))
+    return user, grant, create_access_token(session, s.settings)["access_token"]
+
+
+def verify_transfer_and_staff_scope(s):
     assert s.save(body={"grade_value": 2}).status_code == 200
     assert s.save("GET", student=1).status_code == 404
     assert s.save(body={"grade_value": 3}, student=1).status_code == 404
@@ -130,22 +162,23 @@ def test_transfer_read_scope_revocation_and_historical_staff(results):
     s.db.flush()
     assert s.save(body={"grade_value": 2}, course=1).status_code == 200
     s.students[0].group_id = s.groups[1].id
-    unit = s.add(OrgUnit, name="Деканат", type="dean_office")
-    s.teacher_users[2].role = "staff"
-    profile = s.add(StaffProfile, user_id=s.teacher_users[2].id, org_unit_id=unit.id)
-    grant = s.add(StaffPermission, staff_profile_id=profile.id, permission_code="grades.edit")
-    assert s.save("GET", teacher=2, course=1).status_code == 200
-    assert s.save(body={"grade_value": 4}, teacher=2, course=1).status_code == 200
-    grant.permission_code = "students.read"
-    s.db.flush()
-    assert s.save("GET", teacher=2, course=1).status_code == 403
-    grant.permission_code = "grades.edit"
-    unit.type = "accounting"
-    s.db.flush()
-    assert s.save(body={"grade_value": 2}, teacher=2, course=1).status_code == 403
-    s.teacher_users[2].role = "admin"
-    s.db.flush()
-    assert s.save("GET", teacher=2, course=1).status_code == 403
+    _, grant, staff_token = create_result_actor(
+        s, "staff", unit_type="dean_office", permission="grades.edit"
+    )
+    assert s.save("GET", token=staff_token, course=1).status_code == 200
+    assert s.save(body={"grade_value": 4}, token=staff_token, course=1).status_code == 200
+    # Delete the grant, keep the same JWT: rights must be read from the database.
+    s.db.delete(grant)
+    assert s.save("GET", token=staff_token, course=1).status_code == 403
+    assert s.save(body={"grade_value": 2}, token=staff_token, course=1).status_code == 403
+    for role, unit_type, permission in [
+        ("staff", "dean_office", "students.read"),
+        ("staff", "accounting", "grades.edit"),
+        ("admin", None, None),
+    ]:
+        _, _, token = create_result_actor(s, role, unit_type=unit_type, permission=permission)
+        assert s.save("GET", token=token, course=1).status_code == 403
+        assert s.save(body={"grade_value": 2}, token=token, course=1).status_code == 403
 
 
 def test_student_academics_and_audit_rollback(results, monkeypatch):
@@ -218,3 +251,48 @@ def test_writer_failure_rolls_back_creation(results, monkeypatch):
     assert s.save("POST", {"retake_location": "A-101"}).status_code == 500
     assert s.save("GET").json()["result_id"] is None
     assert s.events() == []
+
+
+@pytest.mark.parametrize("location", ["x" * 201, "", "A\n\t101\x01"])
+@pytest.mark.parametrize("operation", ["patch", "pass", "delete"])
+def test_historical_location_is_audited_exactly(results, location, operation):
+    s = results
+    result = s.add(
+        FinalResult,
+        course_offering_id=s.courses[0].id,
+        student_id=s.students[0].id,
+        retake_location=location,
+    )
+    result_id = result.id
+    before = dict(
+        course_offering_id=s.courses[0].id,
+        student_id=s.students[0].id,
+        grade_value=None,
+        passed=None,
+        retake_date=None,
+        retake_location=location,
+    )
+    # Historical data is valid PostgreSQL TEXT, even when invalid as new API input.
+    s.db.commit()
+    count = len(s.events())
+    assert s.save(body={"retake_location": location}).status_code == 422
+    assert s.save("GET").json()["retake_location"] == location
+    assert len(s.events()) == count
+    if operation == "delete":
+        response = s.save("DELETE")
+        after = None
+    else:
+        grade = 2 if operation == "patch" else 5
+        response = s.save(body={"grade_value": grade})
+        after = dict(
+            before, grade_value=grade, retake_location=location if operation == "patch" else None
+        )
+    assert response.status_code == 200, response.text
+    events = s.events()
+    assert len(events) == count + 1
+    event = events[-1]
+    assert event.entity_id == result_id
+    assert event.before_data == before
+    assert event.after_data == after
+    assert event.action == ("delete" if operation == "delete" else "update")
+    assert response.json()["retake_location"] == (after["retake_location"] if after else None)

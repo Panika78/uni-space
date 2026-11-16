@@ -3,7 +3,12 @@ from datetime import UTC, date, datetime
 import pytest
 from sqlalchemy.orm import Session
 
-from app.audit import _EVENT_FIELDS, _serialize_snapshot, write_audit_event
+from app.audit import (
+    _EVENT_FIELDS,
+    _serialize_snapshot,
+    validate_retake_location,
+    write_audit_event,
+)
 from app.models import User
 
 
@@ -65,7 +70,7 @@ def test_unknown_event_and_request_actor_id_are_rejected():
 @pytest.mark.parametrize("value", [True, 123, {}, "", " ", "A\n101", "A\x00101", "x" * 201])
 def test_retake_location_rejects_invalid_typed_content(value):
     with pytest.raises(ValueError):
-        _serialize_snapshot({"retake_location": value}, _EVENT_FIELDS["final_result", "update"])
+        validate_retake_location(value)
 
 
 def test_retake_location_is_explicit_nullable_allowlisted_text():
@@ -75,3 +80,15 @@ def test_retake_location_is_explicit_nullable_allowlisted_text():
     }
     assert _serialize_snapshot({"retake_location": None}, fields) == {"retake_location": None}
     assert "retake_location" not in _serialize_snapshot({"student_id": 1}, fields)
+
+
+@pytest.mark.parametrize("value", ["x" * 201, "", " ", "A\n\t101\x01"])
+def test_audit_preserves_historical_retake_location_exactly(value):
+    fields = _EVENT_FIELDS["final_result", "update"]
+    assert _serialize_snapshot({"retake_location": value}, fields) == {"retake_location": value}
+
+
+@pytest.mark.parametrize("value", [True, 123, {}, ["A-101"]])
+def test_audit_retake_location_remains_strictly_typed(value):
+    with pytest.raises(ValueError, match="requires a string"):
+        _serialize_snapshot({"retake_location": value}, _EVENT_FIELDS["final_result", "update"])
