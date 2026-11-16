@@ -1,6 +1,6 @@
 """Display metadata in editor reads is batched and covers historical lessons."""
 
-from datetime import date
+from datetime import date, datetime, timedelta
 
 import pytest
 from sqlalchemy import event
@@ -13,6 +13,9 @@ from app.models import (
     CourseGroup,
     CourseOffering,
     Discipline,
+    Lesson,
+    LessonGroup,
+    LessonRoom,
     Room,
     StudyGroup,
     Subgroup,
@@ -109,7 +112,10 @@ def test_editor_display_resolves_catalog_tail_and_survives_mutations(editor):  #
             "discipline_code": "TAIL-100",
             "term_id": str(offering.term_id),
             "term_name": "Tail term 100",
+            "term_starts_on": "2026-09-01",
+            "term_ends_on": "2027-01-31",
             "attestation_type": "pass_fail",
+            "groups": [{"id": str(group.id), "name": group.name} for group in (group_a, group_b)],
         },
         "teacher": {"id": str(teacher.id), "full_name": teacher.full_name},
         "participants": [
@@ -209,31 +215,232 @@ def test_editor_display_resolves_catalog_tail_and_survives_mutations(editor):  #
     assert unassigned_teacher.json()["display"]["teacher"] is None
 
 
-def test_editor_read_query_count_is_constant_for_one_and_two_hundred_lessons(editor):  # noqa: F811
+def test_editor_teacher_name_uses_account_and_matches_other_schedule_reads(editor):  # noqa: F811
     e = editor
-    lessons = [e.lesson() for _ in range(200)]
+    participant = [{"group_id": str(e.groups[1].id), "subgroup_id": None}]
+    payload = e.payload(
+        teacher_id=str(e.teacher.id),
+        participants=participant,
+        room_ids=[],
+    )
+    created = e.request_editor("POST", body=payload)
+    assert created.status_code == 201, created.text
+    lesson_id = created.json()["id"]
+    initial_name = e.teacher_user.full_name
+    assert created.json()["display"]["teacher"]["full_name"] == initial_name
+
+    e.teacher_user.full_name = "Updated account teacher name"
     e.db.commit()
-    params = {
-        "resource": "group",
-        "resource_id": str(e.groups[0].id),
-        "date_from": "2026-11-10",
-        "date_to": "2026-11-10",
-        "limit": 200,
+    staff_lesson = e.request_editor("GET", f"/lessons/{lesson_id}").json()
+    assert staff_lesson["display"]["teacher"]["full_name"] == e.teacher_user.full_name
+
+    teacher_catalog = e.request_editor("GET", "/catalog/teachers", params={"limit": 100})
+    assert teacher_catalog.status_code == 200, teacher_catalog.text
+    teacher_item = next(
+        row for row in teacher_catalog.json()["items"] if row["id"] == str(e.teacher.id)
+    )
+    assert teacher_item["name"] == e.teacher_user.full_name
+
+    student_schedule = e.request(index=1).json()
+    student_lesson = next(row for row in student_schedule["items"] if row["id"] == lesson_id)
+    assert student_lesson["teacher"]["name"] == e.teacher_user.full_name
+
+    e.add(
+        TeachingAssignment,
+        teacher_id=e.standalone.id,
+        course_offering_id=e.offering.id,
+        group_id=e.groups[1].id,
+    )
+    e.db.commit()
+    unlinked = e.request_editor(
+        "POST",
+        body=payload
+        | {
+            "teacher_id": str(e.standalone.id),
+            "starts_at": "2026-11-10T11:00:00+03:00",
+            "ends_at": "2026-11-10T12:00:00+03:00",
+        },
+    )
+    assert unlinked.status_code == 201, unlinked.text
+    assert unlinked.json()["display"]["teacher"] == {
+        "id": str(e.standalone.id),
+        "full_name": e.standalone.full_name,
     }
-    counts = []
-    for count in (1, 200):
+
+
+def test_course_offering_display_distinguishes_duplicate_business_values(editor):  # noqa: F811
+    e = editor
+    same_title_other_dates = e.add(
+        AcademicTerm,
+        name=e.term.name,
+        starts_on=date(2027, 2, 1),
+        ends_on=date(2027, 6, 30),
+    )
+    offerings = [
+        e.add(
+            CourseOffering,
+            discipline_id=e.discipline.id,
+            term_id=term_id,
+            attestation_type="pass_fail",
+        )
+        for term_id in (e.term.id, e.term.id, e.term.id, same_title_other_dates.id)
+    ]
+    group_sets = ((e.groups[0],), (e.groups[1],), (e.groups[0],), (e.groups[0],))
+    for offering, groups in zip(offerings, group_sets, strict=True):
+        for group in groups:
+            e.add(CourseGroup, course_offering_id=offering.id, group_id=group.id)
+    e.db.commit()
+
+    displays = []
+    for index, (offering, groups) in enumerate(zip(offerings, group_sets, strict=True)):
+        starts_at = f"2026-11-10T{9 + index * 2:02}:00:00+03:00"
+        created = e.request_editor(
+            "POST",
+            body=e.payload(
+                course_offering_id=str(offering.id),
+                teacher_id=None,
+                participants=[{"group_id": str(group.id), "subgroup_id": None} for group in groups],
+                room_ids=[],
+                starts_at=starts_at,
+                ends_at=f"2026-11-10T{10 + index * 2:02}:00:00+03:00",
+            ),
+        )
+        assert created.status_code == 201, created.text
+        displays.append(created.json()["display"]["course_offering"])
+
+    assert [item["groups"] for item in displays[:2]] == [
+        [{"id": str(e.groups[0].id), "name": e.groups[0].name}],
+        [{"id": str(e.groups[1].id), "name": e.groups[1].name}],
+    ]
+    assert displays[0]["groups"] == displays[2]["groups"]
+    assert displays[0]["id"] != displays[2]["id"]
+    assert {key: value for key, value in displays[0].items() if key != "id"} == {
+        key: value for key, value in displays[2].items() if key != "id"
+    }
+    assert displays[0]["term_name"] == displays[3]["term_name"]
+    assert displays[0]["term_id"] != displays[3]["term_id"]
+    assert displays[0]["term_starts_on"] == "2026-09-01"
+    assert displays[0]["term_ends_on"] == "2027-01-31"
+    assert displays[3]["term_starts_on"] == "2027-02-01"
+    assert displays[3]["term_ends_on"] == "2027-06-30"
+
+
+def test_editor_read_query_count_is_bounded_for_repeated_and_diverse_links(editor):  # noqa: F811
+    e = editor
+    for _ in range(200):
+        e.lesson(teacher_id=e.teacher.id, room_ids=[e.rooms[0].id])
+    diverse_ids = []
+    diverse_group_id = e.groups[1].id
+    diverse_group_name = e.groups[1].name
+    for index in range(200):
+        group = e.add(
+            StudyGroup,
+            name=f"Load group {index}",
+            program_id=e.groups[0].program_id,
+            course_number=1,
+        )
+        subgroup = e.add(Subgroup, name=f"Load subgroup {index}", group_id=group.id)
+        teacher = e.add(Teacher, full_name=f"Load teacher {index}")
+        room = e.add(
+            Room,
+            name=f"Load room {index}",
+            building_id=e.buildings[index % len(e.buildings)].id,
+        )
+        offering = e.add(
+            CourseOffering,
+            discipline_id=e.discipline.id,
+            term_id=e.term.id,
+            attestation_type="pass_fail",
+        )
+        e.add(CourseGroup, course_offering_id=offering.id, group_id=group.id)
+        e.add(CourseGroup, course_offering_id=offering.id, group_id=diverse_group_id)
+        starts_at = datetime.fromisoformat("2026-11-10T09:00:00+03:00") + timedelta(minutes=index)
+        lesson = e.add(
+            Lesson,
+            course_offering_id=offering.id,
+            teacher_id=teacher.id,
+            starts_at=starts_at,
+            ends_at=starts_at + timedelta(minutes=45),
+            kind="seminar",
+        )
+        e.add(LessonGroup, lesson_id=lesson.id, group_id=diverse_group_id)
+        e.add(
+            LessonGroup,
+            lesson_id=lesson.id,
+            group_id=group.id,
+            subgroup_id=subgroup.id,
+        )
+        e.add(LessonRoom, lesson_id=lesson.id, room_id=room.id)
+        diverse_ids.append(str(lesson.id))
+    e.db.commit()
+
+    def read_and_count(params, limit, after_id=None):
         e.db.connection()
         e.db.expunge_all()
         statements = []
         listener = make_query_listener(statements)
         event.listen(e.db.bind, "before_cursor_execute", listener)
         try:
-            response = e.request_editor("GET", params=params | {"limit": count})
+            request_params = params | {"limit": limit}
+            if after_id is not None:
+                request_params["after_id"] = after_id
+            response = e.request_editor(
+                "GET",
+                params=request_params,
+            )
         finally:
             event.remove(e.db.bind, "before_cursor_execute", listener)
         assert response.status_code == 200, response.text
-        assert len(response.json()["items"]) == count
-        counts.append(len(statements))
-    print(f"Editor lesson SQL counts for page sizes 1/200: {counts}")
-    assert counts[0] == counts[1]
-    assert len(lessons) == 200
+        return response.json(), len(statements)
+
+    repeated_params = {
+        "resource": "group",
+        "resource_id": str(e.groups[0].id),
+        "date_from": "2026-11-10",
+        "date_to": "2026-11-10",
+    }
+    repeated_one, repeated_count_one = read_and_count(repeated_params, 1)
+    repeated_page, repeated_count_200 = read_and_count(repeated_params, 200)
+    assert len(repeated_one["items"]) == 1
+    assert len(repeated_page["items"]) == 200
+    assert len({item["id"] for item in repeated_page["items"]}) == 200
+    assert repeated_count_one == repeated_count_200
+    assert all(
+        len(item["display"]["participants"]) == 1
+        and len(item["display"]["rooms"]) == 1
+        and len(item["display"]["course_offering"]["groups"]) == 2
+        for item in repeated_page["items"]
+    )
+
+    diverse_params = repeated_params | {"resource_id": str(diverse_group_id)}
+    diverse_one, diverse_count_one = read_and_count(diverse_params, 1)
+    diverse_page, diverse_count_200 = read_and_count(diverse_params, 200)
+    assert len(diverse_one["items"]) == 1
+    assert [item["id"] for item in diverse_page["items"]] == diverse_ids
+    assert len({item["id"] for item in diverse_page["items"]}) == 200
+    assert diverse_count_one == diverse_count_200
+    assert abs(diverse_count_200 - repeated_count_200) <= 2
+    for index, item in enumerate(diverse_page["items"]):
+        display = item["display"]
+        assert len(display["participants"]) == 2
+        assert len({participant["group_id"] for participant in display["participants"]}) == 2
+        assert len(display["rooms"]) == len({room["id"] for room in display["rooms"]}) == 1
+        offering_groups = display["course_offering"]["groups"]
+        offering_group_ids = [group["id"] for group in offering_groups]
+        assert len(offering_group_ids) == len(set(offering_group_ids)) == 2
+        assert [group["name"] for group in offering_groups] == [
+            diverse_group_name,
+            f"Load group {index}",
+        ]
+        assert display["teacher"]["full_name"] == f"Load teacher {index}"
+
+    first_page, _ = read_and_count(diverse_params, 100)
+    second_page, _ = read_and_count(diverse_params, 100, after_id=first_page["next_after_id"])
+    paged_ids = [item["id"] for item in first_page["items"] + second_page["items"]]
+    assert len(first_page["items"]) == len(second_page["items"]) == 100
+    assert paged_ids == diverse_ids
+    assert len(set(paged_ids)) == 200
+    print(
+        "Editor SQL counts for 1/200 repeated and 1/200 diverse lessons: "
+        f"{repeated_count_one}/{repeated_count_200}, {diverse_count_one}/{diverse_count_200}"
+    )

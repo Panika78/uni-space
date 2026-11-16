@@ -1177,9 +1177,21 @@
             "title": "Discipline Name",
             "type": "string"
           },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/EditorOfferingGroupDisplay"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
           "id": {
             "pattern": "^[1-9][0-9]*$",
             "title": "Id",
+            "type": "string"
+          },
+          "term_ends_on": {
+            "format": "date",
+            "title": "Term Ends On",
             "type": "string"
           },
           "term_id": {
@@ -1190,6 +1202,11 @@
           "term_name": {
             "title": "Term Name",
             "type": "string"
+          },
+          "term_starts_on": {
+            "format": "date",
+            "title": "Term Starts On",
+            "type": "string"
           }
         },
         "required": [
@@ -1199,7 +1216,10 @@
           "discipline_code",
           "term_id",
           "term_name",
-          "attestation_type"
+          "term_starts_on",
+          "term_ends_on",
+          "attestation_type",
+          "groups"
         ],
         "title": "EditorCourseOfferingDisplay",
         "type": "object"
@@ -1374,6 +1394,26 @@
           "rooms"
         ],
         "title": "EditorLessonDisplay",
+        "type": "object"
+      },
+      "EditorOfferingGroupDisplay": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "EditorOfferingGroupDisplay",
         "type": "object"
       },
       "EditorParticipantDisplay": {

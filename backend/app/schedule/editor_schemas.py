@@ -1,5 +1,6 @@
 """Staff editor contract; complete proposed state on PATCH and move."""
 
+from datetime import date
 from typing import Annotated, Literal, Self
 
 from pydantic import AfterValidator, Field, model_validator
@@ -37,6 +38,11 @@ class EditorRoomDisplay(RequestModel):
     building_name: str
 
 
+class EditorOfferingGroupDisplay(RequestModel):
+    id: Id
+    name: str
+
+
 class EditorCourseOfferingDisplay(RequestModel):
     id: Id
     discipline_id: Id
@@ -44,7 +50,10 @@ class EditorCourseOfferingDisplay(RequestModel):
     discipline_code: str | None
     term_id: Id
     term_name: str
+    term_starts_on: date
+    term_ends_on: date
     attestation_type: Literal["exam", "pass_fail", "graded_pass"]
+    groups: list[EditorOfferingGroupDisplay]
 
 
 class EditorTeacherDisplay(RequestModel):

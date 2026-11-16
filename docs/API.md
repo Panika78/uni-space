@@ -778,13 +778,16 @@ JWT после отзыва разрешения. Student `/schedule` сохра
 
 `EditorLesson.display` не заменяет существующие ID-поля. `course_offering` содержит
 `id`, `discipline_id`, `discipline_name`, nullable `discipline_code`, `term_id`,
-`term_name`, `attestation_type`; `teacher` — nullable `{id, full_name}`;
+`term_name`, `term_starts_on`, `term_ends_on`, `attestation_type` и `groups` — список
+связанных `{id, name}` из `course_groups`; ID проведения остаётся идентификатором,
+который различает записи даже при полном совпадении остальных характеристик.
+`teacher` — nullable `{id, full_name}`; при наличии аккаунта `full_name` берётся из
+`users.full_name`, иначе из `teachers.full_name`;
 `participants` — по одной записи на существующего участника с `group_id`,
 `group_name`, nullable `subgroup_id` и `subgroup_name`; `rooms` — по одной записи на
 аудиторию с `id`, `name`, `building_id`, `building_name`. Поэтому одинаковые
-названия не объединяют разные сущности, а проведение различается дисциплиной,
-семестром и типом аттестации. Подписи загружаются пакетно для страницы расписания;
-catalog lookup не требуется.
+названия не объединяют разные сущности. Подписи загружаются пакетно для страницы
+расписания; catalog lookup не требуется.
 
 Обычное редактирование разрешено только scheduled; cancel: scheduled→cancelled,
 move: scheduled→moved + новая scheduled, restore: cancelled→scheduled.

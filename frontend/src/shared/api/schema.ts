@@ -1351,12 +1351,24 @@ export interface components {
             discipline_id: string;
             /** Discipline Name */
             discipline_name: string;
+            /** Groups */
+            groups: components["schemas"]["EditorOfferingGroupDisplay"][];
             /** Id */
             id: string;
+            /**
+             * Term Ends On
+             * Format: date
+             */
+            term_ends_on: string;
             /** Term Id */
             term_id: string;
             /** Term Name */
             term_name: string;
+            /**
+             * Term Starts On
+             * Format: date
+             */
+            term_starts_on: string;
         };
         /** EditorLesson */
         EditorLesson: {
@@ -1408,6 +1420,13 @@ export interface components {
             /** Rooms */
             rooms: components["schemas"]["EditorRoomDisplay"][];
             teacher: components["schemas"]["EditorTeacherDisplay"] | null;
+        };
+        /** EditorOfferingGroupDisplay */
+        EditorOfferingGroupDisplay: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
         };
         /** EditorParticipantDisplay */
         EditorParticipantDisplay: {

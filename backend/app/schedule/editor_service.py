@@ -36,6 +36,7 @@ from app.schedule.editor_schemas import (
     EditorCourseOfferingDisplay,
     EditorLesson,
     EditorLessonDisplay,
+    EditorOfferingGroupDisplay,
     EditorParticipantDisplay,
     EditorRoomDisplay,
     EditorSchedule,
@@ -107,6 +108,8 @@ def list_editor_lessons(db: Session, lessons: list[Lesson]) -> list[EditorLesson
             Discipline.code,
             CourseOffering.term_id.label("term_id"),
             AcademicTerm.name.label("term_name"),
+            AcademicTerm.starts_on.label("term_starts_on"),
+            AcademicTerm.ends_on.label("term_ends_on"),
             CourseOffering.attestation_type,
         )
         .join(Discipline, Discipline.id == CourseOffering.discipline_id)
@@ -114,11 +117,23 @@ def list_editor_lessons(db: Session, lessons: list[Lesson]) -> list[EditorLesson
         .where(CourseOffering.id.in_(offering_ids))
     ).all()
     offerings = {row.offering_id: row for row in offering_rows}
+    offering_groups = defaultdict(list)
+    for offering_id, group_id, group_name in db.execute(
+        select(CourseGroup.course_offering_id, StudyGroup.id, StudyGroup.name)
+        .join(StudyGroup, StudyGroup.id == CourseGroup.group_id)
+        .where(CourseGroup.course_offering_id.in_(offering_ids))
+        .order_by(CourseGroup.course_offering_id, StudyGroup.id)
+    ):
+        offering_groups[offering_id].append(
+            EditorOfferingGroupDisplay(id=str(group_id), name=group_name)
+        )
     teacher_ids = {lesson.teacher_id for lesson in lessons if lesson.teacher_id is not None}
     teachers = (
         dict(
             db.execute(
-                select(Teacher.id, Teacher.full_name).where(Teacher.id.in_(teacher_ids))
+                select(Teacher.id, func.coalesce(User.full_name, Teacher.full_name))
+                .outerjoin(User, Teacher.user_id == User.id)
+                .where(Teacher.id.in_(teacher_ids))
             ).all()
         )
         if teacher_ids
@@ -201,7 +216,10 @@ def list_editor_lessons(db: Session, lessons: list[Lesson]) -> list[EditorLesson
                     discipline_code=offerings[lesson.course_offering_id].code,
                     term_id=str(offerings[lesson.course_offering_id].term_id),
                     term_name=offerings[lesson.course_offering_id].term_name,
+                    term_starts_on=offerings[lesson.course_offering_id].term_starts_on,
+                    term_ends_on=offerings[lesson.course_offering_id].term_ends_on,
                     attestation_type=offerings[lesson.course_offering_id].attestation_type,
+                    groups=offering_groups[lesson.course_offering_id],
                 ),
                 teacher=(
                     EditorTeacherDisplay(
