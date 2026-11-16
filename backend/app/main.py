@@ -22,6 +22,7 @@ from app.core.schemas import (
 from app.final_results import journal_router as final_results_journal_router
 from app.final_results import router as final_results_router
 from app.news.router import router as news_router
+from app.news.staff_router import router as staff_news_router
 from app.notifications import router as notifications_router
 from app.permissions import router as permissions_router
 from app.preferences import router as preferences_router
@@ -55,6 +56,7 @@ app.include_router(schedule_editor_router)
 app.include_router(students_router)
 app.include_router(staff_students_router)
 app.include_router(news_router)
+app.include_router(staff_news_router)
 app.include_router(teaching_router)
 app.include_router(final_results_router)
 app.include_router(final_results_journal_router)

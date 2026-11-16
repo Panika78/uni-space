@@ -450,3 +450,135 @@ def test_production_acl_allows_only_academic_status_and_transactional_audit(
             {"actor": c["actors"][0]},
         )
         db.execute(delete(AuditEvent).where(AuditEvent.actor_user_id == c["actors"][0]))
+
+
+def test_production_acl_allows_news_workflow_and_keeps_audit_append_only(
+    context,  # noqa: F811
+    runtime_engine,
+):
+    from app.models import AuditEvent, News, StaffPermission, StaffProfile
+    from app.news.router import router as student_news_router
+    from app.news.staff_router import router as staff_news_router
+
+    c = context
+    admin_engine, api_engine = runtime_engine
+    c["client"].app.include_router(student_news_router)
+    c["client"].app.include_router(staff_news_router)
+
+    def runtime_session():
+        with Session(api_engine) as db:
+            yield db
+
+    c["client"].app.dependency_overrides[get_db_session] = runtime_session
+    with Session(admin_engine) as db, db.begin():
+        profile = db.get(StaffProfile, c["profiles"][0])
+        db.add(
+            StaffPermission(
+                staff_profile_id=profile.id,
+                permission_code="news.publish",
+                scope_org_unit_id=profile.org_unit_id,
+            )
+        )
+    staff_token = c["tokens"][0]
+    created = c["request"](
+        "POST",
+        "/api/v1/staff/news",
+        staff_token,
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"title": "ACL news", "body": "Runtime role workflow"},
+    )
+    assert created.status_code == 201, created.text
+    news_id = created.json()["id"]
+    version = created.json()["version"]
+    for path, method, body in (
+        (f"/api/v1/staff/news/{news_id}/publish", "POST", None),
+        (
+            f"/api/v1/staff/news/{news_id}",
+            "PATCH",
+            {"title": "Edited", "body": "Runtime role workflow", "version": version + 1},
+        ),
+        (f"/api/v1/staff/news/{news_id}/unpublish", "POST", None),
+        (f"/api/v1/staff/news/{news_id}/publish", "POST", None),
+    ):
+        response = c["request"](method, path, staff_token, **({"json": body} if body else {}))
+        assert response.status_code == 200, response.text
+        version = response.json()["version"]
+    assert c["request"]("GET", "/api/v1/staff/news", staff_token).status_code == 200
+    with api_engine.connect() as db:
+        assert db.scalar(
+            text(
+                "SELECT has_sequence_privilege(current_user, "
+                "pg_get_serial_sequence('news','id'),'USAGE')"
+            )
+        )
+        assert not db.scalar(text("SELECT has_table_privilege(current_user,'news','DELETE')"))
+        assert not db.scalar(
+            text("SELECT has_table_privilege(current_user,'news_create_requests','INSERT')")
+        )
+        assert not db.scalar(
+            text("SELECT has_table_privilege(current_user,'news_create_requests','SELECT')")
+        )
+        assert not db.scalar(
+            text("SELECT has_table_privilege(current_user,'news_create_requests','UPDATE')")
+        )
+        for column in (
+            "actor_user_id",
+            "org_unit_id",
+            "idempotency_key",
+            "payload_hash",
+            "news_id",
+            "response_data",
+        ):
+            assert db.scalar(
+                text(
+                    "SELECT has_column_privilege(current_user,'news_create_requests',"
+                    ":column,'SELECT')"
+                ),
+                {"column": column},
+            )
+        for column in ("actor_user_id", "org_unit_id", "idempotency_key", "payload_hash"):
+            assert db.scalar(
+                text(
+                    "SELECT has_column_privilege(current_user,'news_create_requests',"
+                    ":column,'INSERT')"
+                ),
+                {"column": column},
+            )
+        for column in ("news_id", "response_data"):
+            assert not db.scalar(
+                text(
+                    "SELECT has_column_privilege(current_user,'news_create_requests',"
+                    ":column,'INSERT')"
+                ),
+                {"column": column},
+            )
+        for column in ("news_id", "response_data"):
+            assert db.scalar(
+                text(
+                    "SELECT has_column_privilege(current_user,'news_create_requests',"
+                    ":column,'UPDATE')"
+                ),
+                {"column": column},
+            )
+        for action in ("UPDATE", "DELETE"):
+            assert not db.scalar(
+                text("SELECT has_table_privilege(current_user,'audit_events',:action)"),
+                {"action": action},
+            )
+    with admin_engine.connect() as db:
+        assert (
+            db.scalar(
+                text(
+                    "SELECT count(*) FROM audit_events WHERE entity_type='news' AND entity_id=:id"
+                ),
+                {"id": int(news_id)},
+            )
+            == 5
+        )
+    with Session(admin_engine) as db, db.begin():
+        db.execute(
+            delete(AuditEvent).where(
+                AuditEvent.entity_type == "news", AuditEvent.entity_id == int(news_id)
+            )
+        )
+        db.execute(delete(News).where(News.id == int(news_id)))

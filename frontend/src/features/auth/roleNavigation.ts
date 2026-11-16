@@ -39,7 +39,9 @@ export function getRoleNavigation(context: AuthorizationContext): NavigationItem
             ? '/staff/students'
             : permission === 'students.status.edit'
               ? '/staff/students/status'
-              : `/staff#${permission}`,
+              : permission === 'news.publish'
+                ? '/staff/news'
+                : `/staff#${permission}`,
       label,
       icon: 'file',
     }))

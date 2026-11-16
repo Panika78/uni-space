@@ -150,10 +150,16 @@ export function StaffHome() {
       {sections.map(({ permission, label }) => (
         <section key={permission} id={permission}>
           <h2>{label}</h2>
-          <p>
-            Модуль пока недоступен. Полномочие предоставлено, функциональность будет подключена на
-            следующем этапе MVP2.
-          </p>
+          {permission === 'news.publish' ? (
+            <p>
+              <Link to="/staff/news">Открыть редактор новостей</Link>
+            </p>
+          ) : (
+            <p>
+              Модуль пока недоступен. Полномочие предоставлено, функциональность будет подключена на
+              следующем этапе MVP2.
+            </p>
+          )}
         </section>
       ))}
     </section>
