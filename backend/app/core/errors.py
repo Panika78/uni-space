@@ -21,9 +21,18 @@ HTTP_ERROR_CODES = {
     },
     403: {"forbidden", "origin_not_allowed"},
     404: {"not_found"},
-    409: {"version_conflict", "invalid_transition", "concurrent_change"},
+    409: {
+        "version_conflict",
+        "invalid_transition",
+        "conflict",
+        "concurrent_change",
+        "login_exists",
+        "teacher_unavailable",
+        "self_block_forbidden",
+        "last_admin",
+    },
     413: {"request_too_large"},
-    422: {"validation_error"},
+    422: {"validation_error", "invalid_profile", "invalid_permission_scope"},
     429: {"rate_limited"},
 }
 DEFAULT_HTTP_ERROR_CODES = {

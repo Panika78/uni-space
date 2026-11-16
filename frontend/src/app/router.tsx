@@ -1,3 +1,4 @@
+import { UsersPage, CreateUserPage, UserDetailPage } from '../features/admin/UsersPage'
 import {
   RoleAccess,
   RoleStart,
@@ -179,7 +180,9 @@ export const appRoutes: RouteObject[] = [
                   {
                     element: <RoleGuard role="admin" />,
                     children: [
-                      { path: '/admin/users', element: <ModuleUnavailable title="Пользователи" /> },
+                      { path: '/admin/users', element: <UsersPage /> },
+                      { path: '/admin/users/new', element: <CreateUserPage /> },
+                      { path: '/admin/users/:id', element: <UserDetailPage /> },
                     ],
                   },
                   {

@@ -74,6 +74,8 @@ def runtime_engine(migration_database):  # noqa: F811
             assert result.returncode == 0, result.stderr
             if iteration == 0:
                 run_migration(admin_engine, "upgrade", "head")
+                with admin_engine.begin() as db:
+                    db.execute(text("GRANT UPDATE (id) ON users TO uni_space_api"))
         api_engine = create_engine(
             admin_engine.url.set(username="uni_space_api", password=API_PASSWORD)
         )
