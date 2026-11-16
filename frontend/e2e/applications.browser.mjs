@@ -51,7 +51,10 @@ try {
     await page.getByRole('link', { name: 'Мои заявления', exact: true }).click()
     await page.getByRole('heading', { name: 'Мои заявления' }).waitFor()
     await page.getByRole('link', { name: 'Каталог услуг', exact: true }).click()
-    await page.getByRole('link', { name: 'Подать заявление' }).click()
+    await page
+      .getByRole('article', { name: 'Справка об обучении' })
+      .getByRole('link', { name: 'Подать заявление', exact: true })
+      .click()
     const place = `Task014 ${width} — Канцелярия`
     await page.getByLabel(/Место предоставления/).fill(place)
     const responsePromise = page.waitForResponse(

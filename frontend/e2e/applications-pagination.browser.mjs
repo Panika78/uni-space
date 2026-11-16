@@ -262,7 +262,10 @@ try {
     catalogFailed = false
     const documentOrigin = await page.evaluate(() => performance.timeOrigin)
     await page.getByRole('button', { name: 'Повторить' }).click()
-    await page.getByRole('link', { name: 'Подать заявление' }).waitFor()
+    await page
+      .getByRole('article', { name: 'Справка об обучении' })
+      .getByRole('link', { name: 'Подать заявление', exact: true })
+      .waitFor()
     assert.equal(await page.evaluate(() => performance.timeOrigin), documentOrigin)
     console.log(
       `PASS ${width}px R3-02: forbidden initial/refetch/append hide all private list content; recovery; HTTP500 stale retry; catalog denied/500`,

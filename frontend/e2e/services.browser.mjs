@@ -120,7 +120,28 @@ try {
 
   await page.goto(`${baseURL}/services`)
   await page.getByRole('heading', { name: 'Услуги и документы' }).waitFor()
-  await page.getByRole('link', { name: 'Подать заявление' }).click()
+  for (const title of [
+    'Справка об обучении',
+    'Выписка об успеваемости',
+    'Академический отпуск',
+    'Бухгалтерская справка',
+  ]) {
+    await page.getByRole('heading', { name: title }).waitFor()
+  }
+  assert.equal(await page.getByRole('link', { name: /Требования и форма/ }).isVisible(), true)
+  for (const width of [360, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.waitForTimeout(150)
+    assert.ok(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      `Catalog fits ${width}px`,
+    )
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page
+    .getByRole('article', { name: 'Справка об обучении' })
+    .getByRole('link', { name: 'Подать заявление' })
+    .click()
   await page.getByRole('heading', { name: 'Справка об обучении' }).waitFor()
   const field = page.getByLabel(/Место предоставления/)
   assert.equal(await field.getAttribute('required'), '')
@@ -458,7 +479,10 @@ try {
   }
 
   await page.getByRole('link', { name: 'Каталог услуг', exact: true }).click()
-  await page.getByRole('link', { name: 'Подать заявление' }).click()
+  await page
+    .getByRole('article', { name: 'Справка об обучении' })
+    .getByRole('link', { name: 'Подать заявление' })
+    .click()
   const maxField = page.getByLabel(/Место предоставления/)
   const maxValue = 'А'.repeat(299) + '😀'
   await maxField.fill(maxValue)
@@ -472,7 +496,10 @@ try {
   assert.equal(maxResponse.status(), 201)
   assert.equal(Array.from((await maxResponse.json()).form_data.place_of_submission).length, 300)
   await page.getByRole('link', { name: 'К каталогу услуг' }).click()
-  await page.getByRole('link', { name: 'Подать заявление' }).click()
+  await page
+    .getByRole('article', { name: 'Справка об обучении' })
+    .getByRole('link', { name: 'Подать заявление' })
+    .click()
   const overLimitField = page.getByLabel(/Место предоставления/)
   await overLimitField.fill('А'.repeat(300) + '😀')
   await page.getByRole('button', { name: 'Отправить заявление' }).click()
@@ -526,6 +553,12 @@ try {
             id: '999',
             code: 'study_certificate',
             title: 'А'.repeat(280),
+            description: 'Описание',
+            processing_mode: 'automatic',
+            produces_document: true,
+            action_available: true,
+            unavailable_reason: null,
+            requirements: ['Место предоставления'],
           },
         ],
       }),
@@ -540,7 +573,10 @@ try {
       `No horizontal overflow at ${width}px with a long unbroken title`,
     )
   }
-  await page.getByRole('link', { name: 'Подать заявление' }).click()
+  await page
+    .getByRole('article', { name: 'А'.repeat(280) })
+    .getByRole('link', { name: 'Подать заявление' })
+    .click()
   await page.getByRole('heading', { name: 'Справка об обучении' }).waitFor()
   for (const width of [360, 320]) {
     await page.setViewportSize({ width, height: 800 })

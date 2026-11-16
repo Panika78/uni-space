@@ -56,10 +56,27 @@ def list_services(
 ) -> ServiceList:
     services = db.scalars(
         select(ServiceType)
-        .where(ServiceType.code == "study_certificate")
+        .where(ServiceType.code.in_(workflow.APPLICATION_FORMS))
         .order_by(ServiceType.code)
     ).all()
-    return ServiceList(items=[Service(id=str(s.id), code=s.code, title=s.title) for s in services])
+    items = []
+    for service in services:
+        available, reason = workflow.get_service_availability(db, service, _student)
+        description, requirements = workflow.SERVICE_DETAILS[service.code]
+        items.append(
+            Service(
+                id=str(service.id),
+                code=service.code,
+                title=service.title,
+                description=description,
+                processing_mode=service.processing_mode,
+                produces_document=service.produces_document,
+                action_available=available,
+                unavailable_reason=reason,
+                requirements=requirements,
+            )
+        )
+    return ServiceList(items=items)
 
 
 @router.post(
@@ -82,12 +99,19 @@ def submit_application(
     service = db.scalar(select(ServiceType).where(ServiceType.code == request.service_code))
     if service is None:
         raise HTTPException(422, "validation_error")
+    stored_form, assigned_org_unit_id = workflow.validate_and_store_form(
+        db, service, request.form_data.model_dump(), student=student
+    )
+    available, _reason = workflow.get_service_availability(db, service, student)
+    if not available:
+        raise HTTPException(409, "service_unavailable")
     application = Application(
         student_id=student.id,
         service_type_id=service.id,
         review_status="submitted",
-        document_status="pending",
-        form_data=request.form_data.model_dump(),
+        document_status="not_required" if service.code == "academic_leave" else "pending",
+        form_data=stored_form,
+        assigned_org_unit_id=assigned_org_unit_id,
         feedback=None,
         version=1,
     )
@@ -103,10 +127,21 @@ def submit_application(
                 comment=None,
             )
         )
+        description, requirements = workflow.SERVICE_DETAILS[service.code]
         payload = ApplicationResponse(
             id=str(application.id),
-            service=Service(id=str(service.id), code=service.code, title=service.title),
-            form_data=request.form_data,
+            service=Service(
+                id=str(service.id),
+                code=service.code,
+                title=service.title,
+                description=description,
+                processing_mode=service.processing_mode,
+                produces_document=service.produces_document,
+                action_available=False,
+                unavailable_reason=None,
+                requirements=requirements,
+            ),
+            form_data=stored_form,
             review_status=application.review_status,
             document_status=application.document_status,
             feedback=None,
@@ -123,9 +158,20 @@ def submit_application(
 
 
 def serialize_application(application: Application, service: ServiceType) -> ApplicationResponse:
+    description, requirements = workflow.SERVICE_DETAILS.get(service.code, ("", []))
     return ApplicationResponse(
         id=str(application.id),
-        service=Service(id=str(service.id), code=service.code, title=service.title),
+        service=Service(
+            id=str(service.id),
+            code=service.code,
+            title=service.title,
+            description=description,
+            processing_mode=service.processing_mode,
+            produces_document=service.produces_document,
+            action_available=False,
+            unavailable_reason=None,
+            requirements=requirements,
+        ),
         form_data=application.form_data,
         review_status=application.review_status,
         document_status=application.document_status,
@@ -331,7 +377,7 @@ def resubmit_application(
             student,
             parse_application_id(id),
             expected_version=request.expected_version,
-            form_data=request.form_data,
+            form_data=request.form_data.model_dump(),
         )
         payload = serialize_application(
             application, db.get(ServiceType, application.service_type_id)

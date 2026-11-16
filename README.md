@@ -325,6 +325,7 @@ set +a
 export PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_modules/playwright/index.mjs"
 export SERVICES_TEST_URL=http://localhost:5173
 node frontend/e2e/services.browser.mjs
+node frontend/e2e/services-mvp2.browser.mjs
 node frontend/e2e/applications.browser.mjs
 node frontend/e2e/applications-review.browser.mjs
 node frontend/e2e/applications-pagination.browser.mjs
@@ -336,6 +337,9 @@ node frontend/e2e/applications-pagination.browser.mjs
 `applications.browser.mjs` проверяет TASK-014 на desktop и 360 px: создание,
 детали, список, повторный вход, «Показать ещё», восстановление прокрутки,
 потерянный ответ POST и изоляцию аккаунтов.
+`services-mvp2.browser.mjs` проверяет полный каталог, адаптивность 360/1440 px,
+успешную отправку выписки и бухгалтерской справки, а также недоступность отправки
+академического отпуска до подключения обязательных вложений.
 `applications-review.browser.mjs` использует управляемые тестовые ответы GET для
 проверки обновления всех загруженных страниц, 200 → 404/network error → 200,
 мобильных подписей и полного клавиатурного возврата с fallback при исчезновении

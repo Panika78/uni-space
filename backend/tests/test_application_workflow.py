@@ -646,11 +646,15 @@ def test_new_endpoints_reject_forged_fields_versions_queries_and_missing_auth(co
 
 def test_academic_leave_approval_preserves_student_status_and_document_not_required(context):
     c = context
-    with Session(c["engine"]) as db, db.begin():
-        service = db.get(ServiceType, c["service_id"])
-        service.code = "academic_leave"  # controlled fixture, no production form/seed
-        service.produces_document = False
-    identifier = c["application"](document_status="not_required")
+    with Session(c["engine"]) as db:
+        service = db.scalar(select(ServiceType).where(ServiceType.code == "academic_leave"))
+        assert service is not None
+        service_id = service.id
+    identifier = c["application"](
+        service_type_id=service_id,
+        assigned_org_unit_id=c["unit_ids"][0],
+        document_status="not_required",
+    )
     assert c["review"](identifier, "start_review", 1).status_code == 200
     approved = c["review"](identifier, "approve", 2)
     assert approved.status_code == 200
