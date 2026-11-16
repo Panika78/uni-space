@@ -855,36 +855,22 @@ def test_mvp2_service_forms_fix_server_term_and_responsible_units(db_session):
             .select_from(ApplicationHistory)
             .where(ApplicationHistory.application_id == saved_application.id)
         )
-        resubmitted = client.post(
+        automatic_resubmit = client.post(
             f"/api/v1/applications/{saved_application.id}/resubmit",
             json={"expected_version": 2, "form_data": {}},
         )
-        assert resubmitted.status_code == 200, resubmitted.text
-        assert resubmitted.json()["id"] == transcript.json()["id"]
-        assert resubmitted.json()["version"] == 3
-        assert resubmitted.json()["form_data"] == saved_form
+        assert automatic_resubmit.status_code == 409
+        assert automatic_resubmit.json()["error"]["code"] == "invalid_transition"
+        assert saved_application.form_data == saved_form
         assert (
             db_session.scalar(
                 select(func.count())
                 .select_from(ApplicationHistory)
                 .where(ApplicationHistory.application_id == saved_application.id)
             )
-            == history_count + 1
+            == history_count
         )
-        stale_resubmit = client.post(
-            f"/api/v1/applications/{saved_application.id}/resubmit",
-            json={"expected_version": 2, "form_data": {}},
-        )
-        assert stale_resubmit.status_code == 409
-        assert stale_resubmit.json()["error"]["code"] == "version_conflict"
-        assert (
-            db_session.scalar(
-                select(func.count())
-                .select_from(ApplicationHistory)
-                .where(ApplicationHistory.application_id == saved_application.id)
-            )
-            == history_count + 1
-        )
+        assert saved_application.version == 2
 
         accounting_response = client.post(
             "/api/v1/applications",
@@ -894,6 +880,72 @@ def test_mvp2_service_forms_fix_server_term_and_responsible_units(db_session):
         accounting_application = db_session.get(Application, int(accounting_response.json()["id"]))
         assert accounting_application.assigned_org_unit_id == accounting.id
         assert accounting_application.document_status == "pending"
+        accounting_application.review_status = "needs_correction"
+        accounting_application.feedback = "Please clarify purpose"
+        accounting_application.version = 2
+        db_session.add(
+            ApplicationHistory(
+                application_id=accounting_application.id,
+                actor_user_id=student.user_id,
+                from_status="in_review",
+                to_status="needs_correction",
+                comment="Please clarify purpose",
+            )
+        )
+        db_session.flush()
+        accounting_history_count = db_session.scalar(
+            select(func.count())
+            .select_from(ApplicationHistory)
+            .where(ApplicationHistory.application_id == accounting_application.id)
+        )
+        malformed_resubmit = client.post(
+            f"/api/v1/applications/{accounting_application.id}/resubmit",
+            json={
+                "expected_version": 2,
+                "form_data": {"purpose": "Updated", "assigned_org_unit_id": accounting.id},
+            },
+        )
+        assert malformed_resubmit.status_code == 422
+        assert accounting_application.form_data == {"purpose": "For study"}
+        assert (
+            db_session.scalar(
+                select(func.count())
+                .select_from(ApplicationHistory)
+                .where(ApplicationHistory.application_id == accounting_application.id)
+            )
+            == accounting_history_count
+        )
+        resubmitted = client.post(
+            f"/api/v1/applications/{accounting_application.id}/resubmit",
+            json={"expected_version": 2, "form_data": {"purpose": "Updated purpose"}},
+        )
+        assert resubmitted.status_code == 200, resubmitted.text
+        assert resubmitted.json()["id"] == accounting_response.json()["id"]
+        assert resubmitted.json()["version"] == 3
+        assert resubmitted.json()["form_data"] == {"purpose": "Updated purpose"}
+        assert (
+            db_session.scalar(
+                select(func.count())
+                .select_from(ApplicationHistory)
+                .where(ApplicationHistory.application_id == accounting_application.id)
+            )
+            == accounting_history_count + 1
+        )
+        stale_accounting_resubmit = client.post(
+            f"/api/v1/applications/{accounting_application.id}/resubmit",
+            json={"expected_version": 2, "form_data": {"purpose": "Late update"}},
+        )
+        assert stale_accounting_resubmit.status_code == 409
+        assert stale_accounting_resubmit.json()["error"]["code"] == "version_conflict"
+        assert accounting_application.form_data == {"purpose": "Updated purpose"}
+        assert (
+            db_session.scalar(
+                select(func.count())
+                .select_from(ApplicationHistory)
+                .where(ApplicationHistory.application_id == accounting_application.id)
+            )
+            == accounting_history_count + 1
+        )
 
         duplicate_dean = OrgUnit(
             name=f"MVP2 forms second dean {uuid4().hex}", type="dean_office", parent_id=faculty.id
@@ -915,7 +967,7 @@ def test_mvp2_service_forms_fix_server_term_and_responsible_units(db_session):
         )
         assert leave_response.status_code == 409
         assert leave_response.json()["error"]["code"] == "responsible_unit_unavailable"
-        assert db_session.scalar(select(func.count()).select_from(Application)) == before + 2
+        assert db_session.scalar(select(func.count()).select_from(Application)) == before + 3
     finally:
         app.dependency_overrides.pop(get_db_session, None)
         app.dependency_overrides.pop(get_current_student, None)
