@@ -226,7 +226,9 @@ try {
     ['academic_leave', '500', 1, 'Обучается'],
     ['graduated', 'network', 2, 'В академическом отпуске'],
   ]) {
-    await page.getByRole('button', { name: 'Изменить статус' }).click()
+    if (failure === 'network') await page.setViewportSize({ width: 360, height: 900 })
+    const editTrigger = page.getByRole('button', { name: 'Изменить статус' })
+    await editTrigger.click()
     let dialog = page.getByRole('dialog', { name: 'Изменение статуса' })
     await dialog.getByText(`Предыдущий статус: ${previousLabel}`, { exact: true }).waitFor()
     let droppedPatchCount = 0
@@ -242,7 +244,9 @@ try {
     await dialog.getByRole('button', { name: 'Подтвердить изменение' }).click()
     await dialog.getByText(/Результат изменения неизвестен/).waitFor()
     verify(`check:${target}:${auditCount}`)
+    let failedDetailReads = 0
     await page.route(`**${studentDetailPath}`, async (route) => {
+      failedDetailReads++
       if (failure === '500') await route.fulfill({ status: 500, body: 'injected GET failure' })
       else await route.abort('failed')
     })
@@ -266,19 +270,39 @@ try {
       true,
     )
     await page.keyboard.press('Escape')
-    assert.equal(await dialog.isVisible(), true)
+    assert.equal(droppedPatchCount, 1)
+    await dialog.waitFor({ state: 'hidden' })
+    assert.equal(await editTrigger.evaluate((el) => el === document.activeElement), true)
+    await editTrigger.click()
+    dialog = page.getByRole('dialog', { name: 'Изменение статуса' })
+    await dialog
+      .getByText('Текущий статус неизвестен. Изменение недоступно до проверки.', { exact: true })
+      .waitFor()
     assert.equal(
-      await dialog.getByRole('button', { name: 'Проверка состояния обязательна' }).isDisabled(),
+      await dialog.getByText(`Предыдущий статус: ${previousLabel}`, { exact: true }).count(),
+      0,
+    )
+    assert.equal(await dialog.getByLabel('Новый статус').isDisabled(), true)
+    assert.equal(
+      await dialog.getByRole('button', { name: 'Подтвердить изменение' }).isDisabled(),
       true,
     )
+    assert.ok(failedDetailReads >= 2)
     assert.equal(droppedPatchCount, 1)
+    await dialog.getByRole('button', { name: 'Отмена' }).click()
+    await dialog.waitFor({ state: 'hidden' })
+    assert.equal(await editTrigger.evaluate((el) => el === document.activeElement), true)
     await page.unroute(`**${studentDetailPath}`)
-    await dialog.getByRole('button', { name: 'Повторно проверить актуальное состояние' }).click()
+    await editTrigger.click()
+    dialog = page.getByRole('dialog', { name: 'Изменение статуса' })
     const actualLabel = target === 'academic_leave' ? 'В академическом отпуске' : 'Выпускник'
     await dialog.getByText(`Предыдущий статус: ${actualLabel}`, { exact: true }).waitFor()
     assert.equal(await dialog.getByLabel('Новый статус').isEnabled(), true)
     assert.equal(droppedPatchCount, 1)
     await page.keyboard.press('Escape')
+    await dialog.waitFor({ state: 'hidden' })
+    assert.equal(await editTrigger.evaluate((el) => el === document.activeElement), true)
+    await checkWidth(page)
     await page.unroute('**/academic-status')
     verify(`check:${target}:${auditCount}`)
   }

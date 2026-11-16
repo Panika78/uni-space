@@ -41,6 +41,8 @@ type PendingStatusOperation = {
 }
 const pendingKey = (actorId: string, studentId: string) =>
   `staff-student-status:${actorId}:${studentId}`
+const refreshRequiredKey = (actorId: string, studentId: string) =>
+  `staff-student-status-refresh:${actorId}:${studentId}`
 function readPendingOperation(actorId: string, studentId: string): PendingStatusOperation | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(pendingKey(actorId, studentId)) ?? 'null')
@@ -75,6 +77,8 @@ function StatusEditor({
 }) {
   const { user_id: actorId } = useRoleContext()
   const initialOperation = readPendingOperation(actorId, studentId)
+  const requireFreshStatus = sessionStorage.getItem(refreshRequiredKey(actorId, studentId)) === '1'
+  const mustReadOnMount = !student || requireFreshStatus
   const [operationId, setOperationId] = useState(initialOperation?.operationId ?? '')
   const [target, setTarget] = useState<AcademicStatus | ''>(initialOperation?.status ?? '')
   const [reason, setReason] = useState<'administrative_change' | 'correction'>(
@@ -87,9 +91,9 @@ function StatusEditor({
   const [error, setError] = useState('')
   const [saved, setSaved] = useState<AcademicStatus | null>(null)
   const [receiptConfirmed, setReceiptConfirmed] = useState(false)
-  const [known, setKnown] = useState(student)
-  const [currentStateVerified, setCurrentStateVerified] = useState(!!student)
-  const [needsRefresh, setNeedsRefresh] = useState(false)
+  const [known, setKnown] = useState(requireFreshStatus ? undefined : student)
+  const [currentStateVerified, setCurrentStateVerified] = useState(!!student && !requireFreshStatus)
+  const [needsRefresh, setNeedsRefresh] = useState(requireFreshStatus)
   const [loadedStatus, setLoadedStatus] = useState<{
     studentId: string
     academicStatus: AcademicStatus
@@ -98,11 +102,12 @@ function StatusEditor({
     ? (known?.academic_status ??
       (loadedStatus?.studentId === studentId ? loadedStatus.academicStatus : null))
     : null
-  const [statusLoading, setStatusLoading] = useState(!student)
+  const [statusLoading, setStatusLoading] = useState(!student || requireFreshStatus)
   const [reconciling, setReconciling] = useState(false)
   const [reconciled, setReconciled] = useState(false)
   const [readRevoked, setReadRevoked] = useState(false)
   const [denied, setDenied] = useState(false)
+  const onReadDeniedRef = useRef(onReadDenied)
   const alive = useRef(true)
   const request = useRef<AbortController | null>(null)
   const busy = useRef(false)
@@ -115,33 +120,60 @@ function StatusEditor({
     }
   }, [])
   useEffect(() => {
-    onCriticalChange?.(pending || uncertain || needsRefresh)
-  }, [onCriticalChange, pending, uncertain, needsRefresh])
+    onReadDeniedRef.current = onReadDenied
+  }, [onReadDenied])
   useEffect(() => {
-    if (student) return
+    onCriticalChange?.(pending || uncertain)
+  }, [onCriticalChange, pending, uncertain])
+  useEffect(() => {
+    if (!mustReadOnMount) return
     const controller = new AbortController()
-    readAcademicStatus(studentId, controller.signal)
+    const readCurrent = canRead
+      ? readStudent(studentId, controller.signal)
+      : readAcademicStatus(studentId, controller.signal)
+    readCurrent
       .then((result) => {
         if (alive.current) {
+          if (canRead) {
+            const actual = result as Student
+            if (actual.id !== studentId) throw new Error('invalid_student_response')
+            setKnown(actual)
+          } else setKnown(undefined)
           setLoadedStatus({ studentId, academicStatus: result.academic_status })
           setCurrentStateVerified(true)
+          setNeedsRefresh(false)
+          setReconciled(true)
+          sessionStorage.removeItem(refreshRequiredKey(actorId, studentId))
+          void queryClient.invalidateQueries({ queryKey: ['staff-students'] })
         }
       })
       .catch((cause) => {
         if (!alive.current) return
-        setError(
-          cause instanceof ApiClientError && cause.status === 403
-            ? 'Доступ к чтению текущего статуса отозван.'
-            : cause instanceof ApiClientError && cause.status === 404
-              ? 'Студент с таким ID не найден.'
+        if (cause instanceof ApiClientError && cause.status === 403) {
+          setReadRevoked(true)
+          setKnown(undefined)
+          setLoadedStatus(null)
+          setCurrentStateVerified(false)
+          if (canRead) {
+            setError('Разрешение на чтение отозвано. Персональные данные скрыты.')
+            onReadDeniedRef.current?.()
+            void queryClient.invalidateQueries({ queryKey: ['authorization-context'] })
+          } else setError('Доступ к чтению текущего статуса отозван.')
+        } else if (cause instanceof ApiClientError && cause.status === 404) {
+          setError('Студент с таким ID не найден.')
+        } else {
+          setError(
+            requireFreshStatus
+              ? 'Ранее подтверждённую операцию нельзя сверить с текущим состоянием. Повторите чтение; новая запись заблокирована.'
               : 'Не удалось получить текущий статус. Изменение не отправлено.',
-        )
+          )
+        }
       })
       .finally(() => {
         if (alive.current) setStatusLoading(false)
       })
     return () => controller.abort()
-  }, [studentId, student])
+  }, [actorId, canRead, mustReadOnMount, queryClient, requireFreshStatus, studentId])
 
   function resetSuccess() {
     setSaved(null)
@@ -238,13 +270,13 @@ function StatusEditor({
       }
       sessionStorage.removeItem(pendingKey(actorId, studentId))
       setUncertain(false)
-      onCriticalChange?.(true)
       setSaved(target)
       setReceiptConfirmed(true)
       setKnown(undefined)
       setLoadedStatus(null)
       setCurrentStateVerified(false)
       setNeedsRefresh(true)
+      sessionStorage.setItem(refreshRequiredKey(actorId, studentId), '1')
       void queryClient.invalidateQueries({ queryKey: ['staff-students'] })
       await refreshCurrentState(controller, true)
     } catch (cause) {
@@ -281,6 +313,7 @@ function StatusEditor({
       setNeedsRefresh(false)
       setReconciled(true)
       onCriticalChange?.(false)
+      sessionStorage.removeItem(refreshRequiredKey(actorId, studentId))
       await queryClient.invalidateQueries({ queryKey: ['staff-students'] })
     } catch (cause) {
       if (!alive.current) return
@@ -508,17 +541,8 @@ function StatusEditor({
       )}
       <div className="student-form-actions">
         {onClose && (
-          <button
-            type="button"
-            className="button-secondary"
-            disabled={needsRefresh}
-            onClick={onClose}
-          >
-            {needsRefresh
-              ? 'Проверка состояния обязательна'
-              : pending || uncertain
-                ? 'Закрыть окно (результат не подтверждён)'
-                : 'Отмена'}
+          <button type="button" className="button-secondary" onClick={onClose}>
+            {pending || uncertain ? 'Закрыть окно (результат не подтверждён)' : 'Отмена'}
           </button>
         )}
         <button

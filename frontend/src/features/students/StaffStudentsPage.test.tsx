@@ -242,7 +242,7 @@ it.each([undefined, 500])(
   },
 )
 
-it('does not reuse a stale list status after a completed receipt and failed refresh', async () => {
+it('keeps a fresh-read requirement across closing and reopening the status dialog', async () => {
   let detailReads = 0
   const user = userEvent.setup()
   vi.mocked(apiFetch).mockImplementation(async (input, init) => {
@@ -257,7 +257,7 @@ it('does not reuse a stale list status after a completed receipt and failed refr
       return { completed: true, academic_status: 'academic_leave' } as never
     if (url === '/api/v1/staff/students/21') {
       detailReads++
-      if (detailReads === 1) throw new ApiClientError('', 'internal_error', 500)
+      if (detailReads < 4) throw new ApiClientError('', 'internal_error', 500)
       return { ...student, academic_status: 'academic_leave' } as never
     }
     return undefined as never
@@ -280,11 +280,27 @@ it('does not reuse a stale list status after a completed receipt and failed refr
   expect(
     vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'PATCH'),
   ).toHaveLength(1)
-  await user.click(
-    within(dialog).getByRole('button', { name: 'Повторно проверить актуальное состояние' }),
-  )
-  await within(dialog).findByText('Предыдущий статус: В академическом отпуске')
-  expect(within(dialog).getByLabelText('Новый статус')).toBeEnabled()
+  const trigger = screen.getByRole('button', { name: 'Изменить статус' })
+  await user.click(within(dialog).getByRole('button', { name: 'Отмена' }))
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(trigger).toHaveFocus()
+
+  await user.click(trigger)
+  const reopenedDialog = screen.getByRole('dialog', { name: 'Изменение статуса' })
+  await within(reopenedDialog).findByText(/Ранее подтверждённую операцию нельзя сверить/)
+  expect(within(reopenedDialog).queryByText('Предыдущий статус: Обучается')).not.toBeInTheDocument()
+  expect(within(reopenedDialog).getByText(/Текущий статус неизвестен/)).toBeInTheDocument()
+  expect(within(reopenedDialog).getByLabelText('Новый статус')).toBeDisabled()
+  expect(
+    vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'PATCH'),
+  ).toHaveLength(1)
+  await user.click(within(reopenedDialog).getByRole('button', { name: 'Отмена' }))
+  expect(trigger).toHaveFocus()
+
+  await user.click(trigger)
+  const refreshedDialog = screen.getByRole('dialog', { name: 'Изменение статуса' })
+  await within(refreshedDialog).findByText('Предыдущий статус: В академическом отпуске')
+  expect(within(refreshedDialog).getByLabelText('Новый статус')).toBeEnabled()
   expect(
     vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'PATCH'),
   ).toHaveLength(1)
