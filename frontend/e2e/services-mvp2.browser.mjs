@@ -100,9 +100,9 @@ try {
   await ends.fill('01.03.2028')
   const reloadDialogPromise = page.waitForEvent('dialog').then(async (dialog) => {
     assert.equal(dialog.type(), 'beforeunload')
-    await dialog.dismiss()
+    await dialog.accept()
   })
-  await Promise.all([page.reload({ waitUntil: 'commit' }), reloadDialogPromise])
+  await Promise.all([page.reload({ waitUntil: 'domcontentloaded' }), reloadDialogPromise])
   await page.getByLabel('Основание').waitFor()
   assert.equal(await page.getByLabel('Основание').inputValue(), 'other')
   assert.equal(

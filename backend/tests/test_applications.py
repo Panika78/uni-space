@@ -849,7 +849,8 @@ def test_mvp2_service_forms_fix_server_term_and_responsible_units(db_session):
                 comment="Please confirm details",
             )
         )
-        db_session.flush()
+        db_session.commit()
+        db_session.refresh(saved_application)
         history_count = db_session.scalar(
             select(func.count())
             .select_from(ApplicationHistory)
@@ -892,7 +893,8 @@ def test_mvp2_service_forms_fix_server_term_and_responsible_units(db_session):
                 comment="Please clarify purpose",
             )
         )
-        db_session.flush()
+        db_session.commit()
+        db_session.refresh(accounting_application)
         accounting_history_count = db_session.scalar(
             select(func.count())
             .select_from(ApplicationHistory)
