@@ -418,6 +418,10 @@ jobs:
           exit 1
       - name: Run services catalog and application browser E2E
         run: node frontend/e2e/services.browser.mjs
+      - name: Verify repeated browser seed preserves applications
+        run: uv run --locked --python 3.12.16 --project backend python backend/scripts/seed_services_browser_test_students.py >> "$GITHUB_ENV"
+      - name: Run MVP2 service forms browser E2E
+        run: node frontend/e2e/services-mvp2.browser.mjs
       - name: Restart API before application read scenarios
         run: |
           set -e

@@ -105,7 +105,10 @@ async function openNextForm(page) {
   if (await dialog.count())
     await dialog.getByRole('button', { name: /^(Выйти|Покинуть форму)$/ }).click()
   await heading(page, 'Услуги и документы')
-  await page.getByRole('link', { name: 'Подать заявление', exact: true }).click()
+  await page
+    .getByRole('article', { name: 'Справка об обучении' })
+    .getByRole('link', { name: 'Подать заявление', exact: true })
+    .click()
   await heading(page, 'Справка об обучении')
 }
 async function assertApplicationRecovery(page) {
@@ -123,7 +126,10 @@ async function assertApplicationRecovery(page) {
       .click()
   } else await page.getByRole('link', { name: 'Услуги и документы' }).click()
   await heading(page, 'Услуги и документы')
-  await page.getByRole('link', { name: 'Подать заявление', exact: true }).click()
+  await page
+    .getByRole('article', { name: 'Справка об обучении' })
+    .getByRole('link', { name: 'Подать заявление', exact: true })
+    .click()
   await heading(page, 'Справка об обучении')
   for (const [path, status] of [
     ['/api/v1/auth/context', 0],

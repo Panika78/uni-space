@@ -132,7 +132,10 @@ async function inspectMoves(page, account) {
 }
 
 async function submitAndRestore(page, account, password) {
-  await page.getByRole('link', { name: 'Подать заявление' }).click()
+  await page
+    .getByRole('article', { name: 'Справка об обучении' })
+    .getByRole('link', { name: 'Подать заявление', exact: true })
+    .click()
   const place = `Acceptance ${account} ${page.viewportSize().width}`
   await page.getByLabel(/Место предоставления/).fill(place)
   const pending = page.waitForResponse(
@@ -437,7 +440,10 @@ async function inspectStudent(
 
   await navigate(page, 'Услуги и документы')
   await page.getByRole('heading', { name: 'Услуги и документы', exact: true }).waitFor()
-  await page.getByRole('link', { name: 'Подать заявление' }).waitFor()
+  await page
+    .getByRole('article', { name: 'Справка об обучении' })
+    .getByRole('link', { name: 'Подать заявление', exact: true })
+    .waitFor()
   await noOverflow(page, width)
   await submitAndRestore(page, account, password)
   await page.screenshot({ path: `work/acceptance-${account}-${width}.png`, fullPage: true })
