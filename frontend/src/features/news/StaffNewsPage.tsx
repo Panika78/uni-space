@@ -56,6 +56,7 @@ export function StaffNewsPage() {
     null,
   )
   const [bodyDraft, setBodyDraft] = useState<{ id: string | undefined; value: string } | null>(null)
+  const [baseVersion, setBaseVersion] = useState<{ id: string; version: number } | null>(null)
   const [success, setSuccess] = useState('')
   const [feedback, setFeedback] = useState<string | null>(null)
   const [listAccessDenied, setListAccessDenied] = useState(false)
@@ -63,6 +64,13 @@ export function StaffNewsPage() {
   const createRequest = useRef<{ body: string; key: string } | null>(null)
   const isAccessDenied = (error: unknown) =>
     error instanceof ApiClientError && (error.status === 401 || error.status === 403)
+  function handleAccessDenied(error: unknown, deniedNewsId = newsId) {
+    if (!isAccessDenied(error)) return
+    setListAccessDenied(true)
+    if (deniedNewsId) setItemAccessDenied(deniedNewsId)
+    void queryClient.cancelQueries({ queryKey: staffNewsKey })
+    queryClient.removeQueries({ queryKey: staffNewsKey })
+  }
   const listQuery = useInfiniteQuery({
     queryKey: staffNewsKey,
     queryFn: async ({ pageParam, signal }) => {
@@ -75,7 +83,7 @@ export function StaffNewsPage() {
           },
         )
       } catch (error) {
-        if (isAccessDenied(error)) setListAccessDenied(true)
+        handleAccessDenied(error, undefined)
         throw error
       }
     },
@@ -93,7 +101,7 @@ export function StaffNewsPage() {
           signal,
         })
       } catch (error) {
-        if (isAccessDenied(error)) setItemAccessDenied(newsId ?? '')
+        handleAccessDenied(error, newsId)
         throw error
       }
     },
@@ -101,6 +109,11 @@ export function StaffNewsPage() {
     staleTime: 0,
   })
   const item = itemQuery.data
+  const hasUnsavedChanges = Boolean(
+    item &&
+    ((titleDraft?.id === newsId && titleDraft?.value !== item.title) ||
+      (bodyDraft?.id === newsId && bodyDraft?.value !== item.body)),
+  )
   useEffect(() => {
     if (listQuery.isError && isAccessDenied(listQuery.error)) {
       queryClient.removeQueries({ queryKey: staffNewsKey, exact: true })
@@ -128,12 +141,23 @@ export function StaffNewsPage() {
           method: newsId ? 'PATCH' : 'POST',
           headers: newsId ? undefined : { 'Idempotency-Key': variables.idempotencyKey },
           body: JSON.stringify(
-            newsId ? { ...variables.content, version: item?.version } : variables.content,
+            newsId
+              ? {
+                  ...variables.content,
+                  version: baseVersion?.id === newsId ? baseVersion.version : item?.version,
+                }
+              : variables.content,
           ),
         },
       ),
+    onError: (error) => handleAccessDenied(error),
     onSuccess: async (news, variables) => {
       if (!newsId) createRequest.current = null
+      if (newsId) {
+        setBaseVersion({ id: newsId, version: news.version })
+        setTitleDraft({ id: newsId, value: news.title })
+        setBodyDraft({ id: newsId, value: news.body })
+      }
       if (!variables.suppressSuccess)
         setSuccess(news.is_published ? 'Изменения сохранены.' : 'Черновик сохранён.')
       setFeedback(null)
@@ -153,7 +177,9 @@ export function StaffNewsPage() {
           method: 'POST',
         },
       ),
+    onError: (error) => handleAccessDenied(error),
     onSuccess: async (news) => {
+      setBaseVersion({ id: news.id, version: news.version })
       setSuccess(news.is_published ? 'Новость опубликована.' : 'Публикация снята.')
       await queryClient.invalidateQueries({ queryKey: staffNewsKey })
       await queryClient.invalidateQueries({ queryKey: newsFeedKey })
@@ -214,9 +240,11 @@ export function StaffNewsPage() {
 
       {!newsId && !isNew && (
         <>
-          <Link className="staff-news-create" to="/staff/news/new">
-            Создать новость
-          </Link>
+          {!listAccessDenied && !isAccessDenied(listQuery.error) && (
+            <Link className="staff-news-create" to="/staff/news/new">
+              Создать новость
+            </Link>
+          )}
           {!listAccessDenied && listQuery.isPending && <LoadingState title="Загружаем новости…" />}
           {listAccessDenied && (
             <ErrorState
@@ -303,6 +331,8 @@ export function StaffNewsPage() {
               onChange={(event) => {
                 if (codePointLength(event.target.value) > 200) return
                 setTitleDraft({ id: newsId, value: event.target.value })
+                if (newsId && item && !hasUnsavedChanges)
+                  setBaseVersion({ id: newsId, version: item.version })
                 clearMutationMessages()
               }}
             />
@@ -322,6 +352,8 @@ export function StaffNewsPage() {
               onChange={(event) => {
                 if (codePointLength(event.target.value) > 20_000) return
                 setBodyDraft({ id: newsId, value: event.target.value })
+                if (newsId && item && !hasUnsavedChanges)
+                  setBaseVersion({ id: newsId, version: item.version })
                 clearMutationMessages()
               }}
             />
@@ -364,13 +396,16 @@ export function StaffNewsPage() {
                         idempotencyKey: getCreateKey(content),
                         suppressSuccess: true,
                       })
+                    } catch {
+                      return
+                    }
+                    try {
                       await publishMutation.mutateAsync(true)
                     } catch (error) {
-                      if (!saveMutation.isError) {
+                      if (!isAccessDenied(error))
                         setFeedback(
                           `Изменения сохранены, но опубликовать новость не удалось: ${messageForError(error)}`,
                         )
-                      }
                     }
                   }}
                 >

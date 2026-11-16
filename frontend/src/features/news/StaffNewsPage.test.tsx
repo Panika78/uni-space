@@ -124,6 +124,46 @@ describe('staff news publishing', () => {
     expect(await screen.findByText('Изменения сохранены.')).toBeInTheDocument()
   })
 
+  it('keeps the edit base version after a background refetch for a second editor', async () => {
+    let itemReads = 0
+    const updatedByOtherEditor = { ...draft, title: 'Версия второго редактора', version: 2 }
+    apiFetch.mockImplementation((path: string | URL | Request, init?: RequestInit) => {
+      const requestPath = String(path)
+      if (requestPath === '/api/v1/staff/news/41') {
+        if (init?.method === 'PATCH')
+          return Promise.reject(new ApiClientError('conflict', 'version_conflict', 409))
+        itemReads += 1
+        return Promise.resolve(itemReads === 1 ? draft : updatedByOtherEditor)
+      }
+      if (requestPath.startsWith('/api/v1/staff/news'))
+        return Promise.resolve({ items: [draft], next_cursor: null })
+      return Promise.resolve({ items: [], next_cursor: null })
+    })
+    const user = userEvent.setup()
+    const { queryClient } = renderPage('/staff/news/41')
+    const title = await screen.findByLabelText('Заголовок')
+    await user.clear(title)
+    await user.type(title, 'Правка первого редактора')
+
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ['staff-news', '41'], exact: true })
+    })
+    expect(await screen.findByLabelText('Заголовок')).toHaveValue('Правка первого редактора')
+    expect(queryClient.getQueryData(['staff-news', '41'])).toEqual(updatedByOtherEditor)
+
+    await user.click(screen.getByRole('button', { name: 'Сохранить черновик' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Новость изменил другой сотрудник')
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/api/v1/staff/news/41',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ title: 'Правка первого редактора', body: draft.body, version: 1 }),
+      }),
+    )
+    expect(apiFetch.mock.calls.filter((call) => call[1]?.method === 'PATCH')).toHaveLength(1)
+    expect(screen.getByLabelText('Заголовок')).toHaveValue('Правка первого редактора')
+  })
+
   it('locks the new draft form while a delayed create is pending', async () => {
     let resolveCreate: ((value: typeof draft) => void) | undefined
     apiFetch.mockImplementation((path: string | URL | Request, init?: RequestInit) => {
@@ -164,6 +204,7 @@ describe('staff news publishing', () => {
     await screen.findByText('У вас отозвано право публикации новостей.')
     expect(screen.queryByText(draft.title)).not.toBeInTheDocument()
     expect(queryClient.getQueryData(['staff-news'])).toBeUndefined()
+    expect(screen.queryByRole('link', { name: 'Создать новость' })).not.toBeInTheDocument()
   })
 
   it('keeps cached list rows visible on an ordinary network failure', async () => {
@@ -234,4 +275,75 @@ describe('staff news publishing', () => {
     expect(await screen.findByText('Черновик сохранён.')).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
+
+  it.each([
+    ['PATCH', false, false],
+    ['publish', false, true],
+    ['unpublish', true, false],
+  ] as const)(
+    'hides protected editor after a 403 from %s',
+    async (operation, published, editFirst) => {
+      const item = {
+        ...draft,
+        is_published: published,
+        published_at: published ? '2026-11-15T12:00:00Z' : null,
+      }
+      apiFetch.mockImplementation((path: string | URL | Request, init?: RequestInit) => {
+        const requestPath = String(path)
+        if (
+          (operation === 'PATCH' &&
+            requestPath === '/api/v1/staff/news/41' &&
+            init?.method === 'PATCH') ||
+          (operation === 'publish' && requestPath.endsWith('/publish')) ||
+          (operation === 'unpublish' && requestPath.endsWith('/unpublish'))
+        )
+          return Promise.reject(new ApiClientError('forbidden', 'forbidden', 403))
+        if (requestPath === '/api/v1/staff/news/41') return Promise.resolve(item)
+        return Promise.resolve({ items: [item], next_cursor: null })
+      })
+      const user = userEvent.setup()
+      const { queryClient } = renderPage('/staff/news/41')
+      await screen.findByLabelText('Текст новости')
+      if (editFirst) {
+        await user.clear(screen.getByLabelText('Заголовок'))
+        await user.type(screen.getByLabelText('Заголовок'), 'Черновое изменение')
+      }
+      const action =
+        operation === 'PATCH'
+          ? screen.getByRole('button', { name: 'Сохранить черновик' })
+          : operation === 'publish'
+            ? screen.getByRole('button', { name: 'Опубликовать' })
+            : screen.getByRole('button', { name: 'Снять с публикации' })
+      await user.click(action)
+      expect(
+        await screen.findByText('У вас больше нет права публикации новостей.'),
+      ).toBeInTheDocument()
+      expect(screen.queryByText(item.title)).not.toBeInTheDocument()
+      expect(screen.queryByText(item.body)).not.toBeInTheDocument()
+      expect(queryClient.getQueryData(['staff-news', '41'])).toBeUndefined()
+    },
+  )
+
+  it.each([422, 500])(
+    'does not publish or claim saved when PATCH fails with %i',
+    async (status) => {
+      apiFetch.mockImplementation((path: string | URL | Request, init?: RequestInit) => {
+        const requestPath = String(path)
+        if (requestPath === '/api/v1/staff/news/41' && init?.method === 'PATCH')
+          return Promise.reject(new ApiClientError('save failed', 'save_failed', status))
+        if (requestPath === '/api/v1/staff/news/41') return Promise.resolve(draft)
+        return Promise.resolve({ items: [draft], next_cursor: null })
+      })
+      const user = userEvent.setup()
+      renderPage('/staff/news/41')
+      const title = await screen.findByLabelText('Заголовок')
+      await user.clear(title)
+      await user.type(title, 'Unsaved title')
+      await user.click(screen.getByRole('button', { name: 'Опубликовать' }))
+      expect(await screen.findByRole('alert')).toBeInTheDocument()
+      expect(screen.getByLabelText('Заголовок')).toHaveValue('Unsaved title')
+      expect(screen.queryByText(/Изменения сохранены, но опубликовать/)).not.toBeInTheDocument()
+      expect(apiFetch.mock.calls.some((call) => String(call[0]).endsWith('/publish'))).toBe(false)
+    },
+  )
 })
