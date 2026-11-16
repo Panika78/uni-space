@@ -650,11 +650,12 @@ it('does not confirm a malformed 201 response for an additional service', async 
     ...catalogService('10', 'Бухгалтерская справка'),
     code: 'accounting_certificate',
   }
-  apiFetch
-    .mockResolvedValueOnce({ items: [accountingService] })
-    .mockResolvedValueOnce({
-      id: '91', service: accountingService, review_status: 'submitted', document_status: 'pending',
-    })
+  apiFetch.mockResolvedValueOnce({ items: [accountingService] }).mockResolvedValueOnce({
+    id: '91',
+    service: accountingService,
+    review_status: 'submitted',
+    document_status: 'pending',
+  })
   const router = createMemoryRouter(
     [{ path: '/services/:serviceCode', element: <ApplicationFormPage /> }],
     { initialEntries: ['/services/accounting_certificate'] },
