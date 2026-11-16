@@ -1,4 +1,4 @@
-/* global process, console, document, window, URL, Event, Element */
+/* global process, console, document, window, URL, Event, Element, AbortController */
 // Real backend and fictional deploy/schedule_fixtures.py; faults are scoped to schedule reads.
 import assert from 'node:assert/strict'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -6,6 +6,7 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const baseURL = process.env.SCHEDULE_TEST_URL || 'http://localhost:5173'
 const password = process.env.SCHEDULE_TEST_PASSWORD
 assert.ok(password, 'Provide fictional SCHEDULE_TEST_PASSWORD')
+let responsiveLayoutWaitSequence = 0
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || undefined,
   headless: true,
@@ -454,6 +455,46 @@ async function checkPreferences(page, width) {
   )
 }
 
+async function checkResponsiveLayoutTimeout(page) {
+  await assert.rejects(
+    waitForResponsiveLayout(page, { timeoutMs: 250, stableFramesRequired: 10_000 }),
+    (error) => {
+      assert.match(error.message, /Responsive layout did not stabilize within 250 ms/)
+      assert.match(error.message, /"viewportWidth":1440/)
+      assert.match(error.message, /"activeAnimations"/)
+      assert.match(error.message, /"elements"/)
+      return true
+    },
+  )
+  await waitForResponsiveLayout(page)
+  check('Responsive layout wait is bounded and reports live diagnostics')
+}
+
+async function checkCardOverflowDetection(page) {
+  const card = page.locator('.lesson-card:visible').first()
+  await card.evaluate((element) => {
+    element.dataset.e2eOriginalPosition = element.style.position
+    element.style.position = 'relative'
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'e2e-overflow-probe'
+    button.textContent = 'Overflow probe'
+    button.style.cssText = `position:absolute;left:${element.clientWidth - 8}px;top:0;width:32px;height:32px;`
+    element.append(button)
+  })
+  try {
+    await assert.rejects(noOverflow(page), /Visible lesson-card content escapes card bounds/)
+  } finally {
+    await card.evaluate((element) => {
+      element.querySelector('.e2e-overflow-probe')?.remove()
+      element.style.position = element.dataset.e2eOriginalPosition
+      delete element.dataset.e2eOriginalPosition
+    })
+  }
+  await noOverflow(page)
+  check('No-overflow rejects an artificial visible button escaping its lesson card')
+}
+
 async function checkCancelledLesson(card, width) {
   assert.ok((await card.innerText()).includes('Отменено'))
   for (const selector of ['time', 'h3']) {
@@ -659,72 +700,200 @@ async function noOverflow(page) {
     overflow.documentWidth <= overflow.viewportWidth,
     `No horizontal page overflow: ${JSON.stringify(overflow)}`,
   )
-  assert.ok(
-    await page.locator('.lesson-card:visible').evaluateAll((cards) =>
-      cards.every((card) => {
-        const bounds = card.getBoundingClientRect()
-        return [...card.querySelectorAll('h3, p, time, li')].every((child) => {
-          const rect = child.getBoundingClientRect()
-          return rect.left >= bounds.left && rect.right <= bounds.right + 1
+  await assertLessonCardContentsFit(page)
+}
+
+async function assertLessonCardContentsFit(page) {
+  const escapingContent = await page.locator('.lesson-card:visible').evaluateAll((cards) =>
+    cards.flatMap((card) => {
+      const bounds = card.getBoundingClientRect()
+      return [
+        ...card.querySelectorAll(
+          'h1, h2, h3, h4, p, time, span, strong, em, li, button, a, [role], [class*="tag"], [class*="status"]',
+        ),
+      ]
+        .filter((element) => {
+          const style = window.getComputedStyle(element)
+          const rect = element.getBoundingClientRect()
+          return (
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            rect.width > 0 &&
+            rect.height > 0
+          )
         })
-      }),
-    ),
-    'Long names stay inside cards',
+        .filter((element) => {
+          const rect = element.getBoundingClientRect()
+          return rect.left < bounds.left || rect.right > bounds.right + 1
+        })
+        .map((element) => {
+          const rect = element.getBoundingClientRect()
+          return {
+            tag: element.tagName.toLowerCase(),
+            className: typeof element.className === 'string' ? element.className : '',
+            text: element.innerText?.trim().slice(0, 100),
+            left: Number(rect.left.toFixed(2)),
+            right: Number(rect.right.toFixed(2)),
+            cardLeft: Number(bounds.left.toFixed(2)),
+            cardRight: Number(bounds.right.toFixed(2)),
+          }
+        })
+    }),
+  )
+  assert.equal(
+    escapingContent.length,
+    0,
+    `Visible lesson-card content escapes card bounds: ${JSON.stringify(escapingContent)}`,
   )
 }
 
-async function waitForResponsiveLayout(page) {
-  await page.evaluate(async () => {
-    const main = document.querySelector('.student-main-column')
-    const ambient = document.querySelector('.ambient-canvas')
-    const responsiveTransitions = () =>
-      document.getAnimations().filter((animation) => {
-        if (!('transitionProperty' in animation)) return false
-        const target = animation.effect?.target
-        const element = target instanceof Element ? target : target?.element
-        return (
-          (element === main && animation.transitionProperty === 'margin-left') ||
-          (element === ambient && animation.transitionProperty === 'left')
-        )
-      })
-
-    let previousGeometry = ''
-    let stableFrames = 0
-    while (stableFrames < 2) {
-      const transitions = responsiveTransitions()
-      if (transitions.length) {
-        await Promise.all(transitions.map((transition) => transition.finished.catch(() => {})))
-        previousGeometry = ''
-        stableFrames = 0
-        continue
+async function getResponsiveLayoutDiagnostics(page) {
+  return page.evaluate(() => {
+    const selectors = [
+      '.student-main-column',
+      '.student-content',
+      '.schedule-page',
+      '.schedule-heading',
+      '.schedule-toolbar',
+      '.schedule-modes',
+      '.lesson-card',
+    ]
+    const elements = selectors.flatMap((selector) =>
+      [...document.querySelectorAll(selector)].map((element) => {
+        const rect = element.getBoundingClientRect()
+        const style = window.getComputedStyle(element)
+        return {
+          selector,
+          left: Number(rect.left.toFixed(2)),
+          right: Number(rect.right.toFixed(2)),
+          width: Number(rect.width.toFixed(2)),
+          display: style.display,
+          minWidth: style.minWidth,
+          marginLeft: style.marginLeft,
+          leftStyle: style.left,
+          rightStyle: style.right,
+          overflowX: style.overflowX,
+          transitionProperty: style.transitionProperty,
+          transitionDuration: style.transitionDuration,
+          transform: style.transform,
+        }
+      }),
+    )
+    const activeAnimations = document.getAnimations().map((animation) => {
+      const target = animation.effect?.target
+      const element = target instanceof Element ? target : target?.element
+      return {
+        type: 'transitionProperty' in animation ? 'transition' : 'animation',
+        property: animation.transitionProperty,
+        name: animation.animationName,
+        playState: animation.playState,
+        currentTime: animation.currentTime,
+        target: element
+          ? `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ''}${typeof element.className === 'string' && element.className ? `.${element.className.trim().replaceAll(/\s+/g, '.')}` : ''}`
+          : null,
+        pseudoElement: target?.pseudoElement ?? null,
       }
-
-      await new Promise((resolve) => window.requestAnimationFrame(resolve))
-      const geometry = [
-        document.documentElement.scrollWidth,
-        ...[
-          '.student-main-column',
-          '.student-content',
-          '.schedule-page',
-          '.schedule-heading',
-          '.schedule-toolbar',
-          '.schedule-modes',
-          '.lesson-card',
-        ].flatMap((selector) =>
-          Array.from(document.querySelectorAll(selector)).map((element) => {
-            const bounds = element.getBoundingClientRect()
-            return [bounds.left, bounds.right, bounds.width].map(
-              (value) => Math.round(value * 100) / 100,
-            )
-          }),
-        ),
-      ]
-      const nextGeometry = JSON.stringify(geometry)
-      if (nextGeometry === previousGeometry) stableFrames += 1
-      else stableFrames = 0
-      previousGeometry = nextGeometry
+    })
+    return {
+      viewportWidth: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      direction: document.documentElement.dir,
+      mode: document.querySelector('.schedule-page')?.className,
+      elements,
+      activeAnimations,
     }
   })
+}
+
+async function waitForResponsiveLayout(page, { timeoutMs = 5000, stableFramesRequired = 2 } = {}) {
+  const waitId = ++responsiveLayoutWaitSequence
+  const abortController = new AbortController()
+  const layoutPromise = page.evaluate(
+    async ({ waitId, stableFramesRequired }) => {
+      window.__scheduleLayoutWaitCancellations ??= {}
+      window.__scheduleLayoutWaitCancellations[waitId] = false
+      const main = document.querySelector('.student-main-column')
+      const ambient = document.querySelector('.ambient-canvas')
+      const responsiveTransitions = () =>
+        document.getAnimations().filter((animation) => {
+          if (!('transitionProperty' in animation)) return false
+          const target = animation.effect?.target
+          const element = target instanceof Element ? target : target?.element
+          return (
+            (element === main && animation.transitionProperty === 'margin-left') ||
+            (element === ambient && animation.transitionProperty === 'left')
+          )
+        })
+
+      let previousGeometry = ''
+      let stableFrames = 0
+      try {
+        while (stableFrames < stableFramesRequired) {
+          if (window.__scheduleLayoutWaitCancellations[waitId]) {
+            throw new Error(`Responsive layout wait ${waitId} was cancelled`)
+          }
+          const transitions = responsiveTransitions()
+          if (transitions.length) {
+            previousGeometry = ''
+            stableFrames = 0
+          }
+
+          await new Promise((resolve) => window.requestAnimationFrame(resolve))
+          const geometry = [
+            document.documentElement.scrollWidth,
+            ...[
+              '.student-main-column',
+              '.student-content',
+              '.schedule-page',
+              '.schedule-heading',
+              '.schedule-toolbar',
+              '.schedule-modes',
+              '.lesson-card',
+            ].flatMap((selector) =>
+              Array.from(document.querySelectorAll(selector)).map((element) => {
+                const bounds = element.getBoundingClientRect()
+                return [bounds.left, bounds.right, bounds.width].map(
+                  (value) => Math.round(value * 100) / 100,
+                )
+              }),
+            ),
+          ]
+          const nextGeometry = JSON.stringify(geometry)
+          if (!responsiveTransitions().length && nextGeometry === previousGeometry) {
+            stableFrames += 1
+          } else {
+            stableFrames = 0
+          }
+          previousGeometry = nextGeometry
+        }
+      } finally {
+        delete window.__scheduleLayoutWaitCancellations[waitId]
+      }
+    },
+    { waitId, stableFramesRequired },
+  )
+  const timeoutPromise = delay(timeoutMs, undefined, { signal: abortController.signal }).then(
+    async () => {
+      const diagnostics = await getResponsiveLayoutDiagnostics(page).catch((error) => ({
+        diagnosticError: error.message,
+      }))
+      await page
+        .evaluate((id) => {
+          if (window.__scheduleLayoutWaitCancellations) {
+            window.__scheduleLayoutWaitCancellations[id] = true
+          }
+        }, waitId)
+        .catch(() => {})
+      throw new Error(
+        `Responsive layout did not stabilize within ${timeoutMs} ms (required ${stableFramesRequired} stable frames); diagnostics=${JSON.stringify(diagnostics)}`,
+      )
+    },
+  )
+  try {
+    await Promise.race([layoutPromise, timeoutPromise])
+  } finally {
+    abortController.abort()
+  }
 }
 try {
   for (const [timezoneId, width] of [
@@ -744,6 +913,7 @@ try {
     await page.goto(`${baseURL}/schedule`)
     await page.getByRole('heading', { name: 'Вход в систему' }).waitFor()
     await login(page)
+    if (timezoneId === 'America/Los_Angeles') await checkResponsiveLayoutTimeout(page)
     await checkStudentProfile(page, 1)
     await page.goto(`${baseURL}/schedule/unknown-integration-path`)
     await page.getByRole('heading', { name: 'Страница не найдена' }).waitFor()
@@ -764,6 +934,7 @@ try {
     assert.equal(await shared.locator('li').count(), 2)
     assert.equal((await shared.locator('.lesson-card__time').innerText()).trim(), '09:00 — 10:00')
     await checkPreferences(page, width)
+    if (timezoneId === 'America/Los_Angeles') await checkCardOverflowDetection(page)
     await checkScheduleChanges(page, width)
     await checkOvernightDates(page)
     await page.getByLabel('Дата', { exact: true }).fill('2026-11-11')
