@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { CreateUserPage, UserDetailPage } from './UsersPage'
+import type { components } from '../../shared/api/schema'
 vi.mock('../auth/RoleContext', () => ({ useRoleContext: () => ({ user_id: '1', role: 'admin' }) }))
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 vi.mock('../../shared/api/client', async (original) => ({
@@ -11,11 +12,17 @@ vi.mock('../../shared/api/client', async (original) => ({
   apiFetch: vi.fn(),
 }))
 afterEach(() => {
-  cleanup()
-  vi.resetAllMocks()
-  vi.restoreAllMocks()
+  try {
+    cleanup()
+    expect(console.error).not.toHaveBeenCalled()
+  } finally {
+    vi.resetAllMocks()
+    vi.restoreAllMocks()
+  }
 })
 beforeEach(() => {
+  // React Router can catch render exceptions; they must still fail these tests.
+  vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.mocked(apiFetch).mockImplementation(async (_url, init) =>
     init?.method === 'POST'
       ? { user: { id: '9', login: 'selected-namesake' }, initial_password: 'fictional-secret' }
@@ -83,12 +90,34 @@ it('reports a rejected duplicate without inventing a password', async () => {
 })
 
 it('distinguishes namesake teachers by ID and department and submits the selected ID', async () => {
-  vi.mocked(apiFetch).mockResolvedValue({
+  const teachers: components['schemas']['LookupPage'] = {
     items: [
       { id: '11', name: 'Вымышленный Однофамилец', context: 'Кафедра: Физика (ID 3)' },
       { id: '12', name: 'Вымышленный Однофамилец', context: 'Кафедра: Математика (ID 4)' },
     ],
     next_after_id: null,
+  }
+  const created: components['schemas']['CreatedUser'] = {
+    user: {
+      id: '9',
+      login: 'selected-namesake',
+      full_name: 'Вымышленный',
+      role: 'teacher',
+      is_active: true,
+      teacher_id: '12',
+      student_id: null,
+      staff_profile_id: null,
+      group_id: null,
+      org_unit_id: null,
+      permissions: [],
+    },
+    initial_password: 'fictional-teacher-initial-password',
+  }
+  vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+    const method = init?.method ?? 'GET'
+    if (method === 'GET' && url === '/api/v1/admin/lookups?kind=teachers&q=') return teachers
+    if (method === 'POST' && url === '/api/v1/admin/users') return created
+    throw new Error(`Unexpected API request: ${method} ${url}`)
   })
   mount()
   const user = userEvent.setup()
@@ -101,6 +130,10 @@ it('distinguishes namesake teachers by ID and department and submits the selecte
   await user.click(screen.getByRole('button', { name: 'Создать' }))
   const post = vi.mocked(apiFetch).mock.calls.find(([, init]) => init?.method === 'POST')
   expect(JSON.parse(String(post?.[1]?.body)).teacher_id).toBe('12')
+  expect(await screen.findByRole('heading', { name: 'Пользователь создан' })).toHaveFocus()
+  expect(screen.getByText(created.user.login)).toBeInTheDocument()
+  expect(screen.getByText(created.initial_password)).toBeInTheDocument()
+  expect(console.error).not.toHaveBeenCalled()
 })
 
 it('uses the server permission catalogue and replaces an invalid selection after transfer', async () => {
