@@ -77,6 +77,24 @@ def _ids(value: object) -> list[int]:
     return [_integer(item) for item in value]
 
 
+def _participants(value: object) -> list[dict]:
+    if type(value) not in (list, tuple):
+        raise ValueError("Audit participants require a list")
+    result = []
+    for item in value:
+        if type(item) is not dict or item.keys() != {"group_id", "subgroup_id"}:
+            raise ValueError("Audit participant requires exact group/subgroup fields")
+        group = _integer(item["group_id"])
+        subgroup = None if item["subgroup_id"] is None else _integer(item["subgroup_id"])
+        if group <= 0 or (subgroup is not None and subgroup <= 0):
+            raise ValueError("Audit participant requires positive IDs")
+        result.append({"group_id": group, "subgroup_id": subgroup})
+    result.sort(key=lambda item: (item["group_id"], item["subgroup_id"] or 0))
+    if len({(p["group_id"], p["subgroup_id"]) for p in result}) != len(result):
+        raise ValueError("Duplicate audit participant")
+    return result
+
+
 # Explicit fields AND value serializers per event. Never traverse ORM objects,
 # arbitrary nested mappings, or stringify unknown objects.
 _SCORE_FIELDS = {"assessment_group_id": _integer, "student_id": _integer, "score": _integer}
@@ -99,6 +117,7 @@ _LESSON_FIELDS = {
     "previous_lesson_id": _integer,
     "version": _integer,
     "group_ids": _ids,
+    "participants": _participants,
     "room_ids": _ids,
 }
 _ROLE = _choice("student", "teacher", "staff", "admin")
@@ -111,7 +130,10 @@ _EVENT_FIELDS = {
     **{("attendance", action): _ATTENDANCE_FIELDS for action in ("create", "update", "delete")},
     **{("assessment_result", action): _SCORE_FIELDS for action in ("create", "update", "delete")},
     **{("final_result", action): _FINAL_FIELDS for action in ("create", "update", "delete")},
-    **{("lesson", action): _LESSON_FIELDS for action in ("create", "update", "cancel", "move")},
+    **{
+        ("lesson", action): _LESSON_FIELDS
+        for action in ("create", "update", "cancel", "move", "restore")
+    },
     ("student", "create"): {
         "user_id": _integer,
         "group_id": _integer,
@@ -144,7 +166,9 @@ def _serialize_snapshot(data: Mapping[str, object] | None, fields: dict) -> dict
     if not isinstance(data, Mapping):
         raise ValueError("Audit snapshot requires a mapping")
     result = {
-        name: None if data[name] is None else serialize(data[name])
+        name: None
+        if data[name] is None and serialize is not _participants
+        else serialize(data[name])
         for name, serialize in fields.items()
         if name in data
     }

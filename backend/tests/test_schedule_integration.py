@@ -111,6 +111,10 @@ def schedule(db_session):
             add(LessonGroup, lesson_id=obj.id, group_id=group.id)
         for room_id in room_ids:
             add(LessonRoom, lesson_id=obj.id, room_id=room_id)
+        # A fixture lesson with its initial links is one aggregate creation,
+        # matching insert_lesson(), not independent administrative statements.
+        db.execute(text("UPDATE lessons SET version=1 WHERE id=:id"), {"id": obj.id})
+        db.refresh(obj)
         return obj
 
     settings = Settings(

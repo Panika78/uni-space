@@ -34,6 +34,9 @@ HTTP_ERROR_CODES = {
         "academic_term_unavailable",
         "academic_term_ambiguous",
         "responsible_unit_unavailable",
+        "schedule_conflict",
+        "assessment_group_in_use",
+        "assignment_conflict",
     },
     413: {"request_too_large"},
     422: {"validation_error", "invalid_profile", "invalid_permission_scope"},
@@ -146,6 +149,13 @@ def install_exception_handlers(app: FastAPI) -> None:
             message = HTTPStatus(exc.status_code).phrase
         except ValueError:
             message = "Request failed"
+        message = {
+            "version_conflict": "Запись изменена другим пользователем; обновите данные",
+            "invalid_transition": "Операция недоступна в текущем состоянии",
+            "assessment_group_in_use": "Сначала перепривяжите работы, назначенные этой группе",
+            "concurrent_change": "Данные изменяются параллельно; обновите и повторите запрос",
+            "assignment_conflict": "Изменение нарушает связи учебных данных",
+        }.get(code, message)
         return _error_response(exc.status_code, code, message, headers=headers)
 
     @app.exception_handler(Exception)

@@ -578,6 +578,8 @@ with engine.connect() as c:
     # Exercise INSERT ... RETURNING without preserving a synthetic event.
     event = c.execute(text("INSERT INTO audit_events (entity_type,entity_id,action) VALUES ('acl_fixture',1,'create') RETURNING id,created_at")).one()
     assert event.id > 0 and event.created_at is not None
+    for column in ('id','created_at'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'audit_events',:column,'SELECT')"), {'column': column}).scalar_one()
     assert not c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
     for column in ('id','role','password_hash','login','full_name'):
         assert not c.execute(text("SELECT has_column_privilege(current_user,'users',:column,'UPDATE')"), {'column': column}).scalar_one()
@@ -599,11 +601,11 @@ with engine.connect() as c:
                           ('assessment_groups','id'),('course_groups','group_id'),('lessons','version')):
         assert c.execute(text("SELECT has_column_privilege(current_user,:table,:column,'UPDATE')"),
                          {'table': table, 'column': column}).scalar_one()
-    assert not c.execute(text("SELECT has_table_privilege(current_user,'lesson_groups','UPDATE')")).scalar_one()
+    assert c.execute(text("SELECT has_column_privilege(current_user,'lesson_groups','id','UPDATE')")).scalar_one()
     assert not c.execute(text("SELECT has_column_privilege(current_user,'lesson_groups','group_id','UPDATE')")).scalar_one()
     for table, column in (('assessments','title'),('students','group_id'),
                           ('assessment_groups','assessment_id'),('course_groups','course_offering_id'),
-                          ('lessons','status')):
+                          ('lessons','created_by_user_id')):
         assert not c.execute(text("SELECT has_column_privilege(current_user,:table,:column,'UPDATE')"),
                              {'table': table, 'column': column}).scalar_one()
     for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
@@ -629,11 +631,11 @@ with engine.connect() as c:
                   'disciplines','course_offerings','buildings','rooms','lessons','lesson_groups',
                   'lesson_rooms','news','notifications','academic_terms','course_groups',
                   'assessments','assessment_groups','assessment_results','final_results',
-                  'staff_profiles','staff_permissions','teaching_assignments','attendance'):
+                  'staff_profiles','staff_permissions','teaching_assignments','attendance','subgroups'):
         assert c.execute(text("SELECT has_table_privilege(current_user, :table, 'SELECT')"), {'table': table}).scalar_one()
         c.execute(text(f"SELECT * FROM public.{table} LIMIT 1")).all()
     for table in ('study_groups','programs','org_units','teachers','disciplines','course_offerings',
-                  'buildings','rooms','lessons','lesson_groups','lesson_rooms',
+                  'buildings','rooms','subgroups',
                   'academic_terms','course_groups','assessments','assessment_groups',
                   'teaching_assignments'):
         for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
@@ -646,7 +648,17 @@ with engine.connect() as c:
     for column in ('course_offering_id','student_id'):
         assert not c.execute(text("SELECT has_column_privilege(current_user,'final_results',:column,'UPDATE')"), {'column': column}).scalar_one()
     assert not c.execute(text("SELECT has_sequence_privilege(current_user,'teaching_assignments_id_seq','USAGE')")).scalar_one()
-    print('PASS: profile and schedule SELECT permitted; dependent tables remain read-only')
+    for table in ('lessons','lesson_groups','lesson_rooms'):
+        assert c.execute(text("SELECT has_table_privilege(current_user,:table,'INSERT')"), {'table': table}).scalar_one()
+        for privilege in ('UPDATE','TRUNCATE','REFERENCES','TRIGGER'):
+            assert not c.execute(text("SELECT has_table_privilege(current_user,:table,:privilege)"), {'table': table, 'privilege': privilege}).scalar_one()
+    assert not c.execute(text("SELECT has_table_privilege(current_user,'lessons','DELETE')")).scalar_one()
+    for table in ('lesson_groups','lesson_rooms'):
+        assert c.execute(text("SELECT has_table_privilege(current_user,:table,'DELETE')"), {'table': table}).scalar_one()
+    for column in ('course_offering_id','teacher_id','starts_at','ends_at','kind','status','version'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'lessons',:column,'UPDATE')"), {'column': column}).scalar_one()
+    assert c.execute(text("SELECT has_column_privilege(current_user,'assessment_groups','date_needs_confirmation','UPDATE')")).scalar_one()
+    print('PASS: schedule editor grants permitted; grades and audit payload remain protected')
 for statement in (
     "CREATE ROLE forbidden_role", "CREATE DATABASE forbidden_database",
     "CREATE TABLE public.forbidden_table(id int)", "CREATE SCHEMA forbidden_schema",
@@ -673,7 +685,8 @@ for statement in (
     "TRUNCATE attendance", "UPDATE students SET group_id=group_id",
     "DELETE FROM teaching_assignments",
     "SELECT nextval('public.org_units_id_seq')", "SELECT nextval('public.programs_id_seq')",
-    "UPDATE lessons SET status='cancelled'", "DELETE FROM lesson_groups",
+    "DELETE FROM lessons", "UPDATE lessons SET previous_lesson_id=NULL",
+    "UPDATE lessons SET created_by_user_id=NULL",
     "INSERT INTO assessments (course_offering_id,title,type,max_score) VALUES (1,'forbidden','test',10)",
     "UPDATE assessment_groups SET assessment_id=assessment_id",
     "UPDATE final_results SET student_id=student_id", "UPDATE course_offerings SET attestation_type='exam'", "SELECT nextval('public.final_results_id_seq')",

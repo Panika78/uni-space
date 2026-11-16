@@ -198,7 +198,7 @@ def test_runtime_role_can_confirm_with_audit_and_cannot_modify_structure(runtime
                 "DELETE FROM audit_events",
                 "SELECT before_data FROM audit_events",
                 "SELECT nextval('audit_events_id_seq')",
-                "UPDATE lessons SET status='cancelled'",
+                "DELETE FROM lessons",
             ):
                 with runtime.connect() as connection, pytest.raises(DBAPIError) as rejected:
                     connection.execute(text(sql))

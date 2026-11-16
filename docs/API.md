@@ -701,3 +701,61 @@ PUT/DELETE возвращают `200`; `401` без действующей се�
 GET определяет актуальные группу и подгруппу в SQL того же запроса, не из ранее
 загруженного ORM-объекта; собственные сохранённые отметки остаются доступными.
 Публичные схемы и формат аудита не изменились.
+
+## Официальный staff schedule editor (MVP2-12, #74)
+
+Все маршруты `/api/v1/staff/schedule` требуют актуальную активную staff-роль
+деканата и эффективное глобальное `schedule.edit`. Admin/teacher/student без этого
+доступа получают 403; проверка выполняется по БД при каждом запросе, включая старый
+JWT после отзыва разрешения. Student `/schedule` сохраняет собственный scope.
+
+- `GET /catalog/{kind}`: `groups`, `subgroups`, `teachers`, `rooms`,
+  `course-offerings`, `teaching-assignments`. Параметры `q`, `after_id`, `limit`
+  (1–100); `group_id` для подгрупп/проведений/назначений,
+  `course_offering_id` для групп/назначений. Неуместные фильтры отклоняются.
+  Возвращает `items`, `next_after_id`; справочники содержат безопасные названия,
+  ссылки на корпус/семестр, группы проведения и предметные назначения преподавателя.
+- `GET /lessons?resource=group|teacher|room&resource_id=...&date_from=...&date_to=...`:
+  1–31 календарных дней Europe/Moscow, `limit` 1–200, `after_id`;
+  порядок `(starts_at, id)`. Формат `after_id`/`next_after_id` сохраняется:
+  ID последней выданной пары служит опорой `(starts_at, id)` в той же выборке.
+  Если опора удалена или больше не попадает под фильтры, возвращается 422;
+  клиент обновляет страницу с начала. Между страницами нет snapshot-изоляции.
+  Участники, аудитории и продолжения загружаются пакетно для всей страницы;
+  только официальные занятия, включая сохранённые cancelled/moved.
+- `GET /lessons/{id}`: полное редактируемое состояние, participants
+  (`group_id`, nullable `subgroup_id`), room_ids, version, status, previous/next ID
+  и ID создателя. Историческое чтение не требует текущих teaching_assignments.
+- `POST /lessons`: создание scheduled, 201; полный `LessonWrite`.
+- `PATCH /lessons/{id}`: полный предполагаемый `LessonWrite` плюс ожидаемая `version`.
+- `POST /lessons/{id}/cancel`, `/restore`: тело только `{version}`.
+- `POST /lessons/{id}/move`: полный новый `LessonWrite` плюс версия исходного,
+  201 с новым занятием; исходное сохраняется moved. Новая запись version=1.
+
+`LessonWrite`: course_offering_id, nullable teacher_id, starts_at/ends_at с часовым
+поясом, kind (lecture/seminar/lab/other), непустые participants, room_ids.
+Клиент не задаёт статус, автора, previous_lesson_id или is_additional. ID — строки
+положительных PostgreSQL bigint. Физический DELETE отсутствует.
+
+Обычное редактирование разрешено только scheduled; cancel: scheduled→cancelled,
+move: scheduled→moved + новая scheduled, restore: cancelled→scheduled.
+Старая moved не активируется, перенос продолжается от последней scheduled.
+Перенос обязан изменять starts_at или ends_at; сохранение прежнего слота,
+включая изменение только преподавателя/аудиторий, отклоняется 409 invalid_transition
+до записи. Для изменения атрибутов в прежнем слоте используется PATCH.
+Проверяется выбранное предметное назначение преподавателя, а не назначение
+сотрудника; новое назначение требует teaching_assignments для всех групп.
+
+Изменение повышает version ровно один раз; no-op — ноль, без аудита. Устаревшая
+версия: 409 version_conflict; запрещённое состояние: invalid_transition;
+последняя группа с привязанной работой: assessment_group_in_use;
+блокировка/сериализация: concurrent_change; нарушение SQL-связей: assignment_conflict.
+Конфликт движка #73: 409 schedule_conflict, типизированные error.details с кодами
+teacher_conflict/room_conflict/participants_conflict. Нет гарантии резервирования
+ресурсов между одновременными созданиями разных занятий (граница #73).
+
+При cancel/move флаги связанных assessment_groups и аудит меняются атомарно;
+дата, связь, результаты и посещаемость сохраняются. Подтверждение даты у
+cancelled/moved запрещено PostgreSQL-проверкой; teacher API принадлежит #71.
+После commit предусмотрена точка подключения доменного события #86, рассылки нет.
+Точные схемы: `backend/openapi.json` → generated TS.
