@@ -571,6 +571,7 @@ async function checkScheduleChanges(page, width) {
 }
 
 async function noOverflow(page) {
+  await waitForResponsiveLayout(page)
   await page.waitForFunction(() => {
     const main = document.querySelector('.student-main-column')
     const collapsed = document.body.classList.contains('sidebar-collapsed')
@@ -582,16 +583,77 @@ async function noOverflow(page) {
   const overflow = await page.evaluate(() => ({
     viewportWidth: window.innerWidth,
     documentWidth: document.documentElement.scrollWidth,
+    direction: document.documentElement.dir,
+    mode: document.querySelector('.schedule-page')?.className,
     elements: Array.from(document.body.querySelectorAll('*'))
-      .map((element) => ({
-        tag: element.tagName.toLowerCase(),
-        className: typeof element.className === 'string' ? element.className : '',
-        id: element.id,
-        left: Math.round(element.getBoundingClientRect().left),
-        right: Math.round(element.getBoundingClientRect().right),
-      }))
-      .filter(({ left, right }) => left < 0 || right > window.innerWidth + 1)
-      .slice(0, 12),
+      .filter((element) => {
+        const bounds = element.getBoundingClientRect()
+        return bounds.left < 0 || bounds.right > window.innerWidth + 1
+      })
+      .slice(0, 12)
+      .map((element) => {
+        const bounds = element.getBoundingClientRect()
+        const styles = window.getComputedStyle(element)
+        const ancestors = []
+        for (
+          let parent = element;
+          parent && parent !== document.body;
+          parent = parent.parentElement
+        ) {
+          const parentBounds = parent.getBoundingClientRect()
+          const parentStyles = window.getComputedStyle(parent)
+          ancestors.push({
+            tag: parent.tagName.toLowerCase(),
+            className: typeof parent.className === 'string' ? parent.className : '',
+            id: parent.id,
+            left: Number(parentBounds.left.toFixed(2)),
+            right: Number(parentBounds.right.toFixed(2)),
+            width: Number(parentBounds.width.toFixed(2)),
+            display: parentStyles.display,
+            position: parentStyles.position,
+            minWidth: parentStyles.minWidth,
+            marginLeft: parentStyles.marginLeft,
+            leftStyle: parentStyles.left,
+            rightStyle: parentStyles.right,
+            overflowX: parentStyles.overflowX,
+            direction: parentStyles.direction,
+          })
+        }
+        return {
+          tag: element.tagName.toLowerCase(),
+          className: typeof element.className === 'string' ? element.className : '',
+          id: element.id,
+          left: Number(bounds.left.toFixed(2)),
+          right: Number(bounds.right.toFixed(2)),
+          width: Number(bounds.width.toFixed(2)),
+          display: styles.display,
+          position: styles.position,
+          minWidth: styles.minWidth,
+          marginLeft: styles.marginLeft,
+          leftStyle: styles.left,
+          rightStyle: styles.right,
+          overflowX: styles.overflowX,
+          direction: styles.direction,
+          transitionProperty: styles.transitionProperty,
+          transitionDuration: styles.transitionDuration,
+          transform: styles.transform,
+          ancestors,
+        }
+      }),
+    animations: document.getAnimations().map((animation) => {
+      const target = animation.effect?.target
+      const element = target instanceof Element ? target : target?.element
+      return {
+        type: 'transitionProperty' in animation ? 'transition' : 'animation',
+        property: animation.transitionProperty,
+        playState: animation.playState,
+        currentTime: animation.currentTime,
+        target: element
+          ? `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ''}${typeof element.className === 'string' && element.className ? `.${element.className.trim().replaceAll(/\s+/g, '.')}` : ''}`
+          : null,
+        pseudoElement: target?.pseudoElement ?? null,
+      }
+    }),
   }))
   assert.ok(
     overflow.documentWidth <= overflow.viewportWidth,
@@ -609,6 +671,60 @@ async function noOverflow(page) {
     ),
     'Long names stay inside cards',
   )
+}
+
+async function waitForResponsiveLayout(page) {
+  await page.evaluate(async () => {
+    const main = document.querySelector('.student-main-column')
+    const ambient = document.querySelector('.ambient-canvas')
+    const responsiveTransitions = () =>
+      document.getAnimations().filter((animation) => {
+        if (!('transitionProperty' in animation)) return false
+        const target = animation.effect?.target
+        const element = target instanceof Element ? target : target?.element
+        return (
+          (element === main && animation.transitionProperty === 'margin-left') ||
+          (element === ambient && animation.transitionProperty === 'left')
+        )
+      })
+
+    let previousGeometry = ''
+    let stableFrames = 0
+    while (stableFrames < 2) {
+      const transitions = responsiveTransitions()
+      if (transitions.length) {
+        await Promise.all(transitions.map((transition) => transition.finished.catch(() => {})))
+        previousGeometry = ''
+        stableFrames = 0
+        continue
+      }
+
+      await new Promise((resolve) => window.requestAnimationFrame(resolve))
+      const geometry = [
+        document.documentElement.scrollWidth,
+        ...[
+          '.student-main-column',
+          '.student-content',
+          '.schedule-page',
+          '.schedule-heading',
+          '.schedule-toolbar',
+          '.schedule-modes',
+          '.lesson-card',
+        ].flatMap((selector) =>
+          Array.from(document.querySelectorAll(selector)).map((element) => {
+            const bounds = element.getBoundingClientRect()
+            return [bounds.left, bounds.right, bounds.width].map(
+              (value) => Math.round(value * 100) / 100,
+            )
+          }),
+        ),
+      ]
+      const nextGeometry = JSON.stringify(geometry)
+      if (nextGeometry === previousGeometry) stableFrames += 1
+      else stableFrames = 0
+      previousGeometry = nextGeometry
+    }
+  })
 }
 try {
   for (const [timezoneId, width] of [
