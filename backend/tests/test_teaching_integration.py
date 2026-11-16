@@ -810,6 +810,198 @@ def test_concurrent_score_creates_use_one_result_and_one_audit(committed_academi
         assert events[-1].after_data is None
 
 
+@pytest.mark.parametrize("first_operation", ["update", "delete"])
+def test_concurrent_score_update_and_delete_preserve_last_successful_write_and_audit(
+    committed_academics, first_operation
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event, Lock
+
+    from sqlalchemy import select, text
+    from sqlalchemy.orm import Session
+    from test_lesson_participants_integration import require_blocked_writer
+
+    from app.dependencies.database import get_db_session
+
+    s = committed_academics
+    s.app.include_router(router)
+    user = s.add(
+        User,
+        login=uuid4().hex,
+        password_hash="unused",
+        full_name="Teacher",
+        role="teacher",
+        is_active=True,
+    )
+    teacher = s.add(Teacher, user_id=user.id, full_name=user.full_name)
+    auth_session = s.add(
+        AuthSession, user_id=user.id, expires_at=datetime.now(UTC) + timedelta(days=1)
+    )
+    course = s.offering()
+    work = s.assignment(course)
+    initial = s.result(work, 4)
+    initial_id = initial.id
+    initial_graded_at = initial.graded_at
+    s.add(
+        TeachingAssignment,
+        teacher_id=teacher.id,
+        course_offering_id=course.id,
+        group_id=s.groups[0].id,
+    )
+    headers = {
+        "Authorization": "Bearer " + create_access_token(auth_session, s.settings)["access_token"]
+    }
+    path = (
+        f"/api/v1/teaching/courses/{course.id}/groups/{s.groups[0].id}"
+        f"/assessments/{work.id}/results/{s.students[0].id}"
+    )
+    engine = s.db.bind
+    s.db.commit()
+
+    request_pids: list[int | None] = [None, None]
+    request_sessions_ready = [Event(), Event()]
+    request_index = 0
+    request_index_lock = Lock()
+
+    def get_request_session():
+        nonlocal request_index
+        with request_index_lock:
+            index = request_index
+            request_index += 1
+        with Session(engine) as db:
+            request_pids[index] = db.scalar(text("SELECT pg_backend_pid()"))
+            request_sessions_ready[index].set()
+            yield db
+
+    s.app.dependency_overrides[get_db_session] = get_request_session
+
+    def write(score):
+        return s.client.put(path, json={"score": score}, headers=headers)
+
+    first_score, second_score = (7, None) if first_operation == "update" else (None, 7)
+    with ThreadPoolExecutor(max_workers=2) as executor, Session(engine) as blocker:
+        blocker.begin()
+        blocker_pid = blocker.scalar(text("SELECT pg_backend_pid()"))
+        assert (
+            blocker.scalar(
+                select(AssessmentResult.id)
+                .where(AssessmentResult.id == initial_id)
+                .with_for_update()
+            )
+            == initial_id
+        )
+
+        first_request = executor.submit(write, first_score)
+        assert request_sessions_ready[0].wait(5)
+        first_pid = request_pids[0]
+        assert first_pid is not None
+        # The first request has locked the assignment and is waiting on this
+        # existing result row. This makes it the deterministic lock winner.
+        require_blocked_writer(engine, blocker_pid, first_pid)
+
+        second_request = executor.submit(write, second_score)
+        assert request_sessions_ready[1].wait(5)
+        second_pid = request_pids[1]
+        assert second_pid is not None
+        # The second request must now be queued behind the first on the parent
+        # assignment row before releasing the blocker.
+        require_blocked_writer(engine, first_pid, second_pid)
+        blocker.commit()
+
+        first_response = first_request.result(timeout=10)
+        second_response = second_request.result(timeout=10)
+
+    assert first_response.status_code == 200, first_response.text
+    assert second_response.status_code == 200, second_response.text
+    with Session(engine) as db:
+        results = db.scalars(
+            select(AssessmentResult).where(
+                AssessmentResult.assessment_group_id == work.id,
+                AssessmentResult.student_id == s.students[0].id,
+            )
+        ).all()
+        all_events = (
+            db.query(AuditEvent)
+            .filter_by(entity_type="assessment_result")
+            .order_by(AuditEvent.id)
+            .all()
+        )
+        events = [
+            event
+            for event in all_events
+            if (event.after_data or event.before_data or {}).get("assessment_group_id") == work.id
+            and (event.after_data or event.before_data or {}).get("student_id") == s.students[0].id
+        ]
+
+        if first_operation == "update":
+            assert first_response.json()["result_id"] == str(initial_id)
+            assert first_response.json()["score"] == 7
+            update_time = datetime.fromisoformat(
+                first_response.json()["graded_at"].replace("Z", "+00:00")
+            )
+            assert update_time != initial_graded_at
+            assert events[0].created_at >= update_time
+            assert second_response.json() == {
+                "result_id": None,
+                "score": None,
+                "graded_at": None,
+            }
+            assert results == []
+            assert [event.action for event in events] == ["update", "delete"]
+            assert [event.entity_id for event in events] == [initial_id, initial_id]
+            assert events[0].before_data == {
+                "assessment_group_id": work.id,
+                "student_id": s.students[0].id,
+                "score": 4,
+            }
+            assert events[0].after_data == {
+                "assessment_group_id": work.id,
+                "student_id": s.students[0].id,
+                "score": 7,
+            }
+            assert events[1].before_data == events[0].after_data
+            assert events[1].after_data is None
+        else:
+            assert first_response.json() == {
+                "result_id": None,
+                "score": None,
+                "graded_at": None,
+            }
+            assert second_response.json()["score"] == 7
+            assert second_response.json()["result_id"] != str(initial_id)
+            assert len(results) == 1
+            assert results[0].id == int(second_response.json()["result_id"])
+            assert results[0].id != initial_id
+            assert results[0].score == 7
+            assert results[0].graded_by_user_id == user.id
+            assert results[0].graded_at != initial_graded_at
+            assert (
+                results[0].graded_at.isoformat()
+                == datetime.fromisoformat(
+                    second_response.json()["graded_at"].replace("Z", "+00:00")
+                ).isoformat()
+            )
+            assert [event.action for event in events] == ["delete", "create"]
+            assert [event.entity_id for event in events] == [initial_id, results[0].id]
+            assert events[0].before_data == {
+                "assessment_group_id": work.id,
+                "student_id": s.students[0].id,
+                "score": 4,
+            }
+            assert events[0].after_data is None
+            assert events[1].before_data is None
+            assert events[1].after_data == {
+                "assessment_group_id": work.id,
+                "student_id": s.students[0].id,
+                "score": 7,
+            }
+
+        assert len(events) == 2
+        assert all(event.actor_user_id == user.id for event in events)
+        assert events[0].id < events[1].id
+        assert events[0].created_at <= events[1].created_at
+
+
 def test_assessment_lock_timeout_rolls_back_and_request_can_be_retried(committed_academics):
     from sqlalchemy import select
     from sqlalchemy.orm import Session
