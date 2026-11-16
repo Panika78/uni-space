@@ -563,7 +563,23 @@ with engine.connect() as c:
     assert c.execute(text("SELECT has_table_privilege(current_user,'applications','INSERT')")).scalar_one()
     assert c.execute(text("SELECT has_sequence_privilege(current_user,'applications_id_seq','USAGE')")).scalar_one()
     assert c.execute(text("SELECT has_table_privilege(current_user,'news','SELECT')")).scalar_one()
-    assert not c.execute(text("SELECT has_sequence_privilege(current_user,'news_id_seq','USAGE')")).scalar_one()
+    assert c.execute(text("SELECT has_sequence_privilege(current_user,'news_id_seq','USAGE')")).scalar_one()
+    for column in ('title', 'body', 'author_user_id', 'published_at', 'is_published', 'version'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'news',:column,'INSERT')"), {'column': column}).scalar_one()
+    for column in ('title', 'body', 'is_published', 'published_at', 'version'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'news',:column,'UPDATE')"), {'column': column}).scalar_one()
+    assert not c.execute(text("SELECT has_column_privilege(current_user,'news','author_user_id','UPDATE')")).scalar_one()
+    assert not c.execute(text("SELECT has_table_privilege(current_user,'news_create_requests','SELECT')")).scalar_one()
+    assert not c.execute(text("SELECT has_table_privilege(current_user,'news_create_requests','INSERT')")).scalar_one()
+    assert not c.execute(text("SELECT has_table_privilege(current_user,'news_create_requests','UPDATE')")).scalar_one()
+    for column in ('actor_user_id','org_unit_id','idempotency_key','payload_hash','news_id','response_data'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'news_create_requests',:column,'SELECT')"), {'column': column}).scalar_one()
+    for column in ('actor_user_id','org_unit_id','idempotency_key','payload_hash'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'news_create_requests',:column,'INSERT')"), {'column': column}).scalar_one()
+    for column in ('news_id','response_data'):
+        assert not c.execute(text("SELECT has_column_privilege(current_user,'news_create_requests',:column,'INSERT')"), {'column': column}).scalar_one()
+    for column in ('news_id', 'response_data'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'news_create_requests',:column,'UPDATE')"), {'column': column}).scalar_one()
     assert c.execute(text("SELECT has_table_privilege(current_user,'notifications','SELECT')")).scalar_one()
     for privilege in ('INSERT','UPDATE','DELETE'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'notifications',:privilege)"), {'privilege': privilege}).scalar_one()
@@ -630,7 +646,10 @@ with engine.connect() as c:
     assert c.execute(text("SELECT has_column_privilege(current_user,'students','academic_status','UPDATE')")).scalar_one()
     for column in ('user_id','group_id','subgroup_id'):
         assert not c.execute(text("SELECT has_column_privilege(current_user,'students',:column,'UPDATE')"), {'column': column}).scalar_one()
-    for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
+    assert not c.execute(text("SELECT has_column_privilege(current_user,'audit_events','entity_type','SELECT')")).scalar_one()
+    assert not c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'news','INSERT')")).scalar_one()
+    for privilege in ('UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'news',:privilege)"), {'privilege': privilege}).scalar_one()
     for privilege in ('SELECT','INSERT','UPDATE'):
         assert c.execute(text("SELECT has_table_privilege(current_user,'user_preferences',:privilege)"), {'privilege': privilege}).scalar_one()
@@ -695,9 +714,7 @@ for statement in (
     "SELECT public.existing_function_fixture()", "SELECT public.future_function_fixture()",
     "INSERT INTO disciplines (name) VALUES ('forbidden')",
     "UPDATE org_units SET name='forbidden'", "DELETE FROM programs",
-    "INSERT INTO news (title,body,is_published) VALUES ('forbidden','forbidden',false)",
-    "UPDATE news SET title='forbidden'", "DELETE FROM news", "TRUNCATE news",
-    "SELECT nextval('public.news_id_seq')",
+    "UPDATE news SET author_user_id=NULL", "DELETE FROM news", "TRUNCATE news",
     "INSERT INTO notifications (user_id,type,title,body) VALUES (1,'forbidden','forbidden','forbidden')",
     "UPDATE notifications SET title='forbidden'", "DELETE FROM notifications",
     "SELECT nextval('public.notifications_id_seq')",

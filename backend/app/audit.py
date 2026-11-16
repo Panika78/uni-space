@@ -44,6 +44,14 @@ def _positive_integer(value: object) -> int:
     return result
 
 
+def _string(value: object, maximum: int) -> str:
+    if type(value) is not str or len(value) > maximum or "\x00" in value:
+        raise ValueError("Audit field requires a valid bounded string")
+    if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+        raise ValueError("Audit field contains an invalid character")
+    return value
+
+
 def _boolean(value: object) -> bool:
     if type(value) is not bool:
         raise ValueError("Audit field requires a boolean")
@@ -121,6 +129,13 @@ _LESSON_FIELDS = {
     "room_ids": _ids,
 }
 _ROLE = _choice("student", "teacher", "staff", "admin")
+_NEWS_FIELDS = {
+    "title": lambda value: _string(value, 200),
+    "body": lambda value: _string(value, 20_000),
+    "is_published": _boolean,
+    "published_at": _timestamp,
+    "author_user_id": _integer,
+}
 _EVENT_FIELDS = {
     ("assessment_group", "update"): {
         "planned_date": _date,
@@ -156,6 +171,7 @@ _EVENT_FIELDS = {
     ("student", "set_academic_status"): {
         "academic_status": _choice("enrolled", "academic_leave", "expelled", "graduated")
     },
+    **{("news", action): _NEWS_FIELDS for action in ("create", "update", "publish", "unpublish")},
 }
 _REASON = _choice("correction", "administrative_change", "schedule_change")
 

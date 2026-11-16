@@ -11,9 +11,12 @@ const loginName = process.env.NEWS_TEST_LOGIN
 const password = process.env.NEWS_TEST_PASSWORD
 const detailId = process.env.NEWS_TEST_DETAIL_ID
 const detailTitle = process.env.NEWS_TEST_DETAIL_TITLE
+const staffLoginName = process.env.NEWS_TEST_STAFF_LOGIN
+const staffPassword = process.env.NEWS_TEST_STAFF_PASSWORD
 assert.ok(loginName && password, 'Provide fictional NEWS_TEST_LOGIN and NEWS_TEST_PASSWORD')
 assert.ok(detailId, 'Provide NEWS_TEST_DETAIL_ID from the news browser fixture')
 assert.ok(detailTitle, 'Provide NEWS_TEST_DETAIL_TITLE from the news browser fixture')
+assert.ok(staffLoginName && staffPassword, 'Provide fictional staff news credentials')
 
 const browser = await chromium.launch({
   ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
@@ -24,7 +27,8 @@ const browser = await chromium.launch({
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
 context.setDefaultTimeout(15_000)
 context.setDefaultNavigationTimeout(15_000)
-const page = await context.newPage()
+let page = await context.newPage()
+let staffContext
 page.setDefaultTimeout(15_000)
 page.setDefaultNavigationTimeout(15_000)
 const apiRequests = []
@@ -479,6 +483,137 @@ try {
   )
   await context.unroute((url) => url.pathname === `/api/v1/news/${encodeURIComponent(detailId)}`)
   check('a cached article is hidden after a read-only HTTP 403 refetch')
+
+  currentScenario = 'deny direct staff editor navigation to a student'
+  let deniedStaffRequests = 0
+  const countDeniedStaffRequest = (request) => {
+    if (new URL(request.url()).pathname.startsWith('/api/v1/staff/news')) deniedStaffRequests += 1
+  }
+  page.on('request', countDeniedStaffRequest)
+  await page.goto(`${baseURL}/staff/news`)
+  await page.getByText('Доступ запрещён', { exact: true }).waitFor()
+  assert.equal(
+    deniedStaffRequests,
+    0,
+    'The student UI must deny the route before staff news API calls',
+  )
+  page.off('request', countDeniedStaffRequest)
+  check('student direct navigation to staff news is denied before staff API access')
+
+  currentScenario = 'open the permission-protected staff editor'
+  const studentPage = page
+  staffContext = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  staffContext.setDefaultTimeout(15_000)
+  staffContext.setDefaultNavigationTimeout(15_000)
+  const staffPage = await staffContext.newPage()
+  staffPage.setDefaultTimeout(15_000)
+  staffPage.setDefaultNavigationTimeout(15_000)
+  await staffPage.goto(`${baseURL}/login`)
+  await staffPage.getByLabel('Логин', { exact: true }).fill(staffLoginName)
+  await staffPage.getByLabel('Пароль', { exact: true }).fill(staffPassword)
+  await staffPage.getByRole('button', { name: 'Войти', exact: true }).click()
+  await staffPage.getByRole('heading', { name: 'Кабинет сотрудника', exact: true }).waitFor()
+  page = staffPage
+  await page.getByRole('link', { name: 'Публикация новостей', exact: true }).click()
+  await page.getByRole('heading', { name: 'Публикация новостей', exact: true }).waitFor()
+  for (const width of [360, 1440]) {
+    currentScenario = `complete staff and student workflow at ${width}px`
+    page = staffPage
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`${baseURL}/staff/news`)
+    await page.getByRole('heading', { name: 'Публикация новостей', exact: true }).waitFor()
+    await page.getByRole('link', { name: 'Создать новость', exact: true }).click()
+    const originalTitle = `E2E: официальная новость ${width}px`
+    const updatedTitle = `E2E: изменённая официальная новость ${width}px`
+    const body = `Первая строка ${width}\nВторая строка`
+    await page.getByLabel('Заголовок').fill(originalTitle)
+    await page.getByLabel('Текст новости').fill(body)
+    await page.waitForFunction(() => document.documentElement.scrollWidth <= window.innerWidth)
+    await page.getByLabel('Заголовок').focus()
+    await page.keyboard.press('Tab')
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'staff-news-body-input')
+    await page.keyboard.press('Tab')
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.textContent?.trim()),
+      'Сохранить черновик',
+      'Keyboard tab order should reach the draft save action',
+    )
+    let droppedReply = false
+    const createRoute = (url) => url.pathname === '/api/v1/staff/news'
+    await staffContext.route(createRoute, async (route) => {
+      if (route.request().method() !== 'POST' || droppedReply) return route.continue()
+      const response = await route.fetch()
+      assert.equal(response.status(), 201, 'First create request must commit successfully')
+      droppedReply = true
+      await route.fulfill({
+        response,
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { code: 'internal_error', message: 'Lost response after commit', details: [] },
+        }),
+      })
+    })
+    await page.keyboard.press('Enter')
+    await page.getByRole('alert').waitFor()
+    assert.equal(await page.getByLabel('Заголовок').inputValue(), originalTitle)
+    assert.equal(await page.getByLabel('Текст новости').inputValue(), body)
+    assert.equal(await page.locator('[role="status"]').count(), 0)
+    await page.getByRole('button', { name: 'Сохранить черновик', exact: true }).click()
+    await page.getByRole('heading', { name: originalTitle, exact: true }).waitFor()
+    await staffContext.unroute(createRoute)
+    const newsId = new URL(page.url()).pathname.split('/').at(-1)
+    assert.ok(newsId && newsId !== 'new')
+    await page.getByRole('button', { name: 'Опубликовать', exact: true }).focus()
+    await page.keyboard.press('Enter')
+    await page.getByText('Новость опубликована.', { exact: true }).waitFor()
+
+    page = studentPage
+    await page.goto(`${baseURL}/news`)
+    await page.getByRole('heading', { name: 'Новости', exact: true }).waitFor()
+    await page.getByRole('heading', { name: originalTitle, exact: true }).waitFor()
+    await page.goto(`${baseURL}/news/${newsId}`)
+    await page.getByRole('heading', { level: 1, name: originalTitle, exact: true }).waitFor()
+    assert.equal(
+      await page
+        .locator('.news-article')
+        .innerText()
+        .then((text) => text.includes(body)),
+      true,
+    )
+
+    page = staffPage
+    await page.goto(`${baseURL}/staff/news`)
+    await page.getByRole('heading', { name: 'Публикация новостей', exact: true }).waitFor()
+    await page.getByRole('link', { name: originalTitle, exact: false }).click()
+    await page.getByLabel('Заголовок').fill(updatedTitle)
+    await page
+      .getByLabel('Текст новости')
+      .fill(`Обновлённая строка ${width}\nСохранённый перенос строки`)
+    await page.getByRole('button', { name: 'Сохранить изменения', exact: true }).click()
+    await page.getByText('Изменения сохранены.', { exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Снять с публикации', exact: true }).click()
+    await page.getByText('Публикация снята.', { exact: true }).waitFor()
+
+    page = studentPage
+    await page.goto(`${baseURL}/news/${newsId}`)
+    await page.getByText('Новость не найдена или больше недоступна', { exact: true }).waitFor()
+    await page.goto(`${baseURL}/news`)
+    assert.equal(await page.getByRole('heading', { name: updatedTitle, exact: true }).count(), 0)
+
+    page = staffPage
+    await page.goto(`${baseURL}/staff/news`)
+    await page.getByRole('heading', { name: 'Публикация новостей', exact: true }).waitFor()
+    await page.getByRole('link', { name: updatedTitle, exact: false }).click()
+    await page.getByRole('button', { name: 'Опубликовать', exact: true }).click()
+    await page.getByText('Новость опубликована.', { exact: true }).waitFor()
+
+    page = studentPage
+    await page.goto(`${baseURL}/news/${newsId}`)
+    await page.getByRole('heading', { level: 1, name: updatedTitle, exact: true }).waitFor()
+    await page.waitForFunction(() => document.documentElement.scrollWidth <= window.innerWidth)
+    check(`staff and student create/publish/edit/unpublish/republish workflow at ${width}px`)
+  }
 } catch (error) {
   console.error(`FAIL ${currentScenario}: ${error?.message || String(error)}`)
   console.error(`Diagnostic URL: ${new URL(page.url()).origin}${new URL(page.url()).pathname}`)
@@ -497,6 +632,10 @@ try {
   try {
     await context.close()
   } finally {
-    await browser.close()
+    try {
+      await staffContext?.close()
+    } finally {
+      await browser.close()
+    }
   }
 }

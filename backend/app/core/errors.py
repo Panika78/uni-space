@@ -23,6 +23,7 @@ HTTP_ERROR_CODES = {
     404: {"not_found"},
     409: {
         "version_conflict",
+        "idempotency_conflict",
         "operation_id_conflict",
         "invalid_transition",
         "conflict",
