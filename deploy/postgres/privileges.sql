@@ -55,7 +55,7 @@ SELECT format('GRANT SELECT ON public.%I TO uni_space_api', tablename)
 FROM pg_tables WHERE schemaname='public' AND tablename IN
     ('users','auth_sessions','refresh_tokens','students','alembic_version',
      'study_groups','programs','org_units','teachers','disciplines','course_offerings',
-     'buildings','rooms','lessons','lesson_groups','lesson_rooms',
+     'buildings','rooms','lessons','lesson_groups','lesson_rooms','subgroups',
      'service_types','applications','application_history','news','notifications',
      'academic_terms','course_groups',
      'assessments','assessment_groups','assessment_results','final_results',
@@ -90,40 +90,12 @@ FROM pg_tables WHERE schemaname='public'
 SELECT 'GRANT UPDATE (review_status, form_data, reviewer_user_id, feedback, updated_at, version)
         ON public.applications TO uni_space_api'
 WHERE to_regclass('public.applications') IS NOT NULL \gexec
--- SELECT FOR UPDATE in login requires UPDATE on at least one user column.
--- Administration can change activity; passwords and roles remain immutable.
--- Table-level REVOKE above does not remove previously granted column ACL.
+-- Login row locks use the administration activity column; revoke legacy identifier ACL.
 SELECT 'REVOKE UPDATE (id) ON public.users FROM uni_space_api'
 WHERE to_regclass('public.users') IS NOT NULL \gexec
--- MVP2-06: safe both before the first migration and on existing volumes.
-SELECT 'GRANT UPDATE (planned_date, lesson_id, date_needs_confirmation)
-        ON public.assessment_groups TO uni_space_api'
-WHERE to_regclass('public.assessment_groups') IS NOT NULL \gexec
--- PostgreSQL row locks and existing integrity triggers require UPDATE access.
-SELECT format('GRANT UPDATE (id) ON public.%I TO uni_space_api', tablename)
-FROM pg_tables WHERE schemaname='public'
-  AND tablename IN ('assessments', 'teaching_assignments') \gexec
--- Existing subgroup guard serializes links via UPDATE lessons SET version=version.
-SELECT 'GRANT UPDATE (version) ON public.lessons TO uni_space_api'
-WHERE to_regclass('public.lessons') IS NOT NULL \gexec
-SELECT 'GRANT UPDATE (group_id) ON public.course_groups TO uni_space_api'
-WHERE to_regclass('public.course_groups') IS NOT NULL \gexec
--- Existing final-result trigger uses SELECT FOR SHARE on its offering.
--- UPDATE on the identifier enables that lock without granting academic edits.
-SELECT 'GRANT UPDATE (id) ON public.course_offerings TO uni_space_api'
-WHERE to_regclass('public.course_offerings') IS NOT NULL \gexec
--- Manual final results and mandatory append-only audit (#72).
-SELECT 'GRANT UPDATE (grade_value, passed, retake_date, retake_location)
-        ON public.final_results TO uni_space_api'
-WHERE to_regclass('public.final_results') IS NOT NULL \gexec
-SELECT 'GRANT INSERT, DELETE ON public.final_results TO uni_space_api'
-WHERE to_regclass('public.final_results') IS NOT NULL \gexec
-SELECT 'GRANT INSERT ON public.audit_events TO uni_space_api'
-WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
-
 SELECT 'GRANT UPDATE (is_active) ON public.users TO uni_space_api'
 WHERE to_regclass('public.users') IS NOT NULL \gexec
--- MVP2-25: explicit administration writes; no role/password UPDATE or profile DELETE.
+-- Administration: immutable role/password, explicit profiles and append-only audit.
 SELECT format('GRANT INSERT ON public.%I TO uni_space_api', tablename)
 FROM pg_tables WHERE schemaname='public' AND tablename IN
     ('users','students','staff_profiles','staff_permissions','audit_events') \gexec
@@ -137,32 +109,37 @@ SELECT 'GRANT UPDATE (org_unit_id) ON public.staff_profiles TO uni_space_api'
 WHERE to_regclass('public.staff_profiles') IS NOT NULL \gexec
 SELECT 'GRANT DELETE ON public.staff_permissions TO uni_space_api'
 WHERE to_regclass('public.staff_permissions') IS NOT NULL \gexec
--- SELECT FOR SHARE in score writes serializes teacher eligibility against transfers.
-SELECT 'GRANT UPDATE (id) ON public.students TO uni_space_api'
-WHERE to_regclass('public.students') IS NOT NULL \gexec
-SELECT 'GRANT INSERT, UPDATE, DELETE ON public.assessment_results TO uni_space_api'
-WHERE to_regclass('public.assessment_results') IS NOT NULL \gexec
--- The result trigger touches these parent columns without changing their values
--- to serialize against concurrent maximum/assignment changes.
-SELECT 'GRANT UPDATE (max_score) ON public.assessments TO uni_space_api'
-WHERE to_regclass('public.assessments') IS NOT NULL \gexec
-SELECT 'GRANT UPDATE (id) ON public.assessment_groups TO uni_space_api'
+-- Academic writes and invoker-trigger / row-lock requirements.
+SELECT 'GRANT UPDATE (planned_date, lesson_id, date_needs_confirmation, id)
+        ON public.assessment_groups TO uni_space_api'
 WHERE to_regclass('public.assessment_groups') IS NOT NULL \gexec
--- Assignment validation triggers take row locks using FOR SHARE / no-op writes.
-SELECT 'GRANT UPDATE (group_id) ON public.course_groups TO uni_space_api'
-WHERE to_regclass('public.course_groups') IS NOT NULL \gexec
-SELECT 'GRANT UPDATE (version) ON public.lessons TO uni_space_api'
-WHERE to_regclass('public.lessons') IS NOT NULL \gexec
-SELECT 'GRANT INSERT ON public.audit_events TO uni_space_api'
-WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
-SELECT 'GRANT SELECT (id, created_at) ON public.audit_events TO uni_space_api'
-WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
--- Attendance uses parent row locks to serialize transfers and schedule changes.
-SELECT 'GRANT SELECT, INSERT, UPDATE, DELETE ON public.attendance TO uni_space_api'
-WHERE to_regclass('public.attendance') IS NOT NULL \gexec
+SELECT 'GRANT UPDATE (id, max_score) ON public.assessments TO uni_space_api'
+WHERE to_regclass('public.assessments') IS NOT NULL \gexec
 SELECT format('GRANT UPDATE (id) ON public.%I TO uni_space_api', tablename)
 FROM pg_tables WHERE schemaname='public'
-  AND tablename IN ('lessons', 'students', 'teaching_assignments') \gexec
+  AND tablename IN ('students','teaching_assignments','course_offerings') \gexec
+SELECT 'GRANT UPDATE (group_id) ON public.course_groups TO uni_space_api'
+WHERE to_regclass('public.course_groups') IS NOT NULL \gexec
+SELECT 'GRANT INSERT, UPDATE, DELETE ON public.assessment_results TO uni_space_api'
+WHERE to_regclass('public.assessment_results') IS NOT NULL \gexec
+SELECT 'GRANT UPDATE (grade_value, passed, retake_date, retake_location)
+        ON public.final_results TO uni_space_api'
+WHERE to_regclass('public.final_results') IS NOT NULL \gexec
+SELECT 'GRANT INSERT, DELETE ON public.final_results TO uni_space_api'
+WHERE to_regclass('public.final_results') IS NOT NULL \gexec
+SELECT 'GRANT SELECT, INSERT, UPDATE, DELETE ON public.attendance TO uni_space_api'
+WHERE to_regclass('public.attendance') IS NOT NULL \gexec
+-- Schedule: no physical lesson deletion or UPDATE of authors/history pointers.
+SELECT 'GRANT INSERT, UPDATE (id, course_offering_id, teacher_id, starts_at, ends_at, kind, status, version)
+        ON public.lessons TO uni_space_api'
+WHERE to_regclass('public.lessons') IS NOT NULL \gexec
+SELECT format('GRANT INSERT, DELETE ON public.%I TO uni_space_api', tablename)
+FROM pg_tables WHERE schemaname='public' AND tablename IN ('lesson_groups','lesson_rooms') \gexec
+SELECT 'GRANT UPDATE (room_id) ON public.lesson_rooms TO uni_space_api'
+WHERE to_regclass('public.lesson_rooms') IS NOT NULL \gexec
+SELECT 'GRANT UPDATE (id) ON public.lesson_groups TO uni_space_api'
+WHERE to_regclass('public.lesson_groups') IS NOT NULL \gexec
+-- INSERT identity + RETURNING needs no sequence USAGE and no payload SELECT.
 SELECT 'GRANT INSERT, SELECT (id, created_at) ON public.audit_events TO uni_space_api'
 WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
 COMMIT;
