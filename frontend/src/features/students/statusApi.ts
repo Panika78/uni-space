@@ -53,7 +53,7 @@ export async function checkStatusOperation(
   reason: StatusReason,
   signal: AbortSignal,
 ) {
-  return apiFetch<{ operation_id: string; completed: boolean }>(
+  return apiFetch<components['schemas']['StatusOperationReceipt']>(
     `/api/v1/staff/students/status-operations/${operationId}?${new URLSearchParams({
       student_id: studentId,
       academic_status: academicStatus,

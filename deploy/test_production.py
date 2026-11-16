@@ -33,7 +33,13 @@ def run(args, *, input=None, env=None, success=True, timeout=180):
     if success and result.returncode:
         # Retain private diagnostics locally; never dump tokens or secret values.
         (ROOT / "work" / "production-command-error.log").write_text(result.stderr)
-        raise AssertionError(f"Command failed ({result.returncode}): {args}")
+        detail = ""
+        # The embedded API-role ACL assertions otherwise hide their actual
+        # assertion in the outer compose test traceback. This script is static
+        # test code and contains no injected credentials.
+        if "exec" in args and "api" in args and "python" in args:
+            detail = "\nEmbedded API check stderr:\n" + result.stderr[-4000:]
+        raise AssertionError(f"Command failed ({result.returncode}): {args}{detail}")
     return result
 
 
@@ -565,12 +571,15 @@ with engine.connect() as c:
     assert c.execute(text("SELECT has_table_privilege(current_user,'audit_events','INSERT')")).scalar_one()
     assert c.execute(text("SELECT has_column_privilege(current_user,'audit_events','id','SELECT')")).scalar_one()
     assert c.execute(text("SELECT has_column_privilege(current_user,'audit_events','created_at','SELECT')")).scalar_one()
-    for column in ('operation_id', 'operation_fingerprint'):
-        assert c.execute(text("SELECT has_column_privilege(current_user,'audit_events',:column,'SELECT')"), {'column': column}).scalar_one()
     for column in ('actor_user_id', 'entity_id', 'action', 'before_data', 'after_data', 'reason'):
         assert not c.execute(text("SELECT has_column_privilege(current_user,'audit_events',:column,'SELECT')"), {'column': column}).scalar_one()
     for privilege in ('SELECT','UPDATE','DELETE','TRUNCATE'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'audit_events',:privilege)"), {'privilege': privilege}).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'student_status_operations','SELECT')")).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'student_status_operations','INSERT')")).scalar_one()
+    for privilege in ('UPDATE','DELETE','TRUNCATE'):
+        assert not c.execute(text("SELECT has_table_privilege(current_user,'student_status_operations',:privilege)"), {'privilege': privilege}).scalar_one()
+    c.execute(text("SELECT operation_id, actor_user_id, student_id, target_status, previous_status, reason, changed, created_at FROM student_status_operations LIMIT 0")).all()
     assert not c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
     assert c.execute(text("SELECT has_column_privilege(current_user,'students','academic_status','UPDATE')")).scalar_one()
     for column in ('user_id','group_id','subgroup_id'):
@@ -632,7 +641,8 @@ for statement in (
     "SELECT nextval('public.notifications_id_seq')",
     "UPDATE audit_events SET reason='correction'", "DELETE FROM audit_events",
     "SELECT * FROM audit_events", "SELECT before_data FROM audit_events LIMIT 1",
-    "SELECT operation_fingerprint FROM audit_events WHERE operation_id IS NULL",
+    "UPDATE student_status_operations SET changed=true",
+    "DELETE FROM student_status_operations",
     "SELECT nextval('public.audit_events_id_seq')",
     "SELECT nextval('public.org_units_id_seq')", "SELECT nextval('public.programs_id_seq')",
     "UPDATE lessons SET status='cancelled'", "DELETE FROM lesson_groups",

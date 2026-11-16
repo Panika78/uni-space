@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import struct
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -16,14 +17,21 @@ from app.core.pagination import InvalidCursorError, decode_page_cursor, paginate
 from app.core.schemas import ApiError, Id, Page, PaginationParams, Ref, RequestModel
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_db_session
-from app.models import AuditEvent, OrgUnit, Program, Student, StudyGroup, User
+from app.models import (
+    OrgUnit,
+    Program,
+    Student,
+    StudentStatusOperation,
+    StudyGroup,
+    User,
+)
 from app.permissions import PermissionCode, require_staff_permission
 from app.teaching.ordering import STUDENT_KEY_PREFIX, get_student_name_key
 
 router = APIRouter(
     prefix="/api/v1/staff/students",
     tags=["staff", "students"],
-    responses={code: {"model": ApiError} for code in (401, 403, 404, 422, 500)},
+    responses={code: {"model": ApiError} for code in (401, 403, 404, 409, 422, 500)},
 )
 
 
@@ -70,7 +78,7 @@ class AcademicStatusUpdate(RequestModel):
 class AcademicStatusResponse(RequestModel):
     operation_id: str
     academic_status: Literal["enrolled", "academic_leave", "expelled", "graduated"]
-    previous_academic_status: Literal["enrolled", "academic_leave", "expelled", "graduated"] | None
+    previous_academic_status: Literal["enrolled", "academic_leave", "expelled", "graduated"]
     changed: bool
 
 
@@ -82,13 +90,25 @@ class StudentAcademicStatus(RequestModel):
 class StatusOperationReceipt(RequestModel):
     operation_id: str
     completed: bool
+    academic_status: Literal["enrolled", "academic_leave", "expelled", "graduated"] | None = None
+    previous_academic_status: (
+        Literal["enrolled", "academic_leave", "expelled", "graduated"] | None
+    ) = None
+    changed: bool | None = None
 
 
-def _operation_fingerprint(*, actor_id: int, student_id: int, status: str, reason: str) -> str:
-    payload = json.dumps(
-        [actor_id, student_id, status, reason], ensure_ascii=False, separators=(",", ":")
+def _operation_lock_keys(operation_id: UUID) -> tuple[int, int]:
+    """Map a UUID to a stable PostgreSQL transaction advisory-lock key."""
+    return struct.unpack(">ii", operation_id.bytes[:8])
+
+
+def _operation_response(operation: StudentStatusOperation) -> AcademicStatusResponse:
+    return AcademicStatusResponse(
+        operation_id=operation.operation_id,
+        academic_status=operation.target_status,
+        previous_academic_status=operation.previous_status,
+        changed=operation.changed,
     )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _validate_query(request: Request) -> None:
@@ -267,13 +287,22 @@ def get_status_operation_receipt(
     require_staff_permission(db, user, PermissionCode.STUDENTS_STATUS_EDIT)
     if len(student_id) > 19 or int(student_id) > 9_223_372_036_854_775_807:
         raise HTTPException(422, "validation_error")
-    fingerprint = _operation_fingerprint(
-        actor_id=user.id, student_id=int(student_id), status=academic_status, reason=reason
-    )
     stored = db.scalar(
-        select(AuditEvent.operation_fingerprint).where(AuditEvent.operation_id == str(operation_id))
+        select(StudentStatusOperation).where(
+            StudentStatusOperation.operation_id == str(operation_id),
+            StudentStatusOperation.actor_user_id == user.id,
+            StudentStatusOperation.student_id == int(student_id),
+            StudentStatusOperation.target_status == academic_status,
+            StudentStatusOperation.reason == reason,
+        )
     )
-    return StatusOperationReceipt(operation_id=str(operation_id), completed=stored == fingerprint)
+    return StatusOperationReceipt(
+        operation_id=str(operation_id),
+        completed=stored is not None,
+        academic_status=stored.target_status if stored else None,
+        previous_academic_status=stored.previous_status if stored else None,
+        changed=stored.changed if stored else None,
+    )
 
 
 @router.patch("/{student_id}/academic-status", response_model=AcademicStatusResponse)
@@ -286,28 +315,21 @@ def set_student_academic_status(
     if len(student_id) > 19 or int(student_id) > 9_223_372_036_854_775_807:
         raise HTTPException(422, "validation_error")
     require_staff_permission(db, user, PermissionCode.STUDENTS_STATUS_EDIT)
-    fingerprint = _operation_fingerprint(
-        actor_id=user.id,
-        student_id=int(student_id),
-        status=change.academic_status,
-        reason=change.reason,
-    )
     try:
-        previous_operation = db.scalar(
-            select(AuditEvent.operation_fingerprint).where(
-                AuditEvent.operation_id == str(change.operation_id)
-            )
-        )
+        lock_keys = _operation_lock_keys(change.operation_id)
+        db.execute(select(func.pg_advisory_xact_lock(*lock_keys)))
+        previous_operation = db.get(StudentStatusOperation, str(change.operation_id))
         if previous_operation is not None:
-            if previous_operation != fingerprint:
+            if (
+                previous_operation.actor_user_id != user.id
+                or previous_operation.student_id != int(student_id)
+                or previous_operation.target_status != change.academic_status
+                or previous_operation.reason != change.reason
+            ):
                 raise HTTPException(409, "operation_id_conflict")
+            response = _operation_response(previous_operation)
             db.rollback()
-            return AcademicStatusResponse(
-                operation_id=str(change.operation_id),
-                academic_status=change.academic_status,
-                previous_academic_status=None,
-                changed=True,
-            )
+            return response
         student = db.scalars(
             select(Student)
             .where(Student.id == int(student_id))
@@ -316,21 +338,6 @@ def set_student_academic_status(
         ).one_or_none()
         if student is None:
             raise HTTPException(404, "not_found")
-        previous_operation = db.scalar(
-            select(AuditEvent.operation_fingerprint).where(
-                AuditEvent.operation_id == str(change.operation_id)
-            )
-        )
-        if previous_operation is not None:
-            if previous_operation != fingerprint:
-                raise HTTPException(409, "operation_id_conflict")
-            db.rollback()
-            return AcademicStatusResponse(
-                operation_id=str(change.operation_id),
-                academic_status=change.academic_status,
-                previous_academic_status=None,
-                changed=True,
-            )
         before_status = student.academic_status
         if before_status != change.academic_status:
             student.academic_status = change.academic_status
@@ -343,16 +350,19 @@ def set_student_academic_status(
                 before_data={"academic_status": before_status},
                 after_data={"academic_status": change.academic_status},
                 reason=change.reason,
-                operation_id=str(change.operation_id),
-                operation_fingerprint=fingerprint,
             )
-        db.commit()
-        return AcademicStatusResponse(
+        operation = StudentStatusOperation(
             operation_id=str(change.operation_id),
-            academic_status=student.academic_status,
-            previous_academic_status=before_status,
+            actor_user_id=user.id,
+            student_id=student.id,
+            target_status=change.academic_status,
+            previous_status=before_status,
+            reason=change.reason,
             changed=before_status != change.academic_status,
         )
+        db.add(operation)
+        db.commit()
+        return _operation_response(operation)
     except HTTPException:
         db.rollback()
         raise

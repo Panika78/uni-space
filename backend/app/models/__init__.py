@@ -17,12 +17,14 @@ from app.models.schedule import (
     LessonRoom,
     Room,
 )
+from app.models.student_status_operation import StudentStatusOperation
 from app.models.teaching import TeachingAssignment
 from app.models.university import OrgUnit, Program, Student, StudyGroup, Subgroup, Teacher
 
 __all__ = [
     "TeachingAssignment",
     "AuditEvent",
+    "StudentStatusOperation",
     "Assessment",
     "AssessmentGroup",
     "AssessmentResult",

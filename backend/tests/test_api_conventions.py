@@ -808,6 +808,16 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
     assert client.get("/docs").status_code == 404
 
 
+def test_student_status_operation_conflict_is_documented_as_409() -> None:
+    schema = TestClient(app).get("/api/openapi.json").json()
+    operation = schema["paths"]["/api/v1/staff/students/{student_id}/academic-status"]["patch"]
+    assert "409" in operation["responses"]
+    assert (
+        operation["responses"]["409"]["content"]["application/json"]["schema"]["$ref"]
+        == "#/components/schemas/ApiError"
+    )
+
+
 def test_openapi_uses_synthetic_route_prefix_once_in_effective_url() -> None:
     probe_app = FastAPI()
 

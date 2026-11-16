@@ -509,8 +509,8 @@ PATCH принимает ровно одно обязательное поле `
 | GET | `/staff/students` | `students.read` | `q`, `faculty_id`, `program_id`, `course_number`, `limit`, `cursor` → страница студентов |
 | GET | `/staff/students/filters` | `students.read` | справочники факультетов, программ и курсов |
 | GET | `/staff/students/{student_id}` | `students.read` | минимальный профиль студента |
-| GET | `/staff/students/{student_id}/academic-status` | `students.status.edit` | только ID и текущий статус, без профиля |
-| GET | `/staff/students/status-operations/{operation_id}` | `students.status.edit` | `student_id`, `academic_status`, `reason` → receipt конкретной операции |
+| GET | `/staff/students/{student_id}/academic-status` | `students.status.edit` | узкое status-only исключение: только ID и текущий статус, без профиля/поиска |
+| GET | `/staff/students/status-operations/{operation_id}` | `students.status.edit` | `student_id`, `academic_status`, `reason` → receipt с `completed` и сохранённым результатом |
 | PATCH | `/staff/students/{student_id}/academic-status` | `students.status.edit` | `{ academic_status, reason, operation_id }` → сохранённый статус и результат операции |
 
 Поиск по `q` ищет подстроку в ФИО или текущей группе. Результат содержит ID,
@@ -526,9 +526,13 @@ keyset-cursor. Учебный доступ сотрудника деканата
 переходы и исправления не ограничены. Причина аудита — `administrative_change` или
 `correction`. Статус блокируется `FOR UPDATE`, before-status читается после получения
 блокировки; последнее успешно сохранённое изменение побеждает. No-op не создаёт
-аудит. Статус и `student/set_academic_status` в `audit_events` фиксируются одной
-транзакцией. Изменение не переключает `users.is_active` и не меняет другие данные.
-UI перед отправкой требует подтверждения оформленного внешнего основания. Клиент передаёт UUID операции; при неопределённом результате запись автоматически не повторяется. Receipt сверяет точный отпечаток actor/student/status/reason, а не текущее значение статуса. Сотрудник с `students.read` отдельно может перечитать карточку для актуального состояния.
+аудит. Статус и `student/set_academic_status` в `audit_events` (только при изменении)
+и квитанция `student_status_operations` (включая no-op) фиксируются одной транзакцией.
+Повтор UUID с тем же actor/student/status/reason возвращает сохранённый исходный ответ;
+иной payload с тем же UUID даёт 409 `operation_id_conflict`. Изменение не переключает
+`users.is_active` и не меняет другие данные. UI перед отправкой требует подтверждения
+оформленного внешнего основания. При неопределённом результате запись автоматически не
+повторяется. Сотрудник с `students.read` отдельно перечитывает карточку для актуального состояния.
 
 Для staff-поиска `%`, `_` и `\` в `q` — буквальные символы (явный SQL ESCAPE),
 кириллица ищется без учёта регистра, включая `Ё/ё`. Курсор привязан к нормализованным
@@ -541,8 +545,11 @@ q/faculty_id/program_id/course_number и версии/направлению о�
 Ожидание PATCH ограничено 15 секундами только в этом сценарии. Потеря ответа,
 таймаут, неразбираемый ответ или 5xx означают неопределённый результат, а не обещание
 rollback. Повторной записи автоматически нет. С правом чтения доступна явная GET-сверка;
-без него — только внешняя проверка результата. Сверка не отменяет ещё выполняющийся
-запрос и не доказывает его исход. Новая запись требует нового осознанного подтверждения.
+status-only сотрудник сверяет UUID квитанцией или проверяет результат внешне. Узкий GET
+`/academic-status` требует актуальное `students.status.edit` на каждом запросе и возвращает
+только ID и статус. Это одобренное исключение к запрету profile-read для status-only;
+оно не даёт общего поиска или карточки. Сверка не отменяет ещё выполняющийся запрос
+и не доказывает его исход. Новая запись требует нового осознанного подтверждения.
 Модель PostgreSQL row-level lock / last-successful-write-wins не меняется.
 
 UI-карточка `/staff/students/:id` использует существующий GET и переживает обновление

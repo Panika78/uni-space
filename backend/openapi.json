@@ -76,21 +76,14 @@
             "type": "string"
           },
           "previous_academic_status": {
-            "anyOf": [
-              {
-                "enum": [
-                  "enrolled",
-                  "academic_leave",
-                  "expelled",
-                  "graduated"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "enum": [
+              "enrolled",
+              "academic_leave",
+              "expelled",
+              "graduated"
             ],
-            "title": "Previous Academic Status"
+            "title": "Previous Academic Status",
+            "type": "string"
           }
         },
         "required": [
@@ -1965,6 +1958,34 @@
       "StatusOperationReceipt": {
         "additionalProperties": false,
         "properties": {
+          "academic_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "enrolled",
+                  "academic_leave",
+                  "expelled",
+                  "graduated"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Academic Status"
+          },
+          "changed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changed"
+          },
           "completed": {
             "title": "Completed",
             "type": "boolean"
@@ -1972,6 +1993,23 @@
           "operation_id": {
             "title": "Operation Id",
             "type": "string"
+          },
+          "previous_academic_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "enrolled",
+                  "academic_leave",
+                  "expelled",
+                  "graduated"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Academic Status"
           }
         },
         "required": [
@@ -4049,6 +4087,16 @@
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -4125,6 +4173,16 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -4253,6 +4311,16 @@
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -4342,6 +4410,16 @@
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -4430,6 +4508,16 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -4527,6 +4615,16 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {

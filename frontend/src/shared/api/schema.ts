@@ -572,8 +572,11 @@ export interface components {
             changed: boolean;
             /** Operation Id */
             operation_id: string;
-            /** Previous Academic Status */
-            previous_academic_status: ("enrolled" | "academic_leave" | "expelled" | "graduated") | null;
+            /**
+             * Previous Academic Status
+             * @enum {string}
+             */
+            previous_academic_status: "enrolled" | "academic_leave" | "expelled" | "graduated";
         };
         /** AcademicStatusUpdate */
         AcademicStatusUpdate: {
@@ -1202,10 +1205,16 @@ export interface components {
         };
         /** StatusOperationReceipt */
         StatusOperationReceipt: {
+            /** Academic Status */
+            academic_status?: ("enrolled" | "academic_leave" | "expelled" | "graduated") | null;
+            /** Changed */
+            changed?: boolean | null;
             /** Completed */
             completed: boolean;
             /** Operation Id */
             operation_id: string;
+            /** Previous Academic Status */
+            previous_academic_status?: ("enrolled" | "academic_leave" | "expelled" | "graduated") | null;
         };
         /** StudentAcademicStatus */
         StudentAcademicStatus: {
@@ -2520,6 +2529,15 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -2578,6 +2596,15 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2656,6 +2683,15 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -2716,6 +2752,15 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2790,6 +2835,15 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -2854,6 +2908,15 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

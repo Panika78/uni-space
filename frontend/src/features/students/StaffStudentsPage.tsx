@@ -92,7 +92,7 @@ function StatusEditor({
     academicStatus: AcademicStatus
   } | null>(null)
   const currentStatus =
-    student?.academic_status ??
+    known?.academic_status ??
     (loadedStatus?.studentId === studentId ? loadedStatus.academicStatus : null)
   const [statusLoading, setStatusLoading] = useState(!student)
   const [reconciling, setReconciling] = useState(false)
@@ -167,6 +167,7 @@ function StatusEditor({
       if (result.academic_status !== target) throw new Error('invalid_status_response')
       setSaved(result.academic_status)
       setLoadedStatus({ studentId, academicStatus: result.academic_status })
+      if (known) setKnown({ ...known, academic_status: result.academic_status })
       setUncertain(false)
       sessionStorage.removeItem(pendingKey(actorId, studentId))
       setOperationId('')
@@ -234,6 +235,7 @@ function StatusEditor({
           if (cause instanceof ApiClientError && cause.status === 403) {
             setReadRevoked(true)
             setKnown(undefined)
+            setLoadedStatus(null)
             onReadDenied?.()
           } else setError('Операция подтверждена. Текущее состояние не удалось перечитать.')
         }

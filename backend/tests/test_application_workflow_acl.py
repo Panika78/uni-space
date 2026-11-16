@@ -275,5 +275,37 @@ def test_production_acl_allows_only_academic_status_and_transactional_audit(
         )
     with admin_engine.begin() as db:
         db.execute(text("GRANT INSERT ON audit_events TO uni_space_api"))
+    # Receipt persistence is part of the same transaction, including the status update.
+    with admin_engine.begin() as db:
+        db.execute(text("REVOKE INSERT ON student_status_operations FROM uni_space_api"))
+    denied_receipt = c["request"](
+        "PATCH",
+        f"/api/v1/staff/students/{student_id}/academic-status",
+        c["tokens"][0],
+        json={
+            "academic_status": "expelled",
+            "reason": "correction",
+            "operation_id": str(uuid4()),
+        },
+    )
+    assert denied_receipt.status_code == 500
+    with Session(admin_engine) as db:
+        assert db.get(Student, student_id).academic_status == "academic_leave"
+        assert (
+            len(
+                db.scalars(
+                    select(AuditEvent).where(
+                        AuditEvent.entity_id == student_id, AuditEvent.entity_type == "student"
+                    )
+                ).all()
+            )
+            == 1
+        )
+    with admin_engine.begin() as db:
+        db.execute(text("GRANT INSERT ON student_status_operations TO uni_space_api"))
     with Session(admin_engine) as db, db.begin():
+        db.execute(
+            text("DELETE FROM student_status_operations WHERE actor_user_id=:actor"),
+            {"actor": c["actors"][0]},
+        )
         db.execute(delete(AuditEvent).where(AuditEvent.actor_user_id == c["actors"][0]))

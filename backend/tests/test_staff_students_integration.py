@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
 from app.auth.security import create_access_token
@@ -21,6 +21,7 @@ from app.models import (
     StaffPermission,
     StaffProfile,
     Student,
+    StudentStatusOperation,
     StudyGroup,
     User,
 )
@@ -275,12 +276,17 @@ def test_status_only_preview_and_operation_receipt_do_not_expose_profile(staff_s
         | {"student_id": str(student.id)},
     )
     assert receipt.status_code == 200
-    assert receipt.json() == {"operation_id": operation_id, "completed": True}
-    assert set(receipt.json()) == {"operation_id", "completed"}
+    assert receipt.json() == {
+        "operation_id": operation_id,
+        "completed": True,
+        "academic_status": "expelled",
+        "previous_academic_status": "enrolled",
+        "changed": True,
+    }
 
     replay = request(s, "PATCH", f"/{student.id}/academic-status", s["editor_token"], json=payload)
     assert replay.status_code == 200
-    assert replay.json()["operation_id"] == operation_id
+    assert replay.json() == changed.json()
     assert (
         s["db"].scalar(
             select(func.count(AuditEvent.id)).where(
@@ -297,6 +303,7 @@ def test_status_only_preview_and_operation_receipt_do_not_expose_profile(staff_s
         json={**payload, "academic_status": "graduated"},
     )
     assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "operation_id_conflict"
     mismatch = request(
         s,
         "GET",
@@ -309,6 +316,50 @@ def test_status_only_preview_and_operation_receipt_do_not_expose_profile(staff_s
         },
     )
     assert mismatch.json()["completed"] is False
+
+
+def test_noop_operation_receipt_replay_does_not_undo_a_later_change(staff_students):
+    s = staff_students
+    student = s["students"][0]
+    noop_id = str(uuid4())
+    noop_payload = {
+        "operation_id": noop_id,
+        "academic_status": "enrolled",
+        "reason": "correction",
+    }
+    noop = request(
+        s, "PATCH", f"/{student.id}/academic-status", s["editor_token"], json=noop_payload
+    )
+    assert noop.status_code == 200
+    assert noop.json()["changed"] is False
+    assert noop.json()["previous_academic_status"] == "enrolled"
+    changed_payload = {
+        "operation_id": str(uuid4()),
+        "academic_status": "expelled",
+        "reason": "administrative_change",
+    }
+    changed = request(
+        s, "PATCH", f"/{student.id}/academic-status", s["editor_token"], json=changed_payload
+    )
+    assert changed.status_code == 200 and changed.json()["changed"] is True
+    replay = request(
+        s, "PATCH", f"/{student.id}/academic-status", s["editor_token"], json=noop_payload
+    )
+    assert replay.json() == noop.json()
+    s["db"].refresh(student)
+    assert student.academic_status == "expelled"
+    assert (
+        len(
+            s["db"]
+            .scalars(
+                select(AuditEvent).where(
+                    AuditEvent.entity_type == "student", AuditEvent.entity_id == student.id
+                )
+            )
+            .all()
+        )
+        == 1
+    )
 
 
 @pytest.mark.parametrize(
@@ -368,6 +419,7 @@ def test_all_academic_status_values_and_corrections_are_audited(
         )
         == 1
     )
+    assert status in {"enrolled", "academic_leave", "expelled", "graduated"}
     assert s["db"].get(User, student.user_id).is_active
 
 
@@ -634,7 +686,7 @@ def test_concurrent_status_changes_audit_the_locked_before_value(postgresql_engi
 
     app.dependency_overrides[get_db_session] = session_dependency
 
-    def update(status):
+    def update(status, operation_id=None):
         with TestClient(app, raise_server_exceptions=False) as client:
             return client.patch(
                 f"/api/v1/staff/students/{student_id}/academic-status",
@@ -642,7 +694,7 @@ def test_concurrent_status_changes_audit_the_locked_before_value(postgresql_engi
                 json={
                     "academic_status": status,
                     "reason": "correction",
-                    "operation_id": str(uuid4()),
+                    "operation_id": operation_id or str(uuid4()),
                 },
             )
 
@@ -650,21 +702,40 @@ def test_concurrent_status_changes_audit_the_locked_before_value(postgresql_engi
         with ThreadPoolExecutor(max_workers=2) as executor:
             responses = list(executor.map(update, ["expelled", "graduated"]))
         assert [response.status_code for response in responses] == [200, 200]
+        duplicate_operation_id = str(uuid4())
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            duplicates = list(
+                executor.map(lambda _: update("academic_leave", duplicate_operation_id), range(2))
+            )
+        assert [response.status_code for response in duplicates] == [200, 200]
+        assert duplicates[0].json() == duplicates[1].json()
+        assert duplicates[0].json()["changed"] is True
         with Session(postgresql_engine) as db:
             events = db.scalars(
                 select(AuditEvent)
                 .where(AuditEvent.entity_type == "student", AuditEvent.entity_id == student_id)
                 .order_by(AuditEvent.id)
             ).all()
-            assert len(events) == 2
+            assert len(events) == 3
             assert events[0].before_data == {"academic_status": "enrolled"}
             assert events[1].before_data == events[0].after_data
             assert (
                 events[-1].after_data["academic_status"]
                 == db.get(Student, student_id).academic_status
             )
+            receipt = db.get(StudentStatusOperation, duplicate_operation_id)
+            assert receipt is not None and receipt.changed is True
+            assert receipt.previous_status == events[-1].before_data["academic_status"]
     finally:
         with Session(postgresql_engine) as db, db.begin():
+            db.execute(
+                text("DELETE FROM student_status_operations WHERE student_id=:student_id"),
+                {"student_id": student_id},
+            )
+            db.execute(
+                text("DELETE FROM student_status_operations WHERE student_id=:student_id"),
+                {"student_id": student_id},
+            )
             db.execute(
                 delete(AuditEvent).where(
                     AuditEvent.entity_type == "student", AuditEvent.entity_id == student_id
@@ -730,6 +801,28 @@ def test_search_covers_both_faculties_and_literal_special_characters(staff_stude
         assert {row["id"] for row in grouped.json()["items"]} == expected_ids
 
 
+def test_status_editor_can_change_student_in_another_faculty_by_known_id(staff_students):
+    s = staff_students
+    student = s["students"][2]
+    assert s["groups"][2].program_id == s["other_program"].id
+    response = request(
+        s,
+        "PATCH",
+        f"/{student.id}/academic-status",
+        s["editor_token"],
+        json={"academic_status": "graduated", "reason": "administrative_change"},
+    )
+    assert response.status_code == 200
+    assert response.json()["academic_status"] == "graduated"
+    assert student.academic_status == "graduated"
+    event = s["db"].scalar(
+        select(AuditEvent).where(
+            AuditEvent.entity_type == "student", AuditEvent.entity_id == student.id
+        )
+    )
+    assert event.after_data == {"academic_status": "graduated"}
+
+
 @pytest.mark.parametrize(
     "filters",
     [
@@ -774,13 +867,15 @@ def test_cursor_cannot_be_reused_with_different_filters(staff_students, field):
     assert result.status_code == 422
     assert result.json()["error"]["code"] == "invalid_cursor"
     # Normalized spelling is the same selection, not a different filter.
-    first = request(s, "GET", "", s["reader_token"], params={"limit": 1, "q": "ТЕСТ"})
+    first = request(s, "GET", "", s["reader_token"], params={"limit": 1, "q": "ПОИСК27"})
+    assert first.status_code == 200
+    assert first.json()["next_cursor"]
     continuation = request(
         s,
         "GET",
         "",
         s["reader_token"],
-        params={"limit": 1, "q": "  тест  ", "cursor": first.json()["next_cursor"]},
+        params={"limit": 1, "q": "  поиск27  ", "cursor": first.json()["next_cursor"]},
     )
     assert continuation.status_code == 200
     mismatched = request(
@@ -806,6 +901,15 @@ def test_read_revocation_and_department_transfer_reject_old_jwt(staff_students):
     s["db"].flush()
     s["editor_profile"].org_unit_id = accounting.id
     s["db"].flush()
+    assert (
+        request(
+            s,
+            "GET",
+            f"/{s['students'][0].id}/academic-status",
+            s["editor_token"],
+        ).status_code
+        == 403
+    )
     assert (
         request(
             s,
