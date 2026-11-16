@@ -562,6 +562,19 @@ with engine.connect() as c:
     assert c.execute(text("SELECT has_table_privilege(current_user,'applications','SELECT')")).scalar_one()
     assert c.execute(text("SELECT has_table_privilege(current_user,'applications','INSERT')")).scalar_one()
     assert c.execute(text("SELECT has_sequence_privilege(current_user,'applications_id_seq','USAGE')")).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'application_attachments','SELECT')")).scalar_one()
+    assert not c.execute(text("SELECT has_table_privilege(current_user,'application_attachments','DELETE')")).scalar_one()
+    assert not c.execute(text("SELECT has_table_privilege(current_user,'application_attachments','UPDATE')")).scalar_one()
+    for column in ('id','application_id','storage_key','original_filename','mime_type','size_bytes','is_current','uploaded_at'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'application_attachments',:column,'SELECT')"), {'column': column}).scalar_one()
+    for column in ('application_id','storage_key','original_filename','mime_type','size_bytes','is_current'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'application_attachments',:column,'INSERT')"), {'column': column}).scalar_one()
+    for column in ('id','uploaded_at'):
+        assert not c.execute(text("SELECT has_column_privilege(current_user,'application_attachments',:column,'INSERT')"), {'column': column}).scalar_one()
+    assert c.execute(text("SELECT has_column_privilege(current_user,'application_attachments','is_current','UPDATE')")).scalar_one()
+    for column in ('storage_key','original_filename','mime_type','size_bytes','application_id'):
+        assert not c.execute(text("SELECT has_column_privilege(current_user,'application_attachments',:column,'UPDATE')"), {'column': column}).scalar_one()
+    assert c.execute(text("SELECT has_sequence_privilege(current_user,'application_attachments_id_seq','USAGE')")).scalar_one()
     assert c.execute(text("SELECT has_table_privilege(current_user,'news','SELECT')")).scalar_one()
     assert c.execute(text("SELECT has_sequence_privilege(current_user,'news_id_seq','USAGE')")).scalar_one()
     for column in ('title', 'body', 'author_user_id', 'published_at', 'is_published', 'version'):

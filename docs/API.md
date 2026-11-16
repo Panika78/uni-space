@@ -39,6 +39,20 @@
 | POST | `/applications` | `CreateApplicationRequest` | `201 Application` |
 | GET | `/applications` | `limit`, `cursor` | `200 Page<Application>` |
 | GET | `/applications/{id}` | ID | `200 Application` |
+
+Для `academic_leave` `POST /applications` принимает только `multipart/form-data` с
+полем `form_data` (JSON-строка) и одним или несколькими полями `files`.
+Старый JSON-контракт остальных услуг сохранён; JSON-подача академического отпуска
+отклоняется как `422 attachment_required`. Поддерживаются PDF/JPG/PNG: до 5 текущих
+файлов, до 10 МиБ каждый и 50 МиБ суммарно. Минимум один технически корректный файл
+обязателен при любом основании; смысловое соответствие документа сервер не оценивает.
+Метаданные вложений не содержат `storage_key`. В списке и detail доступны только
+текущие вложения.
+
+| GET | `/applications/{id}/attachments` | ID заявки | `200 AttachmentMetadata[]` |
+| GET | `/applications/attachments/{attachment_id}/download` | ID вложения | бинарный файл |
+| GET | `/staff/applications/{id}/attachments` | ID заявки + scope | `200 AttachmentMetadata[]` |
+| GET | `/staff/applications/attachments/{attachment_id}/download` | ID вложения + scope | бинарный файл |
 | GET | `/news` | `limit`, `cursor` | `200 Page<NewsPreview>` |
 | GET | `/news/{id}` | ID | `200 News` |
 | GET | `/notifications` | `limit`, `cursor` | `200 Page<Notification>` |
@@ -472,6 +486,21 @@ MVP1 сохранены, в ответы создания/списка/дета�
 | GET | `/staff/applications/{id}/history` | `limit`, `cursor` | `Page<ApplicationHistoryEvent>` |
 | POST | `/applications/{id}/resubmit` | `ResubmitApplicationRequest` | `Application` |
 | GET | `/applications/{id}/history` | `limit`, `cursor` | `Page<ApplicationHistoryEvent>` |
+
+Для академического отпуска `POST /applications/{id}/resubmit` принимает JSON или
+`multipart/form-data`: `expected_version`, JSON-строку `form_data`, JSON-строку
+`keep_attachment_ids` с ID оставляемых **текущих** файлов и новые `files`.
+Сервер под блокировкой сверяет владельца, статус и версию, проверяет квоты итогового
+набора и наличие хотя бы одного файла, затем одной транзакцией обновляет форму,
+актуальный состав, версию, статус и `application_history`. Неизвестные или устаревшие
+ID приводят к `409`; прежний набор остаётся текущим при любой ошибке. Смена основания
+сама по себе не требует нового файла.
+
+Ошибки для загрузки: `401`, `403`, `404`, `409`, `413 request_too_large`,
+`422 attachment_required`, `422 invalid_attachment`, `422 attachment_limit_exceeded`,
+`503 temporarily_unavailable`. Скачивание авторизуется на каждом запросе, возвращает
+`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` и
+`Cache-Control: no-store`. Неизвестный или чужой ID вложения возвращает одинаковый `404`.
 
 `StaffApplicationResponse` расширяет `Application` полями `student_id: Id` и
 `reviewer_user_id: Id | null`. Список заявлений сортируется по `(created_at, id)`

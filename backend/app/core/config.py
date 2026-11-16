@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     cookie_secure: bool = True
     public_origin: str | None = None
     allowed_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    attachment_storage_path: str = "/var/lib/uni-space/attachments"
 
     proxy_headers_enabled: bool = False
     trusted_proxy_ips: list[str] = Field(default_factory=list)

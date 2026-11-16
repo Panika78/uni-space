@@ -55,8 +55,8 @@ SERVICE_DETAILS = {
     "academic_leave": (
         "Заявление рассматривается деканатом; решение не меняет статус студента автоматически.",
         [
-            "Подтверждающий документ будет обязателен после подключения загрузки файлов",
-            "Отправка станет доступна после подключения безопасного хранения файлов",
+            "Один PDF/JPG/PNG до 10 МБ; всего до 5 файлов и 50 МБ",
+            "Минимум один технически допустимый подтверждающий документ обязателен",
         ],
     ),
     "accounting_certificate": (
@@ -121,10 +121,7 @@ def get_service_availability(
     if service.code == "academic_leave":
         if student is not None and resolve_dean_office(db, student) is None:
             return False, "Для факультета студента не настроен единственный ответственный деканат."
-        return (
-            False,
-            "Отправка станет доступна после подключения безопасной загрузки подтверждающих файлов.",
-        )
+        return True, None
     if service.code == "academic_transcript":
         try:
             if student is None or get_current_academic_term(db, student) is None:
@@ -158,7 +155,7 @@ def validate_and_store_form(
         unit = resolve_dean_office(db, student)
         if unit is None:
             raise HTTPException(409, "responsible_unit_unavailable")
-        raise HTTPException(409, "service_unavailable")
+        assigned_org_unit_id = unit.id
     if service.code == "academic_transcript":
         try:
             term = get_current_academic_term(db, student) if existing is None else None

@@ -1,18 +1,26 @@
+import json
+from contextlib import suppress
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import StreamingResponse
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import Select, select, tuple_
 from sqlalchemy.orm import Session
 
 # Shared RBAC contract from #60; no client-supplied organizational scope.
 from app.applications import service as workflow
+from app.applications import storage
 from app.applications.schemas import (
     ApplicationHistoryEvent,
     ApplicationHistoryPage,
     ApplicationPage,
     ApplicationResponse,
+    AttachmentMetadata,
     CreateApplicationRequest,
     ResubmitApplicationRequest,
     ReviewApplicationRequest,
@@ -21,11 +29,19 @@ from app.applications.schemas import (
     StaffApplicationPage,
     StaffApplicationResponse,
 )
+from app.core.config import get_settings
 from app.core.pagination import InvalidCursorError, decode_page_cursor, paginate_results
 from app.core.schemas import ApiError, Id, PaginationParams, RequestModel
 from app.dependencies.auth import get_current_student, get_current_user
 from app.dependencies.database import get_db_session
-from app.models import Application, ApplicationHistory, ServiceType, Student, User
+from app.models import (
+    Application,
+    ApplicationAttachment,
+    ApplicationHistory,
+    ServiceType,
+    Student,
+    User,
+)
 from app.permissions import (
     PermissionCode,
     get_application_scope,
@@ -34,6 +50,7 @@ from app.permissions import (
 )
 
 router = APIRouter(prefix="/api/v1", tags=["services", "applications"])
+WORKFLOW_ERRORS = {code: {"model": ApiError} for code in (401, 403, 404, 409, 422, 413, 503)}
 
 
 def validate_services_query(request: Request) -> None:
@@ -79,32 +96,183 @@ def list_services(
     return ServiceList(items=items)
 
 
+def attachment_metadata(db: Session, application_id: int) -> list[AttachmentMetadata]:
+    rows = db.scalars(
+        select(ApplicationAttachment)
+        .where(
+            ApplicationAttachment.application_id == application_id,
+            ApplicationAttachment.is_current.is_(True),
+        )
+        .order_by(ApplicationAttachment.id)
+    ).all()
+    return [
+        AttachmentMetadata(
+            id=str(row.id),
+            original_filename=row.original_filename,
+            mime_type=row.mime_type,
+            size_bytes=row.size_bytes,
+        )
+        for row in rows
+    ]
+
+
+async def parse_submission(request: Request, *, resubmit: bool = False):
+    content_type = request.headers.get("content-type", "").lower()
+    if not content_type.startswith("multipart/form-data"):
+        try:
+            payload = await request.json()
+            parsed = TypeAdapter(
+                ResubmitApplicationRequest if resubmit else CreateApplicationRequest
+            )
+            return parsed.validate_python(payload), []
+        except ValidationError as exc:
+            raise RequestValidationError(exc.errors()) from exc
+        except ValueError as exc:
+            raise HTTPException(422, "validation_error") from exc
+    try:
+        form = await request.form(max_files=5, max_fields=3, max_part_size=8192)
+    except Exception as exc:
+        raise HTTPException(422, "validation_error") from exc
+    expected = {"form_data", "files"} | (
+        {"expected_version", "keep_attachment_ids"} if resubmit else set()
+    )
+    if set(form.keys()) - expected:
+        raise HTTPException(422, "validation_error")
+    try:
+        data = json.loads(str(form.get("form_data", "")))
+        if not isinstance(data, dict):
+            raise ValueError
+        if resubmit:
+            payload = {
+                "form_data": data,
+                "expected_version": int(str(form.get("expected_version", ""))),
+                "keep_attachment_ids": json.loads(str(form.get("keep_attachment_ids", "[]"))),
+            }
+            parsed = ResubmitApplicationRequest.model_validate(payload)
+        else:
+            parsed = TypeAdapter(CreateApplicationRequest).validate_python(
+                {"service_code": "academic_leave", "form_data": data}
+            )
+    except ValidationError as exc:
+        raise RequestValidationError(exc.errors()) from exc
+    except ValueError as exc:
+        raise HTTPException(422, "validation_error") from exc
+    files = [item for item in form.getlist("files") if getattr(item, "file", None) is not None]
+    if len(files) != len(form.getlist("files")):
+        raise HTTPException(422, "validation_error")
+    return parsed, files
+
+
 @router.post(
     "/applications",
     response_model=ApplicationResponse,
     status_code=201,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "required": ["service_code", "form_data"],
+                                "properties": {
+                                    "service_code": {"const": "study_certificate"},
+                                    "form_data": {
+                                        "$ref": "#/components/schemas/StudyCertificateFormData"
+                                    },
+                                },
+                            },
+                            {
+                                "type": "object",
+                                "required": ["service_code", "form_data"],
+                                "properties": {
+                                    "service_code": {"const": "academic_transcript"},
+                                    "form_data": {"type": "object"},
+                                },
+                            },
+                            {
+                                "type": "object",
+                                "required": ["service_code", "form_data"],
+                                "properties": {
+                                    "service_code": {"const": "academic_leave"},
+                                    "form_data": {
+                                        "$ref": "#/components/schemas/AcademicLeaveFormData"
+                                    },
+                                },
+                            },
+                            {
+                                "type": "object",
+                                "required": ["service_code", "form_data"],
+                                "properties": {
+                                    "service_code": {"const": "accounting_certificate"},
+                                    "form_data": {
+                                        "$ref": "#/components/schemas/AccountingCertificateFormData"
+                                    },
+                                },
+                            },
+                        ]
+                    }
+                },
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["form_data", "files"],
+                        "properties": {
+                            "form_data": {
+                                "type": "string",
+                                "description": "JSON form_data академического отпуска",
+                            },
+                            "files": {
+                                "type": "array",
+                                "items": {"type": "string", "format": "binary"},
+                            },
+                        },
+                    }
+                },
+            },
+        }
+    },
     responses={
         201: {"headers": {"Location": {"schema": {"type": "string"}}}},
-        401: {"model": ApiError},
-        403: {"model": ApiError},
-        422: {"model": ApiError},
+        **WORKFLOW_ERRORS,
     },
 )
-def submit_application(
-    request: CreateApplicationRequest,
+async def submit_application(
+    request: Request,
     response: Response,
     student: Annotated[Student, Depends(get_current_student)],
     db: Annotated[Session, Depends(get_db_session)],
 ) -> ApplicationResponse:
-    service = db.scalar(select(ServiceType).where(ServiceType.code == request.service_code))
+    submission, uploaded = await parse_submission(request)
+    service = db.scalar(select(ServiceType).where(ServiceType.code == submission.service_code))
     if service is None:
         raise HTTPException(422, "validation_error")
     stored_form, assigned_org_unit_id = workflow.validate_and_store_form(
-        db, service, request.form_data.model_dump(), student=student
+        db, service, submission.form_data.model_dump(), student=student
     )
     available, _reason = workflow.get_service_availability(db, service, student)
     if not available:
         raise HTTPException(409, "service_unavailable")
+    if service.code == "academic_leave" and not uploaded:
+        raise HTTPException(422, "attachment_required")
+    if service.code != "academic_leave" and uploaded:
+        raise HTTPException(422, "validation_error")
+    if len(uploaded) > storage.MAX_FILES:
+        raise HTTPException(422, "attachment_limit_exceeded")
+    root = Path(get_settings().attachment_storage_path)
+    staged = []
+    published = []
+    try:
+        for item in uploaded:
+            staged.append(storage.stage_upload(item.file, item.filename or "attachment", root))
+        if sum(item.size_bytes for item in staged) > storage.MAX_TOTAL_BYTES:
+            raise HTTPException(422, "attachment_limit_exceeded")
+    except Exception:
+        for item in staged:
+            storage.discard(item)
+        raise
     application = Application(
         student_id=student.id,
         service_type_id=service.id,
@@ -116,8 +284,21 @@ def submit_application(
         version=1,
     )
     try:
+        for item in staged:
+            published.append(storage.publish(item, root))
         db.add(application)
         db.flush()
+        for item in staged:
+            db.add(
+                ApplicationAttachment(
+                    application_id=application.id,
+                    storage_key=item.storage_key,
+                    original_filename=item.filename,
+                    mime_type=item.mime_type,
+                    size_bytes=item.size_bytes,
+                    is_current=True,
+                )
+            )
         db.add(
             ApplicationHistory(
                 application_id=application.id,
@@ -148,16 +329,25 @@ def submit_application(
             created_at=application.created_at,
             updated_at=application.updated_at,
             version=application.version,
+            attachments=[],
         )
+        db.flush()
+        payload.attachments = attachment_metadata(db, application.id)
         db.commit()
     except Exception:
         db.rollback()
+        for path in published:
+            path.unlink(missing_ok=True)
+        for item in staged:
+            storage.discard(item)
         raise
     response.headers["Location"] = f"/api/v1/applications/{application.id}"
     return payload
 
 
-def serialize_application(application: Application, service: ServiceType) -> ApplicationResponse:
+def serialize_application(
+    db: Session, application: Application, service: ServiceType
+) -> ApplicationResponse:
     description, requirements = workflow.SERVICE_DETAILS.get(service.code, ("", []))
     return ApplicationResponse(
         id=str(application.id),
@@ -179,6 +369,7 @@ def serialize_application(application: Application, service: ServiceType) -> App
         created_at=application.created_at,
         updated_at=application.updated_at,
         version=application.version,
+        attachments=attachment_metadata(db, application.id),
     )
 
 
@@ -235,9 +426,9 @@ def list_application_page(
     ).all()
     page = paginate_results(
         [
-            serialize_staff_application(application, service)
+            serialize_staff_application(db, application, service)
             if staff
-            else serialize_application(application, service)
+            else serialize_application(db, application, service)
             for application, service in rows
         ],
         key=lambda item: (item.created_at.isoformat(), int(item.id)),
@@ -274,10 +465,121 @@ def get_student_application(
     ).one_or_none()
     if row is None:
         raise HTTPException(404, "not_found")
-    return serialize_application(*row)
+    return serialize_application(db, *row)
 
 
-WORKFLOW_ERRORS = {code: {"model": ApiError} for code in (401, 403, 404, 409, 422)}
+def attachment_download(
+    db: Session, attachment_id: int, *, student: Student | None = None, user: User | None = None
+):
+    row = db.execute(
+        select(ApplicationAttachment, Application)
+        .join(Application, Application.id == ApplicationAttachment.application_id)
+        .where(
+            ApplicationAttachment.id == attachment_id, ApplicationAttachment.is_current.is_(True)
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(404, "not_found")
+    attachment, application = row
+    if student is not None and application.student_id != student.id:
+        raise HTTPException(404, "not_found")
+    if user is not None:
+        require_application_review(db, user, application.id)
+    try:
+        handle = storage.open_key(
+            Path(get_settings().attachment_storage_path), attachment.storage_key
+        )
+    except OSError as exc:
+        raise HTTPException(503, "temporarily_unavailable") from exc
+
+    def chunks():
+        try:
+            while block := handle.read(storage.CHUNK_BYTES):
+                yield block
+        finally:
+            handle.close()
+
+    filename = quote(attachment.original_filename, safe="")
+    return StreamingResponse(
+        chunks(),
+        media_type=attachment.mime_type,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store",
+            "Content-Length": str(attachment.size_bytes),
+        },
+    )
+
+
+@router.get(
+    "/applications/{id}/attachments",
+    response_model=list[AttachmentMetadata],
+    responses=WORKFLOW_ERRORS,
+)
+def list_student_attachments(
+    id: Id,
+    student: Annotated[Student, Depends(get_current_student)],
+    db: Annotated[Session, Depends(get_db_session)],
+    _query: Annotated[RequestModel, Query()],
+):
+    application = workflow.get_owned_application(db, student, parse_application_id(id))
+    return attachment_metadata(db, application.id)
+
+
+@router.get(
+    "/applications/attachments/{attachment_id}/download",
+    responses={
+        **WORKFLOW_ERRORS,
+        200: {
+            "content": {
+                "application/octet-stream": {"schema": {"type": "string", "format": "binary"}}
+            }
+        },
+    },
+)
+def download_student_attachment(
+    attachment_id: Id,
+    student: Annotated[Student, Depends(get_current_student)],
+    db: Annotated[Session, Depends(get_db_session)],
+    _query: Annotated[RequestModel, Query()],
+):
+    return attachment_download(db, parse_application_id(attachment_id), student=student)
+
+
+@router.get(
+    "/staff/applications/{id}/attachments",
+    response_model=list[AttachmentMetadata],
+    responses=WORKFLOW_ERRORS,
+)
+def list_staff_attachments(
+    id: Id,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db_session)],
+    _query: Annotated[RequestModel, Query()],
+):
+    application = require_application_review(db, user, parse_application_id(id))
+    return attachment_metadata(db, application.id)
+
+
+@router.get(
+    "/staff/applications/attachments/{attachment_id}/download",
+    responses={
+        **WORKFLOW_ERRORS,
+        200: {
+            "content": {
+                "application/octet-stream": {"schema": {"type": "string", "format": "binary"}}
+            }
+        },
+    },
+)
+def download_staff_attachment(
+    attachment_id: Id,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db_session)],
+    _query: Annotated[RequestModel, Query()],
+):
+    return attachment_download(db, parse_application_id(attachment_id), user=user)
 
 
 def parse_application_id(identifier: str) -> int:
@@ -287,10 +589,10 @@ def parse_application_id(identifier: str) -> int:
 
 
 def serialize_staff_application(
-    application: Application, service: ServiceType
+    db: Session, application: Application, service: ServiceType
 ) -> StaffApplicationResponse:
     return StaffApplicationResponse(
-        **serialize_application(application, service).model_dump(),
+        **serialize_application(db, application, service).model_dump(),
         student_id=str(application.student_id),
         reviewer_user_id=str(application.reviewer_user_id)
         if application.reviewer_user_id
@@ -333,7 +635,7 @@ def get_staff_application(
 ) -> StaffApplicationResponse:
     application = require_application_review(db, user, parse_application_id(id))
     return serialize_staff_application(
-        application, db.get(ServiceType, application.service_type_id)
+        db, application, db.get(ServiceType, application.service_type_id)
     )
 
 
@@ -352,7 +654,7 @@ def review_application(
     try:
         application = workflow.review_application(db, user, parse_application_id(id), request)
         payload = serialize_staff_application(
-            application, db.get(ServiceType, application.service_type_id)
+            db, application, db.get(ServiceType, application.service_type_id)
         )
         db.commit()
         return payload
@@ -362,30 +664,166 @@ def review_application(
 
 
 @router.post(
-    "/applications/{id}/resubmit", response_model=ApplicationResponse, responses=WORKFLOW_ERRORS
+    "/applications/{id}/resubmit",
+    response_model=ApplicationResponse,
+    responses=WORKFLOW_ERRORS,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["expected_version", "form_data"],
+                        "properties": {
+                            "expected_version": {"type": "integer", "minimum": 1},
+                            "form_data": {
+                                "oneOf": [
+                                    {"$ref": "#/components/schemas/StudyCertificateFormData"},
+                                    {"type": "object"},
+                                    {"$ref": "#/components/schemas/AcademicLeaveFormData"},
+                                    {"$ref": "#/components/schemas/AccountingCertificateFormData"},
+                                ]
+                            },
+                            "keep_attachment_ids": {
+                                "type": "array",
+                                "items": {"$ref": "#/components/schemas/Id"},
+                            },
+                        },
+                    }
+                },
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["expected_version", "form_data", "keep_attachment_ids"],
+                        "properties": {
+                            "expected_version": {"type": "integer", "minimum": 1},
+                            "form_data": {"type": "string", "description": "JSON form_data"},
+                            "keep_attachment_ids": {
+                                "type": "string",
+                                "description": "JSON array of current attachment IDs to keep",
+                            },
+                            "files": {
+                                "type": "array",
+                                "items": {"type": "string", "format": "binary"},
+                            },
+                        },
+                    }
+                },
+            },
+        }
+    },
 )
-def resubmit_application(
+async def resubmit_application(
     id: Id,
-    request: ResubmitApplicationRequest,
+    request: Request,
     student: Annotated[Student, Depends(get_current_student)],
     db: Annotated[Session, Depends(get_db_session)],
     _query: Annotated[RequestModel, Query()],
 ) -> ApplicationResponse:
+    resubmission, uploaded = await parse_submission(request, resubmit=True)
+    identifier = parse_application_id(id)
+    root = Path(get_settings().attachment_storage_path)
+    staged = []
+    published = []
     try:
-        application = workflow.resubmit_application(
+        for item in uploaded:
+            staged.append(storage.stage_upload(item.file, item.filename or "attachment", root))
+        if sum(item.size_bytes for item in staged) > storage.MAX_TOTAL_BYTES:
+            raise HTTPException(422, "attachment_limit_exceeded")
+    except Exception:
+        for item in staged:
+            storage.discard(item)
+        raise
+    removed_keys = []
+    committed = False
+    try:
+        # The lock serializes simultaneous replacement attempts before they inspect
+        # the current attachment set; the version predicate remains the final guard.
+        application = db.scalar(
+            select(Application)
+            .where(Application.id == identifier, Application.student_id == student.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if application is None:
+            raise HTTPException(404, "not_found")
+        service = db.get(ServiceType, application.service_type_id)
+        if service.code != "academic_leave" and (uploaded or resubmission.keep_attachment_ids):
+            raise HTTPException(422, "validation_error")
+        current = db.scalars(
+            select(ApplicationAttachment)
+            .where(
+                ApplicationAttachment.application_id == application.id,
+                ApplicationAttachment.is_current.is_(True),
+            )
+            .with_for_update()
+        ).all()
+        current_by_id = {str(item.id): item for item in current}
+        keep_ids = resubmission.keep_attachment_ids
+        if len(keep_ids) != len(set(keep_ids)) or any(
+            item not in current_by_id for item in keep_ids
+        ):
+            raise HTTPException(409, "version_conflict")
+        retained = [current_by_id[item] for item in keep_ids]
+        if service.code == "academic_leave" and not (retained or staged):
+            raise HTTPException(422, "attachment_required")
+        if len(retained) + len(staged) > storage.MAX_FILES:
+            raise HTTPException(422, "attachment_limit_exceeded")
+        if (
+            sum(item.size_bytes for item in retained) + sum(item.size_bytes for item in staged)
+            > storage.MAX_TOTAL_BYTES
+        ):
+            raise HTTPException(422, "attachment_limit_exceeded")
+        stored_form, _unit_id = workflow.validate_and_store_form(
             db,
-            student,
-            parse_application_id(id),
-            expected_version=request.expected_version,
-            form_data=request.form_data.model_dump(),
+            service,
+            resubmission.form_data.model_dump(),
+            student=student,
+            existing=application.form_data,
         )
-        payload = serialize_application(
-            application, db.get(ServiceType, application.service_type_id)
+        changed = workflow.update_application(
+            db,
+            application,
+            expected_version=resubmission.expected_version,
+            actor_user_id=student.user_id,
+            access_predicate=Application.student_id == student.id,
+            from_statuses={"needs_correction"},
+            to_status="resubmitted",
+            form_data=stored_form,
         )
+        keep_set = set(keep_ids)
+        for old in current:
+            if str(old.id) not in keep_set:
+                old.is_current = False
+                removed_keys.append(old.storage_key)
+        for item in staged:
+            published.append(storage.publish(item, root))
+            db.add(
+                ApplicationAttachment(
+                    application_id=application.id,
+                    storage_key=item.storage_key,
+                    original_filename=item.filename,
+                    mime_type=item.mime_type,
+                    size_bytes=item.size_bytes,
+                    is_current=True,
+                )
+            )
+        db.flush()
+        payload = serialize_application(db, changed, service)
         db.commit()
+        committed = True
+        for key in removed_keys:
+            with suppress(OSError):
+                storage.delete_key(root, key)
         return payload
     except Exception:
         db.rollback()
+        if not committed:
+            for path in published:
+                path.unlink(missing_ok=True)
+        for item in staged:
+            storage.discard(item)
         raise
 
 

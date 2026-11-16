@@ -59,7 +59,8 @@ FROM pg_tables WHERE schemaname='public' AND tablename IN
      'service_types','applications','application_history','news','notifications',
      'academic_terms','course_groups',
      'assessments','assessment_groups','assessment_results','final_results',
-     'staff_profiles','staff_permissions','teaching_assignments','user_preferences') \gexec
+     'staff_profiles','staff_permissions','teaching_assignments','user_preferences',
+     'application_attachments') \gexec
 -- Status changes append the required event in the same transaction. The API
 -- cannot read or mutate arbitrary audit history; RETURNING needs only these columns.
 SELECT 'GRANT INSERT ON public.audit_events TO uni_space_api'
@@ -92,6 +93,13 @@ SELECT format('GRANT INSERT, UPDATE ON public.%I TO uni_space_api', tablename)
 FROM pg_tables WHERE schemaname='public' AND tablename IN ('auth_sessions','refresh_tokens','user_preferences') \gexec
 SELECT format('GRANT INSERT ON public.%I TO uni_space_api', tablename)
 FROM pg_tables WHERE schemaname='public' AND tablename IN ('applications', 'application_history') \gexec
+SELECT 'GRANT INSERT (application_id, storage_key, original_filename, mime_type, size_bytes, is_current) ON public.application_attachments TO uni_space_api'
+WHERE to_regclass('public.application_attachments') IS NOT NULL \gexec
+SELECT 'GRANT UPDATE (is_current) ON public.application_attachments TO uni_space_api'
+WHERE to_regclass('public.application_attachments') IS NOT NULL \gexec
+SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
+              pg_get_serial_sequence('public.application_attachments', 'id'))
+WHERE to_regclass('public.application_attachments') IS NOT NULL \gexec
 SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
               pg_get_serial_sequence(format('public.%I', tablename), 'id'))
 FROM pg_tables WHERE schemaname='public'
