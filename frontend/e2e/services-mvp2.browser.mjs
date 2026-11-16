@@ -104,7 +104,7 @@ try {
   })
   await Promise.all([page.reload({ waitUntil: 'domcontentloaded' }), reloadDialogPromise])
   await page.getByLabel('Основание').waitFor()
-  assert.equal(await page.getByLabel('Основание').inputValue(), 'other')
+  assert.equal(await page.getByLabel('Основание').inputValue(), 'medical')
   assert.equal(
     await page.getByRole('button', { name: 'Подача пока недоступна' }).isDisabled(),
     true,

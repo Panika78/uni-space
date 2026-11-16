@@ -279,6 +279,14 @@ async function assertAllGrantsNavigation() {
       await links.first().focus()
       for (let index = 1; index < 9; index++) await page.keyboard.press('Tab')
       assert.equal(await links.last().evaluate((node) => node === document.activeElement), true)
+      await page.waitForFunction(() => {
+        const navigation = document.querySelector('.desktop-sidebar nav')
+        const last = navigation?.querySelector('a:last-child')
+        if (!navigation || !last) return false
+        const nav = navigation.getBoundingClientRect()
+        const link = last.getBoundingClientRect()
+        return link.top >= nav.top && link.bottom <= nav.bottom
+      })
       const geometry = await navigation.evaluate((node) => {
         const nav = node.getBoundingClientRect()
         const last = node.querySelector('a:last-child').getBoundingClientRect()
