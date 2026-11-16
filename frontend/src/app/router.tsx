@@ -25,6 +25,7 @@ import {
   StaffStudentsPage,
   StaffStudentDetailPage,
 } from '../features/students/StaffStudentsPage'
+import { StaffNewsPage } from '../features/news/StaffNewsPage'
 import type { ReactNode } from 'react'
 import type { RouteObject } from 'react-router-dom'
 
@@ -194,6 +195,13 @@ export const appRoutes: RouteObject[] = [
                     element: <RoleGuard role="staff" />,
                     children: [
                       { path: '/staff', element: <StaffHome /> },
+                      {
+                        element: <RoleGuard role="staff" permission="news.publish" />,
+                        children: [
+                          { path: '/staff/news', element: <StaffNewsPage /> },
+                          { path: '/staff/news/:id', element: <StaffNewsPage /> },
+                        ],
+                      },
                       {
                         element: <RoleGuard role="staff" permission="applications.review" />,
                         children: [

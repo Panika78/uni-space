@@ -93,6 +93,7 @@ except Exception:
 | `user` | `set_role` | `role` |
 | `user` | `set_active` | `is_active` |
 | `student` | `set_academic_status` | `academic_status` |
+| `news` | `create`, `update`, `publish`, `unpublish` | `title`, `body`, `is_published`, `published_at`, `author_user_id` |
 
 Для `attendance` действует явное исключение: `entity_id=lesson_id`, полный
 идентификатор отметки — `(lesson_id, student_id)`, а не один `entity_id`.

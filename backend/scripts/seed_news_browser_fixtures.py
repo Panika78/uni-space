@@ -11,7 +11,16 @@ from sqlalchemy.engine import make_url
 from app.auth.security import PASSWORD_HASHER
 from app.core.config import get_settings
 from app.core.database import SessionLocal
-from app.models import News, OrgUnit, Program, Student, StudyGroup, User
+from app.models import (
+    News,
+    OrgUnit,
+    Program,
+    StaffPermission,
+    StaffProfile,
+    Student,
+    StudyGroup,
+    User,
+)
 
 
 def main() -> None:
@@ -61,6 +70,27 @@ def main() -> None:
         session.flush()
         session.add(Student(user_id=user.id, group_id=group.id, academic_status="enrolled"))
 
+        staff_unit = OrgUnit(name=f"News E2E fictional office {suffix}", type="dean_office")
+        staff = User(
+            login=f"news-staff-e2e-{suffix}",
+            password_hash=PASSWORD_HASHER.hash(password),
+            full_name="Вымышленный сотрудник теста новостей",
+            role="staff",
+            is_active=True,
+        )
+        session.add_all([staff_unit, staff])
+        session.flush()
+        profile = StaffProfile(user_id=staff.id, org_unit_id=staff_unit.id)
+        session.add(profile)
+        session.flush()
+        session.add(
+            StaffPermission(
+                staff_profile_id=profile.id,
+                permission_code="news.publish",
+                scope_org_unit_id=staff_unit.id,
+            )
+        )
+
         published_at = datetime.now(UTC).replace(microsecond=0) - timedelta(days=90)
         news = []
         for index in range(70):
@@ -85,6 +115,8 @@ def main() -> None:
 
     print(f"NEWS_TEST_LOGIN={login}")
     print(f"NEWS_TEST_PASSWORD={password}")
+    print(f"NEWS_TEST_STAFF_LOGIN=news-staff-e2e-{suffix}")
+    print(f"NEWS_TEST_STAFF_PASSWORD={password}")
     print(f"NEWS_TEST_DETAIL_ID={detail_id}")
     print(f"NEWS_TEST_DETAIL_TITLE={news[0].title}")
 
