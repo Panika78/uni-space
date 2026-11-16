@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from test_academics_migrations import migration_database, run_migration  # noqa: F401
 from test_models_postgresql import add_study_group, add_user
 
-from app.models import Application, ApplicationHistory, ServiceType, Student
+from app.models import Application, ApplicationHistory, ServiceType
 
 pytestmark = pytest.mark.integration
 
@@ -18,14 +18,19 @@ def test_history_upgrade_preserves_existing_applications_and_has_single_head(mig
         group = add_study_group(db, "history-migration")
         user = add_user(db, "history-migration")
         actor_id = user.id
-        student = Student(user_id=user.id, group_id=group.id, academic_status="enrolled")
-        db.add(student)
-        db.flush()
+        # Freeze the insert to the schema being upgraded, not the current ORM.
+        student_id = db.scalar(
+            text(
+                "INSERT INTO students(user_id,group_id,academic_status) "
+                "VALUES (:user,:group,'enrolled') RETURNING id"
+            ),
+            {"user": user.id, "group": group.id},
+        )
         service = db.scalar(select(ServiceType).where(ServiceType.code == "study_certificate"))
         for status in ("submitted", "needs_correction", "approved", "rejected"):
             db.add(
                 Application(
-                    student_id=student.id,
+                    student_id=student_id,
                     service_type_id=service.id,
                     review_status=status,
                     document_status="pending",
