@@ -27,6 +27,7 @@ from app.permissions import router as permissions_router
 from app.preferences import router as preferences_router
 from app.schedule.editor_router import router as schedule_editor_router
 from app.schedule.router import router as schedule_router
+from app.staff_students import router as staff_students_router
 from app.students import router as students_router
 from app.teaching.router import router as teaching_router
 
@@ -52,6 +53,7 @@ app.include_router(notifications_router)
 app.include_router(schedule_router)
 app.include_router(schedule_editor_router)
 app.include_router(students_router)
+app.include_router(staff_students_router)
 app.include_router(news_router)
 app.include_router(teaching_router)
 app.include_router(final_results_router)

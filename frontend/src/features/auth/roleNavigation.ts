@@ -32,7 +32,14 @@ export function getRoleNavigation(context: AuthorizationContext): NavigationItem
   return staffSections
     .filter(({ permission }) => hasPermission(context, permission))
     .map(({ permission, label }) => ({
-      to: permission === 'applications.review' ? '/staff/applications' : `/staff#${permission}`,
+      to:
+        permission === 'applications.review'
+          ? '/staff/applications'
+          : permission === 'students.read'
+            ? '/staff/students'
+            : permission === 'students.status.edit'
+              ? '/staff/students/status'
+              : `/staff#${permission}`,
       label,
       icon: 'file',
     }))
@@ -42,5 +49,8 @@ export function getStartRoute(context: AuthorizationContext) {
   if (context.role === 'student') return '/schedule'
   if (context.role === 'teacher') return '/teacher/journals'
   if (context.role === 'admin') return '/admin/users'
-  return hasPermission(context, 'applications.review') ? '/staff/applications' : '/staff'
+  if (hasPermission(context, 'applications.review')) return '/staff/applications'
+  if (hasPermission(context, 'students.read')) return '/staff/students'
+  if (hasPermission(context, 'students.status.edit')) return '/staff/students/status'
+  return '/staff'
 }

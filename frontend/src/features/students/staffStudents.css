@@ -1,0 +1,209 @@
+.staff-students-page {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.staff-students-page h1,
+.staff-student-card h2,
+.student-status-form h2 {
+  margin: 0;
+}
+
+.staff-student-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(145px, 1fr)) auto;
+  align-items: end;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border, #d9dee8);
+  border-radius: 1rem;
+  background: var(--surface, #fff);
+}
+
+.staff-student-filters label,
+.student-status-form > label,
+.student-id-field {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--text-secondary, #536174);
+  font-size: 0.9rem;
+}
+
+.staff-student-filters input,
+.staff-student-filters select,
+.student-status-form select,
+.student-id-field input {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border, #cbd3df);
+  border-radius: 0.6rem;
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
+}
+
+.staff-students-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.staff-student-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border, #d9dee8);
+  border-radius: 0.9rem;
+  background: var(--surface, #fff);
+}
+
+.staff-student-card p,
+.student-status-form p {
+  margin: 0.35rem 0 0;
+  color: var(--text-secondary, #536174);
+}
+
+.staff-student-status {
+  display: grid;
+  justify-items: end;
+  gap: 0.55rem;
+  text-align: right;
+}
+
+.staff-student-status span {
+  font-weight: 600;
+}
+
+.staff-student-filters button,
+.staff-student-status button,
+.student-form-actions button,
+.student-next-page {
+  min-height: 2.75rem;
+  padding: 0.6rem 1rem;
+  border: 0;
+  border-radius: 0.65rem;
+  background: var(--primary, #3159a8);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.staff-student-filters button:disabled,
+.student-form-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.staff-status-link,
+.staff-students-empty {
+  margin: 0;
+}
+
+.staff-status-link a {
+  color: var(--primary, #3159a8);
+  font-weight: 600;
+}
+
+.student-next-page {
+  justify-self: center;
+}
+
+.student-status-overlay {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(15 23 42 / 46%);
+}
+
+.student-status-dialog,
+.student-status-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.student-status-dialog {
+  width: min(calc(100% - 2rem), 34rem);
+  border: 0;
+  margin: auto;
+  max-height: 90dvh;
+  overflow: auto;
+  padding: 1.25rem;
+  border-radius: 1rem;
+  background: var(--surface, #fff);
+  box-shadow: 0 1.5rem 4rem rgb(15 23 42 / 24%);
+}
+
+.student-basis-confirmation {
+  display: flex !important;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 0.65rem !important;
+  color: var(--text-primary, #202b3c) !important;
+  font-size: 0.95rem !important;
+}
+
+.student-basis-confirmation input {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0.1rem 0 0;
+}
+
+.student-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.student-form-actions .button-secondary {
+  border: 1px solid var(--border, #cbd3df);
+  background: transparent;
+  color: inherit;
+}
+
+.student-form-error {
+  color: #a42323 !important;
+}
+
+@media (max-width: 900px) {
+  .staff-student-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .staff-student-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .staff-student-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .staff-student-status {
+    align-items: start;
+    justify-items: start;
+    text-align: left;
+  }
+
+  .staff-student-status button,
+  .student-form-actions button {
+    width: 100%;
+  }
+}
+
+.student-status-dialog::backdrop {
+  background: rgb(15 23 42 / 46%);
+}
+.student-status-dialog:not([open]) {
+  display: none;
+}

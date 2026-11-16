@@ -153,6 +153,17 @@ except Exception:
 `UPDATE(id)` для блокировок lessons/students/teaching_assignments,
 `INSERT` на `audit_events`, `SELECT (id, created_at)` для SQLAlchemy
 `INSERT ... RETURNING`, без права чтения снимков аудита.
+
+
+Изменения permissions согласуются с владельцем #60 отдельной интеграцией: #79
+использует существующий реестр и механизм выдачи прав. Production ACL для ручной
+смены статуса расширен в MVP2-27: `INSERT` на `audit_events`, `SELECT (id, created_at)`
+для SQLAlchemy `INSERT ... RETURNING`, `SELECT` и `INSERT` на отдельный
+`student_status_operations` для точного повтора и `UPDATE (academic_status)` на `students`.
+Реестр квитанций не является аудитом: хранит только actor/student, target/previous status,
+reason и результат, включая no-op, без ФИО, группы или снимков аудита. Runtime не имеет
+UPDATE/DELETE на аудит или реестр.
+У будущих предметных write API права аудита и таблиц добавляются отдельно и узко.
 `id` — IDENTITY, а не SERIAL: генерация значения
 при INSERT не требует `USAGE` на `audit_events_id_seq`; прямой `nextval()` требует
 права на последовательность и приложению не нужен. Не выдавать

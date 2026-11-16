@@ -436,6 +436,7 @@ MVP2-05: отметка сохраняет исходные группу/под�
 | Таблица | Ключевые поля | Назначение | Когда |
 |---|---|---|---|
 | `audit_events` | `id PK`, `actor_user_id FK NULL`, `entity_type`, `entity_id`, `action`, `before_data JSONB NULL`, `after_data JSONB NULL`, `reason NULL`, `created_at` | История важных изменений | MVP 2 |
+| `student_status_operations` | `operation_id UUID PK`, `actor_user_id FK`, `student_id FK`, `target_status`, `previous_status`, `reason`, `changed`, `created_at` | Неизменяемая квитанция успешной команды для точного повтора, включая no-op; не является историей изменений | MVP 2 |
 
 Обязательно аудировать изменения баллов, итоговых оценок, официального расписания и значимых административных данных. Для жизненного цикла заявления отдельно используется `application_history`.
 

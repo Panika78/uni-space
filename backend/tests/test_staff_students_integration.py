@@ -1,0 +1,922 @@
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import delete, func, select, text
+from sqlalchemy.orm import Session
+
+from app.auth.security import create_access_token
+from app.core.config import Settings
+from app.core.errors import install_exception_handlers
+from app.core.middleware import ApiHeadersMiddleware
+from app.dependencies.database import get_db_session
+from app.models import (
+    AuditEvent,
+    AuthSession,
+    OrgUnit,
+    Program,
+    StaffPermission,
+    StaffProfile,
+    Student,
+    StudentStatusOperation,
+    StudyGroup,
+    User,
+)
+from app.permissions import PermissionCode
+from app.staff_students import router
+
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture
+def staff_students(db_session):
+    db = db_session
+    faculty = OrgUnit(name="Факультет вымышленный", type="faculty")
+    db.add(faculty)
+    db.flush()
+    program = Program(
+        code="fixture",
+        name="Тестовая программа",
+        direction_code="00",
+        direction_name="Вымышленное направление",
+        faculty_id=faculty.id,
+    )
+    other_faculty = OrgUnit(name="Другой факультет", type="faculty")
+    db.add_all([program, other_faculty])
+    db.flush()
+    other_program = Program(
+        code="other",
+        name="Другая программа",
+        direction_code="01",
+        direction_name="Другое",
+        faculty_id=other_faculty.id,
+    )
+    db.add(other_program)
+    db.flush()
+    groups = [
+        StudyGroup(name="ИВТ-21", program_id=program.id, course_number=2),
+        StudyGroup(name="ИВТ-31", program_id=program.id, course_number=3),
+        StudyGroup(name="ФИЛ-11", program_id=other_program.id, course_number=1),
+    ]
+    db.add_all(groups)
+    db.flush()
+    names = ["Елена Поиск27", "Ёлкина Поиск27", "Жуков Поиск27"]
+    students = []
+    for index, name in enumerate(names):
+        user = User(
+            login=f"student-{uuid4().hex}",
+            password_hash="unusable",
+            full_name=name,
+            role="student",
+            is_active=True,
+        )
+        db.add(user)
+        db.flush()
+        student = Student(
+            user_id=user.id, group_id=groups[index % 3].id, academic_status="enrolled"
+        )
+        db.add(student)
+        db.flush()
+        students.append(student)
+
+    dean = OrgUnit(name="Деканат фиктивный", type="dean_office")
+    db.add(dean)
+    db.flush()
+
+    def create_actor(role="staff"):
+        actor = User(
+            login=f"actor-{uuid4().hex}",
+            password_hash="unusable",
+            full_name="Вымышленный сотрудник",
+            role=role,
+            is_active=True,
+        )
+        db.add(actor)
+        db.flush()
+        profile = None
+        if role == "staff":
+            profile = StaffProfile(user_id=actor.id, org_unit_id=dean.id)
+            db.add(profile)
+            db.flush()
+        session = AuthSession(user_id=actor.id, expires_at=datetime.now(UTC) + timedelta(hours=1))
+        db.add(session)
+        db.flush()
+        settings = Settings(
+            _env_file=None,
+            app_env="test",
+            jwt_signing_key="test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        )
+        token = create_access_token(session, settings)["access_token"]
+        return actor, profile, token
+
+    app = FastAPI()
+    app.add_middleware(ApiHeadersMiddleware)
+    install_exception_handlers(app)
+    app.include_router(router)
+    app.dependency_overrides[get_db_session] = lambda: db
+    client = TestClient(app, raise_server_exceptions=False)
+    reader, reader_profile, reader_token = create_actor()
+    editor, editor_profile, editor_token = create_actor()
+    admin, _, admin_token = create_actor("admin")
+    db.add(
+        StaffPermission(
+            staff_profile_id=reader_profile.id,
+            permission_code=PermissionCode.STUDENTS_READ,
+            scope_org_unit_id=None,
+        )
+    )
+    db.add(
+        StaffPermission(
+            staff_profile_id=editor_profile.id,
+            permission_code=PermissionCode.STUDENTS_STATUS_EDIT,
+            scope_org_unit_id=None,
+        )
+    )
+    db.flush()
+    return locals()
+
+
+def request(s, method, path, token=None, **kwargs):
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    if method == "PATCH" and path.endswith("/academic-status") and "json" in kwargs:
+        kwargs["json"] = {"operation_id": str(uuid4()), **kwargs["json"]}
+    return s["client"].request(method, "/api/v1/staff/students" + path, headers=headers, **kwargs)
+
+
+def test_independent_permissions_and_minimal_status_write_response(staff_students):
+    s = staff_students
+    assert request(s, "GET", "", s["editor_token"]).status_code == 403
+    assert request(s, "GET", "", s["reader_token"]).status_code == 200
+    assert (
+        request(
+            s,
+            "PATCH",
+            f"/{s['students'][0].id}/academic-status",
+            s["reader_token"],
+            json={"academic_status": "expelled", "reason": "correction"},
+        ).status_code
+        == 403
+    )
+    changed = request(
+        s,
+        "PATCH",
+        f"/{s['students'][0].id}/academic-status",
+        s["editor_token"],
+        json={"academic_status": "academic_leave", "reason": "administrative_change"},
+    )
+    assert changed.status_code == 200
+    assert changed.json() == {
+        "operation_id": changed.json()["operation_id"],
+        "academic_status": "academic_leave",
+        "previous_academic_status": "enrolled",
+        "changed": True,
+    }
+    assert s["db"].get(User, s["students"][0].user_id).is_active is True
+    assert request(s, "GET", "", s["admin_token"]).status_code == 403
+    assert (
+        request(
+            s,
+            "PATCH",
+            f"/{s['students'][0].id}/academic-status",
+            s["admin_token"],
+            json={"academic_status": "expelled", "reason": "correction"},
+        ).status_code
+        == 403
+    )
+
+
+def test_staff_search_filters_and_russian_ё_order_with_cursor(staff_students):
+    s = staff_students
+    # Add enough rows to prove the keyset continuation remains unique and bounded.
+    for index in range(24):
+        user = User(
+            login=f"page-{uuid4().hex}",
+            password_hash="unusable",
+            full_name=f"Студент {index:02}",
+            role="student",
+            is_active=True,
+        )
+        s["db"].add(user)
+        s["db"].flush()
+        s["db"].add(
+            Student(user_id=user.id, group_id=s["groups"][0].id, academic_status="enrolled")
+        )
+    s["db"].flush()
+    first = request(s, "GET", "", s["reader_token"], params={"q": "Поиск27", "limit": 2})
+    assert first.status_code == 200
+    assert [row["full_name"] for row in first.json()["items"]] == [
+        "Елена Поиск27",
+        "Ёлкина Поиск27",
+    ]
+    second = request(
+        s,
+        "GET",
+        "",
+        s["reader_token"],
+        params={"q": "Поиск27", "limit": 2, "cursor": first.json()["next_cursor"]},
+    )
+    assert second.status_code == 200, second.text
+    assert [row["full_name"] for row in second.json()["items"]] == ["Жуков Поиск27"]
+    row = request(
+        s,
+        "GET",
+        "",
+        s["reader_token"],
+        params={
+            "faculty_id": str(s["faculty"].id),
+            "program_id": str(s["program"].id),
+            "course_number": 2,
+            "q": "ИВТ-21",
+        },
+    )
+    assert row.status_code == 200
+    assert len(row.json()["items"]) == 20
+    assert row.json()["next_cursor"] is not None
+    assert set(row.json()["items"][0]) == {
+        "id",
+        "full_name",
+        "group",
+        "course_number",
+        "program",
+        "faculty",
+        "academic_status",
+    }
+    assert request(s, "GET", "", s["reader_token"], params={"limit": 101}).status_code == 422
+    assert (
+        request(s, "GET", "", s["reader_token"], params={"faculty_id": "9" * 20}).status_code == 422
+    )
+    assert request(s, "GET", f"/{s['students'][0].id}", s["editor_token"]).status_code == 403
+
+
+def test_status_only_preview_and_operation_receipt_do_not_expose_profile(staff_students):
+    s = staff_students
+    student = s["students"][0]
+    preview = request(s, "GET", f"/{student.id}/academic-status", s["editor_token"])
+    assert preview.status_code == 200
+    assert preview.json() == {"id": str(student.id), "academic_status": "enrolled"}
+    assert request(s, "GET", f"/{student.id}", s["editor_token"]).status_code == 403
+
+    operation_id = str(uuid4())
+    payload = {
+        "operation_id": operation_id,
+        "academic_status": "expelled",
+        "reason": "correction",
+    }
+    changed = request(s, "PATCH", f"/{student.id}/academic-status", s["editor_token"], json=payload)
+    assert changed.status_code == 200
+    receipt = request(
+        s,
+        "GET",
+        f"/status-operations/{operation_id}",
+        s["editor_token"],
+        params={key: payload[key] for key in ("academic_status", "reason")}
+        | {"student_id": str(student.id)},
+    )
+    assert receipt.status_code == 200
+    assert receipt.json() == {
+        "operation_id": operation_id,
+        "completed": True,
+        "academic_status": "expelled",
+        "previous_academic_status": "enrolled",
+        "changed": True,
+    }
+
+    replay = request(s, "PATCH", f"/{student.id}/academic-status", s["editor_token"], json=payload)
+    assert replay.status_code == 200
+    assert replay.json() == changed.json()
+    assert (
+        s["db"].scalar(
+            select(func.count(AuditEvent.id)).where(
+                AuditEvent.entity_type == "student", AuditEvent.entity_id == student.id
+            )
+        )
+        == 1
+    )
+    conflict = request(
+        s,
+        "PATCH",
+        f"/{student.id}/academic-status",
+        s["editor_token"],
+        json={**payload, "academic_status": "graduated"},
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "operation_id_conflict"
+    mismatch = request(
+        s,
+        "GET",
+        f"/status-operations/{operation_id}",
+        s["editor_token"],
+        params={
+            "student_id": str(student.id),
+            "academic_status": "graduated",
+            "reason": "correction",
+        },
+    )
+    assert mismatch.json()["completed"] is False
+
+
+def test_noop_operation_receipt_replay_does_not_undo_a_later_change(staff_students):
+    s = staff_students
+    student = s["students"][0]
+    noop_id = str(uuid4())
+    noop_payload = {
+        "operation_id": noop_id,
+        "academic_status": "enrolled",
+        "reason": "correction",
+    }
+    noop = request(
+        s, "PATCH", f"/{student.id}/academic-status", s["editor_token"], json=noop_payload
+    )
+    assert noop.status_code == 200
+    assert noop.json()["changed"] is False
+    assert noop.json()["previous_academic_status"] == "enrolled"
+    changed_payload = {
+        "operation_id": str(uuid4()),
+        "academic_status": "expelled",
+        "reason": "administrative_change",
+    }
+    changed = request(
+        s, "PATCH", f"/{student.id}/academic-status", s["editor_token"], json=changed_payload
+    )
+    assert changed.status_code == 200 and changed.json()["changed"] is True
+    replay = request(
+        s, "PATCH", f"/{student.id}/academic-status", s["editor_token"], json=noop_payload
+    )
+    assert replay.json() == noop.json()
+    s["db"].refresh(student)
+    assert student.academic_status == "expelled"
+    assert (
+        len(
+            s["db"]
+            .scalars(
+                select(AuditEvent).where(
+                    AuditEvent.entity_type == "student", AuditEvent.entity_id == student.id
+                )
+            )
+            .all()
+        )
+        == 1
+    )
+
+
+@pytest.mark.parametrize(
+    ("before_status", "status"),
+    [
+        ("enrolled", "academic_leave"),
+        ("enrolled", "expelled"),
+        ("enrolled", "graduated"),
+        ("academic_leave", "enrolled"),
+        ("expelled", "enrolled"),
+        ("graduated", "enrolled"),
+    ],
+)
+def test_all_academic_status_values_and_corrections_are_audited(
+    staff_students, before_status, status
+):
+    s = staff_students
+    student = s["students"][0]
+    student.academic_status = before_status
+    s["db"].flush()
+    response = request(
+        s,
+        "PATCH",
+        f"/{student.id}/academic-status",
+        s["editor_token"],
+        json={"academic_status": status, "reason": "correction"},
+    )
+    assert response.status_code == 200
+    assert student.academic_status == status
+    event = s["db"].scalar(
+        select(AuditEvent).where(
+            AuditEvent.entity_type == "student", AuditEvent.entity_id == student.id
+        )
+    )
+    assert event.action == "set_academic_status"
+    assert event.reason == "correction"
+    assert event.before_data == {"academic_status": before_status}
+    assert event.after_data == {"academic_status": status}
+    # Repeating the confirmed target is a no-op, including corrections to enrolled.
+    repeated = request(
+        s,
+        "PATCH",
+        f"/{student.id}/academic-status",
+        s["editor_token"],
+        json={"academic_status": status, "reason": "correction"},
+    )
+    assert repeated.status_code == 200
+    assert (
+        len(
+            s["db"]
+            .scalars(
+                select(AuditEvent).where(
+                    AuditEvent.entity_type == "student", AuditEvent.entity_id == student.id
+                )
+            )
+            .all()
+        )
+        == 1
+    )
+    assert status in {"enrolled", "academic_leave", "expelled", "graduated"}
+    assert s["db"].get(User, student.user_id).is_active
+
+
+def test_noop_does_not_create_audit_and_foreign_id_is_not_visible(staff_students):
+    s = staff_students
+    student = s["students"][0]
+    response = request(
+        s,
+        "PATCH",
+        f"/{student.id}/academic-status",
+        s["editor_token"],
+        json={"academic_status": "enrolled", "reason": "administrative_change"},
+    )
+    assert response.status_code == 200
+    assert (
+        s["db"].scalar(
+            select(AuditEvent).where(
+                AuditEvent.entity_type == "student", AuditEvent.entity_id == student.id
+            )
+        )
+        is None
+    )
+    assert (
+        request(
+            s,
+            "PATCH",
+            "/9223372036854775807/academic-status",
+            s["editor_token"],
+            json={"academic_status": "expelled", "reason": "correction"},
+        ).status_code
+        == 404
+    )
+    assert request(s, "GET", "/9223372036854775807", s["reader_token"]).status_code == 404
+
+
+def test_invalid_reason_does_not_change_status(staff_students):
+    s = staff_students
+    student = s["students"][0]
+    response = request(
+        s,
+        "PATCH",
+        f"/{student.id}/academic-status",
+        s["editor_token"],
+        json={"academic_status": "expelled", "reason": "free_text"},
+    )
+    assert response.status_code == 422
+    assert student.academic_status == "enrolled"
+
+
+def test_revoked_permission_blocks_the_next_request(staff_students):
+    s = staff_students
+    student = s["students"][0]
+    permission = s["db"].scalar(
+        select(StaffPermission).where(
+            StaffPermission.staff_profile_id == s["editor_profile"].id,
+            StaffPermission.permission_code == PermissionCode.STUDENTS_STATUS_EDIT,
+        )
+    )
+    s["db"].delete(permission)
+    s["db"].flush()
+    denied = request(
+        s,
+        "PATCH",
+        f"/{student.id}/academic-status",
+        s["editor_token"],
+        json={"academic_status": "expelled", "reason": "correction"},
+    )
+    assert denied.status_code == 403
+    assert student.academic_status == "enrolled"
+
+    s["db"].add(
+        StaffPermission(
+            staff_profile_id=s["editor_profile"].id,
+            permission_code=PermissionCode.STUDENTS_STATUS_EDIT,
+            scope_org_unit_id=None,
+        )
+    )
+    s["db"].flush()
+
+
+def test_audit_failure_rolls_back_status_update(postgresql_engine, monkeypatch):
+    with Session(postgresql_engine) as db, db.begin():
+        dean = OrgUnit(name=f"Dean rollback {uuid4().hex}", type="dean_office")
+        faculty = OrgUnit(name=f"Faculty rollback {uuid4().hex}", type="faculty")
+        db.add_all([dean, faculty])
+        db.flush()
+        program = Program(
+            code=f"rollback-{uuid4().hex}",
+            name="Rollback program",
+            direction_code="00",
+            direction_name="Rollback direction",
+            faculty_id=faculty.id,
+        )
+        db.add(program)
+        db.flush()
+        group = StudyGroup(name=f"ROLLBACK-{uuid4().hex}", program_id=program.id, course_number=1)
+        student_user = User(
+            login=f"rollback-student-{uuid4().hex}",
+            password_hash="unusable",
+            full_name="Rollback Student",
+            role="student",
+            is_active=True,
+        )
+        actor = User(
+            login=f"rollback-actor-{uuid4().hex}",
+            password_hash="unusable",
+            full_name="Rollback Actor",
+            role="staff",
+            is_active=True,
+        )
+        db.add_all([group, student_user, actor])
+        db.flush()
+        student = Student(user_id=student_user.id, group_id=group.id, academic_status="enrolled")
+        profile = StaffProfile(user_id=actor.id, org_unit_id=dean.id)
+        db.add_all([student, profile])
+        db.flush()
+        db.add(
+            StaffPermission(
+                staff_profile_id=profile.id,
+                permission_code=PermissionCode.STUDENTS_STATUS_EDIT,
+                scope_org_unit_id=None,
+            )
+        )
+        auth_session = AuthSession(
+            user_id=actor.id, expires_at=datetime.now(UTC) + timedelta(hours=1)
+        )
+        db.add(auth_session)
+        db.flush()
+        token = create_access_token(
+            auth_session,
+            Settings(
+                _env_file=None,
+                app_env="test",
+                jwt_signing_key="test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+            ),
+        )["access_token"]
+        student_id = student.id
+        actor_id = actor.id
+        profile_id = profile.id
+        student_user_id = student_user.id
+        group_id = group.id
+        program_id = program.id
+        dean_id = dean.id
+        faculty_id = faculty.id
+
+    app = FastAPI()
+    app.add_middleware(ApiHeadersMiddleware)
+    install_exception_handlers(app)
+    app.include_router(router)
+
+    def session_dependency():
+        with Session(postgresql_engine) as db:
+            yield db
+
+    app.dependency_overrides[get_db_session] = session_dependency
+
+    def fail_audit(*args, **kwargs):
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr("app.staff_students.write_audit_event", fail_audit)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.patch(
+            f"/api/v1/staff/students/{student_id}/academic-status",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "academic_status": "expelled",
+                "reason": "correction",
+                "operation_id": str(uuid4()),
+            },
+        )
+    assert response.status_code == 500
+    with Session(postgresql_engine) as db:
+        assert db.get(Student, student_id).academic_status == "enrolled"
+        assert (
+            db.scalar(
+                select(AuditEvent).where(
+                    AuditEvent.entity_type == "student", AuditEvent.entity_id == student_id
+                )
+            )
+            is None
+        )
+    with Session(postgresql_engine) as db, db.begin():
+        db.execute(delete(AuthSession).where(AuthSession.user_id == actor_id))
+        db.execute(delete(StaffPermission).where(StaffPermission.staff_profile_id == profile_id))
+        db.execute(delete(Student).where(Student.id == student_id))
+        db.execute(delete(StaffProfile).where(StaffProfile.id == profile_id))
+        db.execute(delete(User).where(User.id.in_([actor_id, student_user_id])))
+        db.execute(delete(StudyGroup).where(StudyGroup.id == group_id))
+        db.execute(delete(Program).where(Program.id == program_id))
+        db.execute(delete(OrgUnit).where(OrgUnit.id.in_([dean_id, faculty_id])))
+
+
+def test_concurrent_status_changes_audit_the_locked_before_value(postgresql_engine):
+    with Session(postgresql_engine) as db, db.begin():
+        dean = OrgUnit(name=f"Dean race {uuid4().hex}", type="dean_office")
+        faculty = OrgUnit(name=f"Faculty race {uuid4().hex}", type="faculty")
+        db.add_all([dean, faculty])
+        db.flush()
+        program = Program(
+            code=f"race-{uuid4().hex}",
+            name="Race program",
+            direction_code="00",
+            direction_name="Race direction",
+            faculty_id=faculty.id,
+        )
+        db.add(program)
+        db.flush()
+        group = StudyGroup(name=f"RACE-{uuid4().hex}", program_id=program.id, course_number=1)
+        student_user = User(
+            login=f"race-student-{uuid4().hex}",
+            password_hash="unusable",
+            full_name="Race Student",
+            role="student",
+            is_active=True,
+        )
+        actor = User(
+            login=f"race-actor-{uuid4().hex}",
+            password_hash="unusable",
+            full_name="Race Actor",
+            role="staff",
+            is_active=True,
+        )
+        db.add_all([group, student_user, actor])
+        db.flush()
+        student = Student(user_id=student_user.id, group_id=group.id, academic_status="enrolled")
+        profile = StaffProfile(user_id=actor.id, org_unit_id=dean.id)
+        db.add_all([student, profile])
+        db.flush()
+        db.add(
+            StaffPermission(
+                staff_profile_id=profile.id,
+                permission_code=PermissionCode.STUDENTS_STATUS_EDIT,
+                scope_org_unit_id=None,
+            )
+        )
+        auth_session = AuthSession(
+            user_id=actor.id, expires_at=datetime.now(UTC) + timedelta(hours=1)
+        )
+        db.add(auth_session)
+        db.flush()
+        settings = Settings(
+            _env_file=None,
+            app_env="test",
+            jwt_signing_key="test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        )
+        token = create_access_token(auth_session, settings)["access_token"]
+        student_id = student.id
+        actor_id = actor.id
+        profile_id = profile.id
+        student_user_id = student_user.id
+        group_id = group.id
+        program_id = program.id
+        dean_id = dean.id
+        faculty_id = faculty.id
+
+    app = FastAPI()
+    app.add_middleware(ApiHeadersMiddleware)
+    install_exception_handlers(app)
+    app.include_router(router)
+
+    def session_dependency():
+        with Session(postgresql_engine) as db:
+            yield db
+
+    app.dependency_overrides[get_db_session] = session_dependency
+
+    def update(status, operation_id=None):
+        with TestClient(app, raise_server_exceptions=False) as client:
+            return client.patch(
+                f"/api/v1/staff/students/{student_id}/academic-status",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "academic_status": status,
+                    "reason": "correction",
+                    "operation_id": operation_id or str(uuid4()),
+                },
+            )
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            responses = list(executor.map(update, ["expelled", "graduated"]))
+        assert [response.status_code for response in responses] == [200, 200]
+        duplicate_operation_id = str(uuid4())
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            duplicates = list(
+                executor.map(lambda _: update("academic_leave", duplicate_operation_id), range(2))
+            )
+        assert [response.status_code for response in duplicates] == [200, 200]
+        assert duplicates[0].json() == duplicates[1].json()
+        assert duplicates[0].json()["changed"] is True
+        with Session(postgresql_engine) as db:
+            events = db.scalars(
+                select(AuditEvent)
+                .where(AuditEvent.entity_type == "student", AuditEvent.entity_id == student_id)
+                .order_by(AuditEvent.id)
+            ).all()
+            assert len(events) == 3
+            assert events[0].before_data == {"academic_status": "enrolled"}
+            assert events[1].before_data == events[0].after_data
+            assert (
+                events[-1].after_data["academic_status"]
+                == db.get(Student, student_id).academic_status
+            )
+            receipt = db.get(StudentStatusOperation, duplicate_operation_id)
+            assert receipt is not None and receipt.changed is True
+            assert receipt.previous_status == events[-1].before_data["academic_status"]
+    finally:
+        with Session(postgresql_engine) as db, db.begin():
+            db.execute(
+                text("DELETE FROM student_status_operations WHERE student_id=:student_id"),
+                {"student_id": student_id},
+            )
+            db.execute(
+                text("DELETE FROM student_status_operations WHERE student_id=:student_id"),
+                {"student_id": student_id},
+            )
+            db.execute(
+                delete(AuditEvent).where(
+                    AuditEvent.entity_type == "student", AuditEvent.entity_id == student_id
+                )
+            )
+            db.execute(delete(AuthSession).where(AuthSession.user_id == actor_id))
+            db.execute(
+                delete(StaffPermission).where(StaffPermission.staff_profile_id == profile_id)
+            )
+            db.execute(delete(Student).where(Student.id == student_id))
+            db.execute(delete(StaffProfile).where(StaffProfile.id == profile_id))
+            db.execute(delete(User).where(User.id.in_([actor_id, student_user_id])))
+            db.execute(delete(StudyGroup).where(StudyGroup.id == group_id))
+            db.execute(delete(Program).where(Program.id == program_id))
+            db.execute(delete(OrgUnit).where(OrgUnit.id.in_([dean_id, faculty_id])))
+
+
+def test_only_patch_is_available(staff_students):
+    s = staff_students
+    body = {"academic_status": "expelled", "reason": "correction"}
+    path = f"/{s['students'][0].id}/academic-status"
+    assert request(s, "PUT", path, s["editor_token"], json=body).status_code == 405
+    assert request(s, "PATCH", path, s["editor_token"], json=body).status_code == 200
+
+
+def test_search_covers_both_faculties_and_literal_special_characters(staff_students):
+    s = staff_students
+    for faculty, expected in (
+        (s["faculty"], s["students"][:2]),
+        (s["other_faculty"], s["students"][2:]),
+    ):
+        result = request(s, "GET", "", s["reader_token"], params={"faculty_id": str(faculty.id)})
+        assert {row["id"] for row in result.json()["items"]} == {str(row.id) for row in expected}
+    assert request(s, "GET", "", s["reader_token"], params={"q": "ёЛКИНА"}).json()["items"][0][
+        "id"
+    ] == str(s["students"][1].id)
+    for symbol in ("%", "_", "\\"):
+        user = User(
+            login=uuid4().hex,
+            password_hash="unusable",
+            full_name=f"Буквальный {symbol} символ",
+            role="student",
+            is_active=True,
+        )
+        s["db"].add(user)
+        s["db"].flush()
+        student = Student(user_id=user.id, group_id=s["groups"][0].id, academic_status="enrolled")
+        s["db"].add(student)
+        s["db"].flush()
+        result = request(s, "GET", "", s["reader_token"], params={"q": symbol})
+        assert result.status_code == 200
+        assert [row["id"] for row in result.json()["items"]] == [str(student.id)]
+        s["groups"][0].name = f"ИВТ{symbol}21"
+        s["groups"][1].name = "ИВТX21"
+        s["db"].flush()
+        grouped = request(s, "GET", "", s["reader_token"], params={"q": f"ИВТ{symbol}21"})
+        expected_ids = {
+            str(identifier)
+            for identifier in s["db"].scalars(
+                select(Student.id).where(Student.group_id == s["groups"][0].id)
+            )
+        }
+        assert {row["id"] for row in grouped.json()["items"]} == expected_ids
+
+
+def test_status_editor_can_change_student_in_another_faculty_by_known_id(staff_students):
+    s = staff_students
+    student = s["students"][2]
+    assert s["groups"][2].program_id == s["other_program"].id
+    response = request(
+        s,
+        "PATCH",
+        f"/{student.id}/academic-status",
+        s["editor_token"],
+        json={"academic_status": "graduated", "reason": "administrative_change"},
+    )
+    assert response.status_code == 200
+    assert response.json()["academic_status"] == "graduated"
+    assert student.academic_status == "graduated"
+    event = s["db"].scalar(
+        select(AuditEvent).where(
+            AuditEvent.entity_type == "student", AuditEvent.entity_id == student.id
+        )
+    )
+    assert event.after_data == {"academic_status": "graduated"}
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"faculty_id": "0"},
+        {"faculty_id": "x"},
+        {"program_id": "-1"},
+        {"course_number": "0"},
+        {"course_number": "101"},
+        {"course_number": "x"},
+        {"q": " "},
+        {"q": "x" * 101},
+        {"unexpected": "1"},
+    ],
+)
+def test_invalid_staff_filters_are_rejected(staff_students, filters):
+    assert (
+        request(
+            staff_students, "GET", "", staff_students["reader_token"], params=filters
+        ).status_code
+        == 422
+    )
+
+
+@pytest.mark.parametrize("field", ["q", "faculty_id", "program_id", "course_number"])
+def test_cursor_cannot_be_reused_with_different_filters(staff_students, field):
+    s = staff_students
+    first = request(s, "GET", "", s["reader_token"], params={"limit": 1})
+    assert first.status_code == 200 and first.json()["next_cursor"]
+    changed = {
+        "q": "Ж",
+        "faculty_id": str(s["other_faculty"].id),
+        "program_id": str(s["other_program"].id),
+        "course_number": "3",
+    }
+    result = request(
+        s,
+        "GET",
+        "",
+        s["reader_token"],
+        params={"limit": 1, "cursor": first.json()["next_cursor"], field: changed[field]},
+    )
+    assert result.status_code == 422
+    assert result.json()["error"]["code"] == "invalid_cursor"
+    # Normalized spelling is the same selection, not a different filter.
+    first = request(s, "GET", "", s["reader_token"], params={"limit": 1, "q": "ПОИСК27"})
+    assert first.status_code == 200
+    assert first.json()["next_cursor"]
+    continuation = request(
+        s,
+        "GET",
+        "",
+        s["reader_token"],
+        params={"limit": 1, "q": "  поиск27  ", "cursor": first.json()["next_cursor"]},
+    )
+    assert continuation.status_code == 200
+    mismatched = request(
+        s,
+        "GET",
+        "",
+        s["reader_token"],
+        params={"limit": 1, "q": "Ж", "cursor": first.json()["next_cursor"]},
+    )
+    assert mismatched.status_code == 422 and mismatched.json()["error"]["code"] == "invalid_cursor"
+
+
+def test_read_revocation_and_department_transfer_reject_old_jwt(staff_students):
+    s = staff_students
+    assert request(s, "GET", f"/{s['students'][0].id}", s["reader_token"]).status_code == 200
+    s["db"].execute(
+        delete(StaffPermission).where(StaffPermission.staff_profile_id == s["reader_profile"].id)
+    )
+    s["db"].flush()
+    assert request(s, "GET", f"/{s['students'][0].id}", s["reader_token"]).status_code == 403
+    accounting = OrgUnit(name="Бухгалтерия", type="accounting")
+    s["db"].add(accounting)
+    s["db"].flush()
+    s["editor_profile"].org_unit_id = accounting.id
+    s["db"].flush()
+    assert (
+        request(
+            s,
+            "GET",
+            f"/{s['students'][0].id}/academic-status",
+            s["editor_token"],
+        ).status_code
+        == 403
+    )
+    assert (
+        request(
+            s,
+            "PATCH",
+            f"/{s['students'][0].id}/academic-status",
+            s["editor_token"],
+            json={"academic_status": "expelled", "reason": "correction"},
+        ).status_code
+        == 403
+    )

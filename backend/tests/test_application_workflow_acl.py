@@ -4,9 +4,10 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, delete, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from test_academics_migrations import migration_database, run_migration  # noqa: F401
@@ -14,6 +15,8 @@ from test_application_workflow import context, history  # noqa: F401
 from test_auth_integration import auth as auth_fixture
 
 from app.dependencies.database import get_db_session
+from app.models import AuditEvent, StaffPermission, Student, User
+from app.staff_students import router as staff_students_router
 
 pytestmark = pytest.mark.integration
 API_PASSWORD = "test-only-workflow-runtime-password"
@@ -233,7 +236,7 @@ def test_production_acl_supports_authenticated_workflow_and_denies_extra_writes(
         "DELETE FROM application_history",
         "DELETE FROM applications",
         "UPDATE applications SET student_id=student_id",
-        "UPDATE students SET academic_status='enrolled'",
+        "UPDATE students SET group_id=group_id",
         "UPDATE staff_permissions SET permission_code='applications.review'",
     ):
         with api_engine.connect() as db, pytest.raises(DBAPIError) as rejected:
@@ -329,3 +332,121 @@ def test_production_acl_runs_score_api_and_keeps_audit_append_only(runtime_engin
                 with pytest.raises(DBAPIError) as rejected:
                     runtime_db.execute(text(sql))
                 assert rejected.value.orig.sqlstate == "42501"
+
+
+def test_production_acl_allows_only_academic_status_and_transactional_audit(
+    context,  # noqa: F811
+    runtime_engine,
+):
+    c = context
+    admin_engine, api_engine = runtime_engine
+    c["client"].app.include_router(staff_students_router)
+    with Session(admin_engine) as db, db.begin():
+        db.add(
+            StaffPermission(
+                staff_profile_id=c["profiles"][0],
+                permission_code="students.status.edit",
+                scope_org_unit_id=None,
+            )
+        )
+        student_id = c["students"][0]
+        student = db.get(Student, student_id)
+        user_id = student.user_id
+        original_active = db.get(User, user_id).is_active
+
+    def runtime_session():
+        with Session(api_engine) as db:
+            yield db
+
+    c["client"].app.dependency_overrides[get_db_session] = runtime_session
+    response = c["request"](
+        "PATCH",
+        f"/api/v1/staff/students/{student_id}/academic-status",
+        c["tokens"][0],
+        json={
+            "academic_status": "academic_leave",
+            "reason": "administrative_change",
+            "operation_id": str(uuid4()),
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["academic_status"] == "academic_leave"
+    assert response.json()["previous_academic_status"] == "enrolled"
+    assert response.json()["changed"] is True
+    assert response.json()["operation_id"]
+    with Session(admin_engine) as db:
+        student = db.get(Student, student_id)
+        actor = db.get(User, c["actors"][0])
+        event = db.scalar(
+            select(AuditEvent).where(
+                AuditEvent.entity_type == "student", AuditEvent.entity_id == student_id
+            )
+        )
+        assert student.academic_status == "academic_leave"
+        assert db.get(User, user_id).is_active is original_active
+        assert actor.role == "staff"
+        assert event.actor_user_id == actor.id
+        assert event.before_data == {"academic_status": "enrolled"}
+        assert event.after_data == {"academic_status": "academic_leave"}
+    # A genuine INSERT denial under the production runtime role must roll back status.
+    with admin_engine.begin() as db:
+        db.execute(text("REVOKE INSERT ON audit_events FROM uni_space_api"))
+    denied = c["request"](
+        "PATCH",
+        f"/api/v1/staff/students/{student_id}/academic-status",
+        c["tokens"][0],
+        json={
+            "academic_status": "expelled",
+            "reason": "correction",
+            "operation_id": str(uuid4()),
+        },
+    )
+    assert denied.status_code == 500
+    with Session(admin_engine) as db:
+        assert db.get(Student, student_id).academic_status == "academic_leave"
+        assert (
+            len(
+                db.scalars(
+                    select(AuditEvent).where(
+                        AuditEvent.entity_id == student_id, AuditEvent.entity_type == "student"
+                    )
+                ).all()
+            )
+            == 1
+        )
+    with admin_engine.begin() as db:
+        db.execute(text("GRANT INSERT ON audit_events TO uni_space_api"))
+    # Receipt persistence is part of the same transaction, including the status update.
+    with admin_engine.begin() as db:
+        db.execute(text("REVOKE INSERT ON student_status_operations FROM uni_space_api"))
+    denied_receipt = c["request"](
+        "PATCH",
+        f"/api/v1/staff/students/{student_id}/academic-status",
+        c["tokens"][0],
+        json={
+            "academic_status": "expelled",
+            "reason": "correction",
+            "operation_id": str(uuid4()),
+        },
+    )
+    assert denied_receipt.status_code == 500
+    with Session(admin_engine) as db:
+        assert db.get(Student, student_id).academic_status == "academic_leave"
+        assert (
+            len(
+                db.scalars(
+                    select(AuditEvent).where(
+                        AuditEvent.entity_id == student_id, AuditEvent.entity_type == "student"
+                    )
+                ).all()
+            )
+            == 1
+        )
+    with admin_engine.begin() as db:
+        db.execute(text("GRANT INSERT ON student_status_operations TO uni_space_api"))
+    with Session(admin_engine) as db, db.begin():
+        db.execute(
+            text("DELETE FROM student_status_operations WHERE actor_user_id=:actor"),
+            {"actor": c["actors"][0]},
+        )
+        db.execute(delete(AuditEvent).where(AuditEvent.actor_user_id == c["actors"][0]))
