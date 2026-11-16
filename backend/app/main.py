@@ -17,6 +17,8 @@ from app.core.schemas import (
     PaginationParams,
     Ref,
 )
+from app.final_results import journal_router as final_results_journal_router
+from app.final_results import router as final_results_router
 from app.news.router import router as news_router
 from app.notifications import router as notifications_router
 from app.permissions import router as permissions_router
@@ -46,6 +48,8 @@ app.include_router(schedule_router)
 app.include_router(students_router)
 app.include_router(news_router)
 app.include_router(teaching_router)
+app.include_router(final_results_router)
+app.include_router(final_results_journal_router)
 
 
 def create_openapi_schema(application: FastAPI) -> dict:

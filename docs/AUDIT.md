@@ -82,7 +82,7 @@ except Exception:
 |---|---|---|
 | `assessment_group` | `update` | `planned_date`, `lesson_id`, `date_needs_confirmation` |
 | `assessment_result` | `create`, `update`, `delete` | `assessment_group_id`, `student_id`, `score` |
-| `final_result` | `create`, `update`, `delete` | `course_offering_id`, `student_id`, `grade_value`, `passed`, `retake_date` |
+| `final_result` | `create`, `update`, `delete` | `course_offering_id`, `student_id`, `grade_value`, `passed`, `retake_date`, `retake_location` |
 | `lesson` | `create`, `update`, `cancel`, `move` | `course_offering_id`, `teacher_id`, `starts_at`, `ends_at`, `kind`, `status`, `previous_lesson_id`, `version`, `group_ids`, `room_ids` |
 | `user` | `create` | `role`, `is_active` |
 | `user` | `set_role` | `role` |
@@ -190,3 +190,33 @@ sequence; прямой nextval запрещён. Для row locks
 `group_id` у course_groups и `version` у lessons; предметные поля работ/занятий
 не доступны на запись. Изменение версии существующим триггером — присваивание
 прежнего значения, без увеличения публичной версии занятия.
+
+
+## Итоги аттестации (#72)
+
+Новые значения `retake_location` в API — простой текст места (1–200 символов,
+без управляющих/служебных Unicode-символов и пустого текста). В поле следует
+передавать только место пересдачи, без ФИО, контактов и иных персональных данных.
+Writer проверяет строгий тип str и сохраняет исторический PostgreSQL TEXT точно,
+даже если он не соответствует новым ограничениям API: длинный/пустой текст и
+управляющие символы не обрезаются и не подменяются. JSONB кодирует их как строку;
+при отображении потребитель должен экранировать текст, не интерпретировать его
+как HTML или команды. `NULL` сохраняется как JSON null, отсутствующий ключ не добавляется.
+Изменение только места различимо в before/after (N-02).
+
+Предметный сервис сохраняет все шесть полей снимка. Снятие оценки с известной
+пересдачей — update; очистка всех четырёх значений — delete, before содержит
+прежнее место, after — SQL NULL. Положительный итог очищает оба поля пересдачи
+с аудитом старых значений. Неизменённые значения не создают событие.
+Пара `(course_offering_id, student_id)` сериализуется transaction advisory lock,
+включая случай отсутствующей строки. При retry заново выполняется вся транзакция
+с проверкой актуальных прав; отдельных версий нет.
+
+Доменное событие изменения итоговой аттестации для #86 — зафиксированная запись
+`final_result/create|update|delete` в общей таблице. Её `id` служит идентификатором
+события, ссылки и значения берутся из before/after. Потребитель читает только
+committed-события отдельной транзакцией; до commit ничего не публикуется,
+rollback и no-op не создают события. Рассылка и учёт доставки относятся к #86.
+Runtime получает INSERT и SELECT(id, created_at) аудита, без UPDATE/DELETE.
+Существующий триггер итогов требует UPDATE(id) на course_offerings для FOR SHARE;
+права изменения вида аттестации не выдаются.
