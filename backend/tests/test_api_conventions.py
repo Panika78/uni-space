@@ -771,6 +771,12 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
     assert openapi.json()["components"]["schemas"]["ApiError"]
     assert "servers" not in openapi.json()
     assert set(openapi.json()["paths"]) == {
+        "/api/v1/admin/users",
+        "/api/v1/admin/users/{user_id}",
+        "/api/v1/admin/users/{user_id}/active",
+        "/api/v1/admin/users/{user_id}/department",
+        "/api/v1/admin/users/{user_id}/permissions",
+        "/api/v1/admin/lookups",
         "/api/v1/teaching/assignments",
         "/api/v1/teaching/courses/{course_offering_id}/assessments/{assessment_id}/dates",
         "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/final-results",

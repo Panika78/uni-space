@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from pydantic import TypeAdapter
 
 from app.academics.router import router as academics_router
+from app.admin.router import router as admin_router
 from app.applications.router import router as applications_router
 from app.auth.router import router as auth_router
 from app.core.config import get_settings
@@ -38,6 +39,7 @@ app = FastAPI(
 )
 app.add_middleware(ApiHeadersMiddleware)
 install_exception_handlers(app)
+app.include_router(admin_router)
 app.include_router(auth_router)
 app.include_router(preferences_router)
 app.include_router(permissions_router)

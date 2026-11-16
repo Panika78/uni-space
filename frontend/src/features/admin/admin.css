@@ -1,0 +1,64 @@
+.admin-users {
+  width: 100%;
+  max-width: 60rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.admin-users form,
+.admin-users fieldset {
+  display: grid;
+  gap: 1rem;
+  margin-block: 1rem;
+  min-width: 0;
+}
+.admin-users label {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.admin-users input,
+.admin-users select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.65rem;
+  border: 1px solid #8994a4;
+  border-radius: 0.5rem;
+  background: white;
+  color: #172033;
+}
+.admin-users button {
+  padding: 0.65rem;
+  border: 1px solid #8994a4;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  white-space: normal;
+}
+.admin-users button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.admin-users a {
+  display: inline-block;
+  margin: 0.5rem;
+  text-decoration: underline;
+}
+.admin-users :focus-visible {
+  outline: 3px solid #315fe7;
+  outline-offset: 3px;
+}
+.admin-user-list {
+  list-style: none;
+  padding: 0;
+}
+.admin-user-list li {
+  padding: 1rem 0;
+  border-bottom: 1px solid #cbd0da;
+}
+.admin-user-list span {
+  display: block;
+}
+.admin-secret {
+  font-family: monospace;
+  user-select: all;
+}

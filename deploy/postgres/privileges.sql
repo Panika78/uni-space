@@ -91,8 +91,9 @@ SELECT 'GRANT UPDATE (review_status, form_data, reviewer_user_id, feedback, upda
         ON public.applications TO uni_space_api'
 WHERE to_regclass('public.applications') IS NOT NULL \gexec
 -- SELECT FOR UPDATE in login requires UPDATE on at least one user column.
--- Grant only the immutable-by-API identifier, not password/role/active fields.
-SELECT 'GRANT UPDATE (id) ON public.users TO uni_space_api'
+-- Administration can change activity; passwords and roles remain immutable.
+-- Table-level REVOKE above does not remove previously granted column ACL.
+SELECT 'REVOKE UPDATE (id) ON public.users FROM uni_space_api'
 WHERE to_regclass('public.users') IS NOT NULL \gexec
 -- MVP2-06: safe both before the first migration and on existing volumes.
 SELECT 'GRANT UPDATE (planned_date, lesson_id, date_needs_confirmation)
@@ -119,6 +120,23 @@ SELECT 'GRANT INSERT, DELETE ON public.final_results TO uni_space_api'
 WHERE to_regclass('public.final_results') IS NOT NULL \gexec
 SELECT 'GRANT INSERT ON public.audit_events TO uni_space_api'
 WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
+
+SELECT 'GRANT UPDATE (is_active) ON public.users TO uni_space_api'
+WHERE to_regclass('public.users') IS NOT NULL \gexec
+-- MVP2-25: explicit administration writes; no role/password UPDATE or profile DELETE.
+SELECT format('GRANT INSERT ON public.%I TO uni_space_api', tablename)
+FROM pg_tables WHERE schemaname='public' AND tablename IN
+    ('users','students','staff_profiles','staff_permissions','audit_events') \gexec
+SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
+              pg_get_serial_sequence(format('public.%I', tablename), 'id'))
+FROM pg_tables WHERE schemaname='public' AND tablename IN
+    ('users','students','staff_profiles','staff_permissions') \gexec
+SELECT 'GRANT UPDATE (user_id) ON public.teachers TO uni_space_api'
+WHERE to_regclass('public.teachers') IS NOT NULL \gexec
+SELECT 'GRANT UPDATE (org_unit_id) ON public.staff_profiles TO uni_space_api'
+WHERE to_regclass('public.staff_profiles') IS NOT NULL \gexec
+SELECT 'GRANT DELETE ON public.staff_permissions TO uni_space_api'
+WHERE to_regclass('public.staff_permissions') IS NOT NULL \gexec
 SELECT 'GRANT SELECT (id, created_at) ON public.audit_events TO uni_space_api'
 WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
 COMMIT;
