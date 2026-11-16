@@ -27,7 +27,7 @@ router = APIRouter(
     prefix="/api/v1/teaching",
     tags=["teaching"],
     dependencies=[Depends(validate_teaching_ids)],
-    responses={code: {"model": ApiError} for code in (401, 403, 404, 422, 500)},
+    responses={code: {"model": ApiError} for code in (401, 403, 404, 422, 500, 503)},
 )
 Db = Annotated[Session, Depends(get_db_session)]
 

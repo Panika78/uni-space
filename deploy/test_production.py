@@ -570,6 +570,7 @@ with engine.connect() as c:
     for column in ('entity_type','entity_id','before_data','after_data'):
         assert not c.execute(text("SELECT has_column_privilege(current_user,'audit_events',:column,'SELECT')"), {'column': column}).scalar_one()
     assert not c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
+    assert not c.execute(text("SELECT has_function_privilege(current_user, 'validate_assessment_assignment()', 'EXECUTE')")).scalar_one()
     for privilege in ('INSERT','UPDATE','DELETE'):
         assert c.execute(text("SELECT has_table_privilege(current_user,'assessment_results',:privilege)"), {'privilege': privilege}).scalar_one()
     for privilege in ('TRUNCATE','REFERENCES','TRIGGER'):
@@ -578,6 +579,8 @@ with engine.connect() as c:
                           ('assessment_groups','id'),('course_groups','group_id'),('lessons','version')):
         assert c.execute(text("SELECT has_column_privilege(current_user,:table,:column,'UPDATE')"),
                          {'table': table, 'column': column}).scalar_one()
+    assert not c.execute(text("SELECT has_table_privilege(current_user,'lesson_groups','UPDATE')")).scalar_one()
+    assert not c.execute(text("SELECT has_column_privilege(current_user,'lesson_groups','group_id','UPDATE')")).scalar_one()
     for table, column in (('assessments','title'),('students','group_id'),
                           ('assessment_groups','planned_date'),('course_groups','course_offering_id'),
                           ('lessons','status')):
@@ -817,7 +820,7 @@ with SessionLocal.begin() as db:
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from app.core.database import SessionLocal
-from app.models import CourseGroup, CourseOffering, Discipline, Lesson, LessonGroup, Student, Teacher, TeachingAssignment, User
+from app.models import Assessment, AssessmentGroup, CourseGroup, CourseOffering, Discipline, Lesson, LessonGroup, Student, Teacher, TeachingAssignment, User
 with SessionLocal.begin() as db:
     password_hash = db.scalar(select(User.password_hash).where(User.login == 'deployment-check'))
     # Pin both teachers to the seeded course with three approved works: positive,
@@ -844,6 +847,12 @@ with SessionLocal.begin() as db:
         db.add(lesson)
         db.flush()
         db.add(LessonGroup(lesson_id=lesson.id, group_id=pair.group_id))
+        db.flush()
+        work = db.scalars(select(AssessmentGroup).join(Assessment).where(
+            Assessment.course_offering_id == pair.course_offering_id,
+            Assessment.title == 'Работа 0',
+            AssessmentGroup.group_id == pair.group_id)).one()
+        work.lesson_id = lesson.id
 """,
             )
             with ExitStack() as teacher_clients:

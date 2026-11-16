@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from fastapi import HTTPException
 from sqlalchemy import and_, exists, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.audit import write_audit_event
@@ -82,13 +82,18 @@ def write_assessment_score(
             if teacher_id is None:
                 raise HTTPException(403, "forbidden")
             require_teaching_assignment(db, teacher_id, course_id, group_id)
-            member_id = db.scalar(
+            member_group_id = db.scalar(
                 select(Student.id)
                 .where(Student.id == student_id, Student.group_id == group_id)
                 .with_for_update(read=True)
             )
-            if member_id is None:
+            if member_group_id is None:
                 raise HTTPException(404, "not_found")
+        elif (
+            db.scalar(select(Student.id).where(Student.id == student_id).with_for_update(read=True))
+            is None
+        ):
+            raise HTTPException(404, "not_found")
 
         if score is not None and score > assessment.max_score:
             raise HTTPException(422, "score_exceeds_maximum")
@@ -219,6 +224,13 @@ def write_assessment_score(
             db.rollback()
         if isinstance(exc, IntegrityError) and getattr(exc.orig, "sqlstate", None) == "23514":
             raise HTTPException(422, "validation_error") from exc
+        sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+        if isinstance(exc, DBAPIError) and sqlstate == "55P03":
+            raise HTTPException(
+                503, "temporarily_unavailable", headers={"Retry-After": "1"}
+            ) from exc
+        if isinstance(exc, IntegrityError) and sqlstate == "23503":
+            raise HTTPException(404, "not_found") from exc
         raise
 
 

@@ -7,6 +7,7 @@ from test_academics_integration import academics as academics_fixture
 
 from app.auth.security import create_access_token
 from app.models import (
+    Assessment,
     AssessmentResult,
     AuditEvent,
     AuthSession,
@@ -70,6 +71,25 @@ def journal(db_session):
 
     s.get = request
     return s
+
+
+def create_staff(s, *, unit_type="dean_office", permission=True):
+    unit = s.add(OrgUnit, name=f"Вымышленное подразделение {uuid4().hex}", type=unit_type)
+    user = s.add(
+        User,
+        login=uuid4().hex,
+        password_hash="unused",
+        full_name="Вымышленный сотрудник",
+        role="staff",
+        is_active=True,
+    )
+    profile = s.add(StaffProfile, user_id=user.id, org_unit_id=unit.id)
+    if permission:
+        s.add(StaffPermission, staff_profile_id=profile.id, permission_code="grades.edit")
+    session = s.add(AuthSession, user_id=user.id, expires_at=datetime.now(UTC) + timedelta(days=1))
+    return user, {
+        "Authorization": "Bearer " + create_access_token(session, s.settings)["access_token"]
+    }
 
 
 def test_assignment_integrity(journal):
@@ -174,9 +194,13 @@ def test_score_write_range_noop_update_delete_and_transfer(journal):
     assert created_event.after_data["score"] == 0
     assert updated_event.before_data["score"] == 0 and updated_event.after_data["score"] == 5
     assert deleted_event.before_data["score"] == 5 and deleted_event.after_data is None
+    historical = write(3)
+    assert historical.status_code == 200
+    historical_id = int(historical.json()["result_id"])
     s.students[0].group_id = s.groups[1].id
     s.db.flush()
-    assert write(2).status_code == 404
+    assert write(2).status_code == write(None).status_code == 404
+    assert s.db.get(AssessmentResult, historical_id).score == 3
 
 
 def test_staff_can_correct_historical_result_only_with_grant(journal):
@@ -229,6 +253,79 @@ def test_staff_can_correct_historical_result_only_with_grant(journal):
     assert s.client.put(endpoint, json={"score": 4}, headers=admin_headers).status_code == 403
 
 
+@pytest.mark.parametrize(("unit_type", "permission"), [("dean_office", False), ("faculty", True)])
+def test_staff_without_effective_grades_edit_cannot_write_scores(journal, unit_type, permission):
+    s = journal
+    work = s.assignment(s.courses[0])
+    existing = s.result(work, 3)
+    original_time = existing.graded_at
+    _, headers = create_staff(s, unit_type=unit_type, permission=permission)
+    endpoint = (
+        f"/api/v1/teaching/courses/{s.courses[0].id}/groups/{s.groups[0].id}"
+        f"/assessments/{work.id}/results"
+    )
+    events_before = s.db.query(AuditEvent).filter_by(entity_type="assessment_result").count()
+    # Student 2 is a current member of the work's group and has no result yet.
+    create = s.client.put(f"{endpoint}/{s.students[2].id}", json={"score": 1}, headers=headers)
+    update = s.client.put(f"{endpoint}/{s.students[0].id}", json={"score": 4}, headers=headers)
+    delete = s.client.put(f"{endpoint}/{s.students[0].id}", json={"score": None}, headers=headers)
+    assert [create.status_code, update.status_code, delete.status_code] == [403, 403, 403]
+    assert s.db.query(AssessmentResult).filter_by(assessment_group_id=work.id).count() == 1
+    assert s.db.get(AssessmentResult, existing.id).score == 3
+    assert s.db.get(AssessmentResult, existing.id).graded_at == original_time
+    assert (
+        s.db.query(AuditEvent).filter_by(entity_type="assessment_result").count() == events_before
+    )
+
+
+def test_staff_missing_student_returns_not_found_without_write_or_audit(journal):
+    s = journal
+    work = s.assignment(s.courses[0])
+    _, headers = create_staff(s)
+    endpoint = (
+        f"/api/v1/teaching/courses/{s.courses[0].id}/groups/{s.groups[0].id}"
+        f"/assessments/{work.id}/results/9223372036854775807"
+    )
+    events_before = s.db.query(AuditEvent).filter_by(entity_type="assessment_result").count()
+    created = s.client.put(endpoint, json={"score": 2}, headers=headers)
+    cleared = s.client.put(endpoint, json={"score": None}, headers=headers)
+    assert [created.status_code, cleared.status_code] == [404, 404]
+    assert created.json()["error"]["code"] == cleared.json()["error"]["code"] == "not_found"
+    assert s.db.query(AssessmentResult).filter_by(assessment_group_id=work.id).count() == 0
+    assert (
+        s.db.query(AuditEvent).filter_by(entity_type="assessment_result").count() == events_before
+    )
+
+
+def test_teacher_written_score_is_in_student_academics_total(journal):
+    s = journal
+    first = s.assignment(s.courses[0], maximum=10)
+    second = s.assignment(s.courses[0], maximum=5)
+    endpoint = (
+        f"/api/v1/teaching/courses/{s.courses[0].id}/groups/{s.groups[0].id}"
+        f"/assessments/{{}}/results/{s.students[0].id}"
+    )
+    headers = {"Authorization": f"Bearer {s.teacher_tokens[0]}"}
+    for assignment, score in ((first, 0), (second, 4)):
+        response = s.client.put(
+            endpoint.format(assignment.id), json={"score": score}, headers=headers
+        )
+        assert response.status_code == 200, response.text
+    academics = s.client.get(
+        "/api/v1/academics", headers={"Authorization": f"Bearer {s.tokens[0]}"}
+    )
+    assert academics.status_code == 200, academics.text
+    item = next(
+        row
+        for row in academics.json()["items"]
+        if row["course_offering_id"] == str(s.courses[0].id)
+    )
+    assert item["total_score"] == 4
+    assert item["max_score"] == 15
+    assert item["graded_assessment_count"] == 2
+    assert item["assessment_count"] == 2
+
+
 def test_score_and_audit_roll_back_together(journal, monkeypatch):
     from app.teaching import service
 
@@ -251,6 +348,79 @@ def test_score_and_audit_roll_back_together(journal, monkeypatch):
     assert response.status_code == 500
     assert s.db.query(AssessmentResult).filter_by(assessment_group_id=work.id).count() == 0
     assert s.db.query(AuditEvent).filter_by(entity_type="assessment_result").count() == 0
+
+
+@pytest.mark.parametrize("operation", ["update", "delete"])
+def test_score_update_and_delete_roll_back_when_audit_fails(
+    committed_academics, monkeypatch, operation
+):
+    from sqlalchemy.orm import Session
+
+    from app.core.database import engine as api_engine
+    from app.dependencies.database import get_db_session
+    from app.teaching import service
+
+    s = committed_academics
+    s.app.include_router(router)
+    course = s.offering()
+    work = s.assignment(course)
+    result = s.result(work, 3)
+    original_time = result.graded_at
+    original_grader = result.graded_by_user_id
+    user = s.add(
+        User,
+        login=uuid4().hex,
+        password_hash="unused",
+        full_name="Teacher",
+        role="teacher",
+        is_active=True,
+    )
+    teacher = s.add(Teacher, user_id=user.id, full_name=user.full_name)
+    auth_session = s.add(
+        AuthSession, user_id=user.id, expires_at=datetime.now(UTC) + timedelta(days=1)
+    )
+    s.add(
+        TeachingAssignment,
+        teacher_id=teacher.id,
+        course_offering_id=course.id,
+        group_id=s.groups[0].id,
+    )
+    headers = {
+        "Authorization": "Bearer " + create_access_token(auth_session, s.settings)["access_token"]
+    }
+    s.db.commit()
+    with Session(api_engine) as verify:
+        events_before = verify.query(AuditEvent).filter_by(entity_type="assessment_result").count()
+
+    def get_request_session():
+        with Session(api_engine) as db:
+            yield db
+
+    s.app.dependency_overrides[get_db_session] = get_request_session
+    endpoint = (
+        f"/api/v1/teaching/courses/{course.id}/groups/{s.groups[0].id}"
+        f"/assessments/{work.id}/results/{s.students[0].id}"
+    )
+
+    def fail_audit(*_args, **_kwargs):
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(service, "write_audit_event", fail_audit)
+    response = s.client.put(
+        endpoint,
+        json={"score": None if operation == "delete" else 4},
+        headers=headers,
+    )
+    assert response.status_code == 500
+    with Session(api_engine) as verify:
+        stored = verify.get(AssessmentResult, result.id)
+        assert stored.score == 3
+        assert stored.graded_at == original_time
+        assert stored.graded_by_user_id == original_grader
+        assert (
+            verify.query(AuditEvent).filter_by(entity_type="assessment_result").count()
+            == events_before
+        )
 
 
 def test_roster_results_subgroups_history_and_pagination(journal):
@@ -565,12 +735,23 @@ def test_concurrent_score_creates_use_one_result_and_one_audit(committed_academi
         )
         assert stored is not None
         result_id = stored.id
-        assert (
+        create_events = (
             db.query(AuditEvent)
-            .filter_by(entity_type="assessment_result", entity_id=result_id, action="create")
-            .count()
-            == 1
+            .filter_by(entity_type="assessment_result", entity_id=result_id)
+            .order_by(AuditEvent.id)
+            .all()
         )
+        assert len(create_events) == 1
+        assert create_events[0].action == "create"
+        assert create_events[0].actor_user_id == user.id
+        assert create_events[0].before_data is None
+        assert create_events[0].after_data == {
+            "assessment_group_id": work.id,
+            "student_id": s.students[0].id,
+            "score": 6,
+        }
+        assert stored.graded_by_user_id == user.id
+        assert stored.graded_at <= create_events[0].created_at
 
     def run_concurrently(payloads):
         barrier = Barrier(len(payloads))
@@ -592,12 +773,21 @@ def test_concurrent_score_creates_use_one_result_and_one_audit(committed_academi
             )
         )
         assert stored.score in {7, 8}
-        assert (
+        update_events = (
             db.query(AuditEvent)
-            .filter_by(entity_type="assessment_result", entity_id=result_id, action="update")
-            .count()
-            == 2
+            .filter_by(entity_type="assessment_result", entity_id=result_id)
+            .order_by(AuditEvent.id)
+            .all()
         )
+        assert [event.action for event in update_events] == ["create", "update", "update"]
+        changes = [
+            (event.before_data["score"], event.after_data["score"]) for event in update_events[1:]
+        ]
+        assert changes in [[(6, 7), (7, 8)], [(6, 8), (8, 7)]]
+        assert all(event.actor_user_id == user.id for event in update_events)
+        assert stored.score == update_events[-1].after_data["score"]
+        assert stored.graded_by_user_id == user.id
+        assert stored.graded_at <= update_events[-1].created_at
 
     deletions = run_concurrently([{"score": None}, {"score": None}])
     assert [response.status_code for response in deletions] == [200, 200]
@@ -608,9 +798,96 @@ def test_concurrent_score_creates_use_one_result_and_one_audit(committed_academi
             .count()
             == 0
         )
-        assert (
+        events = (
             db.query(AuditEvent)
-            .filter_by(entity_type="assessment_result", entity_id=result_id, action="delete")
+            .filter_by(entity_type="assessment_result", entity_id=result_id)
+            .order_by(AuditEvent.id)
+            .all()
+        )
+        assert [event.action for event in events] == ["create", "update", "update", "delete"]
+        assert events[-1].actor_user_id == user.id
+        assert events[-1].before_data["score"] == events[-2].after_data["score"]
+        assert events[-1].after_data is None
+
+
+def test_assessment_lock_timeout_rolls_back_and_request_can_be_retried(committed_academics):
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from app.core.database import API_LOCK_TIMEOUT_MS
+    from app.core.database import engine as api_engine
+    from app.dependencies.database import get_db_session
+
+    s = committed_academics
+    s.app.include_router(router)
+    user = s.add(
+        User,
+        login=uuid4().hex,
+        password_hash="unused",
+        full_name="Teacher",
+        role="teacher",
+        is_active=True,
+    )
+    teacher = s.add(Teacher, user_id=user.id, full_name=user.full_name)
+    auth_session = s.add(
+        AuthSession, user_id=user.id, expires_at=datetime.now(UTC) + timedelta(days=1)
+    )
+    course = s.offering()
+    work = s.assignment(course)
+    s.add(
+        TeachingAssignment,
+        teacher_id=teacher.id,
+        course_offering_id=course.id,
+        group_id=s.groups[0].id,
+    )
+    headers = {
+        "Authorization": "Bearer " + create_access_token(auth_session, s.settings)["access_token"]
+    }
+    path = (
+        f"/api/v1/teaching/courses/{course.id}/groups/{s.groups[0].id}"
+        f"/assessments/{work.id}/results/{s.students[0].id}"
+    )
+    s.db.commit()
+
+    def get_request_session():
+        with Session(api_engine) as db:
+            try:
+                yield db
+            except BaseException:
+                db.rollback()
+                raise
+
+    s.app.dependency_overrides[get_db_session] = get_request_session
+    assert API_LOCK_TIMEOUT_MS == 5_000
+    with Session(api_engine) as blocker:
+        blocker.begin()
+        blocker.scalar(
+            select(Assessment.id).where(Assessment.id == work.assessment_id).with_for_update()
+        )
+        response = s.client.put(path, json={"score": 4}, headers=headers)
+        assert response.status_code == 503, response.text
+        assert response.json()["error"]["code"] == "temporarily_unavailable"
+        assert response.headers["retry-after"] == "1"
+        with Session(api_engine) as verify:
+            assert (
+                verify.query(AssessmentResult).filter_by(assessment_group_id=work.id).count() == 0
+            )
+            assert (
+                verify.query(AuditEvent)
+                .filter_by(entity_type="assessment_result", action="create")
+                .count()
+                == 0
+            )
+        blocker.rollback()
+
+    retried = s.client.put(path, json={"score": 4}, headers=headers)
+    assert retried.status_code == 200, retried.text
+    with Session(api_engine) as verify:
+        stored = verify.query(AssessmentResult).filter_by(assessment_group_id=work.id).one()
+        assert stored.score == 4
+        assert (
+            verify.query(AuditEvent)
+            .filter_by(entity_type="assessment_result", action="create")
             .count()
             == 1
         )

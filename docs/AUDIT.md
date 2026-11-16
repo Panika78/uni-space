@@ -145,6 +145,9 @@ API `UPDATE`/`DELETE` аудита или широкие default GRANT. Пред
 `lessons.version`: существующие PostgreSQL-триггеры используют row locks и no-op
 родительские UPDATE для сериализации переводов, максимумов и принадлежности работы.
 Значения этих полей не меняются write API; остальные колонки сохраняют запрет UPDATE.
+Проверка привязки работы к занятию читает и блокирует строки `lesson_groups`
+внутри `validate_assessment_assignment` с `SECURITY DEFINER` под владельцем миграции;
+runtime-роли `UPDATE` на `lesson_groups` не выдаётся.
 
 `PUT /teaching/courses/{course_offering_id}/groups/{group_id}/assessments/{assessment_group_id}/results/{student_id}`
 (#69) сохраняет только балл заранее утверждённой работы либо `null` для очистки.

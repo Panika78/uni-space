@@ -401,6 +401,9 @@ keyset-граница, курсор и Python-проверка порядка и
 no-op, без смены автора/времени и audit event. Все фактические изменения
 сохраняются с `assessment_result/create|update|delete` в одной транзакции.
 Структура assessment и `max_score` через этот API не изменяются.
+Если PostgreSQL lock timeout не позволяет безопасно дождаться блокировки,
+endpoint возвращает `503 temporarily_unavailable` с `Retry-After: 1`; повторный
+запрос заново проверяет полномочия и актуальное состояние.
 - Занятие: `id`, `starts_at`, `ends_at`, `kind`, `status`, `is_additional`,
   `version`. Список дедуплицирован через `EXISTS lesson_groups`. Не выдаёт
   остальные группы совместной пары, ссылки на переносы или чужие журналы.
