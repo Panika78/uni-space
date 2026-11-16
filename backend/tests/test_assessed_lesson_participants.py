@@ -227,3 +227,15 @@ def test_assessment_creation_and_last_removal_share_parent_synchronization(
         assert len(list(db.scalars(select(AssessmentGroup)))) == (
             1 if winner == "assignment" else 0
         )
+        for assignment in db.scalars(
+            select(AssessmentGroup).where(AssessmentGroup.lesson_id == s.lesson_id)
+        ):
+            assert (
+                db.scalar(
+                    select(LessonGroup.id).where(
+                        LessonGroup.lesson_id == assignment.lesson_id,
+                        LessonGroup.group_id == assignment.group_id,
+                    )
+                )
+                is not None
+            )

@@ -19,6 +19,8 @@ from app.teaching.schemas import (
     JournalResult,
     JournalStudent,
     LessonParams,
+    ScoreWriteRequest,
+    ScoreWriteResponse,
     StudentParams,
     TeachingAssignmentResponse,
 )
@@ -28,7 +30,7 @@ router = APIRouter(
     prefix="/api/v1/teaching",
     tags=["teaching"],
     dependencies=[Depends(validate_teaching_ids)],
-    responses={code: {"model": ApiError} for code in (401, 403, 404, 422, 500)},
+    responses={code: {"model": ApiError} for code in (401, 403, 404, 422, 500, 503)},
 )
 Db = Annotated[Session, Depends(get_db_session)]
 
@@ -75,6 +77,30 @@ def list_journal_results(
     assessment_group_id: TeachingId, db: Db, scope: Scope, params: Annotated[StudentParams, Query()]
 ):
     return service.list_journal_results(db, *scope, int(assessment_group_id), params)
+
+
+@router.put(
+    JOURNAL + "/assessments/{assessment_group_id}/results/{student_id}",
+    response_model=ScoreWriteResponse,
+)
+def write_journal_result(
+    course_offering_id: TeachingId,
+    group_id: TeachingId,
+    assessment_group_id: TeachingId,
+    student_id: TeachingId,
+    body: ScoreWriteRequest,
+    db: Db,
+    user: Annotated[User, Depends(get_current_user)],
+):
+    return service.write_assessment_score(
+        db,
+        user,
+        int(course_offering_id),
+        int(group_id),
+        int(assessment_group_id),
+        int(student_id),
+        body.score,
+    )
 
 
 @router.get(JOURNAL + "/lessons", response_model=Page[JournalLesson])

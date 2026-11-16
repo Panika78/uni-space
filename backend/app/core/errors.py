@@ -38,6 +38,7 @@ HTTP_ERROR_CODES = {
     413: {"request_too_large"},
     422: {"validation_error", "invalid_profile", "invalid_permission_scope"},
     429: {"rate_limited"},
+    503: {"temporarily_unavailable"},
 }
 DEFAULT_HTTP_ERROR_CODES = {
     401: "invalid_access",
@@ -129,7 +130,7 @@ def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def handle_http_exception(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
         headers = dict(exc.headers or {})
-        if exc.status_code >= 500:
+        if exc.status_code >= 500 and exc.status_code != 503:
             return _error_response(
                 exc.status_code,
                 "internal_error",
