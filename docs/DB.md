@@ -52,7 +52,7 @@
 | `org_units` | `id PK`, `name`, `type`, `parent_id FK NULL` | Факультеты, кафедры, деканаты, бухгалтерия | MVP 1 (справочник) |
 | `programs` | `id PK`, `code`, `name`, `direction_code`, `direction_name`, `faculty_id FK` | Образовательная программа и отдельные реквизиты направления | MVP 1 |
 | `study_groups` | `id PK`, `name`, `program_id FK`, `course_number` | Учебные группы | MVP 1 |
-| `students` | `id PK`, `user_id FK UQ`, `group_id FK`, `academic_status` | Учебные сведения студента | MVP 1 |
+| `students` | `id PK`, `user_id FK UQ`, `group_id FK`, `academic_status`, `membership_version`, `membership_changed_at` | Учебные сведения студента | MVP 1 |
 | `teachers` | `id PK`, `full_name`, `user_id FK NULL UQ`, `department_id FK NULL` | Преподаватель как запись справочника; аккаунт необязателен | MVP 1 (справочник) |
 | `staff_profiles` | `id PK`, `user_id FK UQ`, `org_unit_id FK` | Принадлежность сотрудника к подразделению | MVP 2 |
 | `staff_permissions` | `id PK`, `staff_profile_id FK`, `permission_code`, `scope_org_unit_id FK NULL` | Конкретное разрешённое действие и организационная область | MVP 2 |
@@ -220,7 +220,7 @@ A.starts_at < B.ends_at AND B.starts_at < A.ends_at
 | `assessments` | `id PK`, `course_offering_id FK`, `title`, `type`, `max_score`, `description NULL`, `created_by_user_id FK NULL` | Что это за работа; без единой даты для всех групп | MVP 1 |
 | `assessment_groups` | `id PK`, `assessment_id FK`, `group_id FK`, `planned_date DATE NULL`, `lesson_id FK NULL`, `date_needs_confirmation` | **Назначение работы группе**, её отдельная дата и связь с парой | MVP 1 |
 | `assessment_results` | `id PK`, `assessment_group_id FK`, `student_id FK`, `score`, `graded_by_user_id FK NULL`, `graded_at`, `UQ(assessment_group_id, student_id)` | Индивидуальные баллы | MVP 1 |
-| `attendance` | `lesson_id FK`, `student_id FK`, `status`, `marked_by_user_id FK`, `updated_at`, `PK(lesson_id, student_id)` | Индивидуальная посещаемость | MVP 2 |
+| `attendance` | `lesson_id FK`, `student_id FK`, `status`, `marked_by_user_id FK`, `updated_at`, `origin_group_id FK NULL`, `origin_subgroup_id NULL`, `membership_version NULL`, `PK(lesson_id, student_id)` | Индивидуальная посещаемость | MVP 2 |
 | `final_results` | `id PK`, `course_offering_id FK`, `student_id FK`, `grade_value NULL`, `passed NULL`, `retake_date NULL`, `retake_location NULL`, `UQ(course_offering_id, student_id)` | Итог экзамена или зачёта | MVP 1 (просмотр) / MVP 2 (ввод) |
 
 **Утверждённые типы работ MVP 2:** `test` (контрольная/тест, сохраняет код MVP 1), `laboratory` (лабораторная), `practical` (практическая), `seminar` (оцениваемая семинарская), `independent` (самостоятельная), `extended_homework` (крупное длительное домашнее задание), `exam` (балльный компонент экзамена, если предусмотрен планом), `other` (другое). Редактируемый справочник не нужен.
@@ -284,6 +284,24 @@ A.starts_at < B.ends_at AND B.starts_at < A.ends_at
 **Отсутствие строки** означает «не выставлено». Баллы и посещаемость независимы; при отсутствии на занятии студент всё равно может получить баллы за работу.
 
 Посещаемость выставляет преподаватель соответствующей дисциплины; уполномоченный сотрудник может корректировать её по своим правам.
+
+MVP2-05: отметка сохраняет исходные группу/подгруппу и `membership_version`
+студента. Эти поля не меняются при коррекции и не выводятся из `marked_by_user_id`.
+Преподавателю нужны совпадение снимка с текущей принадлежностью, действующее
+назначение и фактическое участие. Возврат в прежнюю группу/подгруппу не возвращает
+право на историческую запись. Деканат с `attendance.edit` может исправить/снять её.
+
+В `students` хранится только текущий номер периода и `membership_changed_at`:
+начальная граница создаётся миграцией `20261116_03` либо при создании студента;
+триггер PostgreSQL увеличивает номер и обновляет время при фактической смене
+группы или подгруппы, включая прямой SQL. No-op и rollback не создают перевод.
+Это служебная граница доступа, не история членства и не optimistic locking отметок.
+Новые отметки нельзя создавать для занятий, начавшихся раньше этой границы,
+в том числе после удаления старой отметки и повторного перевода. Правило одинаково
+для преподавателя и деканата: неизвестную прежнюю принадлежность не угадываем.
+У существовавших до миграции отметок снимок остаётся NULL; они сохраняются и
+корректируются только деканатом. Новые отметки за период до начала учёта не создаются.
+
 
 ### Отмена занятия со связанной контрольной
 

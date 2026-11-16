@@ -1,6 +1,10 @@
+from datetime import datetime
+
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    DateTime,
+    FetchedValue,
     ForeignKey,
     ForeignKeyConstraint,
     Identity,
@@ -8,6 +12,7 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     String,
     UniqueConstraint,
+    func,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -102,6 +107,7 @@ class Student(Base):
             name="ck_students_academic_status",
         ),
         Index("ix_students_group_id", "group_id"),
+        CheckConstraint("membership_version >= 0", name="ck_students_membership_version"),
         ForeignKeyConstraint(
             ["group_id", "subgroup_id"],
             ["subgroups.group_id", "subgroups.id"],
@@ -118,6 +124,14 @@ class Student(Base):
         ForeignKey("study_groups.id", name="fk_students_group_id_study_groups"), nullable=False
     )
     subgroup_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    membership_version: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default="0", server_onupdate=FetchedValue()
+    )
+    membership_changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.clock_timestamp(),
+        server_onupdate=FetchedValue(),
+    )
     academic_status: Mapped[str] = mapped_column(String, nullable=False)
 
 
