@@ -109,13 +109,16 @@ student `/schedule`, teacher `/teacher/journals`, admin `/admin/users`, staff
 #84 — `/staff/applications`, #78 — `/admin/users`; #61 сохраняет серверный read scope.
 #82 и остальные staff-модули добавляют собственные маршруты под `RoleAccess` и
 `RoleGuard`, заменяя соответствующие ссылки `/staff#<permission>` в
-`getRoleNavigation`. Эти якоря ведут только к пояснениям на нейтральном экране,
-не резервируют будущие доменные URL. `useRoleContext()` предоставляет роль,
+`getRoleNavigation`; #79 уже подключает права поиска и ручного статуса к отдельным
+маршрутам. Якоря оставшихся модулей ведут к пояснениям на нейтральном экране и не
+резервируют будущие доменные URL. `useRoleContext()` предоставляет роль,
 подразделение и эффективные grants; это только представление, не авторизация API.
 После предметного 403 можно актуализировать `['authorization-context']` через
 QueryClient; серверная проверка предметной операции обязательна.
-Журналы, очередь, редакторы и CRUD здесь не реализованы: только честные состояния
-недоступности без записей, мутаций и функциональных кнопок.
+Журналы, редакторы и CRUD здесь не реализованы: только честные состояния
+недоступности без записей и мутаций. Поиск студентов и статус реализованы в #79
+на `/staff/students` и `/staff/students/status` с независимыми правами; прочие
+будущие staff-модули пока остаются нейтральными состояниями.
 
 Ролевые browser E2E используют реальный FastAPI/PostgreSQL. На отдельной локальной
 `uni_space_test` после миграций подготовьте расписание (команда в разделе «Расписание студента»), запустите API и Vite с test-настройками, затем:
@@ -133,6 +136,25 @@ PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_modules/playwright/index.mjs" 
 и запоздалый контекст. Дополнительные ошибки контекста подменяются после реального
 входа; успешные ролевые сценарии работают с настоящим API. CI запускает отдельную
 job `roles-browser` вместе с прежними student/auth E2E.
+
+## Поиск студентов и академический статус (MVP2-27)
+
+`students.read` открывает `/staff/students`: поиск по ФИО/группе, фильтры и
+серверная пагинация с Back/Forward и фильтрами в URL. Карточка
+`/staff/students/:id` доступна напрямую и после reload. Независимое `students.status.edit` позволяет установить статус
+по известному ID без доступа к общему поиску или ФИО. UI требует подтверждения
+оформленного внешнего основания и явного выбора целевого статуса. Используется
+PATCH; ожидание записи ограничено 15 секундами. Неопределённый ответ не повторяет
+запись: GET-сверка доступна только с правом чтения, иначе нужна внешняя проверка.
+Изменение статуса и запись аудита #87 атомарны,
+`users.is_active` не меняется. API-контракт: [docs/API.md](docs/API.md#поиск-студентов-и-академический-статус-mvp2-27).
+
+Новая таблица и миграция не нужны. Для production обновление штатного
+`deploy/postgres/privileges.sql` выдаёт runtime роли только `UPDATE` столбца
+`students.academic_status`, `INSERT` в `audit_events` и `SELECT(id, created_at)`
+для `INSERT ... RETURNING`. Проверки: `pytest -m integration tests/test_staff_students_integration.py`
+и `tests/test_application_workflow_acl.py`; browser E2E —
+`PLAYWRIGHT_MODULE="$PWD/work/browser-tooling/node_modules/playwright/index.mjs" node frontend/e2e/staff-students.browser.mjs`.
 
 ## Workflow заявлений (MVP2-15)
 

@@ -23,6 +23,7 @@ HTTP_ERROR_CODES = {
     404: {"not_found"},
     409: {
         "version_conflict",
+        "operation_id_conflict",
         "invalid_transition",
         "conflict",
         "concurrent_change",
@@ -39,7 +40,7 @@ HTTP_ERROR_CODES = {
         "assignment_conflict",
     },
     413: {"request_too_large"},
-    422: {"validation_error", "invalid_profile", "invalid_permission_scope"},
+    422: {"validation_error", "invalid_cursor", "invalid_profile", "invalid_permission_scope"},
     429: {"rate_limited"},
     503: {"temporarily_unavailable"},
 }
