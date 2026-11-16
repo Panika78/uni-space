@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import type { FormEvent } from 'react'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
@@ -19,8 +19,17 @@ function messageForError(error: unknown) {
     if (error.status === 403) return 'У вас отозвано право публикации новостей.'
     if (error.status === 404) return 'Новость больше не найдена. Обновите список.'
     if (error.status === 422) return 'Проверьте заголовок и текст новости.'
+    if (error.status === 409) {
+      return error.code === 'idempotency_conflict'
+        ? 'Не удалось подтвердить результат создания. Начните создание новости заново.'
+        : 'Новость изменил другой сотрудник. Скопируйте введённый текст и обновите страницу перед повторным сохранением.'
+    }
   }
   return 'Не удалось сохранить изменения. Введённый текст сохранён в форме; проверьте связь и повторите запрос.'
+}
+
+function codePointLength(value: string) {
+  return Array.from(value).length
 }
 
 function formatDate(value: string | null) {
@@ -48,48 +57,90 @@ export function StaffNewsPage() {
   )
   const [bodyDraft, setBodyDraft] = useState<{ id: string | undefined; value: string } | null>(null)
   const [success, setSuccess] = useState('')
+  const [feedback, setFeedback] = useState<string | null>(null)
+  const [listAccessDenied, setListAccessDenied] = useState(false)
+  const [itemAccessDenied, setItemAccessDenied] = useState<string | null>(null)
+  const createRequest = useRef<{ body: string; key: string } | null>(null)
+  const isAccessDenied = (error: unknown) =>
+    error instanceof ApiClientError && (error.status === 401 || error.status === 403)
   const listQuery = useInfiniteQuery({
     queryKey: staffNewsKey,
-    queryFn: ({ pageParam, signal }) =>
-      apiFetch<StaffNewsPageData>(
-        `/api/v1/staff/news?limit=100${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`,
-        {
-          authenticated: true,
-          signal,
-        },
-      ),
+    queryFn: async ({ pageParam, signal }) => {
+      try {
+        return await apiFetch<StaffNewsPageData>(
+          `/api/v1/staff/news?limit=100${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`,
+          {
+            authenticated: true,
+            signal,
+          },
+        )
+      } catch (error) {
+        if (isAccessDenied(error)) setListAccessDenied(true)
+        throw error
+      }
+    },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
-    enabled: !newsId && !isNew,
+    enabled: !newsId && !isNew && !listAccessDenied,
     staleTime: 0,
   })
   const itemQuery = useQuery({
     queryKey: [...staffNewsKey, newsId],
-    queryFn: ({ signal }) =>
-      apiFetch<StaffNews>(`/api/v1/staff/news/${encodeURIComponent(newsId ?? '')}`, {
-        authenticated: true,
-        signal,
-      }),
-    enabled: Boolean(newsId),
+    queryFn: async ({ signal }) => {
+      try {
+        return await apiFetch<StaffNews>(`/api/v1/staff/news/${encodeURIComponent(newsId ?? '')}`, {
+          authenticated: true,
+          signal,
+        })
+      } catch (error) {
+        if (isAccessDenied(error)) setItemAccessDenied(newsId ?? '')
+        throw error
+      }
+    },
+    enabled: Boolean(newsId) && itemAccessDenied !== newsId,
     staleTime: 0,
   })
   const item = itemQuery.data
+  useEffect(() => {
+    if (listQuery.isError && isAccessDenied(listQuery.error)) {
+      queryClient.removeQueries({ queryKey: staffNewsKey, exact: true })
+    }
+  }, [listQuery.isError, listQuery.error, queryClient])
+  useEffect(() => {
+    if (newsId && itemQuery.isError && isAccessDenied(itemQuery.error)) {
+      queryClient.removeQueries({ queryKey: [...staffNewsKey, newsId], exact: true })
+    }
+  }, [newsId, itemQuery.isError, itemQuery.error, queryClient])
   const editorTitle =
     titleDraft && titleDraft.id === newsId ? titleDraft.value : (item?.title ?? '')
   const editorBody = bodyDraft && bodyDraft.id === newsId ? bodyDraft.value : (item?.body ?? '')
 
   const saveMutation = useMutation({
     throwOnError: false,
-    mutationFn: (content: NewsContent) =>
+    mutationFn: (variables: {
+      content: NewsContent
+      idempotencyKey: string
+      suppressSuccess?: boolean
+    }) =>
       requestStaffNews(
         newsId ? `/api/v1/staff/news/${encodeURIComponent(newsId)}` : '/api/v1/staff/news',
-        { method: newsId ? 'PATCH' : 'POST', body: JSON.stringify(content) },
+        {
+          method: newsId ? 'PATCH' : 'POST',
+          headers: newsId ? undefined : { 'Idempotency-Key': variables.idempotencyKey },
+          body: JSON.stringify(
+            newsId ? { ...variables.content, version: item?.version } : variables.content,
+          ),
+        },
       ),
-    onSuccess: async (news) => {
-      setSuccess(news.is_published ? 'Изменения сохранены.' : 'Черновик сохранён.')
+    onSuccess: async (news, variables) => {
+      if (!newsId) createRequest.current = null
+      if (!variables.suppressSuccess)
+        setSuccess(news.is_published ? 'Изменения сохранены.' : 'Черновик сохранён.')
+      setFeedback(null)
       await queryClient.invalidateQueries({ queryKey: staffNewsKey })
       await queryClient.invalidateQueries({ queryKey: newsFeedKey })
       await queryClient.invalidateQueries({ queryKey: ['news', 'item', news.id] })
+      queryClient.setQueryData([...staffNewsKey, news.id], news)
       if (isNew) navigate(`/staff/news/${news.id}`, { replace: true })
     },
   })
@@ -107,17 +158,42 @@ export function StaffNewsPage() {
       await queryClient.invalidateQueries({ queryKey: staffNewsKey })
       await queryClient.invalidateQueries({ queryKey: newsFeedKey })
       await queryClient.invalidateQueries({ queryKey: ['news', 'item', news.id] })
+      queryClient.setQueryData([...staffNewsKey, news.id], news)
     },
   })
-  const error = saveMutation.error ?? publishMutation.error
   const isSaving = saveMutation.isPending || publishMutation.isPending
+
+  function clearMutationMessages() {
+    setSuccess('')
+    setFeedback(null)
+    saveMutation.reset()
+    publishMutation.reset()
+  }
+
+  function getCreateKey(content: NewsContent) {
+    const body = JSON.stringify(content)
+    if (!createRequest.current || createRequest.current.body !== body) {
+      createRequest.current = { body, key: crypto.randomUUID() }
+    }
+    return createRequest.current.key
+  }
 
   function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setSuccess('')
-    saveMutation.mutate({ title: editorTitle, body: editorBody })
+    clearMutationMessages()
+    const content = { title: editorTitle, body: editorBody }
+    saveMutation.mutate({ content, idempotencyKey: getCreateKey(content) })
   }
 
+  if (newsId && itemAccessDenied === newsId)
+    return (
+      <section className="section-page">
+        <ErrorState
+          title="Доступ к новости запрещён"
+          description="У вас больше нет права публикации новостей."
+        />
+      </section>
+    )
   if (newsId && itemQuery.isPending) return <LoadingState title="Загружаем новость…" />
   if (newsId && itemQuery.isError)
     return (
@@ -141,35 +217,45 @@ export function StaffNewsPage() {
           <Link className="staff-news-create" to="/staff/news/new">
             Создать новость
           </Link>
-          {listQuery.isPending && <LoadingState title="Загружаем новости…" />}
-          {listQuery.isError && (
+          {!listAccessDenied && listQuery.isPending && <LoadingState title="Загружаем новости…" />}
+          {listAccessDenied && (
+            <ErrorState
+              title="Доступ к новостям запрещён"
+              description="У вас больше нет права публикации новостей."
+            />
+          )}
+          {!listAccessDenied && listQuery.isError && (
             <ErrorState
               title="Не удалось загрузить список"
               description={messageForError(listQuery.error)}
               onRetry={() => void listQuery.refetch()}
             />
           )}
-          {listQuery.data?.pages[0]?.items.length === 0 && (
-            <EmptyState
-              title="Новостей пока нет"
-              description="Создайте черновик, чтобы подготовить публикацию."
-            />
-          )}
-          {!!listQuery.data?.pages.some((page) => page.items.length > 0) && (
-            <div className="staff-news-list" aria-label="Список новостей">
-              {listQuery.data.pages
-                .flatMap((page) => page.items)
-                .map((news) => (
-                  <Link className="staff-news-row" key={news.id} to={`/staff/news/${news.id}`}>
-                    <span className="staff-news-row__status">
-                      {news.is_published ? 'Опубликована' : 'Черновик'}
-                    </span>
-                    <strong>{news.title}</strong>
-                    <span>{formatDate(news.published_at)}</span>
-                  </Link>
-                ))}
-            </div>
-          )}
+          {!listAccessDenied &&
+            !isAccessDenied(listQuery.error) &&
+            listQuery.data?.pages[0]?.items.length === 0 && (
+              <EmptyState
+                title="Новостей пока нет"
+                description="Создайте черновик, чтобы подготовить публикацию."
+              />
+            )}
+          {!listAccessDenied &&
+            !isAccessDenied(listQuery.error) &&
+            !!listQuery.data?.pages.some((page) => page.items.length > 0) && (
+              <div className="staff-news-list" aria-label="Список новостей">
+                {listQuery.data.pages
+                  .flatMap((page) => page.items)
+                  .map((news) => (
+                    <Link className="staff-news-row" key={news.id} to={`/staff/news/${news.id}`}>
+                      <span className="staff-news-row__status">
+                        {news.is_published ? 'Опубликована' : 'Черновик'}
+                      </span>
+                      <strong>{news.title}</strong>
+                      <span>{formatDate(news.published_at)}</span>
+                    </Link>
+                  ))}
+              </div>
+            )}
           {listQuery.hasNextPage && (
             <button
               className="news-load-more"
@@ -211,15 +297,17 @@ export function StaffNewsPage() {
               autoComplete="off"
               required
               minLength={1}
-              maxLength={200}
+              maxLength={400}
+              disabled={isSaving}
               value={editorTitle}
               onChange={(event) => {
+                if (codePointLength(event.target.value) > 200) return
                 setTitleDraft({ id: newsId, value: event.target.value })
-                setSuccess('')
+                clearMutationMessages()
               }}
             />
             <div className="staff-news-editor__counter" aria-live="polite">
-              {editorTitle.length}/200
+              {codePointLength(editorTitle)}/200
             </div>
             <label htmlFor="staff-news-body-input">Текст новости</label>
             <textarea
@@ -227,20 +315,27 @@ export function StaffNewsPage() {
               name="body"
               required
               minLength={1}
-              maxLength={20_000}
+              maxLength={40_000}
+              disabled={isSaving}
               rows={12}
               value={editorBody}
               onChange={(event) => {
+                if (codePointLength(event.target.value) > 20_000) return
                 setBodyDraft({ id: newsId, value: event.target.value })
-                setSuccess('')
+                clearMutationMessages()
               }}
             />
             <div className="staff-news-editor__counter" aria-live="polite">
-              {editorBody.length}/20 000
+              {codePointLength(editorBody)}/20 000
             </div>
-            {error && (
+            {isSaving && (
+              <p className="staff-news-feedback" role="status">
+                Сохранение выполняется. Поля временно недоступны.
+              </p>
+            )}
+            {(feedback || saveMutation.error || publishMutation.error) && (
               <p className="staff-news-feedback staff-news-feedback--error" role="alert">
-                {messageForError(error)}
+                {feedback ?? messageForError(publishMutation.error ?? saveMutation.error)}
               </p>
             )}
             {success && (
@@ -261,12 +356,21 @@ export function StaffNewsPage() {
                   type="button"
                   disabled={isSaving}
                   onClick={async () => {
-                    setSuccess('')
+                    clearMutationMessages()
+                    const content = { title: editorTitle, body: editorBody }
                     try {
-                      await saveMutation.mutateAsync({ title: editorTitle, body: editorBody })
+                      await saveMutation.mutateAsync({
+                        content,
+                        idempotencyKey: getCreateKey(content),
+                        suppressSuccess: true,
+                      })
                       await publishMutation.mutateAsync(true)
-                    } catch {
-                      /* mutation state displays the error and retains form contents */
+                    } catch (error) {
+                      if (!saveMutation.isError) {
+                        setFeedback(
+                          `Изменения сохранены, но опубликовать новость не удалось: ${messageForError(error)}`,
+                        )
+                      }
                     }
                   }}
                 >
@@ -277,7 +381,10 @@ export function StaffNewsPage() {
                 <button
                   type="button"
                   disabled={isSaving}
-                  onClick={() => publishMutation.mutate(false)}
+                  onClick={() => {
+                    clearMutationMessages()
+                    publishMutation.mutate(false)
+                  }}
                 >
                   Снять с публикации
                 </button>

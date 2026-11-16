@@ -93,7 +93,7 @@ def test_staff_news_full_publication_cycle_and_student_visibility(news_client):
     student, student_token = create_account("student")
     created = client.post(
         "/api/v1/staff/news",
-        headers={"Authorization": f"Bearer {author_token}"},
+        headers={"Authorization": f"Bearer {author_token}", "Idempotency-Key": str(uuid4())},
         json={"title": "  Открытая лекция  ", "body": "Первая строка\nВторая строка"},
     )
     assert created.status_code == 201
@@ -105,12 +105,12 @@ def test_staff_news_full_publication_cycle_and_student_visibility(news_client):
     item_id = item["id"]
     second = client.post(
         "/api/v1/staff/news",
-        headers={"Authorization": "Bearer " + author_token},
+        headers={"Authorization": "Bearer " + author_token, "Idempotency-Key": str(uuid4())},
         json={"title": "Вторая новость", "body": "Текст"},
     ).json()
     third = client.post(
         "/api/v1/staff/news",
-        headers={"Authorization": "Bearer " + author_token},
+        headers={"Authorization": "Bearer " + author_token, "Idempotency-Key": str(uuid4())},
         json={"title": "Третья новость", "body": "Текст"},
     ).json()
     first_page = client.get(
@@ -160,7 +160,7 @@ def test_staff_news_full_publication_cycle_and_student_visibility(news_client):
     updated = client.patch(
         f"/api/v1/staff/news/{item_id}",
         headers={"Authorization": f"Bearer {editor_token}"},
-        json={"title": "Обновлённая лекция", "body": "Текст\nс переносом"},
+        json={"title": "Обновлённая лекция", "body": "Текст\nс переносом", "version": 2},
     )
     assert updated.status_code == 200
     assert updated.json()["published_at"] == first_published_at
@@ -168,7 +168,7 @@ def test_staff_news_full_publication_cycle_and_student_visibility(news_client):
     same_update = client.patch(
         f"/api/v1/staff/news/{item_id}",
         headers={"Authorization": f"Bearer {editor_token}"},
-        json={"title": "Обновлённая лекция", "body": "Текст\nс переносом"},
+        json={"title": "Обновлённая лекция", "body": "Текст\nс переносом", "version": 3},
     )
     assert same_update.status_code == 200
 
@@ -252,7 +252,7 @@ def test_staff_news_rechecks_permission_roles_and_input_validation(news_client):
         assert (
             client.post(
                 "/api/v1/staff/news",
-                headers={"Authorization": f"Bearer {denied}"},
+                headers={"Authorization": f"Bearer {denied}", "Idempotency-Key": str(uuid4())},
                 json={"title": "T", "body": "B"},
             ).status_code
             == 403
@@ -260,6 +260,7 @@ def test_staff_news_rechecks_permission_roles_and_input_validation(news_client):
     for payload in (
         {"title": "  ", "body": "body"},
         {"title": "x" * 201, "body": "body"},
+        {"title": "😀" * 201, "body": "body"},
         {"title": "title", "body": " \n "},
         {"title": "title", "body": "bad\u0000text"},
         {"title": "title", "body": "x" * 20_001},
@@ -267,7 +268,9 @@ def test_staff_news_rechecks_permission_roles_and_input_validation(news_client):
     ):
         assert (
             client.post(
-                "/api/v1/staff/news", headers={"Authorization": f"Bearer {token}"}, json=payload
+                "/api/v1/staff/news",
+                headers={"Authorization": f"Bearer {token}", "Idempotency-Key": str(uuid4())},
+                json=payload,
             ).status_code
             == 422
         )
@@ -281,8 +284,8 @@ def test_staff_news_rechecks_permission_roles_and_input_validation(news_client):
     db.flush()
     valid = client.post(
         "/api/v1/staff/news",
-        headers={"Authorization": f"Bearer {token}"},
-        json={"title": "x" * 200, "body": "Ж" * 20_000},
+        headers={"Authorization": f"Bearer {token}", "Idempotency-Key": str(uuid4())},
+        json={"title": "😀" * 200, "body": "😀" * 20_000},
     )
     assert valid.status_code == 201
     assert len(valid.json()["title"]) == 200 and len(valid.json()["body"]) == 20_000
@@ -300,7 +303,7 @@ def test_staff_news_audit_failure_rolls_back_create(news_client, monkeypatch):
     monkeypatch.setattr(service, "write_audit_event", fail_audit)
     response = client.post(
         "/api/v1/staff/news",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"Authorization": f"Bearer {token}", "Idempotency-Key": str(uuid4())},
         json={"title": "Title", "body": "Body"},
     )
     assert response.status_code == 500
@@ -324,3 +327,150 @@ def test_staff_news_keeps_nullable_author_for_legacy_rows(news_client):
     )
     assert response.status_code == 200
     assert response.json()["author_user_id"] is None
+
+
+def test_staff_news_rejects_stale_editor_without_overwriting_or_auditing(news_client):
+    client, create_account, db = news_client
+    author, author_token = create_account()
+    _, editor_a = create_account()
+    _, editor_b = create_account()
+    created = client.post(
+        "/api/v1/staff/news",
+        headers={"Authorization": f"Bearer {author_token}", "Idempotency-Key": str(uuid4())},
+        json={"title": "Original", "body": "Original body"},
+    ).json()
+    news_id = created["id"]
+    edit_a = client.patch(
+        f"/api/v1/staff/news/{news_id}",
+        headers={"Authorization": f"Bearer {editor_a}"},
+        json={"title": "First editor", "body": "First editor body", "version": 1},
+    )
+    assert edit_a.status_code == 200 and edit_a.json()["version"] == 2
+    stale_edit = client.patch(
+        f"/api/v1/staff/news/{news_id}",
+        headers={"Authorization": f"Bearer {editor_b}"},
+        json={"title": "Second editor", "body": "stale body", "version": 1},
+    )
+    assert stale_edit.status_code == 409
+    db.expire_all()
+    saved = db.get(News, int(news_id))
+    assert (saved.title, saved.body, saved.version) == ("First editor", "First editor body", 2)
+    events = db.scalars(
+        select(AuditEvent).where(
+            AuditEvent.entity_type == "news", AuditEvent.entity_id == int(news_id)
+        )
+    ).all()
+    assert [event.action for event in events] == ["create", "update"]
+
+
+def test_staff_news_create_replay_is_idempotent_and_payload_bound(news_client):
+    client, create_account, db = news_client
+    _, token = create_account()
+    key = str(uuid4())
+    headers = {"Authorization": f"Bearer {token}", "Idempotency-Key": key}
+    payload = {"title": "Retry-safe", "body": "Same operation"}
+    first = client.post("/api/v1/staff/news", headers=headers, json=payload)
+    replay = client.post("/api/v1/staff/news", headers=headers, json=payload)
+    assert first.status_code == 201
+    assert replay.status_code == 200 and replay.json() == first.json()
+    assert db.scalar(select(func.count()).select_from(News)) == 1
+    assert (
+        db.scalar(
+            select(func.count()).select_from(AuditEvent).where(AuditEvent.entity_type == "news")
+        )
+        == 1
+    )
+    mismatch = client.post(
+        "/api/v1/staff/news", headers=headers, json={"title": "Different", "body": "Content"}
+    )
+    assert mismatch.status_code == 409
+    assert db.scalar(select(func.count()).select_from(News)) == 1
+
+
+def test_staff_news_published_at_uses_actual_statement_time(news_client):
+    client, create_account, db = news_client
+    _, token = create_account()
+    _, student_token = create_account("student")
+    earlier = client.post(
+        "/api/v1/staff/news",
+        headers={"Authorization": f"Bearer {token}", "Idempotency-Key": str(uuid4())},
+        json={"title": "Earlier publication", "body": "Before delayed item"},
+    ).json()
+    assert (
+        client.post(
+            f"/api/v1/staff/news/{earlier['id']}/publish",
+            headers={"Authorization": f"Bearer {token}"},
+        ).status_code
+        == 200
+    )
+    created = client.post(
+        "/api/v1/staff/news",
+        headers={"Authorization": f"Bearer {token}", "Idempotency-Key": str(uuid4())},
+        json={"title": "Delayed publication", "body": "Timing"},
+    ).json()
+    started = datetime.now(UTC)
+    db.execute(select(func.pg_sleep(0.2)))
+    response = client.post(
+        f"/api/v1/staff/news/{created['id']}/publish", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    published_at = datetime.fromisoformat(response.json()["published_at"].replace("Z", "+00:00"))
+    assert published_at >= started + timedelta(milliseconds=150)
+    feed = client.get("/api/v1/news", headers={"Authorization": f"Bearer {student_token}"}).json()
+    assert [row["id"] for row in feed["items"][:2]] == [created["id"], earlier["id"]]
+
+
+@pytest.mark.parametrize("action", ["update", "publish", "unpublish"])
+def test_staff_news_audit_failure_rolls_back_transitions(news_client, monkeypatch, action):
+    client, create_account, db = news_client
+    _, token = create_account()
+    created = client.post(
+        "/api/v1/staff/news",
+        headers={"Authorization": f"Bearer {token}", "Idempotency-Key": str(uuid4())},
+        json={"title": "Rollback", "body": "Original"},
+    ).json()
+    news_id = int(created["id"])
+    if action == "unpublish":
+        published = client.post(
+            f"/api/v1/staff/news/{news_id}/publish", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert published.status_code == 200
+        original_state = (
+            True,
+            datetime.fromisoformat(published.json()["published_at"].replace("Z", "+00:00")),
+        )
+    else:
+        original_state = (False, None)
+    original_version = db.get(News, news_id).version
+    from app.news import service
+
+    monkeypatch.setattr(
+        service,
+        "write_audit_event",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError()),
+    )
+    if action == "update":
+        response = client.patch(
+            f"/api/v1/staff/news/{news_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"title": "Changed", "body": "Changed", "version": original_version},
+        )
+    else:
+        response = client.post(
+            f"/api/v1/staff/news/{news_id}/{action}", headers={"Authorization": f"Bearer {token}"}
+        )
+    assert response.status_code == 500
+    db.expire_all()
+    unchanged = db.get(News, news_id)
+    assert (unchanged.is_published, unchanged.published_at) == original_state
+    assert (unchanged.title, unchanged.body, unchanged.version) == (
+        "Rollback",
+        "Original",
+        original_version,
+    )
+    actions = db.scalars(
+        select(AuditEvent.action).where(
+            AuditEvent.entity_type == "news", AuditEvent.entity_id == news_id
+        )
+    ).all()
+    assert actions == (["create", "publish"] if action == "unpublish" else ["create"])

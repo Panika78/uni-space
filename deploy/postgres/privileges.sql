@@ -89,8 +89,16 @@ FROM pg_tables WHERE schemaname='public'
   AND tablename IN ('applications', 'application_history') \gexec
 SELECT 'GRANT INSERT ON public.news TO uni_space_api'
 WHERE to_regclass('public.news') IS NOT NULL \gexec
-SELECT 'GRANT UPDATE (title, body, is_published, published_at) ON public.news TO uni_space_api'
+SELECT 'GRANT UPDATE (title, body, is_published, published_at, version) ON public.news TO uni_space_api'
 WHERE to_regclass('public.news') IS NOT NULL \gexec
+SELECT 'GRANT SELECT (actor_user_id, org_unit_id, idempotency_key, payload_hash, news_id, response_data)
+        ON public.news_create_requests TO uni_space_api'
+WHERE to_regclass('public.news_create_requests') IS NOT NULL \gexec
+SELECT 'GRANT INSERT (actor_user_id, org_unit_id, idempotency_key, payload_hash)
+        ON public.news_create_requests TO uni_space_api'
+WHERE to_regclass('public.news_create_requests') IS NOT NULL \gexec
+SELECT 'GRANT UPDATE (news_id, response_data) ON public.news_create_requests TO uni_space_api'
+WHERE to_regclass('public.news_create_requests') IS NOT NULL \gexec
 SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
               pg_get_serial_sequence('public.news', 'id'))
 WHERE to_regclass('public.news') IS NOT NULL \gexec

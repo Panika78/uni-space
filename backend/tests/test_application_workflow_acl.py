@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, delete, text
@@ -222,22 +223,25 @@ def test_production_acl_allows_news_workflow_and_keeps_audit_append_only(
         "POST",
         "/api/v1/staff/news",
         staff_token,
+        headers={"Idempotency-Key": str(uuid4())},
         json={"title": "ACL news", "body": "Runtime role workflow"},
     )
     assert created.status_code == 201, created.text
     news_id = created.json()["id"]
+    version = created.json()["version"]
     for path, method, body in (
         (f"/api/v1/staff/news/{news_id}/publish", "POST", None),
         (
             f"/api/v1/staff/news/{news_id}",
             "PATCH",
-            {"title": "Edited", "body": "Runtime role workflow"},
+            {"title": "Edited", "body": "Runtime role workflow", "version": version + 1},
         ),
         (f"/api/v1/staff/news/{news_id}/unpublish", "POST", None),
         (f"/api/v1/staff/news/{news_id}/publish", "POST", None),
     ):
         response = c["request"](method, path, staff_token, **({"json": body} if body else {}))
         assert response.status_code == 200, response.text
+        version = response.json()["version"]
     assert c["request"]("GET", "/api/v1/staff/news", staff_token).status_code == 200
     with api_engine.connect() as db:
         assert db.scalar(
@@ -247,6 +251,54 @@ def test_production_acl_allows_news_workflow_and_keeps_audit_append_only(
             )
         )
         assert not db.scalar(text("SELECT has_table_privilege(current_user,'news','DELETE')"))
+        assert not db.scalar(
+            text("SELECT has_table_privilege(current_user,'news_create_requests','INSERT')")
+        )
+        assert not db.scalar(
+            text("SELECT has_table_privilege(current_user,'news_create_requests','SELECT')")
+        )
+        assert not db.scalar(
+            text("SELECT has_table_privilege(current_user,'news_create_requests','UPDATE')")
+        )
+        for column in (
+            "actor_user_id",
+            "org_unit_id",
+            "idempotency_key",
+            "payload_hash",
+            "news_id",
+            "response_data",
+        ):
+            assert db.scalar(
+                text(
+                    "SELECT has_column_privilege(current_user,'news_create_requests',"
+                    ":column,'SELECT')"
+                ),
+                {"column": column},
+            )
+        for column in ("actor_user_id", "org_unit_id", "idempotency_key", "payload_hash"):
+            assert db.scalar(
+                text(
+                    "SELECT has_column_privilege(current_user,'news_create_requests',"
+                    ":column,'INSERT')"
+                ),
+                {"column": column},
+            )
+        for column in ("news_id", "response_data"):
+            assert not db.scalar(
+                text(
+                    "SELECT has_column_privilege(current_user,'news_create_requests',"
+                    ":column,'INSERT')"
+                ),
+                {"column": column},
+            )
+        for column in ("news_id", "response_data"):
+            assert db.scalar(
+                text(
+                    "SELECT has_column_privilege(current_user,'news_create_requests',"
+                    ":column,'UPDATE')"
+                ),
+                {"column": column},
+            )
         for action in ("UPDATE", "DELETE"):
             assert not db.scalar(
                 text("SELECT has_table_privilege(current_user,'audit_events',:action)"),

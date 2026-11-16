@@ -3,7 +3,7 @@ from app.models.accounts import AuthSession, Notification, RefreshToken, User
 from app.models.applications import Application, ApplicationHistory, ServiceType
 from app.models.audit import AuditEvent
 from app.models.base import Base
-from app.models.news import News
+from app.models.news import News, NewsCreateRequest
 from app.models.permissions import StaffPermission, StaffProfile
 from app.models.preferences import UserPreferences
 from app.models.schedule import (
@@ -41,6 +41,7 @@ __all__ = [
     "ApplicationHistory",
     "Base",
     "News",
+    "NewsCreateRequest",
     "Notification",
     "OrgUnit",
     "Program",

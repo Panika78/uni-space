@@ -27,7 +27,8 @@ const browser = await chromium.launch({
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
 context.setDefaultTimeout(15_000)
 context.setDefaultNavigationTimeout(15_000)
-const page = await context.newPage()
+let page = await context.newPage()
+let staffContext
 page.setDefaultTimeout(15_000)
 page.setDefaultNavigationTimeout(15_000)
 const apiRequests = []
@@ -500,58 +501,119 @@ try {
   check('student direct navigation to staff news is denied before staff API access')
 
   currentScenario = 'open the permission-protected staff editor'
-  await page.getByRole('button', { name: 'Выйти', exact: true }).click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Выйти', exact: true }).click()
-  await page.getByLabel('Логин', { exact: true }).fill(staffLoginName)
-  await page.getByLabel('Пароль', { exact: true }).fill(staffPassword)
-  await page.getByRole('button', { name: 'Войти', exact: true }).click()
-  await page.getByRole('heading', { name: 'Кабинет сотрудника', exact: true }).waitFor()
+  const studentPage = page
+  staffContext = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  staffContext.setDefaultTimeout(15_000)
+  staffContext.setDefaultNavigationTimeout(15_000)
+  const staffPage = await staffContext.newPage()
+  staffPage.setDefaultTimeout(15_000)
+  staffPage.setDefaultNavigationTimeout(15_000)
+  await staffPage.goto(`${baseURL}/login`)
+  await staffPage.getByLabel('Логин', { exact: true }).fill(staffLoginName)
+  await staffPage.getByLabel('Пароль', { exact: true }).fill(staffPassword)
+  await staffPage.getByRole('button', { name: 'Войти', exact: true }).click()
+  await staffPage.getByRole('heading', { name: 'Кабинет сотрудника', exact: true }).waitFor()
+  page = staffPage
   await page.getByRole('link', { name: 'Публикация новостей', exact: true }).click()
   await page.getByRole('heading', { name: 'Публикация новостей', exact: true }).waitFor()
-  await page.getByRole('link', { name: 'Создать новость', exact: true }).click()
-  await page.getByLabel('Заголовок').fill('E2E: официальная новость')
-  await page.getByLabel('Текст новости').fill('Первая строка\nВторая строка')
   for (const width of [360, 1440]) {
+    currentScenario = `complete staff and student workflow at ${width}px`
+    page = staffPage
     await page.setViewportSize({ width, height: 900 })
+    await page.goto(`${baseURL}/staff/news`)
+    await page.getByRole('heading', { name: 'Публикация новостей', exact: true }).waitFor()
+    await page.getByRole('link', { name: 'Создать новость', exact: true }).click()
+    const originalTitle = `E2E: официальная новость ${width}px`
+    const updatedTitle = `E2E: изменённая официальная новость ${width}px`
+    const body = `Первая строка ${width}\nВторая строка`
+    await page.getByLabel('Заголовок').fill(originalTitle)
+    await page.getByLabel('Текст новости').fill(body)
     await page.waitForFunction(() => document.documentElement.scrollWidth <= window.innerWidth)
-  }
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await page.getByLabel('Заголовок').focus()
-  await page.keyboard.press('Tab')
-  assert.equal(await page.evaluate(() => document.activeElement?.id), 'staff-news-body-input')
-  await page.keyboard.press('Tab')
-  const failDraftSave = (url) => url.pathname === '/api/v1/staff/news'
-  await context.route(failDraftSave, (route) => {
-    if (route.request().method() !== 'POST') return route.continue()
-    return route.fulfill({
-      status: 500,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        error: { code: 'internal_error', message: 'Fictional save failure', details: [] },
-      }),
+    await page.getByLabel('Заголовок').focus()
+    await page.keyboard.press('Tab')
+    assert.equal(await page.evaluate(() => document.activeElement?.id), 'staff-news-body-input')
+    await page.keyboard.press('Tab')
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.textContent?.trim()),
+      'Сохранить черновик',
+      'Keyboard tab order should reach the draft save action',
+    )
+    let droppedReply = false
+    const createRoute = (url) => url.pathname === '/api/v1/staff/news'
+    await staffContext.route(createRoute, async (route) => {
+      if (route.request().method() !== 'POST' || droppedReply) return route.continue()
+      const response = await route.fetch()
+      assert.equal(response.status(), 201, 'First create request must commit successfully')
+      droppedReply = true
+      await route.fulfill({
+        response,
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { code: 'internal_error', message: 'Lost response after commit', details: [] },
+        }),
+      })
     })
-  })
-  await page.getByRole('button', { name: 'Сохранить черновик', exact: true }).click()
-  await page.getByRole('alert').waitFor()
-  assert.equal(await page.getByLabel('Заголовок').inputValue(), 'E2E: официальная новость')
-  assert.equal(await page.locator('[role="status"]').count(), 0)
-  await context.unroute(failDraftSave)
-  check('a failed save keeps the entered content and shows no success')
-  await page.getByRole('button', { name: 'Сохранить черновик', exact: true }).click()
-  await page.getByRole('heading', { name: 'E2E: официальная новость', exact: true }).waitFor()
-  await page.getByRole('button', { name: 'Опубликовать', exact: true }).click()
-  await page.getByText('Новость опубликована.', { exact: true }).waitFor()
-  await page.getByLabel('Заголовок').fill('E2E: изменённая официальная новость')
-  await page.getByLabel('Текст новости').fill('Обновлённая строка\nСохранённый перенос строки')
-  await page.getByRole('button', { name: 'Сохранить изменения', exact: true }).click()
-  await page.getByText('Изменения сохранены.', { exact: true }).waitFor()
-  await page.getByRole('button', { name: 'Снять с публикации', exact: true }).click()
-  await page.getByText('Публикация снята.', { exact: true }).waitFor()
-  await page.getByRole('button', { name: 'Опубликовать', exact: true }).click()
-  await page.getByText('Новость опубликована.', { exact: true }).waitFor()
-  check(
-    'staff creates, publishes, unpublishes and republishes a news item at 360/1440 px with keyboard navigation',
-  )
+    await page.keyboard.press('Enter')
+    await page.getByRole('alert').waitFor()
+    assert.equal(await page.getByLabel('Заголовок').inputValue(), originalTitle)
+    assert.equal(await page.getByLabel('Текст новости').inputValue(), body)
+    assert.equal(await page.locator('[role="status"]').count(), 0)
+    await page.getByRole('button', { name: 'Сохранить черновик', exact: true }).click()
+    await page.getByRole('heading', { name: originalTitle, exact: true }).waitFor()
+    await staffContext.unroute(createRoute)
+    const newsId = new URL(page.url()).pathname.split('/').at(-1)
+    assert.ok(newsId && newsId !== 'new')
+    await page.getByRole('button', { name: 'Опубликовать', exact: true }).focus()
+    await page.keyboard.press('Enter')
+    await page.getByText('Новость опубликована.', { exact: true }).waitFor()
+
+    page = studentPage
+    await page.goto(`${baseURL}/news`)
+    await page.getByRole('heading', { name: 'Новости', exact: true }).waitFor()
+    await page.getByRole('heading', { name: originalTitle, exact: true }).waitFor()
+    await page.goto(`${baseURL}/news/${newsId}`)
+    await page.getByRole('heading', { level: 1, name: originalTitle, exact: true }).waitFor()
+    assert.equal(
+      await page
+        .locator('.news-article')
+        .innerText()
+        .then((text) => text.includes(body)),
+      true,
+    )
+
+    page = staffPage
+    await page.goto(`${baseURL}/staff/news`)
+    await page.getByRole('heading', { name: 'Публикация новостей', exact: true }).waitFor()
+    await page.getByRole('link', { name: originalTitle, exact: false }).click()
+    await page.getByLabel('Заголовок').fill(updatedTitle)
+    await page
+      .getByLabel('Текст новости')
+      .fill(`Обновлённая строка ${width}\nСохранённый перенос строки`)
+    await page.getByRole('button', { name: 'Сохранить изменения', exact: true }).click()
+    await page.getByText('Изменения сохранены.', { exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Снять с публикации', exact: true }).click()
+    await page.getByText('Публикация снята.', { exact: true }).waitFor()
+
+    page = studentPage
+    await page.goto(`${baseURL}/news/${newsId}`)
+    await page.getByText('Новость не найдена или больше недоступна', { exact: true }).waitFor()
+    await page.goto(`${baseURL}/news`)
+    assert.equal(await page.getByRole('heading', { name: updatedTitle, exact: true }).count(), 0)
+
+    page = staffPage
+    await page.goto(`${baseURL}/staff/news`)
+    await page.getByRole('heading', { name: 'Публикация новостей', exact: true }).waitFor()
+    await page.getByRole('link', { name: updatedTitle, exact: false }).click()
+    await page.getByRole('button', { name: 'Опубликовать', exact: true }).click()
+    await page.getByText('Новость опубликована.', { exact: true }).waitFor()
+
+    page = studentPage
+    await page.goto(`${baseURL}/news/${newsId}`)
+    await page.getByRole('heading', { level: 1, name: updatedTitle, exact: true }).waitFor()
+    await page.waitForFunction(() => document.documentElement.scrollWidth <= window.innerWidth)
+    check(`staff and student create/publish/edit/unpublish/republish workflow at ${width}px`)
+  }
 } catch (error) {
   console.error(`FAIL ${currentScenario}: ${error?.message || String(error)}`)
   console.error(`Diagnostic URL: ${new URL(page.url()).origin}${new URL(page.url()).pathname}`)
@@ -570,6 +632,10 @@ try {
   try {
     await context.close()
   } finally {
-    await browser.close()
+    try {
+      await staffContext?.close()
+    } finally {
+      await browser.close()
+    }
   }
 }

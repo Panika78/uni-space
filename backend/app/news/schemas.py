@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from pydantic import StringConstraints, field_validator
+from pydantic import PositiveInt, StringConstraints, field_validator
 
 from app.core.schemas import DateTime, Id, Page, RequestModel
 
@@ -26,6 +26,7 @@ class StaffNews(RequestModel):
     author_user_id: Id | None
     published_at: DateTime | None
     is_published: bool
+    version: PositiveInt
 
 
 def validate_news_text(value: str) -> str:
@@ -45,6 +46,10 @@ class NewsContent(RequestModel):
         if not value.strip():
             raise ValueError("Text must not be blank")
         return value
+
+
+class NewsUpdate(NewsContent):
+    version: PositiveInt
 
 
 class StaffNewsPage(Page[StaffNews]):

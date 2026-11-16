@@ -1,7 +1,10 @@
+import hashlib
+import json
 import re
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select, tuple_, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.audit import write_audit_event
@@ -12,9 +15,16 @@ from app.core.pagination import (
     paginate_results,
 )
 from app.models.accounts import User
-from app.models.news import News
+from app.models.news import News, NewsCreateRequest
 from app.news.schemas import News as NewsResponse
-from app.news.schemas import NewsContent, NewsPage, NewsPreview, StaffNews, StaffNewsPage
+from app.news.schemas import (
+    NewsContent,
+    NewsPage,
+    NewsPreview,
+    NewsUpdate,
+    StaffNews,
+    StaffNewsPage,
+)
 
 NEWS_CURSOR_TYPES = (int, int)
 EXCERPT_LENGTH = 180
@@ -30,6 +40,7 @@ def serialize_staff_news(item: News) -> StaffNews:
         author_user_id=str(item.author_user_id) if item.author_user_id is not None else None,
         published_at=item.published_at,
         is_published=item.is_published,
+        version=item.version,
     )
 
 
@@ -60,9 +71,49 @@ def get_staff_news(db: Session, news_id: int, *, for_update: bool = False) -> Ne
     return db.scalar(statement)
 
 
-def create_staff_news(db: Session, actor: User, content: NewsContent) -> News:
-    item = News(title=content.title, body=content.body, author_user_id=actor.id, is_published=False)
+class NewsVersionConflict(Exception):
+    pass
+
+
+class IdempotencyConflict(Exception):
+    pass
+
+
+def create_staff_news(
+    db: Session, actor: User, org_unit_id: int, content: NewsContent, idempotency_key: str
+) -> tuple[StaffNews, bool]:
+    digest = hashlib.sha256(
+        json.dumps(
+            content.model_dump(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    scope = {
+        "actor_user_id": actor.id,
+        "org_unit_id": org_unit_id,
+        "idempotency_key": idempotency_key,
+    }
     try:
+        inserted = db.scalar(
+            pg_insert(NewsCreateRequest)
+            .values(**scope, payload_hash=digest)
+            .on_conflict_do_nothing()
+            .returning(NewsCreateRequest.idempotency_key)
+        )
+        if inserted is None:
+            prior = db.scalar(
+                select(NewsCreateRequest).where(
+                    NewsCreateRequest.actor_user_id == actor.id,
+                    NewsCreateRequest.org_unit_id == org_unit_id,
+                    NewsCreateRequest.idempotency_key == idempotency_key,
+                )
+            )
+            if prior is None or prior.payload_hash != digest:
+                raise IdempotencyConflict
+            return StaffNews.model_validate(prior.response_data), True
+
+        item = News(
+            title=content.title, body=content.body, author_user_id=actor.id, is_published=False
+        )
         db.add(item)
         db.flush()
         write_audit_event(
@@ -80,14 +131,26 @@ def create_staff_news(db: Session, actor: User, content: NewsContent) -> News:
                 "author_user_id": actor.id,
             },
         )
+        response_data = serialize_staff_news(item).model_dump(mode="json")
+        db.execute(
+            update(NewsCreateRequest)
+            .where(
+                NewsCreateRequest.actor_user_id == actor.id,
+                NewsCreateRequest.org_unit_id == org_unit_id,
+                NewsCreateRequest.idempotency_key == idempotency_key,
+            )
+            .values(news_id=item.id, response_data=response_data)
+        )
         db.commit()
-        return item
+        return serialize_staff_news(item), False
     except Exception:
         db.rollback()
         raise
 
 
-def update_staff_news(db: Session, actor: User, item: News, content: NewsContent) -> News:
+def update_staff_news(db: Session, actor: User, item: News, content: NewsUpdate) -> News:
+    if content.version != item.version:
+        raise NewsVersionConflict
     changes = {
         key: getattr(content, key)
         for key in ("title", "body")
@@ -99,13 +162,13 @@ def update_staff_news(db: Session, actor: User, item: News, content: NewsContent
     try:
         changed = db.scalar(
             update(News)
-            .where(News.id == item.id)
-            .values(**changes)
+            .where(News.id == item.id, News.version == content.version)
+            .values(**changes, version=News.version + 1)
             .returning(News)
             .execution_options(synchronize_session=False, populate_existing=True)
         )
         if changed is None:
-            raise ValueError("News disappeared during update")
+            raise NewsVersionConflict
         write_audit_event(
             db,
             actor=actor,
@@ -126,21 +189,20 @@ def set_news_publication(db: Session, actor: User, item: News, *, publish: bool)
     if item.is_published == publish:
         return item
     previous = {"is_published": item.is_published, "published_at": item.published_at}
-    now = db.scalar(select(func.now()))
     values = {"is_published": publish}
     action = "publish" if publish else "unpublish"
     if publish:
-        values["published_at"] = now
+        values["published_at"] = func.clock_timestamp()
     try:
         changed = db.scalar(
             update(News)
-            .where(News.id == item.id)
-            .values(**values)
+            .where(News.id == item.id, News.version == item.version)
+            .values(**values, version=News.version + 1)
             .returning(News)
             .execution_options(synchronize_session=False, populate_existing=True)
         )
         if changed is None:
-            raise ValueError("News disappeared during publication")
+            raise NewsVersionConflict
         write_audit_event(
             db,
             actor=actor,
@@ -180,7 +242,7 @@ def list_published_news(db: Session, *, limit: int, cursor: str | None) -> NewsP
     statement = select(News).where(
         News.is_published.is_(True),
         News.published_at.is_not(None),
-        News.published_at <= func.now(),
+        News.published_at <= func.clock_timestamp(),
     )
     if after is not None:
         try:
@@ -225,7 +287,7 @@ def get_published_news(db: Session, news_id: int) -> NewsResponse | None:
             News.id == news_id,
             News.is_published.is_(True),
             News.published_at.is_not(None),
-            News.published_at <= func.now(),
+            News.published_at <= func.clock_timestamp(),
         )
     )
     if item is None:

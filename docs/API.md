@@ -500,16 +500,19 @@ type ApplicationHistoryEvent = {
 |---|---|---|---|
 | GET | `/staff/news` | `limit`, `cursor` | `Page<StaffNews>` |
 | GET | `/staff/news/{id}` | — | `StaffNews` |
-| POST | `/staff/news` | `NewsContent` | `201 StaffNews` |
-| PATCH | `/staff/news/{id}` | `NewsContent` | `StaffNews` |
+| POST | `/staff/news` | `NewsContent`, `Idempotency-Key` | `201 StaffNews`; точный повтор возвращает сохранённый результат с `200` |
+| PATCH | `/staff/news/{id}` | `NewsUpdate` (`NewsContent` + `version`) | `StaffNews`; устаревшая версия — `409` |
 | POST | `/staff/news/{id}/publish` | — | `StaffNews` |
 | POST | `/staff/news/{id}/unpublish` | — | `StaffNews` |
 
 `StaffNews` возвращает `id`, `title`, `body`, `author_user_id: Id | null`,
-`published_at: DateTime | null` и `is_published`. Null автора сохраняется для
+`published_at: DateTime | null`, `is_published` и положительную `version`. Null автора сохраняется для
 исторических строк MVP1, у которых автора нет.
 
-`NewsContent` содержит только `title` и `body`, неизвестные поля запрещены.
+`NewsContent` содержит только `title` и `body`, неизвестные поля запрещены. `NewsUpdate`
+дополнительно требует текущую `version`; каждый изменивший запись update/publish/unpublish
+увеличивает её. Повтор `Idempotency-Key` привязан к сотруднику и текущему подразделению;
+другое содержимое для того же ключа отклоняется с `409`.
 Заголовок обрезается по краям и ограничен 1–200 Unicode-символами; текст —
 1–20 000 символов, не может состоять только из пробелов. NUL и некорректные
 суррогатные символы запрещены; переносы строк сохраняются. Создание создаёт
@@ -519,7 +522,7 @@ type ApplicationHistoryEvent = {
 
 Список редактора включает черновики, опубликованные и снятые публикации,
 сортируется по ID убывающе с keyset cursor, limit по умолчанию 20 и максимум 100.
-Ошибки используют `ApiError`: `401`, `403`, `404`, `422`, `500`. Аудит
+Ошибки используют `ApiError`: `401`, `403`, `404`, `409`, `422`, `500`. Аудит
 `news/create|update|publish|unpublish` фиксируется атомарно с новостью.
 
 ## Предпочтение расписания MVP2-14

@@ -903,6 +903,15 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** NewsUpdate */
+        NewsUpdate: {
+            /** Body */
+            body: string;
+            /** Title */
+            title: string;
+            /** Version */
+            version: number;
+        };
         /** NotificationPage */
         NotificationPage: {
             /** Items */
@@ -1140,6 +1149,8 @@ export interface components {
             published_at: string | null;
             /** Title */
             title: string;
+            /** Version */
+            version: number;
         };
         /** StaffNewsPage */
         StaffNewsPage: {
@@ -2447,6 +2458,15 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -2470,7 +2490,9 @@ export interface operations {
     create_news_api_v1_staff_news_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2509,6 +2531,15 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2583,6 +2614,15 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -2614,7 +2654,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["NewsContent"];
+                "application/json": components["schemas"]["NewsUpdate"];
             };
         };
         responses: {
@@ -2647,6 +2687,15 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2721,6 +2770,15 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -2781,6 +2839,15 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

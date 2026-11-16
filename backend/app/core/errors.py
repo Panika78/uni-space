@@ -21,7 +21,7 @@ HTTP_ERROR_CODES = {
     },
     403: {"forbidden", "origin_not_allowed"},
     404: {"not_found"},
-    409: {"version_conflict", "invalid_transition"},
+    409: {"version_conflict", "invalid_transition", "idempotency_conflict"},
     413: {"request_too_large"},
     422: {"validation_error"},
     429: {"rate_limited"},

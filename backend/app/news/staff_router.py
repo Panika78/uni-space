@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from app.core.pagination import InvalidCursorError
@@ -8,8 +8,10 @@ from app.core.schemas import ApiError, Id, PaginationParams
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_db_session
 from app.models import News, User
-from app.news.schemas import NewsContent, StaffNews, StaffNewsPage
+from app.news.schemas import NewsContent, NewsUpdate, StaffNews, StaffNewsPage
 from app.news.service import (
+    IdempotencyConflict,
+    NewsVersionConflict,
     create_staff_news,
     get_staff_news,
     list_staff_news,
@@ -20,7 +22,7 @@ from app.news.service import (
 from app.permissions import PermissionCode, get_authorization_context, require_staff_permission
 
 router = APIRouter(prefix="/api/v1/staff/news", tags=["staff-news"])
-ERRORS = {code: {"model": ApiError} for code in (401, 403, 404, 422, 500)}
+ERRORS = {code: {"model": ApiError} for code in (401, 403, 404, 409, 422, 500)}
 
 
 def require_news_publisher(db: Session, user: User) -> None:
@@ -82,22 +84,38 @@ def create_news(
     response: Response,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db_session)],
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=128)],
 ) -> StaffNews:
-    require_news_publisher(db, user)
-    item = create_staff_news(db, user, content)
+    context = get_authorization_context(db, user)
+    if context.role != "staff" or context.org_unit_id is None:
+        raise HTTPException(403, "forbidden")
+    require_staff_permission(
+        db, user, PermissionCode.NEWS_PUBLISH, org_unit_id=int(context.org_unit_id)
+    )
+    try:
+        item, replayed = create_staff_news(
+            db, user, int(context.org_unit_id), content, idempotency_key
+        )
+    except IdempotencyConflict as exc:
+        raise HTTPException(409, "idempotency_conflict") from exc
     response.headers["Location"] = f"/api/v1/staff/news/{item.id}"
-    return serialize_staff_news(item)
+    if replayed:
+        response.status_code = 200
+    return item
 
 
 @router.patch("/{id}", response_model=StaffNews, responses=ERRORS)
 def update_news(
     id: Id,
-    content: NewsContent,
+    content: NewsUpdate,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db_session)],
 ) -> StaffNews:
     require_news_publisher(db, user)
-    item = update_staff_news(db, user, get_existing_news(db, id, for_update=True), content)
+    try:
+        item = update_staff_news(db, user, get_existing_news(db, id, for_update=True), content)
+    except NewsVersionConflict as exc:
+        raise HTTPException(409, "version_conflict") from exc
     return serialize_staff_news(item)
 
 
