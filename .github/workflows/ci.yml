@@ -348,6 +348,7 @@ jobs:
       APP_ENV: test
       DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
       API_PROXY_TARGET: http://127.0.0.1:8000
+      ATTACHMENT_STORAGE_PATH: ${{ github.workspace }}/work/application-attachments
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -378,6 +379,8 @@ jobs:
           uv run --locked --python 3.12.16 --project backend python backend/scripts/seed_services_browser_test_students.py >> "$GITHUB_ENV"
       - name: Start real API and frontend
         run: |
+          mkdir -p "$ATTACHMENT_STORAGE_PATH"
+          chmod 700 "$ATTACHMENT_STORAGE_PATH"
           setsid bash -c 'echo $$ > work/services-api.pid; cd backend && exec uv run --locked --python 3.12.16 uvicorn app.main:app --host 127.0.0.1 --port 8000' > work/services-api.log 2>&1 < /dev/null &
           setsid bash -c 'cd frontend && exec npm run dev -- --host 127.0.0.1' > work/services-frontend.log 2>&1 < /dev/null &
           for attempt in $(seq 1 60); do
