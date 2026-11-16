@@ -124,6 +124,37 @@ describe('staff news publishing', () => {
     expect(await screen.findByText('Изменения сохранены.')).toBeInTheDocument()
   })
 
+  it('shows the newest server content after a successful save leaves the form clean', async () => {
+    let itemReads = 0
+    const saved = { ...draft, title: 'Saved by editor A', version: 2 }
+    const latest = {
+      ...saved,
+      title: 'Updated by editor B',
+      body: 'Latest server body',
+      version: 3,
+    }
+    apiFetch.mockImplementation((path: string | URL | Request, init?: RequestInit) => {
+      const requestPath = String(path)
+      if (requestPath === '/api/v1/staff/news/41' && init?.method === 'PATCH')
+        return Promise.resolve(saved)
+      if (requestPath === '/api/v1/staff/news/41') {
+        itemReads += 1
+        return Promise.resolve(itemReads === 1 ? draft : latest)
+      }
+      return Promise.resolve({ items: [latest], next_cursor: null })
+    })
+    const user = userEvent.setup()
+    renderPage('/staff/news/41')
+    const title = await screen.findByLabelText('Заголовок')
+    await user.clear(title)
+    await user.type(title, saved.title)
+    await user.click(screen.getByRole('button', { name: 'Сохранить черновик' }))
+
+    await waitFor(() => expect(screen.getByLabelText('Заголовок')).toHaveValue(latest.title))
+    expect(screen.getByLabelText('Текст новости')).toHaveValue(latest.body)
+    expect(screen.getByText('Черновик сохранён.')).toBeInTheDocument()
+  })
+
   it('keeps the edit base version after a background refetch for a second editor', async () => {
     let itemReads = 0
     const updatedByOtherEditor = { ...draft, title: 'Версия второго редактора', version: 2 }
@@ -187,6 +218,33 @@ describe('staff news publishing', () => {
     expect(screen.getByLabelText('Текст новости')).toHaveValue('Версия 1')
   })
 
+  it('keeps denied create content copyable and prevents resubmitting after 403', async () => {
+    apiFetch.mockImplementation((path: string | URL | Request, init?: RequestInit) => {
+      if (String(path) === '/api/v1/staff/news' && init?.method === 'POST')
+        return Promise.reject(new ApiClientError('forbidden', 'forbidden', 403))
+      return Promise.resolve({ items: [], next_cursor: null })
+    })
+    const user = userEvent.setup()
+    renderPage('/staff/news/new')
+    await user.type(await screen.findByLabelText('Заголовок'), 'Title to copy')
+    await user.type(screen.getByLabelText('Текст новости'), 'Body to copy')
+    await user.click(screen.getByRole('button', { name: 'Сохранить черновик' }))
+
+    expect(await screen.findByText('Доступ к созданию новостей запрещён')).toBeInTheDocument()
+    const title = screen.getByLabelText('Заголовок')
+    const body = screen.getByLabelText('Текст новости')
+    expect(title).toHaveValue('Title to copy')
+    expect(body).toHaveValue('Body to copy')
+    expect(title).toHaveAttribute('readonly')
+    expect(body).toHaveAttribute('readonly')
+    expect(screen.queryByRole('button', { name: 'Сохранить черновик' })).not.toBeInTheDocument()
+
+    await user.click(title)
+    await user.keyboard('{Enter}')
+    expect(apiFetch.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1)
+    expect(title.closest('form')).toBeNull()
+  })
+
   it('removes protected list data after a confirmed 403 refetch', async () => {
     apiFetch.mockResolvedValue({ items: [draft], next_cursor: null })
     const { queryClient } = renderPage()
@@ -223,6 +281,58 @@ describe('staff news publishing', () => {
     })
     await screen.findByText('Не удалось загрузить список')
     expect(screen.getByText(draft.title)).toBeInTheDocument()
+  })
+
+  it('shows distinct publication statuses for drafts, published and unpublished news', async () => {
+    const published = {
+      ...draft,
+      id: '42',
+      title: 'Published university update',
+      is_published: true,
+      published_at: '2026-11-15T12:00:00Z',
+    }
+    const unpublished = {
+      ...draft,
+      id: '43',
+      title: 'Unpublished university update',
+      published_at: '2026-11-14T12:00:00Z',
+    }
+    apiFetch.mockResolvedValue({ items: [draft, published, unpublished], next_cursor: null })
+    renderPage()
+
+    const draftRow = await screen.findByRole('link', { name: /Новая официальная новость/ })
+    expect(draftRow).toHaveTextContent('Черновик')
+    expect(
+      screen.getByRole('link', { name: /Опубликована.*Published university update/ }),
+    ).toHaveTextContent('Опубликована')
+    expect(
+      screen.getByRole('link', { name: /Снята с публикации.*Unpublished university update/ }),
+    ).toHaveTextContent('Снята с публикации')
+  })
+
+  it('keeps the historical publication date visible as unpublished status after unpublish', async () => {
+    const published = { ...draft, is_published: true, published_at: '2026-11-15T12:00:00Z' }
+    const unpublished = { ...published, is_published: false, version: 2 }
+    apiFetch.mockImplementation((path: string | URL | Request) => {
+      if (String(path).endsWith('/unpublish')) return Promise.resolve(unpublished)
+      if (String(path) === '/api/v1/staff/news/41') return Promise.resolve(published)
+      return Promise.resolve({ items: [unpublished], next_cursor: null })
+    })
+    const user = userEvent.setup()
+    const { queryClient } = renderPage('/staff/news/41')
+    await screen.findByText(/Опубликована/)
+    await user.click(screen.getByRole('button', { name: 'Снять с публикации' }))
+
+    expect(await screen.findByText('Снята с публикации')).toBeInTheDocument()
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/api/v1/staff/news/41/unpublish',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(queryClient.getQueryData(['staff-news', '41'])).toEqual(unpublished)
+    expect(queryClient.getQueryData(['staff-news', '41'])).toMatchObject({
+      is_published: false,
+      published_at: published.published_at,
+    })
   })
 
   it('counts and limits titles by Unicode code points', async () => {
