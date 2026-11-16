@@ -84,15 +84,16 @@ except Exception:
 | `attendance` | `create`, `update`, `delete` | обязательные `student_id` (положительный integer), `status` (`attended`/`absent`) |
 | `assessment_result` | `create`, `update`, `delete` | `assessment_group_id`, `student_id`, `score` |
 | `final_result` | `create`, `update`, `delete` | `course_offering_id`, `student_id`, `grade_value`, `passed`, `retake_date`, `retake_location` |
-| `lesson` | `create`, `update`, `cancel`, `move` | `course_offering_id`, `teacher_id`, `starts_at`, `ends_at`, `kind`, `status`, `previous_lesson_id`, `version`, `group_ids`, `room_ids` |
-
-| `final_result` | `create`, `update`, `delete` | `course_offering_id`, `student_id`, `grade_value`, `passed`, `retake_date` |
 | `lesson` | `create`, `update`, `cancel`, `move`, `restore` | `course_offering_id`, `teacher_id`, `starts_at`, `ends_at`, `kind`, `status`, `previous_lesson_id`, `version`, `group_ids`, `participants`, `room_ids` |
-| `assessment_group` | `update` | `planned_date`, `lesson_id`, `date_needs_confirmation` |
 | `user` | `create` | `role`, `is_active` |
 | `user` | `set_role` | `role` |
 | `user` | `set_active` | `is_active` |
 | `student` | `set_academic_status` | `academic_status` |
+| `student` | `create` | `user_id`, `group_id`, `academic_status` (`enrolled`) |
+| `teacher` | `link_user` | `user_id` |
+| `staff_profile` | `create` | `user_id`, `org_unit_id` |
+| `staff_profile` | `set_org_unit` | `org_unit_id` |
+| `staff_permission` | `create`, `delete` | `staff_profile_id`, `permission_code` (из `PermissionCode`), `scope_org_unit_id` |
 
 Для `attendance` действует явное исключение: `entity_id=lesson_id`, полный
 идентификатор отметки — `(lesson_id, student_id)`, а не один `entity_id`.
