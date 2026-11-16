@@ -150,16 +150,13 @@ export function UserMenu({
           id="user-menu-panel"
         >
           {student && (
-            <>
-              {' '}
-              <Link to="/profile" onClick={() => setIsOpen(false)}>
-                Мой профиль
-              </Link>
-              <Link to="/settings" onClick={() => setIsOpen(false)}>
-                Настройки <span>Скоро</span>
-              </Link>
-            </>
+            <Link to="/profile" onClick={() => setIsOpen(false)}>
+              Мой профиль
+            </Link>
           )}
+          <Link to="/settings" onClick={() => setIsOpen(false)}>
+            Настройки
+          </Link>
           <button
             onClick={() => {
               setIsOpen(false)

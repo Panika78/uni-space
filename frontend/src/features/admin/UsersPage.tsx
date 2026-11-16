@@ -345,6 +345,9 @@ function UserDetailContent({ id }: { id: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [resetting, setResetting] = useState(false)
+  const [resetPassword, setResetPassword] = useState<string | null>(null)
+  const [resetUncertain, setResetUncertain] = useState(false)
   const [unit, setUnit] = useState('')
   const [code, setCode] = useState<Grant['permission_code']>('applications.review')
   async function change(path: string, method: string, body: unknown) {
@@ -374,6 +377,22 @@ function UserDetailContent({ id }: { id: string }) {
       </section>
     )
   const user = query.data
+  if (resetPassword !== null)
+    return (
+      <section className="admin-users" aria-labelledby="password-reset-title">
+        <h1 id="password-reset-title" tabIndex={-1}>
+          Пароль сброшен
+        </h1>
+        <p>
+          Сохраните пароль сейчас и безопасно передайте пользователю. После закрытия получить его
+          повторно нельзя.
+        </p>
+        <p>
+          Выданный пароль: <strong className="admin-secret">{resetPassword}</strong>
+        </p>
+        <button onClick={() => setResetPassword(null)}>Закрыть и удалить пароль с экрана</button>
+      </section>
+    )
   const availableSections = staffSections.filter((section) =>
     user.available_permission_codes?.includes(section.permission),
   )
@@ -391,6 +410,38 @@ function UserDetailContent({ id }: { id: string }) {
       </p>
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
+      {resetUncertain && (
+        <p role="alert">
+          Ответ на сброс не получен. Пароль мог измениться, но его нельзя восстановить. Проверьте
+          состояние с пользователем перед новым сбросом.
+        </p>
+      )}
+      {user.id !== actor.user_id && (
+        <button
+          disabled={busy || resetting}
+          onClick={async () => {
+            if (!window.confirm('Сбросить пароль? Новый случайный пароль будет показан один раз.'))
+              return
+            setResetting(true)
+            setResetUncertain(false)
+            try {
+              const result = await apiFetch<components['schemas']['ResetUserPassword']>(
+                `${base}/users/${id}/password-reset`,
+                { authenticated: true, replayAfterRefresh: false, method: 'POST' },
+              )
+              setResetPassword(result.password)
+              setError('')
+              void query.refetch()
+            } catch {
+              setResetUncertain(true)
+            } finally {
+              setResetting(false)
+            }
+          }}
+        >
+          {resetting ? 'Сбрасываем…' : 'Сбросить пароль'}
+        </button>
+      )}
       <button
         disabled={busy || user.id === actor.user_id}
         onClick={() => {

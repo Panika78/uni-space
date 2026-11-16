@@ -1,15 +1,15 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from threading import Event
+from threading import Barrier, Event, current_thread
 from typing import Annotated
 from uuid import uuid4
 
 import httpx
 import jwt
 import pytest
-from fastapi import Depends, FastAPI
-from sqlalchemy import delete, event, select, text, update
+from fastapi import Depends, FastAPI, HTTPException
+from sqlalchemy import delete, event, func, select, text, update
 from sqlalchemy.orm import Session
 
 from app.auth import router as auth_routes
@@ -29,6 +29,7 @@ from app.core.middleware import ApiHeadersMiddleware
 from app.dependencies.auth import get_current_student, get_current_user
 from app.dependencies.database import get_db_session
 from app.models import (
+    AuditEvent,
     AuthSession,
     Notification,
     OrgUnit,
@@ -158,6 +159,12 @@ def auth(postgresql_engine, monkeypatch):
     finally:
         with Session(postgresql_engine) as db, db.begin():
             db.execute(delete(Notification).where(Notification.user_id.in_(ids)))
+            db.execute(
+                delete(AuditEvent).where(
+                    AuditEvent.actor_user_id.in_(ids)
+                    | ((AuditEvent.entity_type == "user") & AuditEvent.entity_id.in_(ids))
+                )
+            )
             session_ids = select(AuthSession.id).where(AuthSession.user_id.in_(ids))
             db.execute(delete(RefreshToken).where(RefreshToken.session_id.in_(session_ids)))
             db.execute(delete(AuthSession).where(AuthSession.user_id.in_(ids)))
@@ -227,6 +234,228 @@ def test_login_rotation_cookie_and_logout_revoke_access(auth):
     assert_logout(client.logout(current), True)
     assert_error(client.request("GET", "/api/v1/test/user", access=access), 401, "session_invalid")
     assert_error(client.refresh(current), 401, "invalid_refresh")
+
+
+def test_password_change_rejects_boundaries_then_revokes_every_device(auth):
+    client, engine, ids, logins, _student_ids = auth
+    _first_response, first_refresh, first_access = login(auth)
+    second_response = client.login(json={"login": logins[0], "password": PASSWORD})
+    assert second_response.status_code == 200
+    second_refresh = second_response.cookies[COOKIE_NAME]
+    second_access = second_response.json()["access_token"]
+
+    def change(current, new, confirm=None):
+        return client.request(
+            "POST",
+            "/api/v1/auth/password",
+            access=first_access,
+            json={
+                "current_password": current,
+                "new_password": new,
+                "confirm_password": new if confirm is None else confirm,
+            },
+        )
+
+    assert change("wrong-current", "fictional-new-password").status_code == 401
+    assert change(PASSWORD, "x" * 11).status_code == 422
+    assert change(PASSWORD, "x" * 129).status_code == 422
+    assert change(PASSWORD, "fictional-new-password", "different-new-password").status_code == 422
+    unchanged = change(PASSWORD, PASSWORD)
+    assert unchanged.status_code == 409
+    assert unchanged.json()["error"]["code"] == "password_unchanged"
+    with Session(engine) as db:
+        assert db.scalar(select(User.password_hash).where(User.id == ids[0]))
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(AuthSession)
+                .where(AuthSession.user_id == ids[0], AuthSession.revoked_at.is_(None))
+            )
+            == 2
+        )
+
+    new_password = "пароль фраза 🔐"
+    changed = change(PASSWORD, new_password)
+    assert changed.status_code == 204, changed.text
+    assert changed.headers["cache-control"] == "no-store"
+    assert "Max-Age=0" in changed.headers["set-cookie"]
+    assert_error(
+        client.request("GET", "/api/v1/test/user", access=first_access), 401, "session_invalid"
+    )
+    assert_error(
+        client.request("GET", "/api/v1/test/user", access=second_access), 401, "session_invalid"
+    )
+    assert_error(client.refresh(first_refresh), 401, "invalid_refresh")
+    assert_error(client.refresh(second_refresh), 401, "invalid_refresh")
+    assert client.login(json={"login": logins[0], "password": PASSWORD}).status_code == 401
+    assert client.login(json={"login": logins[0], "password": new_password}).status_code == 200
+    # Python code points, rather than UTF-16 units or bytes, define the accepted limit.
+    max_password = "🧪" * 128
+    max_login = client.login(json={"login": logins[0], "password": new_password})
+    assert max_login.status_code == 200
+    access = max_login.json()["access_token"]
+    accepted = client.request(
+        "POST",
+        "/api/v1/auth/password",
+        access=access,
+        json={
+            "current_password": new_password,
+            "new_password": max_password,
+            "confirm_password": max_password,
+        },
+    )
+    assert accepted.status_code == 204
+
+
+def test_password_change_serializes_login_on_an_independent_postgres_connection(auth, monkeypatch):
+    import time
+
+    from app.auth import service as auth_service
+
+    _client, engine, ids, logins, _student_ids = auth
+    verified = Event()
+    login_pid_box = []
+    original_verify = auth_service.verify_password
+
+    def pause_login_verification(password_hash, password):
+        result = original_verify(password_hash, password)
+        if password == PASSWORD and current_thread().name.startswith("ThreadPoolExecutor"):
+            verified.set()
+        return result
+
+    monkeypatch.setattr(auth_service, "verify_password", pause_login_verification)
+
+    def old_password_login():
+        with engine.connect() as connection:
+            backend_pid = connection.scalar(text("SELECT pg_backend_pid()"))
+            login_pid_box.append(backend_pid)
+            connection.commit()
+            with Session(bind=connection) as db:
+                try:
+                    auth_service.create_login_session(
+                        db,
+                        logins[0],
+                        PASSWORD,
+                        Settings(
+                            _env_file=None,
+                            app_env="test",
+                            jwt_signing_key=KEY,
+                            database_url="postgresql+psycopg://unused:unused@localhost/unused",
+                            allowed_origins=[ORIGIN],
+                        ),
+                    )
+                    return backend_pid, 200
+                except HTTPException as error:
+                    return backend_pid, error.status_code
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with Session(engine) as changing, changing.begin():
+            user = changing.get(User, ids[0])
+            changing.execute(select(User.id).where(User.id == ids[0]).with_for_update())
+            pending_login = pool.submit(old_password_login)
+            assert verified.wait(5)
+            # The successful credential check must now be waiting on our user row lock.
+            deadline = time.monotonic() + 5
+            blocked = False
+            while time.monotonic() < deadline:
+                with engine.connect() as monitor:
+                    blocked = monitor.scalar(
+                        text("SELECT cardinality(pg_blocking_pids(:pid)) > 0"),
+                        {"pid": login_pid_box[0]},
+                    )
+                if blocked:
+                    break
+                time.sleep(0.01)
+            assert blocked
+            auth_service.change_password(changing, user, PASSWORD, "new fictional password 123")
+        _backend_pid, status = pending_login.result(timeout=10)
+        assert status == 401
+        with Session(engine) as db:
+            account = db.get(User, ids[0])
+            assert original_verify(account.password_hash, "new fictional password 123")
+            assert (
+                db.scalar(
+                    select(func.count())
+                    .select_from(AuthSession)
+                    .where(AuthSession.user_id == ids[0], AuthSession.revoked_at.is_(None))
+                )
+                == 0
+            )
+
+
+def test_password_change_audit_failure_rolls_back_hash_and_all_revocations(auth, monkeypatch):
+    from app.auth import service as auth_service
+
+    client, engine, ids, _logins, _student_ids = auth
+    _response, refresh_token, access = login(auth)
+    with Session(engine) as db:
+        original_hash = db.scalar(select(User.password_hash).where(User.id == ids[0]))
+        original_sessions = list(
+            db.scalars(select(AuthSession).where(AuthSession.user_id == ids[0]))
+        )
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(auth_service, "write_audit_event", fail)
+    response = client.request(
+        "POST",
+        "/api/v1/auth/password",
+        access=access,
+        json={
+            "current_password": PASSWORD,
+            "new_password": "fictional new password",
+            "confirm_password": "fictional new password",
+        },
+    )
+    assert response.status_code == 500
+    with Session(engine) as db:
+        assert db.scalar(select(User.password_hash).where(User.id == ids[0])) == original_hash
+        sessions = list(db.scalars(select(AuthSession).where(AuthSession.user_id == ids[0])))
+        assert {session.id for session in sessions} == {session.id for session in original_sessions}
+        assert all(session.revoked_at is None for session in sessions)
+    assert client.request("GET", "/api/v1/test/user", access=access).status_code == 200
+    assert client.refresh(refresh_token).status_code == 200
+
+
+def test_only_one_concurrent_password_change_can_use_the_same_old_password(auth, monkeypatch):
+    from app.auth import service as auth_service
+
+    _client, engine, ids, _logins, _student_ids = auth
+    both_verified = Barrier(2)
+    original_verify = auth_service.verify_password
+
+    def synchronize_old_password(password_hash, password):
+        valid = original_verify(password_hash, password)
+        if password == PASSWORD and current_thread().name.startswith("ThreadPoolExecutor"):
+            both_verified.wait(timeout=5)
+        return valid
+
+    monkeypatch.setattr(auth_service, "verify_password", synchronize_old_password)
+
+    def change(new_password):
+        with Session(engine) as db:
+            actor = db.get(User, ids[0])
+            try:
+                auth_service.change_password(db, actor, PASSWORD, new_password)
+                db.commit()
+                return 204, new_password
+            except HTTPException as error:
+                db.rollback()
+                return error.status_code, None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(
+            pool.map(
+                change,
+                ["fictional concurrent password alpha", "fictional concurrent password beta"],
+            )
+        )
+    assert sorted(status for status, _password in results) == [204, 401]
+    accepted_password = next(password for status, password in results if status == 204)
+    with Session(engine) as db:
+        account = db.get(User, ids[0])
+        assert original_verify(account.password_hash, accepted_password)
 
 
 def test_refresh_lock_timeout_releases_connection_and_allows_later_refresh(auth, monkeypatch):

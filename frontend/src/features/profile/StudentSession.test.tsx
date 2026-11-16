@@ -180,7 +180,7 @@ async function login(user: ReturnType<typeof userEvent.setup>, loginName: string
   await user.click(screen.getByRole('button', { name: 'Меню пользователя' }))
   const link = screen.getByRole('link', { name: 'Мой профиль' })
   expect(link).not.toHaveTextContent('Скоро')
-  expect(screen.getByRole('link', { name: /Настройки/ })).toHaveTextContent('Скоро')
+  expect(screen.getByRole('link', { name: 'Настройки' })).not.toHaveTextContent('Скоро')
   await user.click(link)
   await screen.findByRole('heading', { name: 'Мой профиль' })
 }

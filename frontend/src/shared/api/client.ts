@@ -53,14 +53,17 @@ export function configureApiAuth(begin: () => AuthRequest) {
   beginAuthRequest = begin
 }
 
-export type ApiRequestInit = RequestInit & { authenticated?: boolean }
+export type ApiRequestInit = RequestInit & {
+  authenticated?: boolean
+  replayAfterRefresh?: boolean
+}
 
 // Bounded API pages still need room for slow mobile connections and an auth
 // refresh. This is one wall-clock budget for the initial GET and any replay.
 export const AUTHENTICATED_GET_DEADLINE_MS = 90_000
 
 export async function apiFetch<T>(input: RequestInfo | URL, init: ApiRequestInit = {}): Promise<T> {
-  const { authenticated, ...requestInit } = init
+  const { authenticated, replayAfterRefresh = true, ...requestInit } = init
   if (!authenticated) return sendRequest<T>(input, requestInit)
   const target = requireApiDestination(input)
   if (!beginAuthRequest) throw new Error('Auth provider is unavailable')
@@ -106,6 +109,7 @@ export async function apiFetch<T>(input: RequestInfo | URL, init: ApiRequestInit
         error.code !== 'access_expired'
       )
         throw error
+      if (!replayAfterRefresh) throw error
       // Cancel this waiter promptly without aborting the shared cookie rotation.
       const token = await new Promise<string>((resolve, reject) => {
         const handleAbort = () => reject(signal.reason)

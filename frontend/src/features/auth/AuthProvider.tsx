@@ -33,5 +33,10 @@ export function useAuth() {
   const session = useContext(AuthContext)
   if (!session) throw new Error('AuthProvider is required')
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot)
-  return { ...state, login: session.login, logout: session.logout }
+  return {
+    ...state,
+    login: session.login,
+    logout: session.logout,
+    finishPasswordChange: session.finishPasswordChange,
+  }
 }

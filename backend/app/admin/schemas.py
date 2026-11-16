@@ -63,6 +63,10 @@ class CreatedUser(RequestModel):
     initial_password: str
 
 
+class ResetUserPassword(RequestModel):
+    password: str
+
+
 class SetActive(RequestModel):
     is_active: StrictBool
 

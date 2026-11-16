@@ -8,7 +8,7 @@ from threading import Event
 import pytest
 from fastapi import FastAPI, HTTPException
 from pydantic import SecretStr
-from sqlalchemy import event, func, select
+from sqlalchemy import event, func, select, text
 from sqlalchemy.orm import Session
 from test_academics_migrations import migration_database, run_migration  # noqa: F401
 from test_auth_integration import KEY, ORIGIN, AuthClient
@@ -309,6 +309,493 @@ def test_block_revokes_all_sessions_and_unblock_never_restores(admin, engine):
     )
 
 
+def test_password_reset_is_one_time_atomic_and_preserves_block_state(admin, engine):
+    created = create(admin, "student", login="fictional-reset-target")
+    uid = created["user"]["id"]
+    initial_password = created["initial_password"]
+    client = admin[0]
+    logins = [
+        client.login(json={"login": "fictional-reset-target", "password": initial_password})
+        for _ in range(2)
+    ]
+    assert all(result.status_code == 200 for result in logins)
+
+    own = client.request("POST", f"/api/v1/admin/users/{admin[2]}/password-reset", access=admin[1])
+    assert own.status_code == 409
+    assert own.json()["error"]["code"] == "self_reset_forbidden"
+    denied_origin = client.request(
+        "POST",
+        f"/api/v1/admin/users/{uid}/password-reset",
+        access=admin[1],
+        origin="https://evil.example",
+    )
+    assert denied_origin.status_code == 403
+    assert denied_origin.json()["error"]["code"] == "origin_not_allowed"
+    reset = client.request("POST", f"/api/v1/admin/users/{uid}/password-reset", access=admin[1])
+    assert reset.status_code == 200, reset.text
+    assert reset.headers["cache-control"] == "no-store"
+    password = reset.json()["password"]
+    assert len(password) == 32
+    assert password not in request(admin, "GET", f"/{uid}").text
+    assert request(admin, "GET", f"/{uid}").headers["cache-control"] == "no-store"
+    for result in logins:
+        assert (
+            client.request(
+                "GET", "/api/v1/auth/context", access=result.json()["access_token"]
+            ).status_code
+            == 401
+        )
+        assert client.refresh(result.cookies[COOKIE_NAME]).status_code == 401
+    assert (
+        client.login(
+            json={"login": "fictional-reset-target", "password": initial_password}
+        ).status_code
+        == 401
+    )
+    assert (
+        client.login(json={"login": "fictional-reset-target", "password": password}).status_code
+        == 200
+    )
+
+    assert request(admin, "PUT", f"/{uid}/active", json={"is_active": False}).status_code == 200
+    second_reset = client.request(
+        "POST", f"/api/v1/admin/users/{uid}/password-reset", access=admin[1]
+    )
+    assert second_reset.status_code == 200
+    assert (
+        client.login(
+            json={"login": "fictional-reset-target", "password": second_reset.json()["password"]}
+        ).status_code
+        == 401
+    )
+    detail = request(admin, "GET", f"/{uid}").json()
+    assert detail["is_active"] is False and detail["role"] == "student"
+    assert detail["student_id"] == created["user"]["student_id"]
+    assert request(admin, "PUT", f"/{uid}/active", json={"is_active": True}).status_code == 200
+    assert (
+        client.login(
+            json={"login": "fictional-reset-target", "password": second_reset.json()["password"]}
+        ).status_code
+        == 200
+    )
+
+    with Session(engine) as db:
+        events = list(
+            db.scalars(
+                select(AuditEvent).where(
+                    AuditEvent.entity_type == "user",
+                    AuditEvent.entity_id == int(uid),
+                    AuditEvent.action == "reset_password",
+                )
+            )
+        )
+        assert len(events) == 2
+        assert all(event.actor_user_id == admin[2] for event in events)
+        assert all(event.after_data == {"credential_reset": True} for event in events)
+        assert all(event.before_data == {"credential_reset": False} for event in events)
+        assert all(
+            password not in str(event.before_data) + str(event.after_data) for event in events
+        )
+
+
+def test_self_change_is_available_to_all_four_account_roles(admin):
+    client = admin[0]
+    for role in ("student", "teacher", "staff", "admin"):
+        login_name = f"fictional-self-change-{role}"
+        created = create(admin, role, login=login_name)
+        original = created["initial_password"]
+        login = client.login(json={"login": login_name, "password": original})
+        assert login.status_code == 200
+        new_password = f"fictional new password for {role}"
+        result = client.request(
+            "POST",
+            "/api/v1/auth/password",
+            access=login.json()["access_token"],
+            json={
+                "current_password": original,
+                "new_password": new_password,
+                "confirm_password": new_password,
+            },
+        )
+        assert result.status_code == 204, f"{role}: {result.text}"
+        assert result.headers["cache-control"] == "no-store"
+        assert (
+            client.request(
+                "GET", "/api/v1/auth/context", access=login.json()["access_token"]
+            ).status_code
+            == 401
+        )
+        assert client.refresh(login.cookies[COOKIE_NAME]).status_code == 401
+        assert client.login(json={"login": login_name, "password": original}).status_code == 401
+        assert client.login(json={"login": login_name, "password": new_password}).status_code == 200
+
+
+def test_password_reset_audit_failure_rolls_back_hash_and_session(admin, engine, monkeypatch):
+    created = create(admin, "staff", login="fictional-reset-rollback")
+    uid = int(created["user"]["id"])
+    client = admin[0]
+    login = client.login(
+        json={"login": "fictional-reset-rollback", "password": created["initial_password"]}
+    )
+    assert login.status_code == 200
+    with Session(engine) as db:
+        original_hash = db.scalar(select(User.password_hash).where(User.id == uid))
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(service, "write_audit_event", fail)
+    result = client.request("POST", f"/api/v1/admin/users/{uid}/password-reset", access=admin[1])
+    assert result.status_code == 500
+    with Session(engine) as db:
+        assert db.scalar(select(User.password_hash).where(User.id == uid)) == original_hash
+        session = db.scalar(select(AuthSession).where(AuthSession.user_id == uid))
+        assert session.revoked_at is None
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(AuditEvent)
+                .where(
+                    AuditEvent.entity_type == "user",
+                    AuditEvent.entity_id == uid,
+                    AuditEvent.action == "reset_password",
+                )
+            )
+            == 0
+        )
+    assert (
+        client.request(
+            "GET", "/api/v1/auth/context", access=login.json()["access_token"]
+        ).status_code
+        == 200
+    )
+
+
+def test_two_concurrent_admin_resets_leave_only_the_last_password_valid(admin, engine):
+    created = create(admin, "staff", login="fictional-double-reset")
+    uid = int(created["user"]["id"])
+    client = admin[0]
+    login = client.login(
+        json={"login": "fictional-double-reset", "password": created["initial_password"]}
+    )
+    assert login.status_code == 200
+
+    def reset():
+        return client.request("POST", f"/api/v1/admin/users/{uid}/password-reset", access=admin[1])
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda _index: reset(), range(2)))
+    assert all(response.status_code == 200 for response in responses)
+    issued = [response.json()["password"] for response in responses]
+    assert len(set(issued)) == 2 and all(len(password) == 32 for password in issued)
+    with Session(engine) as db:
+        account = db.get(User, uid)
+        valid = [
+            password for password in issued if verify_password(account.password_hash, password)
+        ]
+        session = db.scalar(select(AuthSession).where(AuthSession.user_id == uid))
+        events = db.scalars(
+            select(AuditEvent).where(
+                AuditEvent.entity_type == "user",
+                AuditEvent.entity_id == uid,
+                AuditEvent.action == "reset_password",
+            )
+        )
+        assert len(valid) == 1
+        assert session.revoked_at is not None
+        assert len(list(events)) == 2
+    assert (
+        client.login(
+            json={"login": "fictional-double-reset", "password": created["initial_password"]}
+        ).status_code
+        == 401
+    )
+    assert (
+        client.login(json={"login": "fictional-double-reset", "password": valid[0]}).status_code
+        == 200
+    )
+
+
+@pytest.mark.parametrize("operation", ["refresh", "logout"])
+def test_reset_serializes_refresh_and_logout_without_reviving_tokens(admin, engine, operation):
+    import time
+
+    created = create(admin, "student", login=f"fictional-reset-{operation}")
+    uid = int(created["user"]["id"])
+    client = admin[0]
+    login = client.login(
+        json={
+            "login": f"fictional-reset-{operation}",
+            "password": created["initial_password"],
+        }
+    )
+    assert login.status_code == 200
+    refresh_token = login.cookies[COOKIE_NAME]
+    access = login.json()["access_token"]
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        with Session(engine) as blocker, blocker.begin():
+            session = blocker.scalar(
+                select(AuthSession).where(AuthSession.user_id == uid).with_for_update()
+            )
+            blocker_pid = blocker.scalar(select(func.pg_backend_pid()))
+            assert session is not None
+            if operation == "refresh":
+                pending_operation = pool.submit(client.refresh, refresh_token)
+            else:
+                pending_operation = pool.submit(client.logout, refresh_token, access=access)
+
+            def blocked_request_count():
+                with engine.connect() as monitor:
+                    return monitor.execute(
+                        text(
+                            "SELECT count(*) FROM pg_stat_activity a "
+                            "WHERE a.wait_event_type='Lock' "
+                            "AND :blocker = ANY(pg_blocking_pids(a.pid))"
+                        ),
+                        {"blocker": blocker_pid},
+                    ).scalar_one()
+
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and blocked_request_count() < 1:
+                time.sleep(0.01)
+            assert blocked_request_count() >= 1
+            pending_reset = pool.submit(
+                client.request,
+                "POST",
+                f"/api/v1/admin/users/{uid}/password-reset",
+                access=admin[1],
+            )
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and blocked_request_count() < 2:
+                time.sleep(0.01)
+            assert blocked_request_count() >= 2
+
+        operation_response = pending_operation.result(timeout=10)
+        reset_response = pending_reset.result(timeout=10)
+    assert reset_response.status_code == 200, reset_response.text
+    assert operation_response.status_code in ({200, 401} if operation == "refresh" else {200})
+    if operation == "logout":
+        assert operation_response.json() == {"session_revoked": True}
+    else:
+        if operation_response.status_code == 200:
+            assert client.refresh(operation_response.cookies[COOKIE_NAME]).status_code == 401
+    assert client.request("GET", "/api/v1/auth/context", access=access).status_code == 401
+    assert client.refresh(refresh_token).status_code == 401
+    with Session(engine) as db:
+        session = db.scalar(select(AuthSession).where(AuthSession.user_id == uid))
+        tokens = list(db.scalars(select(RefreshToken).where(RefreshToken.session_id == session.id)))
+        assert session.revoked_at is not None and all(token.revoked_at for token in tokens)
+
+
+@pytest.mark.parametrize("active", [False, True], ids=["block", "unblock"])
+def test_password_reset_serializes_with_block_and_unblock_by_another_admin(admin, engine, active):
+    import time
+
+    client = admin[0]
+    second_admin = create(admin, "admin", login=f"fictional-second-admin-{active}")
+    second_login = client.login(
+        json={
+            "login": f"fictional-second-admin-{active}",
+            "password": second_admin["initial_password"],
+        }
+    )
+    assert second_login.status_code == 200
+    target = create(admin, "staff", login=f"fictional-target-{active}")
+    target_id = target["user"]["id"]
+    if active:
+        assert (
+            request(admin, "PUT", f"/{target_id}/active", json={"is_active": False}).status_code
+            == 200
+        )
+    target_login = client.login(
+        json={
+            "login": f"fictional-target-{active}",
+            "password": target["initial_password"],
+        }
+    )
+    assert target_login.status_code == (401 if active else 200)
+    if active:
+        # Start from a known session, then revoke it before racing unblocking.
+        assert (
+            request(admin, "PUT", f"/{target_id}/active", json={"is_active": True}).status_code
+            == 200
+        )
+        target_login = client.login(
+            json={"login": f"fictional-target-{active}", "password": target["initial_password"]}
+        )
+        assert target_login.status_code == 200
+        assert (
+            request(admin, "PUT", f"/{target_id}/active", json={"is_active": False}).status_code
+            == 200
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        with Session(engine) as blocker, blocker.begin():
+            service.lock_administration(blocker)
+            blocker_pid = blocker.scalar(select(func.pg_backend_pid()))
+            pending_reset = pool.submit(
+                client.request,
+                "POST",
+                f"/api/v1/admin/users/{target_id}/password-reset",
+                access=admin[1],
+            )
+
+            def blocked_request_count():
+                with engine.connect() as monitor:
+                    return monitor.execute(
+                        text(
+                            "SELECT count(*) FROM pg_stat_activity a "
+                            "WHERE a.wait_event_type='Lock' "
+                            "AND :blocker = ANY(pg_blocking_pids(a.pid))"
+                        ),
+                        {"blocker": blocker_pid},
+                    ).scalar_one()
+
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and blocked_request_count() < 1:
+                time.sleep(0.01)
+            assert blocked_request_count() >= 1
+            pending_activity = pool.submit(
+                client.request,
+                "PUT",
+                f"/api/v1/admin/users/{target_id}/active",
+                access=second_login.json()["access_token"],
+                json={"is_active": active},
+            )
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and blocked_request_count() < 2:
+                time.sleep(0.01)
+            assert blocked_request_count() >= 2
+
+        reset_response = pending_reset.result(timeout=10)
+        activity_response = pending_activity.result(timeout=10)
+    assert reset_response.status_code == 200
+    assert activity_response.status_code == 200
+    assert activity_response.json()["is_active"] is active
+    assert (
+        client.request(
+            "GET", "/api/v1/auth/context", access=target_login.json()["access_token"]
+        ).status_code
+        == 401
+    )
+    assert client.refresh(target_login.cookies[COOKIE_NAME]).status_code == 401
+    with Session(engine) as db:
+        sessions = list(
+            db.scalars(select(AuthSession).where(AuthSession.user_id == int(target_id)))
+        )
+        assert sessions and all(session.revoked_at is not None for session in sessions)
+    if not active:
+        assert (
+            client.login(
+                json={
+                    "login": f"fictional-target-{active}",
+                    "password": reset_response.json()["password"],
+                }
+            ).status_code
+            == 401
+        )
+        assert (
+            request(admin, "PUT", f"/{target_id}/active", json={"is_active": True}).status_code
+            == 200
+        )
+        assert (
+            client.login(
+                json={
+                    "login": f"fictional-target-{active}",
+                    "password": reset_response.json()["password"],
+                }
+            ).status_code
+            == 200
+        )
+    else:
+        assert (
+            client.login(
+                json={"login": f"fictional-target-{active}", "password": target["initial_password"]}
+            ).status_code
+            == 401
+        )
+        assert (
+            client.login(
+                json={
+                    "login": f"fictional-target-{active}",
+                    "password": reset_response.json()["password"],
+                }
+            ).status_code
+            == 200
+        )
+
+
+@pytest.mark.parametrize("reset_first", [True, False], ids=["reset-first", "login-first"])
+def test_admin_reset_and_login_are_serialized_on_the_user_row(admin, engine, reset_first):
+    import time
+
+    created = create(admin, "teacher", login=f"fictional-login-reset-{reset_first}")
+    uid = int(created["user"]["id"])
+    login_name = f"fictional-login-reset-{reset_first}"
+    client = admin[0]
+
+    def login():
+        return client.login(json={"login": login_name, "password": created["initial_password"]})
+
+    def reset():
+        return client.request("POST", f"/api/v1/admin/users/{uid}/password-reset", access=admin[1])
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        with Session(engine) as blocker, blocker.begin():
+            blocker.execute(select(User.id).where(User.id == uid).with_for_update())
+            blocker_pid = blocker.scalar(select(func.pg_backend_pid()))
+
+            def submit_and_wait(operation):
+                future = pool.submit(operation)
+                deadline = time.monotonic() + 5
+                blocked = False
+                while time.monotonic() < deadline and not blocked:
+                    with engine.connect() as monitor:
+                        blocked = monitor.scalar(
+                            text(
+                                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity a "
+                                "WHERE a.wait_event_type='Lock' "
+                                "AND :blocker = ANY(pg_blocking_pids(a.pid)))"
+                            ),
+                            {"blocker": blocker_pid},
+                        )
+                    if not blocked:
+                        time.sleep(0.01)
+                assert blocked
+                return future
+
+            first = submit_and_wait(reset if reset_first else login)
+            second = submit_and_wait(login if reset_first else reset)
+        first_result = first.result(timeout=10)
+        second_result = second.result(timeout=10)
+
+    reset_response = first_result if reset_first else second_result
+    login_response = second_result if reset_first else first_result
+    assert reset_response.status_code == 200, reset_response.text
+    assert login_response.status_code == (401 if reset_first else 200), login_response.text
+    if login_response.status_code == 200:
+        assert (
+            client.request(
+                "GET", "/api/v1/auth/context", access=login_response.json()["access_token"]
+            ).status_code
+            == 401
+        )
+        assert client.refresh(login_response.cookies[COOKIE_NAME]).status_code == 401
+    assert (
+        client.login(
+            json={"login": login_name, "password": created["initial_password"]}
+        ).status_code
+        == 401
+    )
+    assert (
+        client.login(
+            json={"login": login_name, "password": reset_response.json()["password"]}
+        ).status_code
+        == 200
+    )
+
+
 def test_audit_failure_rolls_back_creation_activity_permissions_and_transfer(
     admin, engine, monkeypatch
 ):
@@ -348,6 +835,7 @@ def test_non_admin_and_missing_credentials_cannot_access_admin(admin):
             ("GET", "/999999", None),
             ("POST", "", {"login": "escalate", "full_name": "Fictional", "role": "admin"}),
             ("PUT", "/999999/active", {"is_active": False}),
+            ("POST", "/999999/password-reset", None),
         ]:
             response = admin[0].request(
                 method,
@@ -358,6 +846,7 @@ def test_non_admin_and_missing_credentials_cannot_access_admin(admin):
             assert response.status_code == 403
     assert admin[0].request("GET", "/api/v1/admin/users").status_code == 401
     assert request(admin, "GET", "/999999").status_code == 404
+    assert request(admin, "POST", "/999999/password-reset").status_code == 404
     assert request(admin, "GET", "/9999999999999999999").status_code == 422
 
 

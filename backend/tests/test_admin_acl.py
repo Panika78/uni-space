@@ -8,6 +8,7 @@ from test_academics_migrations import migration_database  # noqa: F401
 from test_admin_integration import admin, create, request  # noqa: F401
 from test_application_workflow_acl import runtime_engine  # noqa: F401
 
+from app.auth.security import verify_password
 from app.models import User
 
 pytestmark = pytest.mark.integration
@@ -33,6 +34,14 @@ def test_admin_operations_with_production_acl(admin, runtime_engine):  # noqa: F
         uid = result["user"]["id"]
         login = admin[0].login(json={"login": role, "password": result["initial_password"]})
         assert login.status_code == 200
+        if role == "student":
+            reset = request(admin, "POST", f"/{uid}/password-reset")
+            assert reset.status_code == 200, reset.text
+            assert reset.headers["cache-control"] == "no-store"
+            with Session(engine) as db:
+                reset_user = db.get(User, int(uid))
+                assert verify_password(reset_user.password_hash, reset.json()["password"])
+                assert reset_user.password_hash != reset.json()["password"]
         with Session(engine) as db:
             assert db.scalar(select(User.id).where(User.id == int(uid)).with_for_update()) == int(
                 uid
@@ -40,6 +49,9 @@ def test_admin_operations_with_production_acl(admin, runtime_engine):  # noqa: F
         with engine.begin() as db, pytest.raises(DBAPIError) as denied:
             db.execute(text("UPDATE users SET id=id WHERE id=:id"), {"id": int(uid)})
         assert denied.value.orig.sqlstate == "42501"
+        with engine.begin() as db, pytest.raises(DBAPIError) as denied_role:
+            db.execute(text("UPDATE users SET role=role WHERE id=:id"), {"id": int(uid)})
+        assert denied_role.value.orig.sqlstate == "42501"
         assert request(admin, "PUT", f"/{uid}/active", json={"is_active": False}).status_code == 200
         assert request(admin, "PUT", f"/{uid}/active", json={"is_active": True}).status_code == 200
         if role == "staff":
@@ -56,7 +68,6 @@ def test_admin_operations_with_production_acl(admin, runtime_engine):  # noqa: F
     with Session(engine) as db:
         for table, column in [
             ("users", "id"),
-            ("users", "password_hash"),
             ("users", "role"),
             ("students", "user_id"),
             ("teachers", "full_name"),
@@ -66,6 +77,9 @@ def test_admin_operations_with_production_acl(admin, runtime_engine):  # noqa: F
                 text("SELECT has_column_privilege(current_user,:table,:column,'UPDATE')"),
                 {"table": table, "column": column},
             )
+        assert db.scalar(
+            text("SELECT has_column_privilege(current_user,'users','password_hash','UPDATE')")
+        )
         for operation in ("UPDATE", "DELETE"):
             assert not db.scalar(
                 text("SELECT has_table_privilege(current_user,'audit_events',:operation)"),

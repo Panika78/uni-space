@@ -6,7 +6,13 @@ from fastapi import HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.auth.security import DUMMY_PASSWORD_HASH, validate_access_token, verify_password
+from app.audit import write_audit_event
+from app.auth.security import (
+    DUMMY_PASSWORD_HASH,
+    PASSWORD_HASHER,
+    validate_access_token,
+    verify_password,
+)
 from app.core.config import Settings
 from app.models import AuthSession, RefreshToken, User
 
@@ -115,6 +121,48 @@ def revoke_session(db: Session, session: AuthSession, now: datetime, reason: str
         .where(RefreshToken.session_id == session.id, RefreshToken.revoked_at.is_(None))
         .values(revoked_at=now)
     )
+
+
+def change_password(db: Session, actor: User, current_password: str, new_password: str) -> None:
+    """Change the authenticated user's password and revoke every session atomically."""
+    # Argon2 work happens before the row lock. The hash is checked again after
+    # acquiring it so parallel login/change attempts cannot use a stale snapshot.
+    snapshot_hash = db.scalar(select(User.password_hash).where(User.id == actor.id))
+    if snapshot_hash is None or not verify_password(snapshot_hash, current_password):
+        raise HTTPException(401, "invalid_credentials")
+    if verify_password(snapshot_hash, new_password):
+        raise HTTPException(409, "password_unchanged")
+    new_hash = PASSWORD_HASHER.hash(new_password)
+    with db.begin_nested():
+        user = db.scalar(
+            select(User)
+            .where(User.id == actor.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if user is None or not user.is_active or user.password_hash != snapshot_hash:
+            raise HTTPException(401, "invalid_credentials")
+        user.password_hash = new_hash
+        now = datetime.now(UTC)
+        sessions = db.scalars(
+            select(AuthSession)
+            .where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None))
+            .order_by(AuthSession.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        for session in sessions:
+            revoke_session(db, session, now, "password_changed")
+        write_audit_event(
+            db,
+            actor=user,
+            entity_type="user",
+            entity_id=user.id,
+            action="change_password",
+            before_data={"credential_changed": False},
+            after_data={"credential_changed": True},
+            reason=None,
+        )
 
 
 def rotate_refresh_token(db: Session, raw_token: str | None) -> tuple[AuthSession, str]:

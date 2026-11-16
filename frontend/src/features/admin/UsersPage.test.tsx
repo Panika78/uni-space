@@ -5,7 +5,8 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { CreateUserPage, UserDetailPage } from './UsersPage'
 import type { components } from '../../shared/api/schema'
-vi.mock('../auth/RoleContext', () => ({ useRoleContext: () => ({ user_id: '1', role: 'admin' }) }))
+const actor = vi.hoisted(() => ({ user_id: '1', role: 'admin' }))
+vi.mock('../auth/RoleContext', () => ({ useRoleContext: () => actor }))
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 vi.mock('../../shared/api/client', async (original) => ({
   ...(await original<typeof import('../../shared/api/client')>()),
@@ -16,6 +17,7 @@ afterEach(() => {
     cleanup()
     expect(console.error).not.toHaveBeenCalled()
   } finally {
+    actor.user_id = '1'
     vi.resetAllMocks()
     vi.restoreAllMocks()
   }
@@ -208,4 +210,77 @@ it('uses the server permission catalogue and replaces an invalid selection after
   await user.selectOptions(departments, '3')
   await user.click(screen.getByRole('button', { name: 'Сменить подразделение и отозвать права' }))
   await screen.findByRole('option', { name: /grades.edit/ })
+})
+
+it('shows an administrative reset secret once without placing it in a retryable cache', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  const detail: components['schemas']['UserDetail'] = {
+    id: '9',
+    login: 'fictional-reset-user',
+    full_name: 'Вымышленный пользователь',
+    role: 'student',
+    is_active: true,
+    student_id: '19',
+    group_id: '29',
+    teacher_id: null,
+    staff_profile_id: null,
+    org_unit_id: null,
+    permissions: [],
+    available_permission_codes: [],
+  }
+  vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+    if (init?.method === 'POST' && String(url).endsWith('/password-reset'))
+      return { password: 'fictional-one-time-reset-secret' }
+    return detail
+  })
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <RouterProvider
+        router={createMemoryRouter([{ path: '/admin/users/:id', element: <UserDetailPage /> }], {
+          initialEntries: ['/admin/users/9'],
+        })}
+      />
+    </QueryClientProvider>,
+  )
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: 'Сбросить пароль' }))
+  expect(await screen.findByText('fictional-one-time-reset-secret')).toBeInTheDocument()
+  const request = vi.mocked(apiFetch).mock.calls.find(([, init]) => init?.method === 'POST')
+  expect(request?.[1]).toMatchObject({ authenticated: true, replayAfterRefresh: false })
+  await user.click(screen.getByRole('button', { name: 'Закрыть и удалить пароль с экрана' }))
+  expect(screen.queryByText('fictional-one-time-reset-secret')).not.toBeInTheDocument()
+  expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(
+    1,
+  )
+})
+
+it('hides the administrative reset action on the current administrator account', async () => {
+  actor.user_id = '9'
+  vi.mocked(apiFetch).mockResolvedValue({
+    id: '9',
+    login: 'fictional-admin',
+    full_name: 'Вымышленный администратор',
+    role: 'admin',
+    is_active: true,
+    student_id: null,
+    group_id: null,
+    teacher_id: null,
+    staff_profile_id: null,
+    org_unit_id: null,
+    permissions: [],
+    available_permission_codes: [],
+  })
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RouterProvider
+        router={createMemoryRouter([{ path: '/admin/users/:id', element: <UserDetailPage /> }], {
+          initialEntries: ['/admin/users/9'],
+        })}
+      />
+    </QueryClientProvider>,
+  )
+  await screen.findByRole('heading', { name: 'Вымышленный администратор' })
+  expect(screen.queryByRole('button', { name: 'Сбросить пароль' })).not.toBeInTheDocument()
 })

@@ -3,17 +3,23 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials
-from pydantic import Field, StrictStr
+from pydantic import Field, StrictStr, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from app.auth.body_limit import AuthRoute
 from app.auth.rate_limit import LoginRateLimiter
 from app.auth.security import create_access_token
-from app.auth.service import create_login_session, revoke_logout_session, rotate_refresh_token
+from app.auth.service import (
+    change_password,
+    create_login_session,
+    revoke_logout_session,
+    rotate_refresh_token,
+)
 from app.core.config import Settings, get_settings
 from app.core.schemas import ApiError, RequestModel
-from app.dependencies.auth import bearer
+from app.dependencies.auth import bearer, get_current_user
 from app.dependencies.database import get_db_session
+from app.models import User
 
 COOKIE_NAME = "__Host-uni_space_refresh"
 COOKIE_PATH = "/api/v1/auth"
@@ -37,6 +43,25 @@ class TokenResponse(RequestModel):
 
 class LogoutResponse(RequestModel):
     session_revoked: bool
+
+
+class ChangePasswordRequest(RequestModel):
+    current_password: Annotated[StrictStr, Field(min_length=1, max_length=1024)]
+    new_password: Annotated[StrictStr, Field(min_length=12, max_length=128)]
+    confirm_password: Annotated[StrictStr, Field(min_length=1, max_length=128)]
+
+    @field_validator("current_password", "new_password", "confirm_password")
+    @classmethod
+    def validate_unicode(cls, value: str) -> str:
+        if any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+            raise ValueError("Password contains invalid Unicode")
+        return value
+
+    @model_validator(mode="after")
+    def validate_confirmation(self):
+        if self.new_password != self.confirm_password:
+            raise ValueError("Passwords do not match")
+        return self
 
 
 def require_auth_origin(
@@ -210,3 +235,27 @@ def logout_session(
     clear_legacy_cookie(response, settings)
     clear_insecure_cookie(response, settings)
     return {"session_revoked": session_revoked}
+
+
+@router.post("/password", status_code=204, dependencies=[])
+def change_own_password(
+    body: ChangePasswordRequest,
+    db: Database,
+    actor: Annotated[User, Depends(get_current_user)],
+    response: Response,
+    settings: AuthSettings,
+) -> Response:
+    try:
+        change_password(db, actor, body.current_password, body.new_password)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    response.status_code = 204
+    response.headers["Cache-Control"] = "no-store"
+    response.delete_cookie(
+        COOKIE_NAME, path=COOKIE_SCOPE, secure=settings.cookie_secure, httponly=True, samesite="lax"
+    )
+    clear_legacy_cookie(response, settings)
+    clear_insecure_cookie(response, settings)
+    return response
