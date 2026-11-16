@@ -849,15 +849,9 @@ def test_assessment_lock_timeout_rolls_back_and_request_can_be_retried(committed
     )
     s.db.commit()
 
-    def get_request_session():
-        with Session(api_engine) as db:
-            try:
-                yield db
-            except BaseException:
-                db.rollback()
-                raise
-
-    s.app.dependency_overrides[get_db_session] = get_request_session
+    # Use the production dependency itself: it must rollback the session when
+    # the translated HTTP 503 escapes the route after PostgreSQL aborts the tx.
+    s.app.dependency_overrides.pop(get_db_session, None)
     assert API_LOCK_TIMEOUT_MS == 5_000
     with Session(api_engine) as blocker:
         blocker.begin()
