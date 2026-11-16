@@ -354,6 +354,137 @@
         "title": "ApplicationResponse",
         "type": "object"
       },
+      "AssessmentDateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_group_id": {
+            "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Assessment Group Id",
+            "type": "string"
+          },
+          "date_needs_confirmation": {
+            "title": "Date Needs Confirmation",
+            "type": "boolean"
+          },
+          "lesson_id": {
+            "anyOf": [
+              {
+                "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                "maxLength": 19,
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lesson Id"
+          },
+          "planned_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planned Date"
+          }
+        },
+        "required": [
+          "assessment_group_id",
+          "planned_date",
+          "lesson_id",
+          "date_needs_confirmation"
+        ],
+        "title": "AssessmentDateResponse",
+        "type": "object"
+      },
+      "AssessmentDateUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_group_id": {
+            "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Assessment Group Id",
+            "type": "string"
+          },
+          "lesson_id": {
+            "anyOf": [
+              {
+                "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                "maxLength": 19,
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lesson Id"
+          },
+          "planned_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planned Date"
+          }
+        },
+        "required": [
+          "assessment_group_id",
+          "planned_date",
+          "lesson_id"
+        ],
+        "title": "AssessmentDateUpdate",
+        "type": "object"
+      },
+      "AssessmentDatesRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentDateUpdate"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AssessmentDatesRequest",
+        "type": "object"
+      },
+      "AssessmentDatesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentDateResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AssessmentDatesResponse",
+        "type": "object"
+      },
       "AuthorizationContext": {
         "additionalProperties": false,
         "properties": {
@@ -3825,6 +3956,128 @@
           }
         ],
         "summary": "List Teaching Assignments",
+        "tags": [
+          "teaching"
+        ]
+      }
+    },
+    "/api/v1/teaching/courses/{course_offering_id}/assessments/{assessment_id}/dates": {
+      "patch": {
+        "operationId": "update_assessment_dates_api_v1_teaching_courses__course_offering_id__assessments__assessment_id__dates_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assessment_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Assessment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssessmentDatesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssessmentDatesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Assessment Dates",
         "tags": [
           "teaching"
         ]

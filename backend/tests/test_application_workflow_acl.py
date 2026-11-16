@@ -22,7 +22,6 @@ API_PASSWORD = "test-only-workflow-runtime-password"
 @pytest.fixture
 def runtime_engine(migration_database):  # noqa: F811
     admin_engine = migration_database
-    run_migration(admin_engine, "upgrade", "head")
     script = (Path(__file__).resolve().parents[2] / "deploy/postgres/privileges.sql").read_text()
     container = os.environ.get("POSTGRES_TEST_CONTAINER")
     if container:
@@ -67,11 +66,14 @@ def runtime_engine(migration_database):  # noqa: F811
     }
     api_engine = None
     try:
-        for _ in range(2):  # reapplying ACL is required for existing production volumes
+        # Production bootstraps roles before migrations, then reapplies ACL.
+        for iteration in range(3):
             result = subprocess.run(
                 command, input=script, text=True, capture_output=True, env=env, timeout=30
             )
             assert result.returncode == 0, result.stderr
+            if iteration == 0:
+                run_migration(admin_engine, "upgrade", "head")
         api_engine = create_engine(
             admin_engine.url.set(username="uni_space_api", password=API_PASSWORD)
         )

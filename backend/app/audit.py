@@ -72,6 +72,11 @@ _LESSON_FIELDS = {
 }
 _ROLE = _choice("student", "teacher", "staff", "admin")
 _EVENT_FIELDS = {
+    ("assessment_group", "update"): {
+        "planned_date": _date,
+        "lesson_id": _integer,
+        "date_needs_confirmation": _boolean,
+    },
     **{("assessment_result", action): _SCORE_FIELDS for action in ("create", "update", "delete")},
     **{("final_result", action): _FINAL_FIELDS for action in ("create", "update", "delete")},
     **{("lesson", action): _LESSON_FIELDS for action in ("create", "update", "cancel", "move")},

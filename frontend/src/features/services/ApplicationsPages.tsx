@@ -9,7 +9,7 @@ import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStat
 
 type Application = components['schemas']['ApplicationResponse']
 type Page = components['schemas']['ApplicationPage']
-type ReturnFocus = { id: string; locationKey: string }
+type ReturnFocus = { id: string }
 export const applicationsKey = ['applications'] as const
 const returnFocusKey = [...applicationsKey, 'return-focus'] as const
 const reviewLabels: Record<Application['review_status'], string> = {
@@ -58,7 +58,6 @@ export function ApplicationsList() {
   const tableId = useId()
   // The private return target is cleared with applications on POST/auth changes.
   // Keep it separate so recording focus cannot change a failed list's API state.
-  const returnFocus = useRef(queryClient.getQueryData<ReturnFocus>(returnFocusKey))
   const restoredLink = useRef<HTMLAnchorElement | null>(null)
   const query = useInfiniteQuery({
     queryKey: applicationsKey,
@@ -92,8 +91,8 @@ export function ApplicationsList() {
   }
   useEffect(() => {
     if (isSuspended) return
-    const target = returnFocus.current
-    if (!target || target.locationKey !== location.key) return
+    const target = queryClient.getQueryData<ReturnFocus>(returnFocusKey)
+    if (!target) return
     const link = Array.from(
       table.current?.querySelectorAll<HTMLAnchorElement>('a[data-application-id]') ?? [],
     ).find((link) => link.dataset.applicationId === target.id)
@@ -104,7 +103,7 @@ export function ApplicationsList() {
       secondFrame = window.requestAnimationFrame(() => {
         const focusWasLost = document.activeElement === document.body
         if (link) {
-          if (!restoredLink.current || (!query.isFetching && focusWasLost)) {
+          if (!restoredLink.current || focusWasLost) {
             link.focus({ preventScroll: true })
             restoredLink.current = link
           }
@@ -112,12 +111,11 @@ export function ApplicationsList() {
           const shouldFocusHeading = !restoredLink.current || focusWasLost
           if (shouldFocusHeading) heading.current?.focus({ preventScroll: true })
         }
+        if (!query.isFetching) {
+          queryClient.removeQueries({ queryKey: returnFocusKey, exact: true })
+        }
       })
     })
-    if (!query.isFetching) {
-      returnFocus.current = undefined
-      queryClient.removeQueries({ queryKey: returnFocusKey, exact: true })
-    }
     return () => {
       window.cancelAnimationFrame(firstFrame)
       if (secondFrame) window.cancelAnimationFrame(secondFrame)
@@ -227,7 +225,6 @@ export function ApplicationsList() {
                       queryClient.setQueryDefaults(returnFocusKey, { gcTime: Infinity })
                       queryClient.setQueryData<ReturnFocus>(returnFocusKey, {
                         id: item.id,
-                        locationKey: location.key,
                       })
                     }}
                   >
@@ -307,6 +304,20 @@ export function ApplicationDetailPage() {
           ) {
             event.preventDefault()
             navigate(-1)
+            let frames = 0
+            const restoreSourceFocus = () => {
+              const source = Array.from(
+                document.querySelectorAll<HTMLAnchorElement>(
+                  '.applications-table a[data-application-id]',
+                ),
+              ).find((link) => link.dataset.applicationId === id)
+              if (source) {
+                source.focus({ preventScroll: true })
+                return
+              }
+              if (frames++ < 120) window.requestAnimationFrame(restoreSourceFocus)
+            }
+            window.requestAnimationFrame(() => window.requestAnimationFrame(restoreSourceFocus))
           }
         }}
       >

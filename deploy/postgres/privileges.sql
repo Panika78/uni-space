@@ -94,4 +94,21 @@ WHERE to_regclass('public.applications') IS NOT NULL \gexec
 -- Grant only the immutable-by-API identifier, not password/role/active fields.
 SELECT 'GRANT UPDATE (id) ON public.users TO uni_space_api'
 WHERE to_regclass('public.users') IS NOT NULL \gexec
+-- MVP2-06: safe both before the first migration and on existing volumes.
+SELECT 'GRANT UPDATE (planned_date, lesson_id, date_needs_confirmation)
+        ON public.assessment_groups TO uni_space_api'
+WHERE to_regclass('public.assessment_groups') IS NOT NULL \gexec
+-- PostgreSQL row locks and existing integrity triggers require UPDATE access.
+SELECT format('GRANT UPDATE (id) ON public.%I TO uni_space_api', tablename)
+FROM pg_tables WHERE schemaname='public'
+  AND tablename IN ('assessments', 'teaching_assignments') \gexec
+-- Existing subgroup guard serializes links via UPDATE lessons SET version=version.
+SELECT 'GRANT UPDATE (version) ON public.lessons TO uni_space_api'
+WHERE to_regclass('public.lessons') IS NOT NULL \gexec
+SELECT 'GRANT UPDATE (group_id) ON public.course_groups TO uni_space_api'
+WHERE to_regclass('public.course_groups') IS NOT NULL \gexec
+SELECT 'GRANT INSERT ON public.audit_events TO uni_space_api'
+WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
+SELECT 'GRANT SELECT (id, created_at) ON public.audit_events TO uni_space_api'
+WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
 COMMIT;

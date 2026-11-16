@@ -269,10 +269,27 @@ async function assertAllGrantsNavigation() {
     if (scale === 2) await scaleVisibleText(page, 2, '.desktop-sidebar', false)
     for (const collapsed of [false, true]) {
       if (collapsed) await sidebar.getByRole('button', { name: 'Свернуть меню' }).click()
+      await sidebar.evaluate(async (node) => {
+        node.getBoundingClientRect()
+        await Promise.all(
+          node
+            .getAnimations({ subtree: true })
+            .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+            .map((animation) => animation.finished.catch(() => {})),
+        )
+      })
       const links = navigation.getByRole('link')
       await links.first().focus()
       for (let index = 1; index < 9; index++) await page.keyboard.press('Tab')
       assert.equal(await links.last().evaluate((node) => node === document.activeElement), true)
+      await page.waitForFunction(() => {
+        const navigation = document.querySelector('.desktop-sidebar nav')
+        const last = navigation?.querySelector('a:last-child')
+        if (!navigation || !last) return false
+        const nav = navigation.getBoundingClientRect()
+        const link = last.getBoundingClientRect()
+        return link.top >= nav.top && link.bottom <= nav.bottom
+      })
       const geometry = await navigation.evaluate((node) => {
         const nav = node.getBoundingClientRect()
         const last = node.querySelector('a:last-child').getBoundingClientRect()

@@ -331,6 +331,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/teaching/courses/{course_offering_id}/assessments/{assessment_id}/dates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Assessment Dates */
+        patch: operations["update_assessment_dates_api_v1_teaching_courses__course_offering_id__assessments__assessment_id__dates_patch"];
+        trace?: never;
+    };
     "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/assessments": {
         parameters: {
             query?: never;
@@ -572,6 +589,42 @@ export interface components {
             updated_at: string;
             /** Version */
             version: number;
+        };
+        /** AssessmentDateResponse */
+        AssessmentDateResponse: {
+            /**
+             * Assessment Group Id
+             * @description Positive PostgreSQL BIGINT ID: 1..9223372036854775807
+             */
+            assessment_group_id: string;
+            /** Date Needs Confirmation */
+            date_needs_confirmation: boolean;
+            /** Lesson Id */
+            lesson_id: string | null;
+            /** Planned Date */
+            planned_date: string | null;
+        };
+        /** AssessmentDateUpdate */
+        AssessmentDateUpdate: {
+            /**
+             * Assessment Group Id
+             * @description Positive PostgreSQL BIGINT ID: 1..9223372036854775807
+             */
+            assessment_group_id: string;
+            /** Lesson Id */
+            lesson_id: string | null;
+            /** Planned Date */
+            planned_date: string | null;
+        };
+        /** AssessmentDatesRequest */
+        AssessmentDatesRequest: {
+            /** Items */
+            items: components["schemas"]["AssessmentDateUpdate"][];
+        };
+        /** AssessmentDatesResponse */
+        AssessmentDatesResponse: {
+            /** Items */
+            items: components["schemas"]["AssessmentDateResponse"][];
         };
         /** AuthorizationContext */
         AuthorizationContext: {
@@ -2344,6 +2397,87 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    update_assessment_dates_api_v1_teaching_courses__course_offering_id__assessments__assessment_id__dates_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_offering_id: string;
+                assessment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssessmentDatesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssessmentDatesResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
