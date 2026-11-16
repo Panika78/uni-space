@@ -305,3 +305,31 @@ it('confirms the identity, group and old/new statuses of the specifically select
     ),
   )
 })
+
+it('identifies a by-ID target and permits reconciliation when the actor separately has read', async () => {
+  mount('/staff/students/status')
+  await screen.findByRole('heading', { name: 'Изменение академического статуса' })
+  await userEvent.setup().type(screen.getByLabelText('ID студента'), '21')
+  expect(await screen.findByText('Ёлкина Вымышленная · ИВТ-21')).toBeInTheDocument()
+  expect(screen.getByText('Текущий статус: Обучается')).toBeInTheDocument()
+  expect(apiFetch).toHaveBeenCalledWith(
+    '/api/v1/staff/students/21',
+    expect.objectContaining({ authenticated: true }),
+  )
+})
+
+it('preserves all rapid filter selections in the URL and clears page boundaries', async () => {
+  const router = mount('/staff/students?q=Тест&cursor=old&back=')
+  await screen.findByText(student.full_name)
+  const user = userEvent.setup()
+  await user.selectOptions(screen.getByLabelText('Факультет'), '1')
+  await user.selectOptions(screen.getByLabelText('Программа'), '2')
+  await user.selectOptions(screen.getByLabelText('Курс'), '2')
+  const params = new URLSearchParams(router.state.location.search)
+  expect(params.get('q')).toBe('Тест')
+  expect(params.get('faculty_id')).toBe('1')
+  expect(params.get('program_id')).toBe('2')
+  expect(params.get('course_number')).toBe('2')
+  expect(params.has('cursor')).toBe(false)
+  expect(params.has('back')).toBe(false)
+})

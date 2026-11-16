@@ -37,9 +37,11 @@ function StatusEditor({
   student,
   onClose,
   onReadDenied,
+  canRead = !!student,
 }: {
   studentId: string
   student?: Student
+  canRead?: boolean
   onClose?: () => void
   onReadDenied?: () => void
 }) {
@@ -56,6 +58,7 @@ function StatusEditor({
   const [known, setKnown] = useState(student)
   const [reconciling, setReconciling] = useState(false)
   const [reconciled, setReconciled] = useState(false)
+  const [readRevoked, setReadRevoked] = useState(false)
   const [denied, setDenied] = useState(false)
   const alive = useRef(true)
   const request = useRef<AbortController | null>(null)
@@ -110,7 +113,7 @@ function StatusEditor({
     }
   }
   async function reconcile() {
-    if (!student || reconciling) return
+    if (!canRead || readRevoked || reconciling) return
     const controller = new AbortController()
     request.current = controller
     setReconciling(true)
@@ -125,7 +128,9 @@ function StatusEditor({
     } catch (cause) {
       if (!alive.current) return
       if (cause instanceof ApiClientError && cause.status === 403) {
-        setDenied(true)
+        setReadRevoked(true)
+        setKnown(undefined)
+        void queryClient.invalidateQueries({ queryKey: ['authorization-context'] })
         onReadDenied?.()
       } else setError('Не удалось сверить актуальное состояние. Повторной записи не было.')
     } finally {
@@ -161,7 +166,7 @@ function StatusEditor({
           <p>Текущий статус: {statusLabels[known.academic_status]}</p>
         </>
       )}
-      {!known && <p>Текущий статус неизвестен: право чтения не предоставлено.</p>}
+      {!known && <p>Текущий статус неизвестен. Сверьте внешнее основание перед изменением.</p>}
       <label>
         Новый статус
         <select
@@ -235,7 +240,7 @@ function StatusEditor({
             Результат изменения неизвестен. Ответ не получен; операция могла быть сохранена.
             Повторной отправки не было.
           </p>
-          {student ? (
+          {canRead && !readRevoked ? (
             <>
               <button type="button" disabled={reconciling} onClick={() => void reconcile()}>
                 Сверить актуальное состояние
@@ -361,6 +366,38 @@ function StatusDialog({
   )
 }
 
+function StatusByIdEditor({ id, canRead }: { id: string; canRead: boolean }) {
+  const queryClient = useQueryClient()
+  const preview = useQuery({
+    queryKey: ['staff-students', 'detail', id],
+    queryFn: ({ signal }) => readStudent(id, signal),
+    enabled: canRead,
+    gcTime: 0,
+  })
+  const forbidden = preview.error instanceof ApiClientError && preview.error.status === 403
+  useEffect(() => {
+    if (forbidden) void queryClient.invalidateQueries({ queryKey: ['authorization-context'] })
+  }, [forbidden, queryClient])
+  if (canRead && preview.isPending) return <LoadingState title="Проверяем сведения студента…" />
+  const snapshot = canRead && !preview.isError ? preview.data : undefined
+  return (
+    <>
+      {canRead && preview.isError && (
+        <p role="alert">
+          Сведения для просмотра недоступны. Независимое изменение по известному ID требует внешней
+          проверки.
+        </p>
+      )}
+      <StatusEditor
+        key={`${id}:${snapshot ? 'known' : 'unknown'}`}
+        studentId={id}
+        student={snapshot}
+        canRead={canRead && !forbidden}
+      />
+    </>
+  )
+}
+
 export function StaffStudentStatusPage() {
   const context = useRoleContext()
   const [studentId, setStudentId] = useState('')
@@ -375,8 +412,8 @@ export function StaffStudentStatusPage() {
     <section className="section-page staff-students-page">
       <h1>Изменение академического статуса</h1>
       <p>
-        Укажите известный ID студента. Эта форма не выполняет поиск и не показывает персональные
-        данные.
+        Укажите известный ID студента. Поиск не выполняется; сведения и сверка доступны только с
+        отдельным правом students.read.
       </p>
       <label className="student-id-field">
         ID студента
@@ -386,7 +423,13 @@ export function StaffStudentStatusPage() {
           onChange={(e) => setStudentId(e.target.value.replace(/\D/g, ''))}
         />
       </label>
-      {/^[1-9][0-9]*$/.test(studentId) && <StatusEditor key={studentId} studentId={studentId} />}
+      {/^[1-9][0-9]*$/.test(studentId) && (
+        <StatusByIdEditor
+          key={studentId}
+          id={studentId}
+          canRead={hasPermission(context, 'students.read')}
+        />
+      )}
     </section>
   )
 }
@@ -439,7 +482,7 @@ export function StaffStudentsPage() {
     if (value) next.set(name, value)
     else next.delete(name)
     setEditing(null)
-    setParams(next)
+    setParams(next, { flushSync: true })
   }
   if (!canRead || readDenied)
     return (
@@ -575,7 +618,7 @@ export function StaffStudentsPage() {
               back.slice(0, -1).forEach((value) => next.append('back', value))
               if (previous) next.set('cursor', previous)
               else next.delete('cursor')
-              setParams(next)
+              setParams(next, { flushSync: true })
             }}
           >
             Предыдущие 20
@@ -590,7 +633,7 @@ export function StaffStudentsPage() {
               next.append('back', params.get('cursor') ?? '')
               if (!nextCursor) return
               next.set('cursor', nextCursor)
-              setParams(next)
+              setParams(next, { flushSync: true })
             }}
           >
             Следующие 20

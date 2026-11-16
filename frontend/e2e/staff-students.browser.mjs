@@ -236,7 +236,10 @@ try {
   )
   const savedUrl = page.url()
   for (const name of ['q', 'faculty_id', 'program_id', 'course_number', 'cursor'])
-    assert.ok(new URL(savedUrl).searchParams.get(name))
+    assert.ok(
+      new URL(savedUrl).searchParams.get(name),
+      `Missing ${name} in saved page URL: ${savedUrl}`,
+    )
   await page.goBack()
   await page.getByText('Страница 2', { exact: true }).waitFor()
   await page.locator('[data-student-id]').nth(19).waitFor()
