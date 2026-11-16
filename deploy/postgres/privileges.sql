@@ -66,6 +66,8 @@ SELECT 'GRANT INSERT ON public.audit_events TO uni_space_api'
 WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
 SELECT 'GRANT SELECT (id, created_at) ON public.audit_events TO uni_space_api'
 WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
+SELECT 'GRANT SELECT (operation_id, operation_fingerprint) ON public.audit_events TO uni_space_api'
+WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
 SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
               pg_get_serial_sequence(format('public.%I', tablename), 'id'))
 FROM pg_tables WHERE schemaname='public' AND tablename IN

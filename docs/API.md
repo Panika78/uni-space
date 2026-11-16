@@ -509,7 +509,9 @@ PATCH принимает ровно одно обязательное поле `
 | GET | `/staff/students` | `students.read` | `q`, `faculty_id`, `program_id`, `course_number`, `limit`, `cursor` → страница студентов |
 | GET | `/staff/students/filters` | `students.read` | справочники факультетов, программ и курсов |
 | GET | `/staff/students/{student_id}` | `students.read` | минимальный профиль студента |
-| PATCH | `/staff/students/{student_id}/academic-status` | `students.status.edit` | `{ academic_status, reason }` → только новый статус |
+| GET | `/staff/students/{student_id}/academic-status` | `students.status.edit` | только ID и текущий статус, без профиля |
+| GET | `/staff/students/status-operations/{operation_id}` | `students.status.edit` | `student_id`, `academic_status`, `reason` → receipt конкретной операции |
+| PATCH | `/staff/students/{student_id}/academic-status` | `students.status.edit` | `{ academic_status, reason, operation_id }` → сохранённый статус и результат операции |
 
 Поиск по `q` ищет подстроку в ФИО или текущей группе. Результат содержит ID,
 ФИО, группу, курс, программу, факультет и академический статус; запросы к страницам
@@ -526,7 +528,7 @@ keyset-cursor. Учебный доступ сотрудника деканата
 блокировки; последнее успешно сохранённое изменение побеждает. No-op не создаёт
 аудит. Статус и `student/set_academic_status` в `audit_events` фиксируются одной
 транзакцией. Изменение не переключает `users.is_active` и не меняет другие данные.
-UI перед отправкой требует подтверждения оформленного внешнего основания.
+UI перед отправкой требует подтверждения оформленного внешнего основания. Клиент передаёт UUID операции; при неопределённом результате запись автоматически не повторяется. Receipt сверяет точный отпечаток actor/student/status/reason, а не текущее значение статуса. Сотрудник с `students.read` отдельно может перечитать карточку для актуального состояния.
 
 Для staff-поиска `%`, `_` и `\` в `q` — буквальные символы (явный SQL ESCAPE),
 кириллица ищется без учёта регистра, включая `Ё/ё`. Курсор привязан к нормализованным

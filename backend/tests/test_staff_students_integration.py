@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.auth.security import create_access_token
@@ -62,7 +62,7 @@ def staff_students(db_session):
     ]
     db.add_all(groups)
     db.flush()
-    names = ["Елена Тестовая", "Ёлкина Тестовая", "Жуков Тестовый"]
+    names = ["Елена Поиск27", "Ёлкина Поиск27", "Жуков Поиск27"]
     students = []
     for index, name in enumerate(names):
         user = User(
@@ -140,6 +140,8 @@ def staff_students(db_session):
 
 def request(s, method, path, token=None, **kwargs):
     headers = {"Authorization": f"Bearer {token}"} if token else {}
+    if method == "PATCH" and path.endswith("/academic-status") and "json" in kwargs:
+        kwargs["json"] = {"operation_id": str(uuid4()), **kwargs["json"]}
     return s["client"].request(method, "/api/v1/staff/students" + path, headers=headers, **kwargs)
 
 
@@ -165,7 +167,12 @@ def test_independent_permissions_and_minimal_status_write_response(staff_student
         json={"academic_status": "academic_leave", "reason": "administrative_change"},
     )
     assert changed.status_code == 200
-    assert changed.json() == {"academic_status": "academic_leave"}
+    assert changed.json() == {
+        "operation_id": changed.json()["operation_id"],
+        "academic_status": "academic_leave",
+        "previous_academic_status": "enrolled",
+        "changed": True,
+    }
     assert s["db"].get(User, s["students"][0].user_id).is_active is True
     assert request(s, "GET", "", s["admin_token"]).status_code == 403
     assert (
@@ -197,21 +204,21 @@ def test_staff_search_filters_and_russian_ё_order_with_cursor(staff_students):
             Student(user_id=user.id, group_id=s["groups"][0].id, academic_status="enrolled")
         )
     s["db"].flush()
-    first = request(s, "GET", "", s["reader_token"], params={"q": "Тест", "limit": 2})
+    first = request(s, "GET", "", s["reader_token"], params={"q": "Поиск27", "limit": 2})
     assert first.status_code == 200
     assert [row["full_name"] for row in first.json()["items"]] == [
-        "Елена Тестовая",
-        "Ёлкина Тестовая",
+        "Елена Поиск27",
+        "Ёлкина Поиск27",
     ]
     second = request(
         s,
         "GET",
         "",
         s["reader_token"],
-        params={"q": "Тест", "limit": 2, "cursor": first.json()["next_cursor"]},
+        params={"q": "Поиск27", "limit": 2, "cursor": first.json()["next_cursor"]},
     )
     assert second.status_code == 200, second.text
-    assert [row["full_name"] for row in second.json()["items"]] == ["Жуков Тестовый"]
+    assert [row["full_name"] for row in second.json()["items"]] == ["Жуков Поиск27"]
     row = request(
         s,
         "GET",
@@ -241,6 +248,67 @@ def test_staff_search_filters_and_russian_ё_order_with_cursor(staff_students):
         request(s, "GET", "", s["reader_token"], params={"faculty_id": "9" * 20}).status_code == 422
     )
     assert request(s, "GET", f"/{s['students'][0].id}", s["editor_token"]).status_code == 403
+
+
+def test_status_only_preview_and_operation_receipt_do_not_expose_profile(staff_students):
+    s = staff_students
+    student = s["students"][0]
+    preview = request(s, "GET", f"/{student.id}/academic-status", s["editor_token"])
+    assert preview.status_code == 200
+    assert preview.json() == {"id": str(student.id), "academic_status": "enrolled"}
+    assert request(s, "GET", f"/{student.id}", s["editor_token"]).status_code == 403
+
+    operation_id = str(uuid4())
+    payload = {
+        "operation_id": operation_id,
+        "academic_status": "expelled",
+        "reason": "correction",
+    }
+    changed = request(s, "PATCH", f"/{student.id}/academic-status", s["editor_token"], json=payload)
+    assert changed.status_code == 200
+    receipt = request(
+        s,
+        "GET",
+        f"/status-operations/{operation_id}",
+        s["editor_token"],
+        params={key: payload[key] for key in ("academic_status", "reason")}
+        | {"student_id": str(student.id)},
+    )
+    assert receipt.status_code == 200
+    assert receipt.json() == {"operation_id": operation_id, "completed": True}
+    assert set(receipt.json()) == {"operation_id", "completed"}
+
+    replay = request(s, "PATCH", f"/{student.id}/academic-status", s["editor_token"], json=payload)
+    assert replay.status_code == 200
+    assert replay.json()["operation_id"] == operation_id
+    assert (
+        s["db"].scalar(
+            select(func.count(AuditEvent.id)).where(
+                AuditEvent.entity_type == "student", AuditEvent.entity_id == student.id
+            )
+        )
+        == 1
+    )
+    conflict = request(
+        s,
+        "PATCH",
+        f"/{student.id}/academic-status",
+        s["editor_token"],
+        json={**payload, "academic_status": "graduated"},
+    )
+    assert conflict.status_code == 409
+    mismatch = request(
+        s,
+        "GET",
+        f"/status-operations/{operation_id}",
+        s["editor_token"],
+        params={
+            "student_id": str(student.id),
+            "academic_status": "graduated",
+            "reason": "correction",
+        },
+    )
+    assert mismatch.json()["completed"] is False
 
 
 @pytest.mark.parametrize(
@@ -464,7 +532,11 @@ def test_audit_failure_rolls_back_status_update(postgresql_engine, monkeypatch):
         response = client.patch(
             f"/api/v1/staff/students/{student_id}/academic-status",
             headers={"Authorization": f"Bearer {token}"},
-            json={"academic_status": "expelled", "reason": "correction"},
+            json={
+                "academic_status": "expelled",
+                "reason": "correction",
+                "operation_id": str(uuid4()),
+            },
         )
     assert response.status_code == 500
     with Session(postgresql_engine) as db:
@@ -567,7 +639,11 @@ def test_concurrent_status_changes_audit_the_locked_before_value(postgresql_engi
             return client.patch(
                 f"/api/v1/staff/students/{student_id}/academic-status",
                 headers={"Authorization": f"Bearer {token}"},
-                json={"academic_status": status, "reason": "correction"},
+                json={
+                    "academic_status": status,
+                    "reason": "correction",
+                    "operation_id": str(uuid4()),
+                },
             )
 
     try:

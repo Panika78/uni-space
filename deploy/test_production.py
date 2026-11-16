@@ -565,6 +565,10 @@ with engine.connect() as c:
     assert c.execute(text("SELECT has_table_privilege(current_user,'audit_events','INSERT')")).scalar_one()
     assert c.execute(text("SELECT has_column_privilege(current_user,'audit_events','id','SELECT')")).scalar_one()
     assert c.execute(text("SELECT has_column_privilege(current_user,'audit_events','created_at','SELECT')")).scalar_one()
+    for column in ('operation_id', 'operation_fingerprint'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'audit_events',:column,'SELECT')"), {'column': column}).scalar_one()
+    for column in ('actor_user_id', 'entity_id', 'action', 'before_data', 'after_data', 'reason'):
+        assert not c.execute(text("SELECT has_column_privilege(current_user,'audit_events',:column,'SELECT')"), {'column': column}).scalar_one()
     for privilege in ('SELECT','UPDATE','DELETE','TRUNCATE'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'audit_events',:privilege)"), {'privilege': privilege}).scalar_one()
     assert not c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
@@ -628,6 +632,7 @@ for statement in (
     "SELECT nextval('public.notifications_id_seq')",
     "UPDATE audit_events SET reason='correction'", "DELETE FROM audit_events",
     "SELECT * FROM audit_events", "SELECT before_data FROM audit_events LIMIT 1",
+    "SELECT operation_fingerprint FROM audit_events WHERE operation_id IS NULL",
     "SELECT nextval('public.audit_events_id_seq')",
     "SELECT nextval('public.org_units_id_seq')", "SELECT nextval('public.programs_id_seq')",
     "UPDATE lessons SET status='cancelled'", "DELETE FROM lesson_groups",

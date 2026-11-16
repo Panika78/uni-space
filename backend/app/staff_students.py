@@ -3,6 +3,7 @@
 import hashlib
 import json
 from typing import Annotated, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -15,7 +16,7 @@ from app.core.pagination import InvalidCursorError, decode_page_cursor, paginate
 from app.core.schemas import ApiError, Id, Page, PaginationParams, Ref, RequestModel
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_db_session
-from app.models import OrgUnit, Program, Student, StudyGroup, User
+from app.models import AuditEvent, OrgUnit, Program, Student, StudyGroup, User
 from app.permissions import PermissionCode, require_staff_permission
 from app.teaching.ordering import STUDENT_KEY_PREFIX, get_student_name_key
 
@@ -63,10 +64,31 @@ class StaffStudentFilters(RequestModel):
 class AcademicStatusUpdate(RequestModel):
     academic_status: Literal["enrolled", "academic_leave", "expelled", "graduated"]
     reason: Literal["administrative_change", "correction"]
+    operation_id: UUID
 
 
 class AcademicStatusResponse(RequestModel):
+    operation_id: str
     academic_status: Literal["enrolled", "academic_leave", "expelled", "graduated"]
+    previous_academic_status: Literal["enrolled", "academic_leave", "expelled", "graduated"] | None
+    changed: bool
+
+
+class StudentAcademicStatus(RequestModel):
+    id: Id
+    academic_status: Literal["enrolled", "academic_leave", "expelled", "graduated"]
+
+
+class StatusOperationReceipt(RequestModel):
+    operation_id: str
+    completed: bool
+
+
+def _operation_fingerprint(*, actor_id: int, student_id: int, status: str, reason: str) -> str:
+    payload = json.dumps(
+        [actor_id, student_id, status, reason], ensure_ascii=False, separators=(",", ":")
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _validate_query(request: Request) -> None:
@@ -213,6 +235,47 @@ def get_staff_student(
     return _student_response(row)
 
 
+@router.get("/{student_id}/academic-status", response_model=StudentAcademicStatus)
+def get_student_academic_status(
+    student_id: Id,
+    request: Request,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db_session)],
+) -> StudentAcademicStatus:
+    if len(student_id) > 19 or int(student_id) > 9_223_372_036_854_775_807:
+        raise HTTPException(422, "validation_error")
+    if request.query_params:
+        raise RequestValidationError(
+            [{"type": "extra_forbidden", "loc": ("query", name)} for name in request.query_params]
+        )
+    require_staff_permission(db, user, PermissionCode.STUDENTS_STATUS_EDIT)
+    status = db.scalar(select(Student.academic_status).where(Student.id == int(student_id)))
+    if status is None:
+        raise HTTPException(404, "not_found")
+    return StudentAcademicStatus(id=student_id, academic_status=status)
+
+
+@router.get("/status-operations/{operation_id}", response_model=StatusOperationReceipt)
+def get_status_operation_receipt(
+    operation_id: UUID,
+    student_id: Id,
+    academic_status: Literal["enrolled", "academic_leave", "expelled", "graduated"],
+    reason: Literal["administrative_change", "correction"],
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db_session)],
+) -> StatusOperationReceipt:
+    require_staff_permission(db, user, PermissionCode.STUDENTS_STATUS_EDIT)
+    if len(student_id) > 19 or int(student_id) > 9_223_372_036_854_775_807:
+        raise HTTPException(422, "validation_error")
+    fingerprint = _operation_fingerprint(
+        actor_id=user.id, student_id=int(student_id), status=academic_status, reason=reason
+    )
+    stored = db.scalar(
+        select(AuditEvent.operation_fingerprint).where(AuditEvent.operation_id == str(operation_id))
+    )
+    return StatusOperationReceipt(operation_id=str(operation_id), completed=stored == fingerprint)
+
+
 @router.patch("/{student_id}/academic-status", response_model=AcademicStatusResponse)
 def set_student_academic_status(
     student_id: Id,
@@ -223,7 +286,28 @@ def set_student_academic_status(
     if len(student_id) > 19 or int(student_id) > 9_223_372_036_854_775_807:
         raise HTTPException(422, "validation_error")
     require_staff_permission(db, user, PermissionCode.STUDENTS_STATUS_EDIT)
+    fingerprint = _operation_fingerprint(
+        actor_id=user.id,
+        student_id=int(student_id),
+        status=change.academic_status,
+        reason=change.reason,
+    )
     try:
+        previous_operation = db.scalar(
+            select(AuditEvent.operation_fingerprint).where(
+                AuditEvent.operation_id == str(change.operation_id)
+            )
+        )
+        if previous_operation is not None:
+            if previous_operation != fingerprint:
+                raise HTTPException(409, "operation_id_conflict")
+            db.rollback()
+            return AcademicStatusResponse(
+                operation_id=str(change.operation_id),
+                academic_status=change.academic_status,
+                previous_academic_status=None,
+                changed=True,
+            )
         student = db.scalars(
             select(Student)
             .where(Student.id == int(student_id))
@@ -232,6 +316,21 @@ def set_student_academic_status(
         ).one_or_none()
         if student is None:
             raise HTTPException(404, "not_found")
+        previous_operation = db.scalar(
+            select(AuditEvent.operation_fingerprint).where(
+                AuditEvent.operation_id == str(change.operation_id)
+            )
+        )
+        if previous_operation is not None:
+            if previous_operation != fingerprint:
+                raise HTTPException(409, "operation_id_conflict")
+            db.rollback()
+            return AcademicStatusResponse(
+                operation_id=str(change.operation_id),
+                academic_status=change.academic_status,
+                previous_academic_status=None,
+                changed=True,
+            )
         before_status = student.academic_status
         if before_status != change.academic_status:
             student.academic_status = change.academic_status
@@ -244,9 +343,16 @@ def set_student_academic_status(
                 before_data={"academic_status": before_status},
                 after_data={"academic_status": change.academic_status},
                 reason=change.reason,
+                operation_id=str(change.operation_id),
+                operation_fingerprint=fingerprint,
             )
         db.commit()
-        return AcademicStatusResponse(academic_status=student.academic_status)
+        return AcademicStatusResponse(
+            operation_id=str(change.operation_id),
+            academic_status=student.academic_status,
+            previous_academic_status=before_status,
+            changed=before_status != change.academic_status,
+        )
     except HTTPException:
         db.rollback()
         raise

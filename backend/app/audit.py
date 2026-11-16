@@ -1,5 +1,6 @@
 """Minimal transactional audit writer. See docs/AUDIT.md for the caller contract."""
 
+import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime
 
@@ -110,6 +111,8 @@ def write_audit_event(
     before_data: Mapping[str, object] | None,
     after_data: Mapping[str, object] | None,
     reason: str | None = None,
+    operation_id: str | None = None,
+    operation_fingerprint: str | None = None,
 ) -> AuditEvent:
     """Add and flush an event in the caller's transaction; propagate every error.
 
@@ -145,6 +148,16 @@ def write_audit_event(
         valid = before is not None and after is not None and before.keys() == after.keys()
     if not valid:
         raise ValueError("Invalid audit before/after shape")
+    if (operation_id is None) != (operation_fingerprint is None):
+        raise ValueError("Operation receipt fields must be provided together")
+    if operation_id is not None and (
+        (entity_type, action) != ("student", "set_academic_status")
+        or not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", operation_id
+        )
+        or not re.fullmatch(r"[0-9a-f]{64}", operation_fingerprint or "")
+    ):
+        raise ValueError("Invalid student status operation receipt")
     event = AuditEvent(
         actor_user_id=actor.id,
         entity_type=entity_type,
@@ -153,6 +166,8 @@ def write_audit_event(
         before_data=before,
         after_data=after,
         reason=None if reason is None else _REASON(reason),
+        operation_id=operation_id,
+        operation_fingerprint=operation_fingerprint,
     )
     db.add(event)
     # Flush the entire unit of work. A failed INSERT makes the Session unusable

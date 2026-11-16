@@ -5,8 +5,8 @@ import { ApiClientError, apiFetch } from '../../shared/api/client'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 import { useRoleContext } from '../auth/RoleContext'
 import { hasPermission } from '../auth/roleNavigation'
-import { updateAcademicStatus } from './statusApi'
-import type { AcademicStatus } from './statusApi'
+import { checkStatusOperation, readAcademicStatus, updateAcademicStatus } from './statusApi'
+import type { AcademicStatus, StatusReason } from './statusApi'
 import './staffStudents.css'
 
 type Ref = { id: string; name: string }
@@ -32,11 +32,38 @@ const base = '/api/v1/staff/students'
 const readStudent = (id: string, signal: AbortSignal) =>
   apiFetch<Student>(`${base}/${id}`, { authenticated: true, signal })
 
+type PendingStatusOperation = {
+  actorId: string
+  studentId: string
+  operationId: string
+  status: AcademicStatus
+  reason: StatusReason
+}
+const pendingKey = (actorId: string, studentId: string) =>
+  `staff-student-status:${actorId}:${studentId}`
+function readPendingOperation(actorId: string, studentId: string): PendingStatusOperation | null {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(pendingKey(actorId, studentId)) ?? 'null')
+    if (
+      value?.actorId === actorId &&
+      value.studentId === studentId &&
+      /^[0-9a-f-]{36}$/.test(value.operationId) &&
+      statusValues.includes(value.status) &&
+      ['administrative_change', 'correction'].includes(value.reason)
+    )
+      return value as PendingStatusOperation
+  } catch {
+    // Browser storage is only a recovery hint, never authorization.
+  }
+  return null
+}
+
 function StatusEditor({
   studentId,
   student,
   onClose,
   onReadDenied,
+  onCriticalChange,
   canRead = !!student,
 }: {
   studentId: string
@@ -44,18 +71,30 @@ function StatusEditor({
   canRead?: boolean
   onClose?: () => void
   onReadDenied?: () => void
+  onCriticalChange?: (critical: boolean) => void
 }) {
-  const [target, setTarget] = useState<AcademicStatus | ''>('')
+  const { user_id: actorId } = useRoleContext()
+  const initialOperation = readPendingOperation(actorId, studentId)
+  const [operationId, setOperationId] = useState(initialOperation?.operationId ?? '')
+  const [target, setTarget] = useState<AcademicStatus | ''>(initialOperation?.status ?? '')
   const [reason, setReason] = useState<'administrative_change' | 'correction'>(
-    'administrative_change',
+    initialOperation?.reason ?? 'administrative_change',
   )
-  const [basis, setBasis] = useState(false)
+  const [basis, setBasis] = useState(Boolean(initialOperation))
   const [pending, setPending] = useState(false)
-  const [uncertain, setUncertain] = useState(false)
+  const [uncertain, setUncertain] = useState(Boolean(initialOperation))
   const [externalCheck, setExternalCheck] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState<AcademicStatus | null>(null)
   const [known, setKnown] = useState(student)
+  const [loadedStatus, setLoadedStatus] = useState<{
+    studentId: string
+    academicStatus: AcademicStatus
+  } | null>(null)
+  const currentStatus =
+    student?.academic_status ??
+    (loadedStatus?.studentId === studentId ? loadedStatus.academicStatus : null)
+  const [statusLoading, setStatusLoading] = useState(!student)
   const [reconciling, setReconciling] = useState(false)
   const [reconciled, setReconciled] = useState(false)
   const [readRevoked, setReadRevoked] = useState(false)
@@ -71,13 +110,45 @@ function StatusEditor({
       request.current?.abort()
     }
   }, [])
+  useEffect(() => {
+    onCriticalChange?.(pending || uncertain)
+  }, [onCriticalChange, pending, uncertain])
+  useEffect(() => {
+    if (student) return
+    const controller = new AbortController()
+    readAcademicStatus(studentId, controller.signal)
+      .then((result) => {
+        if (alive.current) setLoadedStatus({ studentId, academicStatus: result.academic_status })
+      })
+      .catch((cause) => {
+        if (!alive.current) return
+        setError(
+          cause instanceof ApiClientError && cause.status === 403
+            ? 'Доступ к чтению текущего статуса отозван.'
+            : cause instanceof ApiClientError && cause.status === 404
+              ? 'Студент с таким ID не найден.'
+              : 'Не удалось получить текущий статус. Изменение не отправлено.',
+        )
+      })
+      .finally(() => {
+        if (alive.current) setStatusLoading(false)
+      })
+    return () => controller.abort()
+  }, [studentId, student])
+
   function resetSuccess() {
     setSaved(null)
     setError('')
     setBasis(false)
   }
   async function submit() {
-    if (!target || !basis || busy.current || uncertain) return
+    if (!target || !basis || busy.current || uncertain || target === currentStatus) return
+    const operation = operationId || crypto.randomUUID()
+    setOperationId(operation)
+    sessionStorage.setItem(
+      pendingKey(actorId, studentId),
+      JSON.stringify({ actorId, studentId, operationId: operation, status: target, reason }),
+    )
     busy.current = true
     setPending(true)
     setSaved(null)
@@ -85,11 +156,22 @@ function StatusEditor({
     const controller = new AbortController()
     request.current = controller
     try {
-      const result = await updateAcademicStatus(studentId, target, reason, controller.signal)
+      const result = await updateAcademicStatus(
+        studentId,
+        target,
+        reason,
+        operation,
+        controller.signal,
+      )
       if (!alive.current) return
       if (result.academic_status !== target) throw new Error('invalid_status_response')
       setSaved(result.academic_status)
+      setLoadedStatus({ studentId, academicStatus: result.academic_status })
+      setUncertain(false)
+      sessionStorage.removeItem(pendingKey(actorId, studentId))
+      setOperationId('')
       await queryClient.invalidateQueries({ queryKey: ['staff-students'] })
+      onCriticalChange?.(false)
       if (alive.current) onClose?.()
     } catch (cause) {
       if (!alive.current) return
@@ -99,6 +181,8 @@ function StatusEditor({
         cause.status >= 400 &&
         cause.status < 500
       ) {
+        sessionStorage.removeItem(pendingKey(actorId, studentId))
+        setOperationId('')
         if (cause.status === 403) {
           setDenied(true)
           setError(
@@ -106,12 +190,65 @@ function StatusEditor({
           )
           void queryClient.invalidateQueries({ queryKey: ['authorization-context'] })
         } else setError('Сервер отклонил изменение. Проверьте ID, статус и основание.')
+        onCriticalChange?.(false)
       } else setUncertain(true)
     } finally {
       busy.current = false
       if (alive.current) setPending(false)
     }
   }
+  async function reconcileOperation() {
+    if (!operationId || !target || !uncertain || reconciling) return
+    const controller = new AbortController()
+    request.current = controller
+    setReconciling(true)
+    setError('')
+    try {
+      const receipt = await checkStatusOperation(
+        operationId,
+        studentId,
+        target,
+        reason,
+        controller.signal,
+      )
+      if (!alive.current) return
+      if (!receipt.completed) {
+        setError(
+          'Квитанция ещё не подтверждает операцию. Повторная запись не выполнялась; проверьте позже.',
+        )
+        return
+      }
+      sessionStorage.removeItem(pendingKey(actorId, studentId))
+      setUncertain(false)
+      onCriticalChange?.(false)
+      setSaved(target)
+      setLoadedStatus({ studentId, academicStatus: target })
+      if (canRead) {
+        try {
+          const actual = await readStudent(studentId, controller.signal)
+          if (!alive.current) return
+          setKnown(actual)
+          setLoadedStatus({ studentId, academicStatus: actual.academic_status })
+          setReconciled(true)
+        } catch (cause) {
+          if (cause instanceof ApiClientError && cause.status === 403) {
+            setReadRevoked(true)
+            setKnown(undefined)
+            onReadDenied?.()
+          } else setError('Операция подтверждена. Текущее состояние не удалось перечитать.')
+        }
+      }
+      void queryClient.invalidateQueries({ queryKey: ['staff-students'] })
+    } catch (cause) {
+      if (cause instanceof ApiClientError && cause.status === 403) {
+        setDenied(true)
+        setError('Доступ к сверке операции отозван.')
+      } else setError('Не удалось сверить квитанцию. Повторной записи не было.')
+    } finally {
+      if (alive.current) setReconciling(false)
+    }
+  }
+
   async function reconcile() {
     if (!canRead || readRevoked || reconciling) return
     const controller = new AbortController()
@@ -163,16 +300,23 @@ function StatusEditor({
           <p>
             {known.full_name} · {known.group.name}
           </p>
-          <p>Текущий статус: {statusLabels[known.academic_status]}</p>
+          <p>Предыдущий статус: {statusLabels[currentStatus ?? known.academic_status]}</p>
         </>
       )}
-      {!known && <p>Текущий статус неизвестен. Сверьте внешнее основание перед изменением.</p>}
+      {!known &&
+        (statusLoading ? (
+          <p>Проверяем текущий статус…</p>
+        ) : currentStatus ? (
+          <p>Предыдущий статус: {statusLabels[currentStatus]}</p>
+        ) : (
+          <p>Текущий статус неизвестен. Изменение недоступно до проверки.</p>
+        ))}
       <label>
         Новый статус
         <select
           aria-label="Новый статус"
           value={target}
-          disabled={pending || uncertain}
+          disabled={pending || uncertain || statusLoading || !currentStatus}
           required
           onChange={(e) => {
             setTarget(e.target.value as AcademicStatus | '')
@@ -202,9 +346,9 @@ function StatusEditor({
           <option value="correction">Исправление ошибочных данных</option>
         </select>
       </label>
-      {target && (
-        <p>
-          Будет установлен статус: <strong>{statusLabels[target]}</strong>
+      {target && currentStatus && (
+        <p aria-live="polite">
+          Переход: {statusLabels[currentStatus]} → {statusLabels[target]}
         </p>
       )}
       <label className="student-basis-confirmation">
@@ -240,6 +384,9 @@ function StatusEditor({
             Результат изменения неизвестен. Ответ не получен; операция могла быть сохранена.
             Повторной отправки не было.
           </p>
+          <button type="button" disabled={reconciling} onClick={() => void reconcileOperation()}>
+            Проверить квитанцию операции
+          </button>
           {canRead && !readRevoked ? (
             <>
               <button type="button" disabled={reconciling} onClick={() => void reconcile()}>
@@ -270,6 +417,8 @@ function StatusEditor({
             type="button"
             disabled={!externalCheck || reconciling}
             onClick={() => {
+              sessionStorage.removeItem(pendingKey(actorId, studentId))
+              setOperationId('')
               setUncertain(false)
               setExternalCheck(false)
               setReconciled(false)
@@ -289,7 +438,18 @@ function StatusEditor({
             {pending || uncertain ? 'Закрыть окно (результат не подтверждён)' : 'Отмена'}
           </button>
         )}
-        <button type="submit" disabled={!target || !basis || pending || uncertain}>
+        <button
+          type="submit"
+          disabled={
+            !target ||
+            !basis ||
+            !currentStatus ||
+            statusLoading ||
+            target === currentStatus ||
+            pending ||
+            uncertain
+          }
+        >
           {pending ? (saved ? 'Обновляем сведения…' : 'Сохраняем…') : 'Подтвердить изменение'}
         </button>
       </div>
@@ -309,6 +469,7 @@ function StatusDialog({
   onReadDenied: () => void
 }) {
   const ref = useRef<HTMLDialogElement>(null)
+  const [critical, setCritical] = useState(false)
   useEffect(() => {
     const dialog = ref.current!
     if (dialog.showModal) dialog.showModal()
@@ -327,13 +488,17 @@ function StatusDialog({
       aria-modal="true"
       aria-label="Изменение статуса"
       onCancel={(e) => {
+        if (critical) {
+          e.preventDefault()
+          return
+        }
         e.preventDefault()
         onClose()
       }}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.preventDefault()
-          onClose()
+          if (!critical) onClose()
         }
         if (e.key === 'Tab') {
           const items = [
@@ -361,6 +526,7 @@ function StatusDialog({
         student={student}
         onClose={onClose}
         onReadDenied={onReadDenied}
+        onCriticalChange={setCritical}
       />
     </dialog>
   )

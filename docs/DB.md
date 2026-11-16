@@ -417,7 +417,7 @@ A.starts_at < B.ends_at AND B.starts_at < A.ends_at
 
 | Таблица | Ключевые поля | Назначение | Когда |
 |---|---|---|---|
-| `audit_events` | `id PK`, `actor_user_id FK NULL`, `entity_type`, `entity_id`, `action`, `before_data JSONB NULL`, `after_data JSONB NULL`, `reason NULL`, `created_at` | История важных изменений | MVP 2 |
+| `audit_events` | `id PK`, `actor_user_id FK NULL`, `entity_type`, `entity_id`, `action`, `before_data JSONB NULL`, `after_data JSONB NULL`, `reason NULL`, `operation_id UUID NULL`, `operation_fingerprint VARCHAR(64) NULL`, `created_at` | История важных изменений и receipt смены статуса | MVP 2 |
 
 Обязательно аудировать изменения баллов, итоговых оценок, официального расписания и значимых административных данных. Для жизненного цикла заявления отдельно используется `application_history`.
 

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, String, Text, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, String, Text, Uuid, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,6 +13,7 @@ class AuditEvent(Base):
     __tablename__ = "audit_events"
     __table_args__ = (
         Index("ix_audit_events_entity_created_id", "entity_type", "entity_id", "created_at", "id"),
+        Index("uq_audit_events_operation_id", "operation_id", unique=True),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -25,6 +26,8 @@ class AuditEvent(Base):
     before_data: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
     after_data: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    operation_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True)
+    operation_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.statement_timestamp()
     )

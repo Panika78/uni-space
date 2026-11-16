@@ -66,10 +66,38 @@
             ],
             "title": "Academic Status",
             "type": "string"
+          },
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "previous_academic_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "enrolled",
+                  "academic_leave",
+                  "expelled",
+                  "graduated"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Academic Status"
           }
         },
         "required": [
-          "academic_status"
+          "operation_id",
+          "academic_status",
+          "previous_academic_status",
+          "changed"
         ],
         "title": "AcademicStatusResponse",
         "type": "object"
@@ -87,6 +115,11 @@
             "title": "Academic Status",
             "type": "string"
           },
+          "operation_id": {
+            "format": "uuid",
+            "title": "Operation Id",
+            "type": "string"
+          },
           "reason": {
             "enum": [
               "administrative_change",
@@ -98,7 +131,8 @@
         },
         "required": [
           "academic_status",
-          "reason"
+          "reason",
+          "operation_id"
         ],
         "title": "AcademicStatusUpdate",
         "type": "object"
@@ -1926,6 +1960,51 @@
           "next_cursor"
         ],
         "title": "StaffStudentPage",
+        "type": "object"
+      },
+      "StatusOperationReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "completed": {
+            "title": "Completed",
+            "type": "boolean"
+          },
+          "operation_id": {
+            "title": "Operation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "completed"
+        ],
+        "title": "StatusOperationReceipt",
+        "type": "object"
+      },
+      "StudentAcademicStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "academic_status": {
+            "enum": [
+              "enrolled",
+              "academic_leave",
+              "expelled",
+              "graduated"
+            ],
+            "title": "Academic Status",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "academic_status"
+        ],
+        "title": "StudentAcademicStatus",
         "type": "object"
       },
       "StudentProfile": {
@@ -4080,6 +4159,133 @@
         ]
       }
     },
+    "/api/v1/staff/students/status-operations/{operation_id}": {
+      "get": {
+        "operationId": "get_status_operation_receipt_api_v1_staff_students_status_operations__operation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Student Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "academic_status",
+            "required": true,
+            "schema": {
+              "enum": [
+                "enrolled",
+                "academic_leave",
+                "expelled",
+                "graduated"
+              ],
+              "title": "Academic Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason",
+            "required": true,
+            "schema": {
+              "enum": [
+                "administrative_change",
+                "correction"
+              ],
+              "title": "Reason",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusOperationReceipt"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Status Operation Receipt",
+        "tags": [
+          "staff",
+          "students"
+        ]
+      }
+    },
     "/api/v1/staff/students/{student_id}": {
       "get": {
         "operationId": "get_staff_student_api_v1_staff_students__student_id__get",
@@ -4170,6 +4376,93 @@
       }
     },
     "/api/v1/staff/students/{student_id}/academic-status": {
+      "get": {
+        "operationId": "get_student_academic_status_api_v1_staff_students__student_id__academic_status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Student Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentAcademicStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Student Academic Status",
+        "tags": [
+          "staff",
+          "students"
+        ]
+      },
       "patch": {
         "operationId": "set_student_academic_status_api_v1_staff_students__student_id__academic_status_patch",
         "parameters": [

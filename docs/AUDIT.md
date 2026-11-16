@@ -130,7 +130,9 @@ except Exception:
 Изменения permissions согласуются с владельцем #60 отдельной интеграцией: #79
 использует существующий реестр и механизм выдачи прав. Production ACL для ручной
 смены статуса расширен в MVP2-27: `INSERT` на `audit_events`, `SELECT (id, created_at)`
-для SQLAlchemy `INSERT ... RETURNING` и `UPDATE (academic_status)` на `students`.
+для SQLAlchemy `INSERT ... RETURNING`, узкий `SELECT (operation_id, operation_fingerprint)`
+для receipt операции и `UPDATE (academic_status)` на `students`. Receipt возвращает только совпадение
+операции, без содержимого before/after snapshots.
 У будущих предметных write API права аудита и таблиц добавляются отдельно и узко.
 `id` — IDENTITY, а не SERIAL: генерация значения
 при INSERT не требует `USAGE` на `audit_events_id_seq`; прямой `nextval()` требует

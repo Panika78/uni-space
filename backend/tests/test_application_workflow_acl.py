@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, delete, select, text
@@ -221,10 +222,17 @@ def test_production_acl_allows_only_academic_status_and_transactional_audit(
         "PATCH",
         f"/api/v1/staff/students/{student_id}/academic-status",
         c["tokens"][0],
-        json={"academic_status": "academic_leave", "reason": "administrative_change"},
+        json={
+            "academic_status": "academic_leave",
+            "reason": "administrative_change",
+            "operation_id": str(uuid4()),
+        },
     )
     assert response.status_code == 200, response.text
-    assert response.json() == {"academic_status": "academic_leave"}
+    assert response.json()["academic_status"] == "academic_leave"
+    assert response.json()["previous_academic_status"] == "enrolled"
+    assert response.json()["changed"] is True
+    assert response.json()["operation_id"]
     with Session(admin_engine) as db:
         student = db.get(Student, student_id)
         actor = db.get(User, c["actors"][0])
@@ -246,7 +254,11 @@ def test_production_acl_allows_only_academic_status_and_transactional_audit(
         "PATCH",
         f"/api/v1/staff/students/{student_id}/academic-status",
         c["tokens"][0],
-        json={"academic_status": "expelled", "reason": "correction"},
+        json={
+            "academic_status": "expelled",
+            "reason": "correction",
+            "operation_id": str(uuid4()),
+        },
     )
     assert denied.status_code == 500
     with Session(admin_engine) as db:

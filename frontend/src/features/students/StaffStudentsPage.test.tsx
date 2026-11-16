@@ -58,16 +58,18 @@ beforeEach(() => {
         course_numbers: [2],
       } as never
     if (url === '/api/v1/staff/students/21') return student as never
-    if (url.includes('/academic-status')) return { academic_status: 'academic_leave' } as never
+    if (init?.method === 'PATCH')
+      return { academic_status: JSON.parse(String(init.body)).academic_status } as never
+    if (url.includes('/academic-status')) return { academic_status: 'enrolled' } as never
     if (url.startsWith('/api/v1/staff/students?'))
       return { items: [student], next_cursor: null } as never
-    if (init?.method === 'PATCH') return { academic_status: 'academic_leave' } as never
     return undefined as never
   })
 })
 
 afterEach(() => {
   cleanup()
+  sessionStorage.clear()
   vi.resetAllMocks()
 })
 
@@ -97,10 +99,9 @@ it('searches and filters staff students and requires external-basis confirmation
       '/api/v1/staff/students/21/academic-status',
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({
-          academic_status: 'academic_leave',
-          reason: 'administrative_change',
-        }),
+        body: expect.stringMatching(
+          /^\{"academic_status":"academic_leave","reason":"administrative_change","operation_id":"[0-9a-f-]{36}"\}$/,
+        ),
       }),
     ),
   )
@@ -180,7 +181,7 @@ it('requires an explicit target for status-only and clears success when the oper
     vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'PATCH'),
   ).toHaveLength(0)
   await user.selectOptions(screen.getByLabelText('Новый статус'), 'academic_leave')
-  expect(screen.getByText(/Будет установлен статус:/)).toHaveTextContent('В академическом отпуске')
+  expect(screen.getByText(/Переход:/)).toHaveTextContent('В академическом отпуске')
   await user.click(screen.getByLabelText('Подтверждаю, что внешнее основание оформлено'))
   await user.click(submit)
   expect(await screen.findByText(/Статус сохранён:/)).toHaveTextContent('В академическом отпуске')
@@ -198,7 +199,7 @@ it('identifies the selected student and traps/restores keyboard focus', async ()
   await user.click(trigger)
   const dialog = screen.getByRole('dialog', { name: 'Изменение статуса' })
   expect(within(dialog).getByText(/Ёлкина Вымышленная · ИВТ-21/)).toBeInTheDocument()
-  expect(within(dialog).getByText('Текущий статус: Обучается')).toBeInTheDocument()
+  expect(within(dialog).getByText('Предыдущий статус: Обучается')).toBeInTheDocument()
   const target = within(dialog).getByLabelText('Новый статус')
   expect(target).toHaveFocus()
   await user.tab({ shift: true })
@@ -224,7 +225,8 @@ it.each([undefined, 500])(
     mount('/staff/students/status')
     await screen.findByRole('heading', { name: 'Изменение академического статуса' })
     await user.type(screen.getByLabelText('ID студента'), '21')
-    await user.selectOptions(screen.getByLabelText('Новый статус'), 'enrolled')
+    await screen.findByText('Предыдущий статус: Обучается')
+    await user.selectOptions(screen.getByLabelText('Новый статус'), 'expelled')
     await user.click(screen.getByLabelText('Подтверждаю, что внешнее основание оформлено'))
     await user.click(screen.getByRole('button', { name: 'Подтвердить изменение' }))
     expect(await screen.findByText(/Результат изменения неизвестен/)).toBeInTheDocument()
@@ -233,9 +235,7 @@ it.each([undefined, 500])(
       screen.queryByRole('button', { name: 'Сверить актуальное состояние' }),
     ).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Подтвердить изменение' })).toBeDisabled()
-    expect(
-      vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'PATCH'),
-    ).toHaveLength(1)
+    expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.body)).toHaveLength(1)
     expect(vi.mocked(apiFetch).mock.calls.map(([url]) => String(url))).not.toContain(
       '/api/v1/staff/students/21',
     )
@@ -291,11 +291,9 @@ it('confirms the identity, group and old/new statuses of the specifically select
   const dialog = screen.getByRole('dialog')
   expect(within(dialog).getByText('Жуков Вымышленный · ФИЛ-11')).toBeInTheDocument()
   expect(within(dialog).getByText('Студент ID 22')).toBeInTheDocument()
-  expect(within(dialog).getByText('Текущий статус: Выпускник')).toBeInTheDocument()
+  expect(within(dialog).getByText('Предыдущий статус: Выпускник')).toBeInTheDocument()
   await user.selectOptions(within(dialog).getByLabelText('Новый статус'), 'academic_leave')
-  expect(within(dialog).getByText(/Будет установлен статус:/)).toHaveTextContent(
-    'В академическом отпуске',
-  )
+  expect(within(dialog).getByText(/Переход:/)).toHaveTextContent('В академическом отпуске')
   await user.click(within(dialog).getByLabelText('Подтверждаю, что внешнее основание оформлено'))
   await user.click(within(dialog).getByRole('button', { name: 'Подтвердить изменение' }))
   await waitFor(() =>
@@ -311,7 +309,7 @@ it('identifies a by-ID target and permits reconciliation when the actor separate
   await screen.findByRole('heading', { name: 'Изменение академического статуса' })
   await userEvent.setup().type(screen.getByLabelText('ID студента'), '21')
   expect(await screen.findByText('Ёлкина Вымышленная · ИВТ-21')).toBeInTheDocument()
-  expect(screen.getByText('Текущий статус: Обучается')).toBeInTheDocument()
+  expect(screen.getByText('Предыдущий статус: Обучается')).toBeInTheDocument()
   expect(apiFetch).toHaveBeenCalledWith(
     '/api/v1/staff/students/21',
     expect.objectContaining({ authenticated: true }),
