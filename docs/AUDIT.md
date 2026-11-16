@@ -220,3 +220,33 @@ rollback и no-op не создают события. Рассылка и учё
 Runtime получает INSERT и SELECT(id, created_at) аудита, без UPDATE/DELETE.
 Существующий триггер итогов требует UPDATE(id) на course_offerings для FOR SHARE;
 права изменения вида аттестации не выдаются.
+
+## MVP2-25: административные действия и первоначальный администратор
+
+Дополнительные строго типизированные снимки:
+
+| entity_type | action | Поля |
+|---|---|---|
+| `student` | `create` | `user_id`, `group_id`, `academic_status=enrolled` |
+| `teacher` | `link_user` | `user_id` (до привязки NULL) |
+| `staff_profile` | `create` | `user_id`, `org_unit_id` |
+| `staff_profile` | `set_org_unit` | `org_unit_id` |
+| `staff_permission` | `create`, `delete` | `staff_profile_id`, `permission_code` (только PermissionCode), `scope_org_unit_id` |
+
+ID — int, academic_status/permission_code — enum. Создание аккаунта использует
+существующий `user/create`, активность — `user/set_active`. Перевод сотрудника
+создаёт `delete` каждого прежнего grant и `set_org_unit` в одной транзакции.
+No-op не пишет событие. Логин, ФИО, пароль, хеш и токены не входят в снимки.
+
+**Единственное исключение для системного актора:** доверенная интерактивная
+операторская команда `python -m app.admin.bootstrap` напрямую добавляет
+`AuditEvent(entity_type="user", entity_id=<первый admin>, action="create",
+actor_user_id=NULL, before_data=NULL,
+after_data={"role":"admin","is_active":true})` в той же транзакции с аккаунтом.
+Снимок совпадает с allowlist `user/create`. Отказ INSERT аудита откатывает bootstrap.
+Обычный `write_audit_event` по-прежнему требует реальный прикреплённый User;
+`actor=None` не разрешён. HTTP не предоставляет системный actor или bootstrap.
+Это уточняет прежний резерв NULL для будущих системных действий только для этой CLI.
+
+Runtime ACL теперь разрешают append-only INSERT/sequence и SELECT(id,created_at)
+для RETURNING. Чтение снимков, UPDATE/DELETE/TRUNCATE аудита по-прежнему запрещены.

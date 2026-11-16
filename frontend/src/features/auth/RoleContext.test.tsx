@@ -20,7 +20,9 @@ beforeEach(() => {
   auth.status = 'authenticated'
   vi.stubGlobal('innerWidth', 360)
   context = { user_id: '42', role: 'teacher', org_unit_id: null, permissions: [] }
-  vi.mocked(apiFetch).mockImplementation(async () => context)
+  vi.mocked(apiFetch).mockImplementation(async (url) =>
+    String(url).startsWith('/api/v1/admin/users') ? { items: [], next_after_id: null } : context,
+  )
 })
 afterEach(() => {
   cleanup()
@@ -47,7 +49,15 @@ it.each([
   const { router } = mount()
   expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument()
   expect(router.state.location.pathname).toBe(path)
-  expect(vi.mocked(apiFetch).mock.calls.every(([url]) => url === '/api/v1/auth/context')).toBe(true)
+  expect(
+    vi
+      .mocked(apiFetch)
+      .mock.calls.every(
+        ([url]) =>
+          url === '/api/v1/auth/context' ||
+          (role === 'admin' && String(url).startsWith('/api/v1/admin/users')),
+      ),
+  ).toBe(true)
   expect(screen.queryByRole('link', { name: 'Мой профиль' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Уведомления' })).not.toBeInTheDocument()
 })
