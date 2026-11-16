@@ -21,23 +21,38 @@ def upgrade():
         sa.Column("size_bytes", sa.BigInteger(), nullable=False),
         sa.Column("is_current", sa.Boolean(), server_default=sa.text("true"), nullable=False),
         sa.Column(
-            "uploaded_at", sa.DateTime(timezone=True), server_default=sa.func.statement_timestamp(), nullable=False
+            "uploaded_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.func.statement_timestamp(),
+            nullable=False,
         ),
-        sa.CheckConstraint("size_bytes > 0 AND size_bytes <= 10485760", name="ck_application_attachments_size"),
-        sa.CheckConstraint("mime_type IN ('application/pdf','image/jpeg','image/png')", name="ck_application_attachments_mime"),
+        sa.CheckConstraint(
+            "size_bytes > 0 AND size_bytes <= 10485760",
+            name="ck_application_attachments_size",
+        ),
+        sa.CheckConstraint(
+            "mime_type IN ('application/pdf','image/jpeg','image/png')",
+            name="ck_application_attachments_mime",
+        ),
         sa.ForeignKeyConstraint(
-            ["application_id"], ["applications.id"],
-            name="fk_application_attachments_application_id_applications", ondelete="CASCADE"
+            ["application_id"],
+            ["applications.id"],
+            name="fk_application_attachments_application_id_applications",
+            ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name="pk_application_attachments"),
         sa.UniqueConstraint("storage_key", name="uq_application_attachments_storage_key"),
     )
     op.create_index(
         "ix_application_attachments_application_current",
-        "application_attachments", ["application_id", "is_current"]
+        "application_attachments",
+        ["application_id", "is_current"],
     )
 
 
 def downgrade():
-    op.drop_index("ix_application_attachments_application_current", table_name="application_attachments")
+    op.drop_index(
+        "ix_application_attachments_application_current",
+        table_name="application_attachments",
+    )
     op.drop_table("application_attachments")

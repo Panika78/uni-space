@@ -14,7 +14,9 @@ if __name__ == "__main__":
     with SessionLocal() as session:
         referenced = set(
             session.scalars(
-                select(ApplicationAttachment.storage_key).where(ApplicationAttachment.is_current.is_(True))
+                select(ApplicationAttachment.storage_key).where(
+                    ApplicationAttachment.is_current.is_(True)
+                )
             )
         )
     print(f"Removed {cleanup_orphans(root, referenced)} stale attachment objects")
