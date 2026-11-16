@@ -577,6 +577,30 @@ with engine.connect() as c:
     for column in ('id','role','password_hash','login','full_name'):
         assert not c.execute(text("SELECT has_column_privilege(current_user,'users',:column,'UPDATE')"), {'column': column}).scalar_one()
     assert c.execute(text("SELECT has_column_privilege(current_user,'users','is_active','UPDATE')")).scalar_one()
+    assert c.execute(text("SELECT has_table_privilege(current_user,'audit_events','INSERT')")).scalar_one()
+    for privilege in ('SELECT','UPDATE','DELETE','TRUNCATE'):
+        assert not c.execute(text("SELECT has_table_privilege(current_user,'audit_events',:privilege)"), {'privilege': privilege}).scalar_one()
+    for column in ('id','created_at'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'audit_events',:column,'SELECT')"), {'column': column}).scalar_one()
+    for column in ('entity_type','entity_id','before_data','after_data'):
+        assert not c.execute(text("SELECT has_column_privilege(current_user,'audit_events',:column,'SELECT')"), {'column': column}).scalar_one()
+    assert not c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
+    assert not c.execute(text("SELECT has_function_privilege(current_user, 'validate_assessment_assignment()', 'EXECUTE')")).scalar_one()
+    for privilege in ('INSERT','UPDATE','DELETE'):
+        assert c.execute(text("SELECT has_table_privilege(current_user,'assessment_results',:privilege)"), {'privilege': privilege}).scalar_one()
+    for privilege in ('TRUNCATE','REFERENCES','TRIGGER'):
+        assert not c.execute(text("SELECT has_table_privilege(current_user,'assessment_results',:privilege)"), {'privilege': privilege}).scalar_one()
+    for table, column in (('students','id'),('assessments','max_score'),
+                          ('assessment_groups','id'),('course_groups','group_id'),('lessons','version')):
+        assert c.execute(text("SELECT has_column_privilege(current_user,:table,:column,'UPDATE')"),
+                         {'table': table, 'column': column}).scalar_one()
+    assert not c.execute(text("SELECT has_table_privilege(current_user,'lesson_groups','UPDATE')")).scalar_one()
+    assert not c.execute(text("SELECT has_column_privilege(current_user,'lesson_groups','group_id','UPDATE')")).scalar_one()
+    for table, column in (('assessments','title'),('students','group_id'),
+                          ('assessment_groups','assessment_id'),('course_groups','course_offering_id'),
+                          ('lessons','status')):
+        assert not c.execute(text("SELECT has_column_privilege(current_user,:table,:column,'UPDATE')"),
+                             {'table': table, 'column': column}).scalar_one()
     for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'news',:privilege)"), {'privilege': privilege}).scalar_one()
     for privilege in ('SELECT','INSERT','UPDATE'):
@@ -606,7 +630,7 @@ with engine.connect() as c:
     for table in ('study_groups','programs','org_units','teachers','disciplines','course_offerings',
                   'buildings','rooms','lessons','lesson_groups','lesson_rooms',
                   'academic_terms','course_groups','assessments','assessment_groups',
-                  'assessment_results','teaching_assignments'):
+                  'teaching_assignments'):
         for privilege in ('INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
             assert not c.execute(text("SELECT has_table_privilege(current_user, :table, :privilege)"),
                                  {'table': table, 'privilege': privilege}).scalar_one()
@@ -643,9 +667,7 @@ for statement in (
     "SELECT nextval('public.org_units_id_seq')", "SELECT nextval('public.programs_id_seq')",
     "UPDATE lessons SET status='cancelled'", "DELETE FROM lesson_groups",
     "INSERT INTO assessments (course_offering_id,title,type,max_score) VALUES (1,'forbidden','test',10)",
-    "UPDATE assessment_groups SET assessment_id=assessment_id", "DELETE FROM assessment_results",
-    "UPDATE assessment_results SET score=score",
-    "INSERT INTO assessment_results (assessment_group_id,student_id,score,graded_at) SELECT assessment_group_id,student_id,score,graded_at FROM assessment_results LIMIT 1",
+    "UPDATE assessment_groups SET assessment_id=assessment_id",
     "UPDATE final_results SET student_id=student_id", "UPDATE course_offerings SET attestation_type='exam'", "SELECT nextval('public.final_results_id_seq')",
     "SELECT nextval('public.lessons_id_seq')",
     "UPDATE staff_profiles SET user_id=1", "DELETE FROM staff_profiles",
@@ -813,7 +835,7 @@ with SessionLocal.begin() as db:
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from app.core.database import SessionLocal
-from app.models import CourseGroup, CourseOffering, Discipline, Lesson, LessonGroup, Student, Teacher, TeachingAssignment, User
+from app.models import Assessment, AssessmentGroup, CourseGroup, CourseOffering, Discipline, Lesson, LessonGroup, Student, Teacher, TeachingAssignment, User
 with SessionLocal.begin() as db:
     password_hash = db.scalar(select(User.password_hash).where(User.login == 'deployment-check'))
     # Pin both teachers to the seeded course with three approved works: positive,
@@ -840,6 +862,12 @@ with SessionLocal.begin() as db:
         db.add(lesson)
         db.flush()
         db.add(LessonGroup(lesson_id=lesson.id, group_id=pair.group_id))
+        db.flush()
+        work = db.scalars(select(AssessmentGroup).join(Assessment).where(
+            Assessment.course_offering_id == pair.course_offering_id,
+            Assessment.title == 'Работа 0',
+            AssessmentGroup.group_id == pair.group_id)).one()
+        work.lesson_id = lesson.id
 """,
             )
             with ExitStack() as teacher_clients:
@@ -890,6 +918,8 @@ with SessionLocal.begin() as db:
                     assert len(works["items"]) == 3, works
                     assert works["next_cursor"] is None
                     scores_by_title = {}
+                    first_work_assignment_id = None
+                    first_work_result_id = None
                     expected_student_id = sql(
                         "SELECT s.id FROM students s JOIN users u ON u.id=s.user_id "
                         f"WHERE u.login='schedule-fixture-{index + 1}'"
@@ -913,12 +943,61 @@ with SessionLocal.begin() as db:
                         else:
                             assert result["result_id"] is not None
                             assert result["graded_at"] is not None
+                            if work["title"] == "Работа 0":
+                                first_work_assignment_id = work["id"]
+                                first_work_result_id = result["result_id"]
                         scores_by_title[work["title"]] = result["score"]
                     assert scores_by_title == {
                         "Работа 0": 6 if index == 0 else 9,
                         "Работа 1": 0 if index == 0 else 9,
                         "Работа 2": None,
                     }, scores_by_title
+                    if index == 0:
+                        assert first_work_assignment_id is not None
+                        assert first_work_result_id is not None
+                        score_path = (
+                            journal
+                            + f"/assessments/{first_work_assignment_id}/results/{expected_student_id}"
+                        )
+                        changed = teacher_client.put(
+                            score_path, headers=headers, json={"score": 5}
+                        )
+                        assert changed.status_code == 200, changed.text
+                        unchanged = teacher_client.put(
+                            score_path, headers=headers, json={"score": 5}
+                        )
+                        assert unchanged.status_code == 200, unchanged.text
+                        assert unchanged.json()["result_id"] == first_work_result_id
+                        assert (
+                            unchanged.json()["graded_at"] == changed.json()["graded_at"]
+                        )
+                        removed = teacher_client.put(
+                            score_path, headers=headers, json={"score": None}
+                        )
+                        assert removed.status_code == 200, removed.text
+                        assert removed.json()["result_id"] is None
+                        recreated = teacher_client.put(
+                            score_path, headers=headers, json={"score": 6}
+                        )
+                        assert recreated.status_code == 200, recreated.text
+                        recreated_id = recreated.json()["result_id"]
+                        assert recreated_id != first_work_result_id
+                        old_events = sql(
+                            "SELECT string_agg(action, ',' ORDER BY id) FROM audit_events "
+                            "WHERE entity_type='assessment_result' "
+                            f"AND entity_id={int(first_work_result_id)}"
+                        )
+                        new_events = sql(
+                            "SELECT string_agg(action, ',' ORDER BY id) FROM audit_events "
+                            "WHERE entity_type='assessment_result' "
+                            f"AND entity_id={int(recreated_id)}"
+                        )
+                        assert old_events == "update,delete", old_events
+                        assert new_events == "create", new_events
+                        print(
+                            "PASS: production score API update/no-op/delete/create and append-only audit",
+                            flush=True,
+                        )
                     teacher_work_ids.append(works["items"][0]["id"])
                     lessons = teacher_client.get(
                         journal + "/lessons", headers=headers

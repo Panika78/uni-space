@@ -24,6 +24,13 @@ def test_upgrade_populated_schema_preserves_results_and_has_single_head(migratio
         s.result(work, 0)
         s.students[0].group_id = s.groups[1].id
         db.commit()
+    run_migration(engine, "upgrade", "20261115_03")
+    with engine.connect() as db:
+        synchronized_function = db.scalar(
+            text("SELECT pg_get_functiondef('validate_assessment_assignment()'::regprocedure)")
+        )
+        assert "UPDATE lessons SET version=version" in synchronized_function
+        assert "FOR SHARE OF l, g" not in synchronized_function
     with engine.connect() as db:
         before = db.scalar(text(SNAPSHOT))
     run_migration(engine, "upgrade", "head")
@@ -31,7 +38,28 @@ def test_upgrade_populated_schema_preserves_results_and_has_single_head(migratio
     run_migration(engine, "check")
     with engine.connect() as db:
         assert db.scalar(text(SNAPSHOT)) == before
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261115_04"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261116_01"
+        assert not db.scalar(
+            text(
+                "SELECT prosecdef FROM pg_proc WHERE oid="
+                "'validate_assessment_assignment()'::regprocedure"
+            )
+        )
+        function = db.scalar(
+            text("SELECT pg_get_functiondef('validate_assessment_assignment()'::regprocedure)")
+        )
+        assert "UPDATE lessons SET version=version" in function
+        assert "FOR SHARE OF l, g" not in function
+    run_migration(engine, "downgrade", "20261115_03")
+    with engine.connect() as db:
+        restored = db.scalar(
+            text("SELECT pg_get_functiondef('validate_assessment_assignment()'::regprocedure)")
+        )
+        assert restored == synchronized_function
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261115_03"
+        assert db.scalar(text(SNAPSHOT)) == before
+    run_migration(engine, "upgrade", "head")
+    run_migration(engine, "check")
     run_migration(engine, "downgrade", "20261114_03")
     with engine.connect() as db:
         assert db.scalar(text(SNAPSHOT)) == before

@@ -4,10 +4,15 @@ No faculty or lesson-teacher inference. Child identities are always resolved
 within the authorized course/group pair, before pagination or serialization.
 """
 
+from datetime import UTC, datetime
+
 from fastapi import HTTPException
 from sqlalchemy import and_, exists, or_, select, tuple_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
+from app.audit import write_audit_event
 from app.core.pagination import InvalidCursorError, decode_page_cursor, paginate_results
 from app.core.schemas import Ref
 from app.models import (
@@ -25,7 +30,7 @@ from app.models import (
     TeachingAssignment,
     User,
 )
-from app.permissions import get_authorization_context
+from app.permissions import PermissionCode, get_authorization_context, require_staff_permission
 from app.schedule.participants import get_student_lesson_condition
 from app.teaching.ordering import STUDENT_KEY_PREFIX, get_student_name_key
 from app.teaching.schemas import (
@@ -35,6 +40,198 @@ from app.teaching.schemas import (
     JournalStudent,
     TeachingAssignmentResponse,
 )
+
+
+def write_assessment_score(
+    db: Session,
+    user: User,
+    course_id: int,
+    group_id: int,
+    assessment_group_id: int,
+    student_id: int,
+    score: int | None,
+):
+    """Write one score and its mandatory audit event in a single transaction."""
+    write_started = False
+    try:
+        context = get_authorization_context(db, user)
+        is_teacher = context.role == "teacher"
+        is_staff = context.role == "staff"
+        if not (is_teacher or is_staff):
+            raise HTTPException(403, "forbidden")
+        if is_staff:
+            require_staff_permission(db, user, PermissionCode.GRADES_EDIT)
+
+        # Lock the approved assignment and its assessment before validating max_score.
+        target = db.execute(
+            select(AssessmentGroup, Assessment)
+            .join(Assessment, Assessment.id == AssessmentGroup.assessment_id)
+            .where(
+                AssessmentGroup.id == assessment_group_id,
+                AssessmentGroup.group_id == group_id,
+                Assessment.course_offering_id == course_id,
+            )
+            .with_for_update(of=(AssessmentGroup, Assessment))
+        ).one_or_none()
+        if target is None:
+            raise HTTPException(404, "not_found")
+        assignment, assessment = target
+
+        if is_teacher:
+            teacher_id = db.scalar(select(Teacher.id).where(Teacher.user_id == user.id))
+            if teacher_id is None:
+                raise HTTPException(403, "forbidden")
+            require_teaching_assignment(db, teacher_id, course_id, group_id)
+            member_group_id = db.scalar(
+                select(Student.id)
+                .where(Student.id == student_id, Student.group_id == group_id)
+                .with_for_update(read=True)
+            )
+            if member_group_id is None:
+                raise HTTPException(404, "not_found")
+        elif (
+            db.scalar(select(Student.id).where(Student.id == student_id).with_for_update(read=True))
+            is None
+        ):
+            raise HTTPException(404, "not_found")
+
+        if score is not None and score > assessment.max_score:
+            raise HTTPException(422, "score_exceeds_maximum")
+
+        key = (AssessmentResult.assessment_group_id, AssessmentResult.student_id)
+        result = db.scalar(
+            select(AssessmentResult)
+            .where(
+                AssessmentResult.assessment_group_id == assignment.id,
+                AssessmentResult.student_id == student_id,
+            )
+            .with_for_update()
+        )
+        values = {
+            "assessment_group_id": assignment.id,
+            "student_id": student_id,
+            "score": score,
+            "graded_by_user_id": user.id,
+            "graded_at": datetime.now(UTC),
+        }
+        inserted = False
+        if result is None and score is not None:
+            write_started = True
+            inserted_result = db.execute(
+                pg_insert(AssessmentResult)
+                .values(**values)
+                .on_conflict_do_nothing(index_elements=key)
+                .returning(AssessmentResult)
+            ).scalar_one_or_none()
+            if inserted_result is not None:
+                inserted = True
+                result = inserted_result
+            else:
+                # Another writer created the unique key while we were checking.
+                result = db.scalar(
+                    select(AssessmentResult)
+                    .where(
+                        AssessmentResult.assessment_group_id == assignment.id,
+                        AssessmentResult.student_id == student_id,
+                    )
+                    .with_for_update()
+                )
+
+        if inserted:
+            write_audit_event(
+                db,
+                actor=user,
+                entity_type="assessment_result",
+                entity_id=result.id,
+                action="create",
+                before_data=None,
+                after_data={
+                    "assessment_group_id": assignment.id,
+                    "student_id": student_id,
+                    "score": score,
+                },
+            )
+            response = {
+                "result_id": str(result.id),
+                "score": result.score,
+                "graded_at": result.graded_at,
+            }
+        else:
+            if result is None:
+                if score is None:
+                    response = {"result_id": None, "score": None, "graded_at": None}
+                else:
+                    # A concurrent delete won; retry the complete request to decide create/update.
+                    raise HTTPException(409, "concurrent_result_change")
+            elif score is None:
+                write_started = True
+                before = {
+                    "assessment_group_id": result.assessment_group_id,
+                    "student_id": result.student_id,
+                    "score": result.score,
+                }
+                result_id = result.id
+                db.delete(result)
+                write_audit_event(
+                    db,
+                    actor=user,
+                    entity_type="assessment_result",
+                    entity_id=result_id,
+                    action="delete",
+                    before_data=before,
+                    after_data=None,
+                )
+                response = {"result_id": None, "score": None, "graded_at": None}
+            elif score == result.score:
+                response = {
+                    "result_id": str(result.id),
+                    "score": result.score,
+                    "graded_at": result.graded_at,
+                }
+            else:
+                write_started = True
+                before = {
+                    "assessment_group_id": result.assessment_group_id,
+                    "student_id": result.student_id,
+                    "score": result.score,
+                }
+                result.score = score
+                result.graded_by_user_id = user.id
+                result.graded_at = datetime.now(UTC)
+                db.flush()
+                write_audit_event(
+                    db,
+                    actor=user,
+                    entity_type="assessment_result",
+                    entity_id=result.id,
+                    action="update",
+                    before_data=before,
+                    after_data={
+                        "assessment_group_id": assignment.id,
+                        "student_id": student_id,
+                        "score": score,
+                    },
+                )
+                response = {
+                    "result_id": str(result.id),
+                    "score": result.score,
+                    "graded_at": result.graded_at,
+                }
+        db.commit()
+        return response
+    except BaseException as exc:
+        if write_started:
+            db.rollback()
+        if isinstance(exc, IntegrityError) and getattr(exc.orig, "sqlstate", None) == "23514":
+            raise HTTPException(422, "validation_error") from exc
+        sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+        if isinstance(exc, DBAPIError) and sqlstate == "55P03":
+            raise HTTPException(
+                503, "temporarily_unavailable", headers={"Retry-After": "1"}
+            ) from exc
+        if isinstance(exc, IntegrityError) and sqlstate == "23503":
+            raise HTTPException(404, "not_found") from exc
+        raise
 
 
 def require_current_teacher(db: Session, user: User) -> int:
