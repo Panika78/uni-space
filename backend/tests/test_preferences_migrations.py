@@ -9,6 +9,7 @@ def test_preferences_upgrade_downgrade_and_metadata(migration_database):  # noqa
     engine = migration_database
     run_migration(engine, "upgrade", "20261114_03")
     run_migration(engine, "upgrade", "20261115_03")
+    run_migration(engine, "upgrade", "head")
     run_migration(engine, "check")
     assert "user_preferences" in inspect(engine).get_table_names()
     with engine.begin() as db:

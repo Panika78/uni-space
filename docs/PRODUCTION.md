@@ -249,10 +249,10 @@ INSERT и только SELECT(id, created_at) для ORM RETURNING; UPDATE/DELET
 column UPDATE для `students.id` (блокировка перевода), `assessments.max_score`,
 `assessment_groups.id`, `course_groups.group_id` и `lessons.version`: PostgreSQL
 триггеры используют эти строки для сериализации проверок, не меняя их значения.
-Остальные поля этих таблиц не разрешены к UPDATE. Для проверки связи с занятием
-trigger function `validate_assessment_assignment` использует `SECURITY DEFINER`
-под владельцем миграции, поэтому `lesson_groups` остаётся без UPDATE grants API.
-Подробный контракт —
+Остальные поля этих таблиц не разрешены к UPDATE. `validate_assessment_assignment`
+синхронизирует проверку занятия с удалением его групп через разрешённый UPDATE
+`lessons.version`; дочерние строки `lesson_groups` не блокируются и UPDATE на них
+runtime-роли не выдаётся. Подробный контракт —
 [AUDIT.md](AUDIT.md).
 
 API не получает административный или migration secret ни в окружение, ни в mounts.

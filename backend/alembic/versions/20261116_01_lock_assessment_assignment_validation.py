@@ -1,4 +1,4 @@
-"""Run assignment consistency locks under the migration owner.
+"""Restore parent-row synchronization for lesson-bound assessments.
 
 Revision ID: 20261116_01
 Revises: 20261115_03
@@ -11,18 +11,10 @@ down_revision = "20261115_03"
 branch_labels = None
 depends_on = None
 
-
-def upgrade() -> None:
-    # validate_assessment_result performs a no-op UPDATE on assessment_groups
-    # to serialize score writes with assignment edits. That fires
-    # validate_assessment_assignment, whose SELECT FOR SHARE also locks
-    # lesson_groups. Running this trigger function as its migration owner keeps
-    # the runtime role from needing UPDATE on lesson_groups merely to read-lock
-    # it. The fixed search_path prevents object shadowing in a definer function.
-    op.execute("""
+VALIDATE_ASSIGNMENT = """
 CREATE OR REPLACE FUNCTION validate_assessment_assignment() RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS $$
-DECLARE offering bigint;
+LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
+DECLARE offering bigint; lesson_offering bigint;
 BEGIN
     SELECT course_offering_id INTO offering FROM assessments
       WHERE id=NEW.assessment_id FOR SHARE;
@@ -32,42 +24,31 @@ BEGIN
         RAISE EXCEPTION 'Assignment group must study the assessment offering' USING ERRCODE='23514';
     END IF;
     IF NEW.lesson_id IS NOT NULL THEN
-        PERFORM 1 FROM lessons l JOIN lesson_groups g ON g.lesson_id=l.id
-          WHERE l.id=NEW.lesson_id AND l.course_offering_id=offering AND g.group_id=NEW.group_id
-          FOR SHARE OF l, g;
-        IF NOT FOUND THEN
+        -- Same parent write as removal guards, before examining assignments.
+        -- Do not SHARE-lock child rows: a direct DELETE already locks its child
+        -- before running its trigger and may be waiting for this parent.
+        UPDATE lessons SET version=version WHERE id=NEW.lesson_id
+          RETURNING course_offering_id INTO lesson_offering;
+        IF lesson_offering IS DISTINCT FROM offering OR NOT EXISTS (
+          SELECT 1 FROM lesson_groups WHERE lesson_id=NEW.lesson_id AND group_id=NEW.group_id
+        ) THEN
             RAISE EXCEPTION 'Assignment lesson must match offering and group' USING ERRCODE='23514';
         END IF;
     END IF;
     RETURN NEW;
 END $$;
-REVOKE ALL ON FUNCTION validate_assessment_assignment() FROM PUBLIC;
-""")
+"""
+
+
+def upgrade() -> None:
+    # Keep this definition in sync with 20261114_03. That migration's paired
+    # assignment/removal triggers serialize through the lesson parent row. A
+    # child FOR SHARE here would both break that lock order and require an
+    # unnecessary runtime UPDATE grant on lesson_groups.
+    op.execute(VALIDATE_ASSIGNMENT)
 
 
 def downgrade() -> None:
-    # Restore the invoker-security definition from 20261112_02 while retaining
-    # the same assignment checks and row locks.
-    op.execute("""
-CREATE OR REPLACE FUNCTION validate_assessment_assignment() RETURNS trigger
-LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
-DECLARE offering bigint;
-BEGIN
-    SELECT course_offering_id INTO offering FROM assessments
-      WHERE id=NEW.assessment_id FOR SHARE;
-    PERFORM 1 FROM course_groups
-      WHERE course_offering_id=offering AND group_id=NEW.group_id FOR SHARE;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Assignment group must study the assessment offering' USING ERRCODE='23514';
-    END IF;
-    IF NEW.lesson_id IS NOT NULL THEN
-        PERFORM 1 FROM lessons l JOIN lesson_groups g ON g.lesson_id=l.id
-          WHERE l.id=NEW.lesson_id AND l.course_offering_id=offering AND g.group_id=NEW.group_id
-          FOR SHARE OF l, g;
-        IF NOT FOUND THEN
-            RAISE EXCEPTION 'Assignment lesson must match offering and group' USING ERRCODE='23514';
-        END IF;
-    END IF;
-    RETURN NEW;
-END $$;
-""")
+    # The immediately preceding revision (20261115_03) still uses the
+    # parent-row synchronization introduced in 20261114_03.
+    op.execute(VALIDATE_ASSIGNMENT)
