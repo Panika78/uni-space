@@ -521,6 +521,20 @@ def test_decode_page_cursor_rejects_incompatible_key_before_query_construction()
         decode_page_cursor(cursor, key_types=(str, int), direction="desc")
 
 
+@pytest.mark.parametrize("unsafe", ["\x00", "\ud800"])
+def test_cursor_rejects_unsafe_unicode_before_sql_key_use(unsafe: str) -> None:
+    cursor = make_cursor([f"ru-v1:{unsafe}", 4], direction="asc")
+    with pytest.raises(InvalidCursorError):
+        decode_page_cursor(cursor, key_types=(str, int), direction="asc")
+
+
+@pytest.mark.parametrize("student_id", [2**63, -(2**63) - 1])
+def test_cursor_rejects_integer_outside_postgresql_bigint(student_id: int) -> None:
+    cursor = make_cursor(["ru-v1:а", student_id], direction="asc")
+    with pytest.raises(InvalidCursorError):
+        decode_page_cursor(cursor, key_types=(str, int), direction="asc")
+
+
 def test_pagination_rejects_invalid_runtime_arguments() -> None:
     with pytest.raises(InvalidCursorError):
         paginate([], key=lambda row: (row,), key_types=(str,), cursor="invalid")
@@ -792,6 +806,7 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
         "{assessment_group_id}/results/{student_id}",
         "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/lessons",
         "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/lessons/{lesson_id}/students",
+        "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/lessons/{lesson_id}/attendance",
         "/api/v1/auth/context",
         "/api/v1/auth/login",
         "/api/v1/auth/refresh",

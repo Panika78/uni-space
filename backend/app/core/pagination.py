@@ -37,6 +37,11 @@ def _decode_cursor(cursor: str) -> tuple[SortDirection, CursorKey]:
             or not decoded["key"]
             or any(type(value) not in (str, int, float) for value in decoded["key"])
             or any(type(value) is float and not math.isfinite(value) for value in decoded["key"])
+            or any(
+                type(value) is str
+                and ("\x00" in value or any(0xD800 <= ord(char) <= 0xDFFF for char in value))
+                for value in decoded["key"]
+            )
         ):
             raise ValueError
         return decoded["direction"], tuple(decoded["key"])
@@ -57,6 +62,10 @@ def _validate_key(key: CursorKey, key_types: CursorKeyTypes, *, cursor: bool) ->
         if cursor:
             raise InvalidCursorError("Cursor does not match this selection")
         raise ValueError("key() returned a key that does not match key_types")
+    if any(type(value) is int and not -(2**63) <= value <= 2**63 - 1 for value in key):
+        if cursor:
+            raise InvalidCursorError("Cursor integer is outside PostgreSQL BIGINT range")
+        raise ValueError("key() returned an integer outside PostgreSQL BIGINT range")
 
 
 def _validate_page_options(

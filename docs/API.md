@@ -415,6 +415,7 @@ scope — только `teaching_assignments` через `teachers.user_id` де
 | `PUT J/assessments/{assessment_group_id}/results/{student_id}` | `ScoreWriteResponse` | JSON `{"score": number \| null}` |
 | `J/lessons` | `Page<JournalLesson>` | `lesson_id`, `starts_from`, `starts_before`, `status` |
 | `J/lessons/{lesson_id}/students` | `Page<JournalStudent>` | `student_id` |
+| `J/lessons/{lesson_id}/attendance` | `Page<JournalAttendanceRow>` | `student_id` |
 
 Все списки принимают `limit=20` (1–100), непрозрачный `cursor` и возвращают
 `items`, `next_cursor` без общего количества. Назначения и работы сортируются
@@ -480,6 +481,21 @@ endpoint возвращает `503 temporarily_unavailable` с `Retry-After: 1`;
   Участники — текущие студенты выбранной группы, соответствующие её назначениям
   `lesson_groups`: вся группа либо объединение формальных подгрупп по #62.
   Студент без подгруппы участвует только в занятии всей группы.
+- Чтение посещаемости занятия: `student_id`, `full_name`, `subgroup_id`,
+  `academic_status`, `status`, `updated_at`, `can_edit`. Список использует тот же
+  русский keyset-порядок `ru-v1:` и SQL `limit + 1`; отсутствующая отметка имеет
+  `status="unmarked"` и `updated_at=null`. Доступны только актуальные участники
+  выбранной группы занятия. Сохранённая отметка показывается как текущая только
+  при совпадении `origin_group_id`, `origin_subgroup_id` и `membership_version`
+  с актуальным членством; иначе ответ для доступного в roster студента содержит
+  `unmarked`, а `can_edit=false`. Таким образом, перевод и возвращение не
+  раскрывают старую отметку как текущую. `can_edit` — снимок write-условий: пара
+  должна быть `scheduled`, уже начаться, студент должен сейчас участвовать, а
+  существующая отметка — соответствовать исходному периоду; для создания также
+  требуется, чтобы начало пары было не раньше `membership_changed_at`. PUT/DELETE
+  независимо повторно проверяют все условия. Ответ помечен
+  `Cache-Control: no-store`; чужое назначение, дисциплина, занятие или группа возвращают
+  `404 not_found`.
 
 Ошибки используют общий `ApiError`: `401 invalid_access/session_invalid` при
 отсутствующей/недействительной сессии или неактивном аккаунте; `403 forbidden`

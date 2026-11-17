@@ -980,6 +980,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/lessons/{lesson_id}/attendance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Lesson Attendance */
+        get: operations["list_lesson_attendance_api_v1_teaching_courses__course_offering_id__groups__group_id__lessons__lesson_id__attendance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/lessons/{lesson_id}/students": {
         parameters: {
             query?: never;
@@ -1629,6 +1646,29 @@ export interface components {
             /** Type */
             type: string;
         };
+        /** JournalAttendanceRow */
+        JournalAttendanceRow: {
+            /**
+             * Academic Status
+             * @enum {string}
+             */
+            academic_status: "enrolled" | "academic_leave" | "expelled" | "graduated";
+            /** Can Edit */
+            can_edit: boolean;
+            /** Full Name */
+            full_name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "attended" | "absent" | "unmarked";
+            /** Student Id */
+            student_id: string;
+            /** Subgroup Id */
+            subgroup_id: string | null;
+            /** Updated At */
+            updated_at: string | null;
+        };
         /** JournalLesson */
         JournalLesson: {
             /**
@@ -1939,6 +1979,13 @@ export interface components {
         Page_JournalAssessment_: {
             /** Items */
             items: components["schemas"]["JournalAssessment"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** Page[JournalAttendanceRow] */
+        Page_JournalAttendanceRow_: {
+            /** Items */
+            items: components["schemas"]["JournalAttendanceRow"][];
             /** Next Cursor */
             next_cursor: string | null;
         };
@@ -7581,6 +7628,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Page_JournalLesson_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_lesson_attendance_api_v1_teaching_courses__course_offering_id__groups__group_id__lessons__lesson_id__attendance_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                student_id?: string | null;
+            };
+            header?: never;
+            path: {
+                lesson_id: string;
+                course_offering_id: string;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_JournalAttendanceRow_"];
                 };
             };
             /** @description Unauthorized */
