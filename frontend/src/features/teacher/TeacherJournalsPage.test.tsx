@@ -88,6 +88,9 @@ vi.mock('../auth/RoleContext', () => ({
   }),
 }))
 
+let failNextFinalWrite = false
+let failNextScoreWrite = false
+
 function page<T>(items: T[]) {
   return { items, next_cursor: null }
 }
@@ -121,7 +124,21 @@ const assessment = {
 }
 
 beforeEach(() => {
-  fixtures.marks.forEach((row) => Object.assign(row, { status: row.status }))
+  fixtures.marks[0]!.status = 'attended'
+  fixtures.marks[1]!.status = 'absent'
+  fixtures.marks[2]!.status = 'unmarked'
+  fixtures.scores[0]!.score = null
+  fixtures.scores[1]!.score = 0
+  fixtures.scores[2]!.score = null
+  Object.assign(fixtures.final, {
+    grade_value: null,
+    passed: null,
+    retake_date: null,
+    retake_location: null,
+    has_debt: false,
+  })
+  failNextFinalWrite = false
+  failNextScoreWrite = false
   vi.mocked(apiFetch).mockImplementation(async (input, init = {}) => {
     const url = String(input)
     if (url.startsWith('/api/v1/teaching/assignments')) return page([assignment])
@@ -145,7 +162,11 @@ beforeEach(() => {
     if (url.endsWith('/lessons/31/attendance?limit=100')) return page(fixtures.marks)
     if (url.includes('/assessments/44/results?')) {
       const studentId = new URLSearchParams(url.split('?')[1]).get('student_id')
-      return page(fixtures.scores.filter((row) => !studentId || row.student_id === studentId))
+      return page(
+        fixtures.scores
+          .filter((row) => !studentId || row.student_id === studentId)
+          .map((row) => ({ ...row })),
+      )
     }
     if (url.includes('/attendance/lessons/31/students/')) {
       const studentId = url.split('/').at(-1)!
@@ -158,13 +179,37 @@ beforeEach(() => {
     if (url.includes('/assessments/44/results/')) {
       const studentId = url.split('/').at(-1)!
       const row = fixtures.scores.find((item) => item.student_id === studentId)!
+      if (failNextScoreWrite) {
+        failNextScoreWrite = false
+        throw new Error('simulated score write failure')
+      }
       row.score = JSON.parse(String(init.body)).score
       return { result_id: row.score === null ? null : '17', score: row.score, graded_at: null }
     }
     if (url.includes('/final-results/courses/11/students/')) {
       const payload = init.body ? JSON.parse(String(init.body)) : null
-      if (payload) Object.assign(fixtures.final, payload)
-      return fixtures.final
+      if (payload) {
+        if (failNextFinalWrite) {
+          failNextFinalWrite = false
+          throw new Error('simulated final write failure')
+        }
+        Object.assign(fixtures.final, payload)
+        if (payload.grade_value !== undefined) {
+          fixtures.final.has_debt = payload.grade_value === 2
+          if (!fixtures.final.has_debt) {
+            fixtures.final.retake_date = null
+            fixtures.final.retake_location = null
+          }
+        }
+        if (payload.passed !== undefined) {
+          fixtures.final.has_debt = payload.passed === false
+          if (payload.passed === true) {
+            fixtures.final.retake_date = null
+            fixtures.final.retake_location = null
+          }
+        }
+      }
+      return { ...fixtures.final }
     }
     if (url.endsWith('/dates')) return { items: [] }
     throw new Error(`Unexpected journal request: ${url}`)
@@ -178,13 +223,14 @@ afterEach(() => {
 
 function renderJournal(url = '/teacher/journals?course=11&group=21&tab=attendance&lesson=31') {
   const client = createQueryClient()
-  return render(
+  const rendered = render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[url]}>
         <TeacherJournalsPage />
       </MemoryRouter>
     </QueryClientProvider>,
   )
+  return { ...rendered, client }
 }
 
 it('restores all three attendance states from the server and saves individual changes', async () => {
@@ -237,4 +283,116 @@ it('separates an ungraded result from zero and supports scores and manual final 
       'Итог выставляется вручную; сумма баллов не преобразуется в оценку автоматически.',
     ),
   ).toBeInTheDocument()
+})
+
+it('does not write an unchanged score on blur and displays a newer server score after refetch', async () => {
+  const user = userEvent.setup()
+  fixtures.scores[0]!.score = 5
+  const { client } = renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
+  const score = await screen.findByRole('spinbutton', { name: 'Баллы: Анна Иванова' })
+  expect(score).toHaveValue(5)
+  vi.mocked(apiFetch).mockClear()
+
+  await user.click(score)
+  await user.tab()
+  expect(
+    vi
+      .mocked(apiFetch)
+      .mock.calls.filter(
+        ([url, init]) =>
+          String(url).includes('/assessments/44/results/1') && init?.method === 'PUT',
+      ),
+  ).toHaveLength(0)
+
+  fixtures.scores[0]!.score = 7
+  await client.invalidateQueries({ queryKey: ['teacher-journal-results'] })
+  await waitFor(() => expect(score).toHaveValue(7))
+  await user.click(score)
+  await user.tab()
+  expect(
+    vi
+      .mocked(apiFetch)
+      .mock.calls.filter(
+        ([url, init]) =>
+          String(url).includes('/assessments/44/results/1') && init?.method === 'PUT',
+      ),
+  ).toHaveLength(0)
+  expect(fixtures.scores[0]?.score).toBe(7)
+})
+
+it('clears a successfully saved score draft without clearing a newer edit', async () => {
+  const user = userEvent.setup()
+  const { client } = renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
+  const score = await screen.findByRole('spinbutton', { name: 'Баллы: Анна Иванова' })
+  await user.clear(score)
+  await user.type(score, '5')
+  await user.tab()
+  await waitFor(() => expect(fixtures.scores[0]?.score).toBe(5))
+  await waitFor(() => expect(score).toHaveValue(5))
+
+  fixtures.scores[0]!.score = 7
+  await client.invalidateQueries({ queryKey: ['teacher-journal-results'] })
+  await waitFor(() => expect(score).toHaveValue(7))
+})
+
+it('keeps a failed score draft for Retry and retries the same revision exactly once', async () => {
+  const user = userEvent.setup()
+  renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
+  const score = await screen.findByRole('spinbutton', { name: 'Баллы: Анна Иванова' })
+  failNextScoreWrite = true
+  await user.type(score, '6')
+  await user.tab()
+  const student = score.closest<HTMLElement>('.journal-student')!
+  const retry = await within(student).findByRole('button', { name: 'Повторить' })
+  expect(score).toHaveValue(6)
+  await user.click(retry)
+  await waitFor(() => expect(fixtures.scores[0]?.score).toBe(6))
+  expect(score).toHaveValue(6)
+  expect(
+    vi
+      .mocked(apiFetch)
+      .mock.calls.filter(
+        ([url, init]) =>
+          String(url).includes('/assessments/44/results/1') && init?.method === 'PUT',
+      ),
+  ).toHaveLength(2)
+})
+
+it('retains final grade drafts and retry across journal tabs, then reconciles cleared retake fields', async () => {
+  const user = userEvent.setup()
+  renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
+  const finals = await screen.findByRole('region', { name: /Итоги аттестации/ })
+  const grade = await within(finals).findByLabelText('Итог: Анна Иванова')
+  failNextFinalWrite = true
+  await user.selectOptions(grade, '2')
+  await screen.findByRole('button', { name: 'Повторить' })
+  expect(grade).toHaveValue('2')
+
+  await user.click(screen.getByRole('tab', { name: 'Посещаемость' }))
+  await user.click(screen.getByRole('tab', { name: 'Работы и баллы' }))
+  const remountedFinals = await screen.findByRole('region', { name: /Итоги аттестации/ })
+  const retainedGrade = within(remountedFinals).getByLabelText('Итог: Анна Иванова')
+  expect(retainedGrade).toHaveValue('2')
+  await user.click(within(remountedFinals).getByRole('button', { name: 'Повторить' }))
+  await waitFor(() => expect(fixtures.final.grade_value).toBe(2))
+
+  const date = within(remountedFinals).getByLabelText('Дата пересдачи: Анна Иванова')
+  const location = within(remountedFinals).getByLabelText('Место пересдачи: Анна Иванова')
+  await user.type(date, '2027-01-10')
+  await user.tab()
+  await waitFor(() => expect(fixtures.final.retake_date).toBe('2027-01-10'))
+  await user.clear(location)
+  await user.type(location, 'A-101')
+  await user.tab()
+  await waitFor(() => expect(fixtures.final.retake_location).toBe('A-101'))
+
+  await user.selectOptions(retainedGrade, '4')
+  await waitFor(() => expect(fixtures.final.grade_value).toBe(4))
+  await waitFor(() => expect(fixtures.final.retake_date).toBeNull())
+  await waitFor(() => expect(date).toHaveValue(''))
+  expect(location).toHaveValue('')
+  await user.selectOptions(retainedGrade, '2')
+  await waitFor(() => expect(fixtures.final.grade_value).toBe(2))
+  expect(date).toHaveValue('')
+  expect(location).toHaveValue('')
 })

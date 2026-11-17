@@ -111,7 +111,14 @@ def main() -> None:
         db.flush()
         groups = [
             StudyGroup(
-                name=f"JOURNAL-{suffix}-{index}", program_id=program.id, course_number=1
+                name=(
+                    f"Вымышленная учебная группа {suffix} №{index} с очень длинным названием "
+                    "для проверки переноса и мобильной навигации"
+                    if index == 1
+                    else f"JOURNAL-{suffix}-{index}"
+                ),
+                program_id=program.id,
+                course_number=1,
             )
             for index in (1, 2)
         ]
@@ -251,6 +258,14 @@ def main() -> None:
             description="Вымышленная работа для E2E",
             created_by_user_id=users[0].id,
         )
+        assessment_a2 = Assessment(
+            course_offering_id=courses[0].id,
+            title="Повторная контрольная",
+            type="test",
+            max_score=10,
+            description="Вторая вымышленная работа для E2E",
+            created_by_user_id=users[0].id,
+        )
         assessment_b = Assessment(
             course_offering_id=courses[1].id,
             title="Тест по истории",
@@ -258,7 +273,7 @@ def main() -> None:
             max_score=5,
             created_by_user_id=users[1].id,
         )
-        db.add_all([assessment, assessment_b])
+        db.add_all([assessment, assessment_a2, assessment_b])
         db.flush()
         groups_of_assessments = [
             AssessmentGroup(
@@ -266,6 +281,11 @@ def main() -> None:
                 group_id=groups[0].id,
                 planned_date=lesson_day + timedelta(days=1),
                 date_needs_confirmation=True,
+            ),
+            AssessmentGroup(
+                assessment_id=assessment_a2.id,
+                group_id=groups[0].id,
+                planned_date=lesson_day + timedelta(days=2),
             ),
             AssessmentGroup(
                 assessment_id=assessment_b.id,
@@ -313,10 +333,11 @@ def main() -> None:
             "TEACHER_JOURNAL_LESSON_A": str(lessons[0].id),
             "TEACHER_JOURNAL_SUBGROUP_LESSON": str(subgroup_lesson.id),
             "TEACHER_JOURNAL_ASSESSMENT_A": str(groups_of_assessments[0].id),
+            "TEACHER_JOURNAL_ASSESSMENT_A2": str(groups_of_assessments[1].id),
             "TEACHER_JOURNAL_COURSE_B": str(courses[1].id),
             "TEACHER_JOURNAL_GROUP_B": str(groups[1].id),
             "TEACHER_JOURNAL_LESSON_B": str(lessons[1].id),
-            "TEACHER_JOURNAL_ASSESSMENT_B": str(groups_of_assessments[1].id),
+            "TEACHER_JOURNAL_ASSESSMENT_B": str(groups_of_assessments[2].id),
             "TEACHER_JOURNAL_STUDENT_A": str(students[0].id),
             "TEACHER_JOURNAL_STUDENT_B": str(students[1].id),
             "TEACHER_JOURNAL_STUDENT_C": str(students[2].id),

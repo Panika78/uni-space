@@ -17,6 +17,50 @@
   margin: 20px 0 24px;
 }
 
+.teacher-journal__selectors details {
+  min-width: 0;
+}
+
+.teacher-journal__selectors summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.teacher-journal__selectors ul {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0 0 0 18px;
+  list-style: none;
+}
+
+.teacher-journal__selectors button[data-course-id][data-group-id] {
+  max-width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+  background: var(--surface);
+  color: inherit;
+  text-align: start;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.teacher-journal__selectors summary:focus-visible,
+.teacher-journal__selectors button[data-course-id][data-group-id]:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .teacher-journal label {
   display: grid;
   gap: 7px;
