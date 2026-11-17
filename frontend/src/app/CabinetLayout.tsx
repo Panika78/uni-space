@@ -481,12 +481,10 @@ function CabinetShell({ children }: { children?: ReactNode }) {
             ) : (
               children
             )
-          ) : student ? (
+          ) : (
             <UnsavedChangesProvider value={{ status: exitStatus, setStatus: setExitStatus }}>
               <Outlet />
             </UnsavedChangesProvider>
-          ) : (
-            <Outlet />
           )}
         </main>
       </div>

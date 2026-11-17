@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   addDays,
   formatTime,
+  groupLessonsByVisibleDays,
   getIsoWeekNumber,
   getMoscowDate,
   getWeekStart,
+  isValidCalendarDate,
   listDayLessons,
 } from './calendar'
 
@@ -105,3 +107,43 @@ it.each(['scheduled', 'moved', 'cancelled'] as const)(
     expect(formatTime(lesson.ends_at)).toBe('00:30')
   },
 )
+
+it('groups scheduled lessons by visible Moscow day without extending the range', () => {
+  const overnight = createLesson({
+    id: 'overnight',
+    starts_at: '2026-11-17T20:30:00Z',
+    ends_at: '2026-11-17T21:30:00Z',
+  })
+  const midnight = createLesson({
+    id: 'midnight',
+    starts_at: '2026-11-17T20:00:00Z',
+    ends_at: '2026-11-17T21:00:00Z',
+  })
+  const grouped = groupLessonsByVisibleDays([overnight, midnight], '2026-11-18', '2026-11-18')
+  expect(Object.keys(grouped)).toEqual(['2026-11-18'])
+  expect(grouped['2026-11-18']).toEqual([overnight])
+})
+
+it('groups week and year boundary dates once, retaining historical status placement', () => {
+  const overnight = createLesson({
+    id: 'week-overnight',
+    starts_at: '2026-12-31T20:30:00Z',
+    ends_at: '2026-12-31T21:30:00Z',
+  })
+  const moved = createLesson({ id: 'moved', status: 'moved', starts_at: '2026-12-31T20:30:00Z' })
+  const grouped = groupLessonsByVisibleDays([moved, overnight], '2026-12-28', '2027-01-03')
+  expect(Object.keys(grouped)).toEqual(['2026-12-31', '2027-01-01'])
+  expect(grouped['2026-12-31']).toEqual([moved, overnight])
+  expect(grouped['2027-01-01']).toEqual([overnight])
+  expect(groupLessonsByVisibleDays([overnight], '2027-01-01', '2027-01-01')).toEqual({
+    '2027-01-01': [overnight],
+  })
+})
+
+it('validates real calendar dates and accepts supported year boundaries', () => {
+  for (const date of ['2026-02-29', '2026-13-01', '2026-04-31', '2026-1-01', ''])
+    expect(isValidCalendarDate(date)).toBe(false)
+  expect(isValidCalendarDate('2024-02-29')).toBe(true)
+  expect(isValidCalendarDate('0001-01-01')).toBe(true)
+  expect(isValidCalendarDate('9999-12-31')).toBe(true)
+})

@@ -41,9 +41,11 @@ export function getRoleNavigation(context: AuthorizationContext): NavigationItem
               ? '/staff/students/status'
               : permission === 'news.publish'
                 ? '/staff/news'
-                : `/staff#${permission}`,
+                : permission === 'schedule.edit'
+                  ? '/staff/schedule'
+                  : `/staff#${permission}`,
       label,
-      icon: 'file',
+      icon: permission === 'schedule.edit' ? 'calendar' : 'file',
     }))
 }
 
