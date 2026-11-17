@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
@@ -16,7 +16,7 @@ type FinalResult = components['schemas']['ManualFinalResultResponse']
 type Student = components['schemas']['JournalStudent']
 type Page<T> = { items: T[]; next_cursor: string | null }
 type SavePhase = 'saving' | 'saved' | 'error'
-type SaveState = { phase: SavePhase; uncertain?: boolean; retry?: () => void }
+type SaveState = { phase: SavePhase; uncertain?: boolean; message?: string; retry?: () => void }
 
 const base = '/api/v1/teaching'
 const limit = 100
@@ -40,6 +40,17 @@ function formatDate(value: string | null) {
     dateStyle: 'long',
     timeZone: 'Europe/Moscow',
   }).format(new Date(`${value}T12:00:00Z`))
+}
+
+function moscowCalendarDate(value: string) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Moscow',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(value))
+  const dateParts = Object.fromEntries(parts.map(({ type, value: part }) => [type, part]))
+  return `${dateParts.year}-${dateParts.month}-${dateParts.day}`
 }
 
 async function getAllPages<T>(path: string, signal?: AbortSignal): Promise<T[]> {
@@ -78,7 +89,7 @@ function SaveLabel({ state, onRetry }: { state?: SaveState; onRetry?: () => void
     )
   return (
     <span className="journal-save journal-save--error" role="status">
-      Ошибка, повторить{' '}
+      {state.message ?? 'Ошибка, повторить'}{' '}
       {onRetry && (
         <button type="button" className="journal-inline-action" onClick={onRetry}>
           {state.uncertain ? 'Проверить сохранение' : 'Повторить'}
@@ -119,6 +130,7 @@ function QueryError({ error, retry }: { error: unknown; retry: () => void }) {
 
 export function TeacherJournalsPage() {
   const { user_id: userId } = useRoleContext()
+  const location = useLocation()
   const [params, setParams] = useSearchParams()
   const courseId = params.get('course') ?? ''
   const groupId = params.get('group') ?? ''
@@ -127,6 +139,10 @@ export function TeacherJournalsPage() {
   const assessmentId = params.get('assessment') ?? ''
   const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({})
   const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const identity = JSON.stringify([userId, courseId, groupId])
+  const scope = `${identity}:${location.key}`
+  const scopedKey = (key: string) => `${scope}:${key}`
   const revisions = useRef(new Map<string, number>())
   const queues = useRef(new Map<string, Promise<void>>())
   const assignmentsQuery = useQuery({
@@ -191,6 +207,20 @@ export function TeacherJournalsPage() {
   const assessments = assessmentsQuery.data ?? []
   const selectedLesson = lessons.find((item) => item.id === lessonId)
   const selectedAssessment = assessments.find((item) => item.id === assessmentId)
+  const assessmentDateDraft = selectedAssessment
+    ? (drafts[scopedKey(`date:${selectedAssessment.id}:date`)] ??
+      selectedAssessment.planned_date ??
+      '')
+    : ''
+  const assessmentLessonDraft = selectedAssessment
+    ? (drafts[scopedKey(`date:${selectedAssessment.id}:lesson`)] ??
+      selectedAssessment.lesson_id ??
+      '')
+    : ''
+  const linkedLessonDraft = lessons.find((item) => item.id === assessmentLessonDraft)
+  const lessonDateMismatch = Boolean(
+    linkedLessonDraft && moscowCalendarDate(linkedLessonDraft.starts_at) !== assessmentDateDraft,
+  )
   const attendanceQuery = useQuery({
     queryKey: [
       'teacher-journal-attendance',
@@ -251,6 +281,7 @@ export function TeacherJournalsPage() {
   }
 
   function setSave(key: string, state: SaveState, revision?: number) {
+    if (!key.startsWith(`${scope}:`)) return
     if (revision !== undefined && revisions.current.get(key) !== revision) return
     setSaveStates((current) => ({ ...current, [key]: state }))
   }
@@ -330,7 +361,7 @@ export function TeacherJournalsPage() {
   }
 
   async function saveAttendance(row: Attendance, status: 'attended' | 'absent' | 'unmarked') {
-    const key = `attendance:${selectedLesson?.id}:${row.student_id}`
+    const key = scopedKey(`attendance:${selectedLesson?.id}:${row.student_id}`)
     await enqueue(key, async (revision) => {
       try {
         await apiFetch(
@@ -350,7 +381,7 @@ export function TeacherJournalsPage() {
   }
 
   async function saveScore(row: Result, value: string) {
-    const key = `score:${selectedAssessment?.id}:${row.student_id}`
+    const key = scopedKey(`score:${selectedAssessment?.id}:${row.student_id}`)
     const score = value === '' ? null : Number(value)
     if (
       score !== null &&
@@ -383,7 +414,12 @@ export function TeacherJournalsPage() {
         { authenticated: true, cache: 'no-store' },
       )
       const row = actual.items[0]
-      if (row && row.planned_date === (date || null) && row.lesson_id === (lesson || null)) {
+      if (
+        row &&
+        row.planned_date === (date || null) &&
+        row.lesson_id === (lesson || null) &&
+        !row.date_needs_confirmation
+      ) {
         setSave(key, { phase: 'saved' }, revision)
         void assessmentsQuery.refetch()
         return
@@ -404,7 +440,7 @@ export function TeacherJournalsPage() {
 
   async function saveAssessmentDate(date: string, lesson: string) {
     if (!selectedAssessment) return
-    const key = `date:${selectedAssessment.id}`
+    const key = scopedKey(`date:${selectedAssessment.id}`)
     await enqueue(key, async (revision) => {
       try {
         await apiFetch(
@@ -511,7 +547,7 @@ export function TeacherJournalsPage() {
 
   const grouped = new Map<string, Assignment[]>()
   for (const assignment of assignments) {
-    const key = assignment.discipline.name
+    const key = assignment.course_offering_id
     grouped.set(key, [...(grouped.get(key) ?? []), assignment])
   }
   const currentLessonQuery = attendanceQuery
@@ -543,47 +579,40 @@ export function TeacherJournalsPage() {
         />
       ) : (
         <>
-          <div className="teacher-journal__selectors">
-            <label>
-              Дисциплина
-              <select
-                aria-label="Дисциплина"
-                value={selectedCourse}
-                onChange={(event) => setSelection('course', event.target.value)}
-              >
-                <option value="">Выберите дисциплину</option>
-                {[...grouped].map(([name, entries]) => (
-                  <optgroup key={name} label={name}>
-                    {[
-                      ...new Map(entries.map((item) => [item.course_offering_id, item])).values(),
-                    ].map((item) => (
-                      <option key={item.course_offering_id} value={item.course_offering_id}>
-                        {name} · {item.term.name}
-                      </option>
+          <nav className="teacher-journal__selectors" aria-label="Доступные журналы">
+            {[...grouped].map(([offeringId, entries]) => {
+              const offering = entries[0]
+              const label = `${offering.discipline.name} · ${offering.term.name}`
+              return (
+                <details key={offeringId} open={selectedCourse === offeringId}>
+                  <summary>{label}</summary>
+                  <ul>
+                    {entries.map((item) => (
+                      <li key={item.group.id}>
+                        <button
+                          type="button"
+                          aria-current={
+                            selectedCourse === offeringId && selectedGroup === item.group.id
+                              ? 'page'
+                              : undefined
+                          }
+                          onClick={() =>
+                            setParams({
+                              course: offeringId,
+                              group: item.group.id,
+                              tab: 'attendance',
+                            })
+                          }
+                        >
+                          {item.group.name}
+                        </button>
+                      </li>
                     ))}
-                  </optgroup>
-                ))}
-              </select>
-            </label>
-            <label>
-              Группа
-              <select
-                aria-label="Группа"
-                value={selectedGroup}
-                disabled={!selectedCourse}
-                onChange={(event) => setSelection('group', event.target.value)}
-              >
-                <option value="">Выберите группу</option>
-                {assignments
-                  .filter((item) => item.course_offering_id === selectedCourse)
-                  .map((item) => (
-                    <option key={item.group.id} value={item.group.id}>
-                      {item.group.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          </div>
+                  </ul>
+                </details>
+              )
+            })}
+          </nav>
           {hasUnavailableDirectSelection && (
             <ErrorState
               title="Журнал недоступен"
@@ -607,18 +636,41 @@ export function TeacherJournalsPage() {
                   }}
                 />
               )}
-              <div className="teacher-journal__tabs" role="tablist" aria-label="Раздел журнала">
+              <div
+                className="teacher-journal__tabs"
+                role="tablist"
+                aria-label="Раздел журнала"
+                onKeyDown={(event) => {
+                  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                  event.preventDefault()
+                  const next = activeTab === 'attendance' ? 1 : 0
+                  setSelection('tab', next === 0 ? 'attendance' : 'work')
+                  tabRefs.current[next]?.focus()
+                }}
+              >
                 <button
+                  ref={(node) => {
+                    tabRefs.current[0] = node
+                  }}
                   type="button"
                   role="tab"
+                  id="teacher-journal-tab-attendance"
+                  aria-controls="teacher-journal-panel-attendance"
+                  tabIndex={activeTab === 'attendance' ? 0 : -1}
                   aria-selected={activeTab === 'attendance'}
                   onClick={() => setSelection('tab', 'attendance')}
                 >
                   Посещаемость
                 </button>
                 <button
+                  ref={(node) => {
+                    tabRefs.current[1] = node
+                  }}
                   type="button"
                   role="tab"
+                  id="teacher-journal-tab-work"
+                  aria-controls="teacher-journal-panel-work"
+                  tabIndex={activeTab === 'work' ? 0 : -1}
                   aria-selected={activeTab === 'work'}
                   onClick={() => setSelection('tab', 'work')}
                 >
@@ -626,7 +678,13 @@ export function TeacherJournalsPage() {
                 </button>
               </div>
               {activeTab === 'attendance' ? (
-                <section className="teacher-journal__panel" role="tabpanel">
+                <section
+                  id="teacher-journal-panel-attendance"
+                  aria-labelledby="teacher-journal-tab-attendance"
+                  className="teacher-journal__panel"
+                  role="tabpanel"
+                  tabIndex={0}
+                >
                   <label>
                     Занятие
                     <select
@@ -684,7 +742,9 @@ export function TeacherJournalsPage() {
                           </p>
                           <div className="journal-student-list">
                             {attendanceQuery.data.map((row) => {
-                              const key = `attendance:${selectedLesson.id}:${row.student_id}`
+                              const key = scopedKey(
+                                `attendance:${selectedLesson.id}:${row.student_id}`,
+                              )
                               return (
                                 <article className="journal-student" key={row.student_id}>
                                   <div className="journal-student__identity">
@@ -724,7 +784,13 @@ export function TeacherJournalsPage() {
                   )}
                 </section>
               ) : (
-                <section className="teacher-journal__panel" role="tabpanel">
+                <section
+                  id="teacher-journal-panel-work"
+                  aria-labelledby="teacher-journal-tab-work"
+                  className="teacher-journal__panel"
+                  role="tabpanel"
+                  tabIndex={0}
+                >
                   <label>
                     Работа
                     <select
@@ -771,14 +837,15 @@ export function TeacherJournalsPage() {
                             <input
                               type="date"
                               value={
-                                drafts[`date:${selectedAssessment.id}:date`] ??
+                                drafts[scopedKey(`date:${selectedAssessment.id}:date`)] ??
                                 selectedAssessment.planned_date ??
                                 ''
                               }
                               onChange={(event) =>
                                 setDrafts((current) => ({
                                   ...current,
-                                  [`date:${selectedAssessment.id}:date`]: event.target.value,
+                                  [scopedKey(`date:${selectedAssessment.id}:date`)]:
+                                    event.target.value,
                                 }))
                               }
                             />
@@ -788,7 +855,7 @@ export function TeacherJournalsPage() {
                             <select
                               aria-label="Связать с занятием"
                               value={
-                                drafts[`date:${selectedAssessment.id}:lesson`] ??
+                                drafts[scopedKey(`date:${selectedAssessment.id}:lesson`)] ??
                                 selectedAssessment.lesson_id ??
                                 ''
                               }
@@ -796,7 +863,7 @@ export function TeacherJournalsPage() {
                                 const value = event.target.value
                                 setDrafts((current) => ({
                                   ...current,
-                                  [`date:${selectedAssessment.id}:lesson`]: value,
+                                  [scopedKey(`date:${selectedAssessment.id}:lesson`)]: value,
                                 }))
                               }}
                             >
@@ -813,12 +880,16 @@ export function TeacherJournalsPage() {
                           <button
                             type="button"
                             className="journal-date-save"
+                            disabled={
+                              lessonDateMismatch ||
+                              (!assessmentDateDraft && Boolean(assessmentLessonDraft))
+                            }
                             onClick={() =>
                               void saveAssessmentDate(
-                                drafts[`date:${selectedAssessment.id}:date`] ??
+                                drafts[scopedKey(`date:${selectedAssessment.id}:date`)] ??
                                   selectedAssessment.planned_date ??
                                   '',
-                                drafts[`date:${selectedAssessment.id}:lesson`] ??
+                                drafts[scopedKey(`date:${selectedAssessment.id}:lesson`)] ??
                                   selectedAssessment.lesson_id ??
                                   '',
                               )
@@ -826,9 +897,14 @@ export function TeacherJournalsPage() {
                           >
                             Сохранить дату и связь
                           </button>
+                          {lessonDateMismatch && (
+                            <p role="status">
+                              Дата работы и занятия должна совпадать по календарю Москвы.
+                            </p>
+                          )}
                           <SaveLabel
-                            state={saveStates[`date:${selectedAssessment.id}`]}
-                            onRetry={saveStates[`date:${selectedAssessment.id}`]?.retry}
+                            state={saveStates[scopedKey(`date:${selectedAssessment.id}`)]}
+                            onRetry={saveStates[scopedKey(`date:${selectedAssessment.id}`)]?.retry}
                           />
                         </div>
                       </section>
@@ -842,7 +918,9 @@ export function TeacherJournalsPage() {
                       ) : (
                         <div className="journal-student-list">
                           {(resultsQuery.data ?? []).map((row) => {
-                            const key = `score:${selectedAssessment.id}:${row.student_id}`
+                            const key = scopedKey(
+                              `score:${selectedAssessment.id}:${row.student_id}`,
+                            )
                             const value =
                               drafts[key] ?? (row.score === null ? '' : String(row.score))
                             return (
@@ -888,6 +966,7 @@ export function TeacherJournalsPage() {
                     </>
                   )}
                   <FinalResultsSection
+                    key={scope}
                     rows={finalsQuery.data ?? []}
                     studentNames={studentNames}
                     attestationType={chosen.attestation_type}
@@ -896,6 +975,10 @@ export function TeacherJournalsPage() {
                     refetch={() => void finalsQuery.refetch()}
                     save={saveFinal}
                     states={saveStates}
+                    scope={scope}
+                    rosterLoading={rosterQuery.isPending}
+                    rosterError={rosterQuery.error}
+                    retryRoster={() => void rosterQuery.refetch()}
                   />
                 </section>
               )}
@@ -919,6 +1002,10 @@ function FinalResultsSection({
   refetch,
   save,
   states,
+  scope,
+  rosterLoading,
+  rosterError,
+  retryRoster,
 }: {
   rows: FinalResult[]
   studentNames: Map<string, string | undefined>
@@ -933,6 +1020,10 @@ function FinalResultsSection({
     retry: () => void,
   ) => Promise<void>
   states: Record<string, SaveState>
+  scope: string
+  rosterLoading: boolean
+  rosterError: unknown
+  retryRoster: () => void
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const title =
@@ -949,10 +1040,14 @@ function FinalResultsSection({
         <LoadingState title="Загружаем итоги…" variant="compact" />
       ) : error ? (
         <QueryError error={error} retry={refetch} />
+      ) : rosterLoading ? (
+        <LoadingState title="Загружаем список студентов…" variant="compact" />
+      ) : rosterError ? (
+        <QueryError error={rosterError} retry={retryRoster} />
       ) : (
         <div className="journal-student-list">
           {rows.map((row) => {
-            const key = `final:${row.student_id}`
+            const key = `${scope}:final:${row.student_id}`
             const value =
               drafts[key] ??
               (attestationType === 'pass_fail'
@@ -971,7 +1066,8 @@ function FinalResultsSection({
                 attestationType === 'pass_fail'
                   ? { passed: next === '' ? null : next === 'true' }
                   : { grade_value: next === '' ? null : Number(next) }
-              void save(row, patch, key, () => void save(row, patch, key, () => undefined))
+              const retry = () => void save(row, patch, key, retry)
+              void save(row, patch, key, retry)
             }
             const retakeDateKey = `${key}:retake_date`
             const retakeLocationKey = `${key}:retake_location`
@@ -1024,6 +1120,7 @@ function FinalResultsSection({
                       type="date"
                       aria-label={`Дата пересдачи: ${displayName}`}
                       value={retakeDate}
+                      disabled={!row.has_debt}
                       onChange={(event) =>
                         setDrafts((current) => ({
                           ...current,
@@ -1032,12 +1129,8 @@ function FinalResultsSection({
                       }
                       onBlur={() => {
                         const patch = { retake_date: retakeDate || null }
-                        void save(
-                          row,
-                          patch,
-                          retakeDateKey,
-                          () => void save(row, patch, retakeDateKey, () => undefined),
-                        )
+                        const retry = () => void save(row, patch, retakeDateKey, retry)
+                        void save(row, patch, retakeDateKey, retry)
                       }}
                     />
                   </label>
@@ -1047,6 +1140,7 @@ function FinalResultsSection({
                       maxLength={200}
                       aria-label={`Место пересдачи: ${displayName}`}
                       value={retakeLocation}
+                      disabled={!row.has_debt}
                       onChange={(event) =>
                         setDrafts((current) => ({
                           ...current,
@@ -1055,18 +1149,15 @@ function FinalResultsSection({
                       }
                       onBlur={() => {
                         const patch = { retake_location: retakeLocation || null }
-                        void save(
-                          row,
-                          patch,
-                          retakeLocationKey,
-                          () => void save(row, patch, retakeLocationKey, () => undefined),
-                        )
+                        const retry = () => void save(row, patch, retakeLocationKey, retry)
+                        void save(row, patch, retakeLocationKey, retry)
                       }}
                     />
                   </label>
+                  <SaveLabel state={states[retakeDateKey]} onRetry={states[retakeDateKey]?.retry} />
                   <SaveLabel
-                    state={states[retakeDateKey] ?? states[retakeLocationKey]}
-                    onRetry={states[retakeDateKey]?.retry ?? states[retakeLocationKey]?.retry}
+                    state={states[retakeLocationKey]}
+                    onRetry={states[retakeLocationKey]?.retry}
                   />
                 </div>
               </article>
