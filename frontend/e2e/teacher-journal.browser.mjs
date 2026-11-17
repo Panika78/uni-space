@@ -39,8 +39,9 @@ async function login(page, username) {
 }
 
 async function selectJournal(page, course, group) {
-  await page.getByLabel('Дисциплина').selectOption(course)
-  await page.getByLabel('Группа').selectOption(group)
+  const groupButton = page.locator(`button[data-course-id="${course}"][data-group-id="${group}"]`)
+  await groupButton.waitFor()
+  await groupButton.click()
 }
 
 async function waitForSavedStudent(page, name) {

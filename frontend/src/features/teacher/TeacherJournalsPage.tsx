@@ -591,6 +591,8 @@ export function TeacherJournalsPage() {
                       <li key={item.group.id}>
                         <button
                           type="button"
+                          data-course-id={offeringId}
+                          data-group-id={item.group.id}
                           aria-current={
                             selectedCourse === offeringId && selectedGroup === item.group.id
                               ? 'page'
