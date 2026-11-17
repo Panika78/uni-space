@@ -164,6 +164,36 @@ try {
     'two real staff sessions receive version_conflict; local draft stays until explicit version adoption',
   )
 
+  let lostResponseMutationCount = 0
+  await firstPage.route(/\/api\/v1\/staff\/schedule\/lessons\/\d+$/, async (route) => {
+    if (route.request().method() !== 'PATCH') return route.continue()
+    const response = await route.fetch()
+    assert.equal(response.status(), 200)
+    lostResponseMutationCount += 1
+    await route.fulfill({ response, body: '' })
+  })
+  const savedBeforeResponseLoss = firstPage
+    .locator('.staff-schedule__lesson')
+    .filter({ hasText: subjectName })
+    .filter({ hasText: '22:15–23:00' })
+  await savedBeforeResponseLoss.getByRole('button', { name: 'Изменить' }).click()
+  const uncertainDialog = firstPage.getByRole('dialog', { name: 'Изменить занятие' })
+  await uncertainDialog.getByLabel('Время начала · Москва').fill('22:20')
+  await uncertainDialog.getByLabel('Время окончания · Москва').fill('23:05')
+  await uncertainDialog.getByRole('button', { name: 'Сохранить' }).click()
+  await uncertainDialog.getByText(/неизвестном формате/).waitFor()
+  assert.equal(lostResponseMutationCount, 1)
+  await uncertainDialog.getByRole('button', { name: 'Перечитать данные' }).click()
+  await firstPage.getByText('22:20–23:05').waitFor()
+  assert.equal(lostResponseMutationCount, 1)
+  pass('committed mutation with lost response is read back without an automatic retry')
+  await uncertainDialog.getByRole('button', { name: 'Отмена' }).click()
+  await firstPage
+    .getByRole('alertdialog', { name: 'Закрыть черновик?' })
+    .getByRole('button', { name: 'Закрыть без сохранения' })
+    .click()
+  await uncertainDialog.waitFor({ state: 'hidden' })
+
   await secondContext.close()
   await firstPage.setViewportSize({ width: 360, height: 800 })
   await firstPage.waitForFunction(() => document.documentElement.scrollWidth <= 360)
