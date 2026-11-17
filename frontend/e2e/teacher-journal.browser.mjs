@@ -39,6 +39,7 @@ async function login(page, username) {
 }
 
 async function selectJournal(page, course, group) {
+  await page.locator(`details[data-course-id="${course}"] > summary`).click()
   const groupButton = page.locator(`button[data-course-id="${course}"][data-group-id="${group}"]`)
   await groupButton.waitFor()
   await groupButton.click()

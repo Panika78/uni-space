@@ -584,7 +584,11 @@ export function TeacherJournalsPage() {
               const offering = entries[0]
               const label = `${offering.discipline.name} · ${offering.term.name}`
               return (
-                <details key={offeringId} open={selectedCourse === offeringId}>
+                <details
+                  key={offeringId}
+                  data-course-id={offeringId}
+                  open={selectedCourse === offeringId}
+                >
                   <summary>{label}</summary>
                   <ul>
                     {entries.map((item) => (
