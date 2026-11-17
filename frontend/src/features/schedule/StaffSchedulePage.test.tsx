@@ -176,6 +176,57 @@ it('shows a save-time server conflict next to its field and retains the user dra
   expect(screen.queryByText('Изменения сохранены')).not.toBeInTheDocument()
 })
 
+it.each([
+  [401, 'Сессия завершилась. Войдите снова.'],
+  [404, 'Запись не найдена или больше недоступна.'],
+  [422, 'Проверьте заполнение полей и выбранный диапазон.'],
+])('explains HTTP %i mutation failures without discarding the draft', async (status, message) => {
+  const user = userEvent.setup()
+  const defaultImplementation = vi.mocked(apiFetch).getMockImplementation()!
+  vi.mocked(apiFetch).mockImplementation(async (input, init) => {
+    const url = new URL(String(input), window.location.href)
+    if (url.pathname.endsWith('/staff/schedule/lessons/19') && init?.method === 'PATCH')
+      throw new ApiClientError('Request rejected', 'request_rejected', status)
+    return defaultImplementation(input, init) as never
+  })
+  mount()
+  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await user.click(await screen.findByRole('button', { name: 'Изменить' }))
+  const dialog = await screen.findByRole('dialog', { name: 'Изменить занятие' })
+  const start = within(dialog).getByLabelText('Время начала · Москва')
+  await user.clear(start)
+  await user.type(start, '09:30')
+  await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
+  expect(await within(dialog).findByText(message)).toBeInTheDocument()
+  expect(start).toHaveValue('09:30')
+})
+
+it('keeps a network-failed mutation uncertain and never retries it automatically', async () => {
+  const user = userEvent.setup()
+  let patchCount = 0
+  const defaultImplementation = vi.mocked(apiFetch).getMockImplementation()!
+  vi.mocked(apiFetch).mockImplementation(async (input, init) => {
+    const url = new URL(String(input), window.location.href)
+    if (url.pathname.endsWith('/staff/schedule/lessons/19') && init?.method === 'PATCH') {
+      patchCount += 1
+      throw new TypeError('connection lost after request')
+    }
+    return defaultImplementation(input, init) as never
+  })
+  mount()
+  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await user.click(await screen.findByRole('button', { name: 'Изменить' }))
+  const dialog = await screen.findByRole('dialog', { name: 'Изменить занятие' })
+  const start = within(dialog).getByLabelText('Время начала · Москва')
+  await user.clear(start)
+  await user.type(start, '09:30')
+  await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
+  expect(await within(dialog).findByText(/Результат операции неизвестен/)).toBeInTheDocument()
+  expect(start).toHaveValue('09:30')
+  expect(within(dialog).getByRole('button', { name: 'Перечитать данные' })).toBeInTheDocument()
+  expect(patchCount).toBe(1)
+})
+
 it('creates a complete lesson with a timezone-aware Moscow timestamp', async () => {
   const user = userEvent.setup()
   mount()
