@@ -168,6 +168,8 @@ _EVENT_FIELDS = {
     ("user", "create"): {"role": _ROLE, "is_active": _boolean},
     ("user", "set_role"): {"role": _ROLE},
     ("user", "set_active"): {"is_active": _boolean},
+    ("user", "change_password"): {"credential_changed": _boolean},
+    ("user", "reset_password"): {"credential_reset": _boolean},
     ("student", "set_academic_status"): {
         "academic_status": _choice("enrolled", "academic_leave", "expelled", "graduated")
     },

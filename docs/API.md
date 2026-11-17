@@ -32,6 +32,7 @@
 | POST | `/auth/login` | `LoginRequest` | `200 TokenResponse` + cookie |
 | POST | `/auth/refresh` | Refresh cookie, без тела | `200 TokenResponse` + новая cookie |
 | POST | `/auth/logout` | Refresh cookie, необязательный Bearer fallback, без тела | `200 LogoutResponse`, cookie удалена |
+| POST | `/auth/password` | `ChangePasswordRequest`, активная сессия | `204`, cookie удалена, все сессии отозваны |
 | GET | `/users/me` | — | `200 StudentProfile` |
 | GET | `/schedule` | `date_from`, `date_to` | `200 ScheduleResponse` |
 | GET | `/academics` | — | `200 AcademicsResponse` |
@@ -68,6 +69,21 @@ type LoginRequest = {
   login: string;
   password: string;
 };
+
+type ChangePasswordRequest = {
+  current_password: string;
+  new_password: string;    // 12–128 Unicode code points
+  confirm_password: string;
+};
+
+`/auth/password` доступен любой активной роли. Пароли не обрезаются; новый пароль
+должен содержать 12–128 Unicode code points, подтверждение должно совпадать,
+категории символов не навязываются. Неверный действующий пароль — `401
+invalid_credentials`, повтор действующего пароля — `409 password_unchanged`.
+Ответ `204` удаляет активную refresh-cookie; при COMMIT отзываются все сессии и
+refresh пользователя и создаётся безопасное audit-событие. При сетевой ошибке
+клиент не повторяет запрос и отправляет пользователя ко входу, поскольку COMMIT
+мог состояться без доставленного ответа.
 
 type TokenResponse = {
   access_token: string;
@@ -667,17 +683,21 @@ ID — положительные BIGINT-строки. Неизвестные п
 | GET `/admin/lookups` | `kind=groups|teachers|org_units`, `q`, `limit`, `after_id`; ограниченный список вариантов профиля, teachers только свободные |
 | GET `/admin/users/{id}` | логин, ФИО, роль, активность, ID профиля/группы/подразделения, permissions; никаких секретов |
 | POST `/admin/users` | `login`, `full_name`, `role`, ровно соответствующий роли `group_id` / `teacher_id` / `org_unit_id`; admin без профиля. 201 `{user,initial_password}` |
+| POST `/admin/users/{id}/password-reset` | только другой пользователь; `{password}` с `Cache-Control: no-store`; 192 случайных бита, выдать один раз |
 | PUT `/admin/users/{id}/active` | `{is_active:boolean}`; блокировка отзывает все сессии/refresh, разблокировка требует нового входа |
 | PUT `/admin/users/{id}/department` | `{org_unit_id}`; все прежние grants удаляются атомарно |
 | PUT / DELETE `/admin/users/{id}/permissions` | `{permission_code,scope_org_unit_id}`; grant/revoke отдельного разрешения, результат — деталь пользователя |
 
-Для teacher имя берётся из выбранной свободной записи; существующие назначения
+Password reset дополнительно требует ровно один разрешённый `Origin`, действующую
+Bearer-сессию и актуальную серверную роль `admin`; пользовательский plaintext во
+входе отсутствует. Для teacher имя берётся из выбранной свободной записи; существующие назначения
 не меняются. Student создаётся с `academic_status=enrolled`, без подгруппы.
-Staff создаётся без разрешений. Роль, логин и пароль существующего аккаунта
-через этот API не меняются. Учебные PermissionCode допустимы только у деканата
+Staff создаётся без разрешений. Роль и логин существующего аккаунта
+через этот API не меняются; пароль меняется только отдельным reset endpoint.
+Учебные PermissionCode допустимы только у деканата
 с NULL scope; `applications.review` / `news.publish` — со scope своего подразделения.
 
-409: `login_exists`, `teacher_unavailable`, `self_block_forbidden`, `last_admin`,
+409: `login_exists`, `teacher_unavailable`, `self_block_forbidden`, `self_reset_forbidden`, `password_unchanged`, `last_admin`,
 `conflict` (конфликт ограничений). 422: `invalid_profile`,
 `invalid_permission_scope`, `validation_error`. No-op не создаёт аудит.
 Создание аккаунта/профиля, grants, перевод, отзыв сессий и аудит атомарны.
@@ -687,8 +707,13 @@ Staff создаётся без разрешений. Роль, логин и п
 UI не помещает его в query cache/storage/history и удаляет при закрытии/уходе.
 При потерянном/неразбираемом ответе или 5xx после отправки POST повтор не выполняется:
 проверить список по уникальному логину. Неизвестный пароль нельзя восстановить
-до #66. Полученный 401 `access_expired` допускает существующий auth-refresh/replay:
-это явный отказ до предметной операции, не потерянный ответ после COMMIT.
+Сброс пароля выполняется отдельным POST и не повторяется автоматически даже после
+`401 access_expired`; потерянный ответ не раскрывает и не восстанавливает пароль.
+Администратор может выполнить новый осознанный сброс после проверки с пользователем.
+Административный reset атомарно меняет только `password_hash`, отзывает сессии и
+пишет audit-событие без данных учётной записи; блокировка, роль, профиль и права
+не меняются. Заблокированная учётная запись остаётся заблокированной. Reset себя
+возвращает `409 self_reset_forbidden`.
 
 Уточнение MVP2-25 по ревью: варианты `/admin/lookups` сохраняют `id/name/type` и
 дополнительно возвращают nullable `context` (кафедра, программа/курс или родительское
