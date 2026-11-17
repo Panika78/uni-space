@@ -8,6 +8,7 @@ import type { components } from '../../shared/api/schema'
 import {
   addDays,
   formatDate,
+  formatLessonTimeRange,
   formatTime,
   groupLessonsByVisibleDays,
   getMoscowDate,
@@ -266,26 +267,47 @@ async function listLessonsForCreateReconciliation(body: LessonWrite): Promise<Le
       if (candidate > lastDate || candidate === rangeFrom) break
       rangeTo = candidate
     }
-    let afterId: string | null = null
-    const seenCursors = new Set<string>()
-    do {
-      const params = new URLSearchParams({
-        resource: 'group',
-        resource_id: groupId,
-        date_from: rangeFrom,
-        date_to: rangeTo,
-        limit: '100',
-      })
-      if (afterId) params.set('after_id', afterId)
-      const page = await apiFetch<components['schemas']['EditorSchedule']>(
-        `${base}/lessons?${params}`,
-        { authenticated: true },
-      )
-      page.items.forEach((item) => results.set(item.id, item))
-      afterId = page.next_after_id
-      if (afterId && seenCursors.has(afterId)) throw new Error('Repeated schedule cursor')
-      if (afterId) seenCursors.add(afterId)
-    } while (afterId)
+    let recoveredCursor = false
+    let rangeComplete = false
+    while (!rangeComplete) {
+      let afterId: string | null = null
+      const seenCursors = new Set<string>()
+      const rangeResults = new Map<string, Lesson>()
+      try {
+        do {
+          const params = new URLSearchParams({
+            resource: 'group',
+            resource_id: groupId,
+            date_from: rangeFrom,
+            date_to: rangeTo,
+            limit: '100',
+          })
+          if (afterId) params.set('after_id', afterId)
+          const page = await apiFetch<components['schemas']['EditorSchedule']>(
+            `${base}/lessons?${params}`,
+            { authenticated: true },
+          )
+          page.items.forEach((item) => rangeResults.set(item.id, item))
+          afterId = page.next_after_id
+          if (afterId && seenCursors.has(afterId)) throw new Error('Repeated schedule cursor')
+          if (afterId) seenCursors.add(afterId)
+        } while (afterId)
+        rangeResults.forEach((item) => results.set(item.id, item))
+        rangeComplete = true
+      } catch (error) {
+        if (
+          !recoveredCursor &&
+          afterId !== null &&
+          error instanceof ApiClientError &&
+          error.status === 422 &&
+          error.code === 'invalid_cursor'
+        ) {
+          recoveredCursor = true
+          continue
+        }
+        throw error
+      }
+    }
     if (rangeTo === lastDate) break
     rangeFrom = addDays(rangeTo, 1)
   }
@@ -848,7 +870,13 @@ function ScheduleForm({
       }
     } catch (caught) {
       setUncertain(true)
-      setReconcileMessage(getErrorMessage(caught))
+      setReconcileMessage(
+        caught instanceof ApiClientError &&
+          caught.status === 422 &&
+          caught.code === 'invalid_cursor'
+          ? 'Не удалось обновить страницы расписания для сверки. Результат создания остаётся неопределённым; POST не повторялся.'
+          : getErrorMessage(caught),
+      )
       if (caught instanceof ApiClientError && caught.status === 403) onForbidden()
     }
   }
@@ -1823,7 +1851,7 @@ function StaffSchedulePageContent() {
             {grouped[day].map((lesson) => (
               <article key={lesson.id} className={`staff-schedule__lesson is-${lesson.status}`}>
                 <time className="staff-schedule__time" dateTime={lesson.starts_at}>
-                  {formatTime(lesson.starts_at)}–{formatTime(lesson.ends_at)}
+                  {formatLessonTimeRange(lesson.starts_at, lesson.ends_at)}
                 </time>
                 <div className="staff-schedule__details">
                   <h3>{lesson.display.course_offering.discipline_name}</h3>

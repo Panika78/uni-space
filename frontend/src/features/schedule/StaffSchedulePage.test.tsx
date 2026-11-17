@@ -150,6 +150,57 @@ it('restores a direct resource URL with its protected catalog display name', asy
   expect(screen.getByText('Иванов Иван · Лекция')).toBeInTheDocument()
 })
 
+it('shows the start and end Moscow dates for an overnight lesson in the next day view', async () => {
+  scheduleResponse = {
+    items: [
+      {
+        ...lesson,
+        starts_at: '2026-11-17T20:30:00Z',
+        ends_at: '2026-11-17T22:00:00Z',
+      },
+    ],
+    next_after_id: null,
+  }
+  mount(
+    '/staff/schedule?resource=group&resource_id=3&resource_name=ИВТ-21&date=2026-11-18&view=day',
+  )
+  expect(await screen.findByText('17.11, 23:30 — 18.11, 01:00')).toBeInTheDocument()
+})
+
+it.each([
+  [
+    'Sunday to Monday',
+    '2026-11-22',
+    '2026-11-22T20:30:00Z',
+    '2026-11-22T22:00:00Z',
+    '22.11, 23:30 — 23.11, 01:00',
+  ],
+  [
+    'ends at midnight',
+    '2026-11-17',
+    '2026-11-17T20:30:00Z',
+    '2026-11-17T21:00:00Z',
+    '17.11, 23:30 — 18.11, 00:00',
+  ],
+  [
+    'year boundary',
+    '2026-12-31',
+    '2026-12-31T20:30:00Z',
+    '2026-12-31T22:00:00Z',
+    '31.12, 23:30 — 01.01, 01:00',
+  ],
+])(
+  'renders the full time range at the %s boundary',
+  async (_name, date, startsAt, endsAt, label) => {
+    scheduleResponse = {
+      items: [{ ...lesson, starts_at: startsAt, ends_at: endsAt }],
+      next_after_id: null,
+    }
+    mount(`/staff/schedule?resource=group&resource_id=3&resource_name=ИВТ-21&date=${date}&view=day`)
+    expect(await screen.findByText(label)).toBeInTheDocument()
+  },
+)
+
 it('recovers once when fetching a later schedule page gets a stale cursor 422', async () => {
   const user = userEvent.setup()
   let firstPageReads = 0
@@ -481,6 +532,8 @@ it('creates a complete lesson with a timezone-aware Moscow timestamp', async () 
 it('reconciles a lost create response by group and submitted range without claiming causality', async () => {
   const user = userEvent.setup()
   let postCount = 0
+  let firstPageReads = 0
+  let cursorReads = 0
   let candidate = lesson
   const original = vi.mocked(apiFetch).getMockImplementation()!
   vi.mocked(apiFetch).mockImplementation(async (input, init) => {
@@ -491,8 +544,37 @@ it('reconciles a lost create response by group and submitted range without claim
       candidate = { ...lesson, ...submitted, id: 'candidate', version: 1 }
       throw new TypeError('connection lost after request')
     }
-    if (url.pathname.endsWith('/staff/schedule/lessons') && !init?.method)
-      return { items: [candidate], next_after_id: null } as never
+    if (
+      url.pathname.endsWith('/staff/schedule/lessons') &&
+      !init?.method &&
+      url.searchParams.get('date_to') === '2026-11-17' &&
+      url.searchParams.get('limit') === '100'
+    ) {
+      if (url.searchParams.has('after_id')) {
+        cursorReads += 1
+        if (cursorReads === 1 || cursorReads >= 3)
+          throw new ApiClientError('Cursor expired', 'invalid_cursor', 422)
+        return { items: [candidate], next_after_id: null } as never
+      }
+      firstPageReads += 1
+      return {
+        items:
+          firstPageReads === 1
+            ? Array.from({ length: 100 }, (_, index) => ({
+                ...lesson,
+                id: String(index + 1),
+                starts_at: '2026-11-17T06:00:00Z',
+                ends_at: '2026-11-17T07:30:00Z',
+              }))
+            : Array.from({ length: 100 }, (_, index) => ({
+                ...lesson,
+                id: String(index + 101),
+                starts_at: '2026-11-17T06:00:00Z',
+                ends_at: '2026-11-17T07:30:00Z',
+              })),
+        next_after_id: firstPageReads === 1 ? 'stale' : 'fresh',
+      } as never
+    }
     return original(input, init) as never
   })
   mount()
@@ -516,6 +598,8 @@ it('reconciles a lost create response by group and submitted range without claim
   expect(
     await within(dialog).findByText(/Найдена одна запись с совпадающими полями/),
   ).toBeInTheDocument()
+  expect(firstPageReads).toBe(2)
+  expect(cursorReads).toBe(2)
   expect(within(dialog).getByText(/2026-11-17 13:00–2026-11-17 14:15/)).toBeInTheDocument()
   const listing = vi.mocked(apiFetch).mock.calls.find(([url, init]) => {
     const candidateUrl = new URL(String(url), window.location.href)
@@ -532,6 +616,12 @@ it('reconciles a lost create response by group and submitted range without claim
   expect(query.get('resource_id')).toBe('3')
   expect(query.get('date_from')).toBe('2026-11-17')
   expect(query.get('date_to')).toBe('2026-11-17')
+  await user.click(within(dialog).getByRole('button', { name: 'Перечитать данные' }))
+  expect(
+    await within(dialog).findByText(/Не удалось обновить страницы расписания/),
+  ).toBeInTheDocument()
+  expect(firstPageReads).toBe(4)
+  expect(cursorReads).toBe(4)
   expect(postCount).toBe(1)
 })
 

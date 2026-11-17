@@ -165,10 +165,11 @@
   background: #faf6f3;
 }
 .staff-schedule__time {
+  min-width: 0;
   padding-top: 2px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .staff-schedule__details {
   min-width: 0;

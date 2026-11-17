@@ -81,6 +81,13 @@ export function formatTime(timestamp: string): string {
   }).format(new Date(timestamp))
 }
 
+export function formatLessonTimeRange(startsAt: string, endsAt: string): string {
+  const startDate = getMoscowDate(new Date(startsAt))
+  const endDate = getMoscowDate(new Date(endsAt))
+  if (startDate === endDate) return `${formatTime(startsAt)}–${formatTime(endsAt)}`
+  const shortDate = (date: string) => `${date.slice(8, 10)}.${date.slice(5, 7)}`
+  return `${shortDate(startDate)}, ${formatTime(startsAt)} — ${shortDate(endDate)}, ${formatTime(endsAt)}`
+}
 const boundaryTime = new Intl.DateTimeFormat('en-GB', {
   timeZone: timezone,
   hourCycle: 'h23',
