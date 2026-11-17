@@ -1338,12 +1338,45 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** EditorCourseOfferingDisplay */
+        EditorCourseOfferingDisplay: {
+            /**
+             * Attestation Type
+             * @enum {string}
+             */
+            attestation_type: "exam" | "pass_fail" | "graded_pass";
+            /** Discipline Code */
+            discipline_code: string | null;
+            /** Discipline Id */
+            discipline_id: string;
+            /** Discipline Name */
+            discipline_name: string;
+            /** Groups */
+            groups: components["schemas"]["EditorOfferingGroupDisplay"][];
+            /** Id */
+            id: string;
+            /**
+             * Term Ends On
+             * Format: date
+             */
+            term_ends_on: string;
+            /** Term Id */
+            term_id: string;
+            /** Term Name */
+            term_name: string;
+            /**
+             * Term Starts On
+             * Format: date
+             */
+            term_starts_on: string;
+        };
         /** EditorLesson */
         EditorLesson: {
             /** Course Offering Id */
             course_offering_id: string;
             /** Created By User Id */
             created_by_user_id: string | null;
+            display: components["schemas"]["EditorLessonDisplay"];
             /**
              * Ends At
              * Format: date-time
@@ -1379,12 +1412,57 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** EditorLessonDisplay */
+        EditorLessonDisplay: {
+            course_offering: components["schemas"]["EditorCourseOfferingDisplay"];
+            /** Participants */
+            participants: components["schemas"]["EditorParticipantDisplay"][];
+            /** Rooms */
+            rooms: components["schemas"]["EditorRoomDisplay"][];
+            teacher: components["schemas"]["EditorTeacherDisplay"] | null;
+        };
+        /** EditorOfferingGroupDisplay */
+        EditorOfferingGroupDisplay: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** EditorParticipantDisplay */
+        EditorParticipantDisplay: {
+            /** Group Id */
+            group_id: string;
+            /** Group Name */
+            group_name: string;
+            /** Subgroup Id */
+            subgroup_id?: string | null;
+            /** Subgroup Name */
+            subgroup_name?: string | null;
+        };
+        /** EditorRoomDisplay */
+        EditorRoomDisplay: {
+            /** Building Id */
+            building_id: string;
+            /** Building Name */
+            building_name: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
         /** EditorSchedule */
         EditorSchedule: {
             /** Items */
             items: components["schemas"]["EditorLesson"][];
             /** Next After Id */
             next_after_id: string | null;
+        };
+        /** EditorTeacherDisplay */
+        EditorTeacherDisplay: {
+            /** Full Name */
+            full_name: string;
+            /** Id */
+            id: string;
         };
         /** EffectivePermission */
         EffectivePermission: {
