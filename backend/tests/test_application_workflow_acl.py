@@ -194,7 +194,11 @@ def auth(runtime_engine, monkeypatch):
 def test_production_acl_supports_authenticated_workflow_and_denies_extra_writes(
     context,  # noqa: F811
     runtime_engine,
+    monkeypatch,
 ):
+    from app.applications import router as applications_router
+    from app.documents import issuer
+
     c = context
     admin_engine, api_engine = runtime_engine
 
@@ -203,6 +207,8 @@ def test_production_acl_supports_authenticated_workflow_and_denies_extra_writes(
             yield db
 
     c["client"].app.dependency_overrides[get_db_session] = runtime_session
+    monkeypatch.setattr(applications_router, "SessionLocal", lambda: Session(api_engine))
+    monkeypatch.setattr(issuer, "SessionLocal", lambda: Session(api_engine))
     student = c["login"]()
     created = c["request"](
         "POST",
@@ -211,6 +217,7 @@ def test_production_acl_supports_authenticated_workflow_and_denies_extra_writes(
         json={"service_code": "study_certificate", "form_data": {"place_of_submission": "X"}},
     )
     assert created.status_code == 201, created.text
+    assert created.json()["document_status"] == "ready"
     assert history(c, created.json()["id"], student).status_code == 200
     identifier = c["application"]()
     assert c["request"]("GET", "/api/v1/staff/applications", c["tokens"][0]).status_code == 200

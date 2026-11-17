@@ -40,6 +40,20 @@
 | POST | `/applications` | `CreateApplicationRequest` | `201 Application` |
 | GET | `/applications` | `limit`, `cursor` | `200 Page<Application>` |
 | GET | `/applications/{id}` | ID | `200 Application` |
+| GET | `/applications/{id}/document` | ID заявки | готовый PDF владельцу |
+| POST | `/applications/{id}/document/retry` | ID заявки | `200 Application` и метаданные документа |
+| POST | `/applications/{id}/document/process` | ID старой automatic заявки | `200 Application` и метаданные документа |
+| GET | `/staff/applications/{id}/document` | ID + `applications.review` scope | готовый PDF |
+| POST | `/staff/applications/{id}/document/retry` | ID + `applications.review` scope | `200 StaffApplicationResponse` |
+
+Автоматические `study_certificate` и `academic_transcript` фиксируются как
+`approved` с историей до синхронной генерации. При ошибке выдачи заявка остаётся
+одобренной с `document_status=failed`; потеря ответа создания требует проверки
+списка/детали и не является основанием повторно отправлять POST. Ручное одобрение
+`accounting_certificate` сохраняет `200` и запускает генерацию после commit.
+Ответы заявки содержат `document: null | {id, filename, issued_at}` без storage key
+и файлового URL. Метаданные присутствуют при `ready`; ошибка генерации не откатывает
+одобрение. Для `ready` повтор — no-op над теми же байтами.
 
 Для `academic_leave` `POST /applications` принимает только `multipart/form-data` с
 полем `form_data` (JSON-строка) и одним или несколькими полями `files`.
@@ -259,7 +273,7 @@ type Application = {
 
 Академический отпуск подаётся через `multipart/form-data`: поле `form_data` содержит JSON формы, а `files` — подтверждающие файлы PDF/JPG/PNG. Допускается не более 5 текущих файлов размером до 10 МиБ каждый и 50 МиБ суммарно; требуется минимум один технически открываемый файл. Содержимое не сверяется с основанием. Доступность и требования возвращаются в `Service`. Бухгалтерская справка принимает необязательную цель, ответственное подразделение назначается сервером. Неизвестные поля и клиентские ID/статусы запрещены.
 
-Создание доступных услуг возвращает `201 submitted/pending`, без автоматического одобрения или PDF. Ошибки конфигурации — `409 service_unavailable`, `academic_term_unavailable`, `academic_term_ambiguous`, `responsible_unit_unavailable`; ошибки формы — `422 validation_error`.
+Создание `study_certificate` и `academic_transcript` возвращает `201 approved` и запускает синхронную выдачу PDF после отдельной фиксации системного одобрения. При сбое выдачи ответ сохраняет `approved/failed` (или контролируемую ошибку при недоступности БД/хранилища); клиент не должен повторять POST создания, а проверяет заявку. `accounting_certificate` создаётся как `submitted/pending` и выдаётся только после ручного одобрения бухгалтерией. `academic_leave` остаётся отдельным процессом сотрудника без PDF и автоматического изменения академического статуса. Ошибки конфигурации — `409 service_unavailable`, `academic_term_unavailable`, `academic_term_ambiguous`, `responsible_unit_unavailable`; ошибки формы — `422 validation_error`.
 
 ### Новости и уведомления
 
@@ -525,6 +539,11 @@ MVP1 сохранены, в ответы создания/списка/дета�
 | GET | `/staff/applications/{id}/history` | `limit`, `cursor` | `Page<ApplicationHistoryEvent>` |
 | POST | `/applications/{id}/resubmit` | `ResubmitApplicationRequest` | `Application` |
 | GET | `/applications/{id}/history` | `limit`, `cursor` | `Page<ApplicationHistoryEvent>` |
+| GET | `/applications/{id}/document` | ID владельца | готовый PDF |
+| POST | `/applications/{id}/document/retry` | ID владельца | `Application` |
+| POST | `/applications/{id}/document/process` | ID старой automatic заявки | `Application` |
+| GET | `/staff/applications/{id}/document` | ID + доступный scope | готовый PDF |
+| POST | `/staff/applications/{id}/document/retry` | ID + доступный scope | `StaffApplicationResponse` |
 
 Для академического отпуска `POST /applications/{id}/resubmit` принимает JSON или
 `multipart/form-data`: `expected_version`, JSON-строку `form_data`, JSON-строку
@@ -540,6 +559,20 @@ ID приводят к `409`; прежний набор остаётся тек�
 `503 temporarily_unavailable`. Скачивание авторизуется на каждом запросе, возвращает
 `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` и
 `Cache-Control: no-store`. Неизвестный или чужой ID вложения возвращает одинаковый `404`.
+
+PDF доступен только владельцу или сотруднику с действующим `applications.review`
+в scope заявки. GET никогда не запускает генерацию. При `approved + pending/failed`
+явный retry синхронно выдаёт документ; повтор `ready` возвращает прежние metadata.
+`POST /applications/{id}/document/process` один раз фиксирует переход только для
+старых automatic заявок `submitted/pending`, сохраняет прежний ID и добавляет
+реальное событие истории. Для `approved/ready` endpoint является безопасным
+no-op и возвращает существующую заявку, не запуская issuer. Состояния
+`approved/pending`, `approved/failed` и прочие запрещённые состояния возвращают
+`409`; для них используется endpoint retry. `academic_leave` PDF не выдаёт. PDF передаётся как
+`application/pdf` с `Content-Disposition: inline`, `nosniff` и `no-store`; отсутствие
+или повреждение файла при `ready` возвращает `503` без повторной генерации.
+Детали заявки и списки включают только безопасные metadata. Пользовательские
+уведомления о готовности будут подключаться отдельно в #86.
 
 `StaffApplicationResponse` расширяет `Application` полями `student_id: Id` и
 `reviewer_user_id: Id | null`. Список заявлений сортируется по `(created_at, id)`
@@ -601,10 +634,12 @@ ID заявления. Автоматические услуги (включая
 отзыв права/смена подразделения сотрудника действуют на следующий запрос.
 Ошибки формы, причины и версии — `422 validation_error`. Общая форма — `ApiError`.
 
-`approved/rejected` терминальны. `document_status` workflow не изменяет, PDF,
-вложения и уведомления не запускает. Автоматическая `study_certificate` остаётся
-`submitted/pending` до отдельной реализации #67/#83; ручное одобрение для неё
-запрещено. Академический статус студента не меняется при одобрении заявления.
+Для `study_certificate` и `academic_transcript` переход `submitted → approved`
+фиксируется системой с `actor_user_id=NULL` и историей до отдельной транзакции
+генерации PDF; ручное одобрение для этих автоматических услуг запрещено.
+`accounting_certificate` требует реального одобрения сотрудником бухгалтерии.
+`academic_leave` остаётся отдельным ручным процессом без PDF. Академический
+статус студента не меняется при одобрении заявления.
 Изменение набора вложений при повторной подаче академического отпуска фиксируется
 в той же транзакции и увеличивает версию заявления. #83 сохраняет отдельную
 транзакцию генерации и её проверки; #84/#85 используют эти API, текущую

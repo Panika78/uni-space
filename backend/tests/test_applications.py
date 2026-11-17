@@ -18,6 +18,7 @@ from app.models import (
     CourseGroup,
     CourseOffering,
     Discipline,
+    IssuedDocument,
     OrgUnit,
     Program,
     RefreshToken,
@@ -29,10 +30,19 @@ from app.models import (
 
 
 @pytest.mark.integration
-def test_application_http_routes_use_real_bearer_authentication(postgresql_engine):
+def test_application_http_routes_use_real_bearer_authentication(
+    postgresql_engine, monkeypatch, tmp_path
+):
     """Exercise login, Bearer validation, role checks, and ownership without auth overrides."""
+    from app.applications import router as applications_router
     from app.auth.security import PASSWORD_HASHER
+    from app.core.config import get_settings
+    from app.documents import issuer
     from app.main import app
+
+    settings = get_settings().model_copy(update={"attachment_storage_path": str(tmp_path)})
+    monkeypatch.setattr(applications_router, "get_settings", lambda: settings)
+    monkeypatch.setattr(issuer, "get_settings", lambda: settings)
 
     suffix = uuid4().hex
     password = "Task013-real-auth-test-password"
@@ -314,6 +324,9 @@ def test_application_http_routes_use_real_bearer_authentication(postgresql_engin
         ]
     finally:
         if created_ids:
+            session.query(IssuedDocument).filter(
+                IssuedDocument.application_id.in_(created_ids)
+            ).delete(synchronize_session=False)
             session.query(Application).filter(Application.id.in_(created_ids)).delete(
                 synchronize_session=False
             )
@@ -357,7 +370,20 @@ def test_form_data_trims_text_and_rejects_blank_or_oversized_values():
 
 
 @pytest.mark.integration
-def test_application_submission_is_owned_and_returns_location_and_server_state(db_session):
+def test_application_submission_is_owned_and_returns_location_and_server_state(
+    db_session, monkeypatch, tmp_path
+):
+    from contextlib import nullcontext
+
+    from app.applications import router as applications_router
+    from app.core.config import get_settings
+    from app.documents import issuer
+
+    settings = get_settings().model_copy(update={"attachment_storage_path": str(tmp_path)})
+    monkeypatch.setattr(applications_router, "get_settings", lambda: settings)
+    monkeypatch.setattr(applications_router, "SessionLocal", lambda: nullcontext(db_session))
+    monkeypatch.setattr(issuer, "get_settings", lambda: settings)
+    monkeypatch.setattr(issuer, "SessionLocal", lambda: nullcontext(db_session))
     from app.main import app
 
     suffix = "task013-test"
@@ -409,11 +435,11 @@ def test_application_submission_is_owned_and_returns_location_and_server_state(d
         body = response.json()
         assert response.headers["location"] == f"/api/v1/applications/{body['id']}"
         assert body["form_data"]["place_of_submission"] == "Отдел\n№ 2 — 東京"
-        assert body["review_status"] == "submitted"
-        assert body["document_status"] == "pending"
+        assert body["review_status"] == "approved"
+        assert body["document_status"] == "ready"
         assert body["feedback"] is None
         assert db_session.get(Application, int(body["id"])).student_id == student.id
-        assert db_session.get(Application, int(body["id"])).version == 1
+        assert db_session.get(Application, int(body["id"])).version == 3
 
         accepted_unicode_limit = TestClient(app).post(
             "/api/v1/applications",
@@ -478,7 +504,7 @@ def test_application_submission_is_owned_and_returns_location_and_server_state(d
             },
         )
         event.remove(db_session, "before_commit", fail_before_commit)
-        assert failed_commit.status_code == 500
+        assert failed_commit.status_code == 503
         assert db_session.query(Application).filter_by(student_id=student.id).count() == 2
 
         second_user = User(
@@ -534,7 +560,9 @@ def test_service_catalog_seed_is_unique_and_application_indexes_exist(db_session
 
 
 @pytest.mark.integration
-def test_application_routes_work_with_minimal_postgresql_role(postgresql_engine):
+def test_application_routes_work_with_minimal_postgresql_role(
+    postgresql_engine, monkeypatch, tmp_path
+):
     from app.main import app
 
     role = "uni_space_api"
@@ -558,12 +586,26 @@ def test_application_routes_work_with_minimal_postgresql_role(postgresql_engine)
         connection.execute(text(f"GRANT USAGE ON SCHEMA public TO {role}"))
         connection.execute(text(f"GRANT SELECT ON service_types TO {role}"))
         connection.execute(text(f"GRANT SELECT ON application_attachments TO {role}"))
+        connection.execute(text(f"GRANT SELECT ON issued_documents, users, students TO {role}"))
         connection.execute(
             text(f"GRANT SELECT ON academic_terms, org_units, programs, study_groups TO {role}")
         )
         connection.execute(text(f"GRANT SELECT ON course_offerings, course_groups TO {role}"))
         connection.execute(text(f"GRANT SELECT, INSERT ON applications TO {role}"))
+        connection.execute(
+            text(
+                f"GRANT UPDATE (review_status, document_status, updated_at, version) "
+                f"ON applications TO {role}"
+            )
+        )
         connection.execute(text(f"GRANT USAGE ON SEQUENCE applications_id_seq TO {role}"))
+        connection.execute(
+            text(
+                f"GRANT INSERT (application_id, storage_key, filename, snapshot_data) "
+                f"ON issued_documents TO {role}"
+            )
+        )
+        connection.execute(text(f"GRANT USAGE ON SEQUENCE issued_documents_id_seq TO {role}"))
         connection.execute(text(f"GRANT SELECT, INSERT ON application_history TO {role}"))
         connection.execute(text(f"GRANT USAGE ON SEQUENCE application_history_id_seq TO {role}"))
 
@@ -599,6 +641,15 @@ def test_application_routes_work_with_minimal_postgresql_role(postgresql_engine)
 
         api_url = postgresql_engine.url.set(username=role, password=password)
         api_engine = create_engine(api_url)
+        from app.applications import router as applications_router
+        from app.core.config import get_settings
+        from app.documents import issuer
+
+        settings = get_settings().model_copy(update={"attachment_storage_path": str(tmp_path)})
+        monkeypatch.setattr(applications_router, "get_settings", lambda: settings)
+        monkeypatch.setattr(issuer, "get_settings", lambda: settings)
+        monkeypatch.setattr(applications_router, "SessionLocal", lambda: Session(api_engine))
+        monkeypatch.setattr(issuer, "SessionLocal", lambda: Session(api_engine))
 
         def get_api_session():
             with Session(api_engine) as api_session:
@@ -636,6 +687,13 @@ def test_application_routes_work_with_minimal_postgresql_role(postgresql_engine)
         if api_engine is not None:
             api_engine.dispose()
         if student is not None:
+            admin.execute(
+                delete(IssuedDocument).where(
+                    IssuedDocument.application_id.in_(
+                        select(Application.id).where(Application.student_id == student.id)
+                    )
+                )
+            )
             admin.execute(delete(Application).where(Application.student_id == student.id))
             admin.delete(student)
             admin.flush()
@@ -657,7 +715,20 @@ def test_application_routes_work_with_minimal_postgresql_role(postgresql_engine)
 
 
 @pytest.mark.integration
-def test_mvp2_service_forms_fix_server_term_and_responsible_units(db_session):
+def test_mvp2_service_forms_fix_server_term_and_responsible_units(
+    db_session, monkeypatch, tmp_path
+):
+    from contextlib import nullcontext
+
+    from app.applications import router as applications_router
+    from app.core.config import get_settings
+    from app.documents import issuer
+
+    settings = get_settings().model_copy(update={"attachment_storage_path": str(tmp_path)})
+    monkeypatch.setattr(applications_router, "get_settings", lambda: settings)
+    monkeypatch.setattr(applications_router, "SessionLocal", lambda: nullcontext(db_session))
+    monkeypatch.setattr(issuer, "get_settings", lambda: settings)
+    monkeypatch.setattr(issuer, "SessionLocal", lambda: nullcontext(db_session))
     from fastapi.testclient import TestClient
 
     from app.applications.service import resolve_dean_office, validate_and_store_form
@@ -830,7 +901,7 @@ def test_mvp2_service_forms_fix_server_term_and_responsible_units(db_session):
         assert saved_form["starts_on"] == (today - timedelta(days=1)).isoformat()
         saved_application = db_session.get(Application, int(transcript.json()["id"]))
         assert saved_application.form_data == saved_form
-        assert saved_application.document_status == "pending"
+        assert saved_application.document_status == "ready"
         saved_term = db_session.get(AcademicTerm, int(saved_form["academic_term_id"]))
         saved_term.starts_on = today - timedelta(days=3)
         saved_term.ends_on = today - timedelta(days=2)

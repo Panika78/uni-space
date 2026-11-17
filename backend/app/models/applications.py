@@ -143,3 +143,23 @@ class ApplicationAttachment(Base):
     uploaded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.statement_timestamp()
     )
+
+
+class IssuedDocument(Base):
+    __tablename__ = "issued_documents"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_issued_documents"),
+        UniqueConstraint("application_id", name="uq_issued_documents_application_id"),
+        UniqueConstraint("storage_key", name="uq_issued_documents_storage_key"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    application_id: Mapped[int] = mapped_column(
+        ForeignKey("applications.id", name="fk_issued_documents_application_id_applications"),
+        nullable=False,
+    )
+    storage_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    filename: Mapped[str] = mapped_column(String(200), nullable=False)
+    issued_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.statement_timestamp()
+    )
+    snapshot_data: Mapped[dict] = mapped_column(JSONB, nullable=False)

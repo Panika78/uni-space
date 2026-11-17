@@ -4,6 +4,7 @@ from app.models.applications import (
     Application,
     ApplicationAttachment,
     ApplicationHistory,
+    IssuedDocument,
     ServiceType,
 )
 from app.models.attendance import Attendance
@@ -49,6 +50,7 @@ __all__ = [
     "Application",
     "ApplicationAttachment",
     "ApplicationHistory",
+    "IssuedDocument",
     "Base",
     "News",
     "NewsCreateRequest",

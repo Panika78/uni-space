@@ -748,6 +748,7 @@ jobs:
       DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
       COOKIE_SECURE: 'false'
       ALLOWED_ORIGINS: '["http://localhost:5173"]'
+      ATTACHMENT_STORAGE_PATH: ${{ github.workspace }}/work/role-attachments
     services:
       postgres:
         image: postgres:17.11-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
@@ -780,6 +781,8 @@ jobs:
           uv python install 3.12.16
           uv sync --locked --project backend --python 3.12.16
           (cd backend && uv run --locked --python 3.12.16 alembic upgrade head)
+          mkdir -p "$ATTACHMENT_STORAGE_PATH"
+          chmod 700 "$ATTACHMENT_STORAGE_PATH"
           printf '%s' 'fictional-schedule-password' | PYTHONPATH=backend uv run --locked --python 3.12.16 --project backend python deploy/schedule_fixtures.py
           mkdir -p work/browser-tooling
           npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
@@ -880,6 +883,7 @@ jobs:
       DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@localhost:5432/uni_space_test
       COOKIE_SECURE: 'false'
       ALLOWED_ORIGINS: '["http://localhost:5173"]'
+      ATTACHMENT_STORAGE_PATH: ${{ github.workspace }}/work/mvp1-attachments
     services:
       postgres:
         image: postgres:17.11-bookworm@sha256:665dc7b37ac52a17e298511414c21d23ffa4e6a6ef6225b3e5d59c7afb35e994
@@ -912,6 +916,8 @@ jobs:
           uv python install 3.12.16
           uv sync --locked --project backend --python 3.12.16
           (cd backend && uv run --locked --python 3.12.16 alembic upgrade head)
+          mkdir -p "$ATTACHMENT_STORAGE_PATH"
+          chmod 700 "$ATTACHMENT_STORAGE_PATH"
           mkdir -p work/browser-tooling
           npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
           node work/browser-tooling/node_modules/playwright/cli.js install --with-deps chromium --only-shell

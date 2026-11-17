@@ -8,6 +8,7 @@ import hashlib
 import os
 import re
 import tempfile
+import time
 import uuid
 import warnings
 from collections.abc import Callable, Iterator
@@ -39,14 +40,22 @@ class StagedAttachment:
 
 
 @contextmanager
-def coordination_lock(root: Path) -> Iterator[None]:
+def coordination_lock(root: Path, *, timeout_seconds: float = 10) -> Iterator[None]:
     """Serialize publication/commit and orphan cleanup across API processes."""
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     root.chmod(0o700)
     descriptor = os.open(root / ".coordination.lock", os.O_CREAT | os.O_RDWR, 0o600)
     try:
         os.fchmod(descriptor, 0o600)
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("storage coordination timed out") from None
+                time.sleep(min(0.05, max(0, deadline - time.monotonic())))
         yield
     finally:
         fcntl.flock(descriptor, fcntl.LOCK_UN)

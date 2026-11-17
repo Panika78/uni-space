@@ -1752,6 +1752,21 @@ with SessionLocal.begin() as db:
                     assert submitted.status_code == 201
                     application_id = int(submitted.json()["id"])
                     application_path = f"/api/v1/applications/{application_id}"
+                    issued_document_path = (
+                        f"/api/v1/applications/{application_id}/document"
+                    )
+                    issued_download = student_client.get(
+                        issued_document_path, headers=student_headers
+                    )
+                    assert issued_download.status_code == 200, issued_download.text
+                    assert issued_download.headers["content-type"] == "application/pdf"
+                    issued_pdf = issued_download.content
+                    assert issued_pdf.startswith(b"%PDF-")
+                    issued_document_key = sql(
+                        "SELECT storage_key FROM issued_documents "
+                        f"WHERE application_id={application_id}"
+                    )
+                    assert issued_document_key
                     assert (
                         student_client.get(
                             application_path, headers=student_headers
@@ -1885,6 +1900,12 @@ with SessionLocal.begin() as db:
                     database=restored_database,
                 )
                 assert restored_key == attachment_key
+                restored_issued_key = sql(
+                    "SELECT storage_key FROM issued_documents "
+                    f"WHERE application_id={application_id}",
+                    database=restored_database,
+                )
+                assert restored_issued_key == issued_document_key
                 api_image = dc("images", "-q", "api").stdout.strip().splitlines()[0]
                 restored_file_hash = run(
                     [
@@ -1906,6 +1927,26 @@ with SessionLocal.begin() as db:
                     env=env,
                 ).stdout.strip()
                 assert restored_file_hash == hashlib.sha256(leave_pdf).hexdigest()
+                restored_issued_hash = run(
+                    [
+                        "docker",
+                        "run",
+                        "--rm",
+                        "--network",
+                        "none",
+                        "-v",
+                        f"{restored_volume}:/restore:ro",
+                        "--entrypoint",
+                        "python",
+                        api_image,
+                        "-c",
+                        "import hashlib; from pathlib import Path; print(hashlib.sha256(Path('/restore/issued_documents/"
+                        + restored_issued_key
+                        + "').read_bytes()).hexdigest())",
+                    ],
+                    env=env,
+                ).stdout.strip()
+                assert restored_issued_hash == hashlib.sha256(issued_pdf).hexdigest()
                 recovery = temp / "application-data-recovery.yaml"
                 recovery.write_text(
                     f"""services:
@@ -1950,6 +1991,11 @@ volumes:
                     )
                     assert owner_download.status_code == 200
                     assert owner_download.content == leave_pdf
+                    owner_issued_download = recovered.get(
+                        issued_document_path, headers=student_headers
+                    )
+                    assert owner_issued_download.status_code == 200
+                    assert owner_issued_download.content == issued_pdf
                     assert (
                         recovered.get(
                             attachment_download_path, headers=stranger_headers
@@ -1957,7 +2003,7 @@ volumes:
                         == 404
                     )
                 print(
-                    "PASS: combined database and volume recovery preserves attachment bytes and private access",
+                    "PASS: combined database and volume recovery preserves attachment and issued PDF bytes and private access",
                     flush=True,
                 )
                 run(
@@ -1988,7 +2034,13 @@ volumes:
                     + "')",
                 )
                 sql(
-                    f"""DELETE FROM applications WHERE id={application_id};
+                    f"""DELETE FROM issued_documents WHERE application_id={application_id};
+DELETE FROM issued_documents WHERE application_id IN (
+    SELECT id FROM applications WHERE student_id IN (
+        SELECT id FROM students WHERE user_id=(SELECT id FROM users WHERE login='{student_login}')
+    )
+);
+DELETE FROM applications WHERE id={application_id};
 DELETE FROM applications WHERE student_id IN (
     SELECT id FROM students WHERE user_id=(SELECT id FROM users WHERE login='{student_login}')
 );

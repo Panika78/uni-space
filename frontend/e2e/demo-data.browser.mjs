@@ -74,8 +74,8 @@ async function compareApplication(page, created) {
     await field(scope, 'Место предоставления').innerText(),
     created.form_data.place_of_submission,
   )
-  assert.equal(await field(scope, 'Рассмотрение').innerText(), 'Подано')
-  assert.equal(await field(scope, 'Документ').innerText(), 'Ожидает подготовки')
+  assert.equal(await field(scope, 'Рассмотрение').innerText(), 'Одобрено')
+  assert.equal(await field(scope, 'Документ').innerText(), 'Готов')
   assert.equal(
     await field(scope, 'Дата подачи').locator('time').getAttribute('datetime'),
     created.created_at,
@@ -145,8 +145,10 @@ async function submitAndRestore(page, account, password) {
   const response = await pending
   assert.equal(response.status(), 201)
   const created = await response.json()
-  assert.equal(created.review_status, 'submitted')
-  assert.equal(created.document_status, 'pending')
+  assert.equal(created.review_status, 'approved')
+  assert.equal(created.document_status, 'ready')
+  assert.ok(created.document?.id)
+  assert.ok(created.document?.filename.endsWith('.pdf'))
   const authorization = response.request().headers().authorization
   const headers = { authorization }
   const snapshots = {}
@@ -225,7 +227,7 @@ async function submitAndRestore(page, account, password) {
   await page.getByText(place, { exact: true }).waitFor()
   await compareApplication(page, created)
   check(
-    `${account}: POST submitted/pending, reload, revoked access, login, same application ${created.id}`,
+    `${account}: automatic approval/PDF, reload, revoked access, login, same application ${created.id}`,
   )
 }
 
