@@ -1988,7 +1988,13 @@ volumes:
                     + "')",
                 )
                 sql(
-                    f"""DELETE FROM applications WHERE id={application_id};
+                    f"""DELETE FROM issued_documents WHERE application_id={application_id};
+DELETE FROM issued_documents WHERE application_id IN (
+    SELECT id FROM applications WHERE student_id IN (
+        SELECT id FROM students WHERE user_id=(SELECT id FROM users WHERE login='{student_login}')
+    )
+);
+DELETE FROM applications WHERE id={application_id};
 DELETE FROM applications WHERE student_id IN (
     SELECT id FROM students WHERE user_id=(SELECT id FROM users WHERE login='{student_login}')
 );

@@ -67,6 +67,21 @@ function formatRussianDate(value: string): string {
   return match ? `${match[3]}.${match[2]}.${match[1]}` : ''
 }
 
+function hasValidDocumentMetadata(application: Record<string, unknown>): boolean {
+  const document = application.document
+  if (application.document_status !== 'ready') return document == null
+  if (!document || typeof document !== 'object') return false
+  const metadata = document as Record<string, unknown>
+  return (
+    typeof metadata.id === 'string' &&
+    /^[1-9][0-9]*$/.test(metadata.id) &&
+    typeof metadata.filename === 'string' &&
+    metadata.filename.endsWith('.pdf') &&
+    typeof metadata.issued_at === 'string' &&
+    !Number.isNaN(Date.parse(metadata.issued_at))
+  )
+}
+
 function isAdditionalApplicationResponse(
   value: unknown,
   serviceCode: string,
@@ -86,18 +101,26 @@ function isAdditionalApplicationResponse(
     /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)$/.test(date) &&
     isIsoDate(date.slice(0, 10)) &&
     !Number.isNaN(Date.parse(date))
+  const isAutomatic = serviceCode === 'academic_transcript'
   const expectedDocumentStatus = serviceCode === 'academic_leave' ? 'not_required' : 'pending'
+  const hasExpectedWorkflow = isAutomatic
+    ? app.review_status === 'approved' &&
+      Number.isSafeInteger(app.version) &&
+      Number(app.version) >= 2 &&
+      ['pending', 'ready', 'failed'].includes(String(app.document_status))
+    : app.review_status === 'submitted' &&
+      app.version === 1 &&
+      app.document_status === expectedDocumentStatus
   if (!service || typeof service !== 'object' || !form || typeof form !== 'object') return false
   const svc = service as Record<string, unknown>
   const data = form as Record<string, unknown>
   if (
     !isId(app.id) ||
     !Number.isSafeInteger(app.version) ||
-    app.version !== 1 ||
     !isDateTime(app.created_at) ||
     !isDateTime(app.updated_at) ||
-    app.review_status !== 'submitted' ||
-    app.document_status !== expectedDocumentStatus ||
+    !hasExpectedWorkflow ||
+    !hasValidDocumentMetadata(app) ||
     app.feedback !== null ||
     !isId(svc.id) ||
     svc.code !== serviceCode ||
@@ -214,8 +237,11 @@ function isApplicationResponse(value: unknown, placeOfSubmission: string): value
     serviceResponse.code === 'study_certificate' &&
     typeof serviceResponse.title === 'string' &&
     formDataResponse.place_of_submission === placeOfSubmission &&
-    application.review_status === 'submitted' &&
-    application.document_status === 'pending' &&
+    application.review_status === 'approved' &&
+    Number.isSafeInteger(application.version) &&
+    Number(application.version) >= 2 &&
+    ['pending', 'ready', 'failed'].includes(String(application.document_status)) &&
+    hasValidDocumentMetadata(application) &&
     application.feedback === null &&
     isDateTime(application.created_at) &&
     isDateTime(application.updated_at)
