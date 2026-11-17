@@ -251,7 +251,9 @@ def _preflight(application_id: int, *, actor_kind: str, actor_id: int) -> Docume
         )
 
 
-def _record_preflight_failure(application_id: int) -> DocumentState:
+def _record_preflight_failure(
+    application_id: int, *, actor_kind: str, actor_id: int
+) -> DocumentState:
     """Persist only a confirmed pre-pipeline failure without undoing approval."""
     try:
         with SessionLocal() as db:
@@ -263,6 +265,7 @@ def _record_preflight_failure(application_id: int) -> DocumentState:
             )
             if application is None:
                 raise HTTPException(404, "not_found")
+            _authorize(db, application, actor_kind=actor_kind, actor_id=actor_id)
             service = db.get(ServiceType, application.service_type_id)
             if service is None or not service.produces_document:
                 raise HTTPException(409, "document_not_available")
@@ -353,7 +356,9 @@ def issue_document(
         coordination.__enter__()
     except (OSError, TimeoutError) as exc:
         logger.exception("issued PDF storage is temporarily unavailable")
-        outcome = _record_preflight_failure(application_id)
+        outcome = _record_preflight_failure(
+            application_id, actor_kind=actor_kind, actor_id=actor_id
+        )
         if outcome.document_status == "ready" and outcome.document is not None:
             return outcome
         raise HTTPException(503, "document_unavailable") from exc
@@ -433,18 +438,18 @@ def issue_document(
     except Exception:
         logger.exception("PDF issuance failed for application %s", application_id)
         # Resolve a possibly successful COMMIT before touching a published file.
-        known_unreferenced = False
+        known_unreferenced = not commit_attempted
         outcome: DocumentState | None = None
         if commit_attempted:
             try:
                 outcome = _read_state(application_id)
                 if outcome.document_status == "ready" and outcome.document is not None:
                     return outcome
-                known_unreferenced = outcome.document is None and outcome.document_status != "ready"
+                # A fresh SELECT can still see the prior MVCC version while the
+                # original COMMIT is unresolved. Only a confirmed pre-COMMIT
+                # rollback makes synchronous compensation safe.
             except Exception:
                 logger.exception("could not resolve PDF commit for application %s", application_id)
-        else:
-            known_unreferenced = True
         if published_key and known_unreferenced:
             try:
                 _run_issued_filesystem_operation("delete", str(pdf_root), published_key)

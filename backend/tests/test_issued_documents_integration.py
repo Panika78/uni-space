@@ -376,10 +376,10 @@ def test_storage_preflight_failure_does_not_overwrite_concurrent_ready(issue_con
             raise OSError("injected preflight failure")
         return original_operation(operation, *args, renderer=renderer)
 
-    def pause_failure_record(application_id):
+    def pause_failure_record(application_id, *, actor_kind, actor_id):
         preflight_failed.set()
         assert continue_failure_record.wait(timeout=10)
-        return original_record_failure(application_id)
+        return original_record_failure(application_id, actor_kind=actor_kind, actor_id=actor_id)
 
     monkeypatch.setattr(issuer_module, "_run_issued_filesystem_operation", fail_only_first_prepare)
     monkeypatch.setattr(issuer_module, "_record_preflight_failure", pause_failure_record)
@@ -842,10 +842,13 @@ def test_concurrent_retries_from_pending_issue_once(issue_context):
     _cleanup_application(context, identifier)
 
 
-def test_api_process_crash_after_publish_recovers_orphan_and_retry(issue_context, tmp_path):
+def test_api_process_crash_after_publish_recovers_orphan_and_retry(
+    issue_context, tmp_path, monkeypatch
+):
     import multiprocessing
 
     from app.documents.storage import cleanup_orphans, issued_root
+    from scripts import cleanup_issued_documents
 
     context = issue_context
     token = _login(context)
@@ -931,8 +934,17 @@ def test_api_process_crash_after_publish_recovers_orphan_and_retry(issue_context
                 select(ApplicationHistory.id).where(ApplicationHistory.application_id == identifier)
             ).all()
         )
-    references = {existing_key}
-    assert cleanup_orphans(context["root"], references, older_than_seconds=0) == 1
+    monkeypatch.setattr(
+        cleanup_issued_documents,
+        "SessionLocal",
+        lambda: Session(context["engine"], expire_on_commit=False),
+    )
+    assert (
+        cleanup_orphans(
+            context["root"], cleanup_issued_documents.referenced_keys, older_than_seconds=0
+        )
+        == 1
+    )
     assert not crash_orphans[0].exists()
     assert (pdf_root / existing_key).read_bytes() == existing_bytes
 
@@ -1035,6 +1047,142 @@ def test_application_reads_remain_consistent_during_document_issuance(issue_cont
         item = subsequent.json()
     assert item["document_status"] == "ready" and item["document"] is not None
     _cleanup_application(context, identifier)
+
+
+def test_preflight_failure_rechecks_staff_scope_after_permission_revocation(
+    issue_context, monkeypatch
+):
+    from app.documents import issuer as issuer_module
+
+    context = issue_context
+    engine = context["engine"]
+    suffix = uuid4().hex
+    with Session(engine) as db, db.begin():
+        accounting = db.scalar(
+            select(OrgUnit).where(OrgUnit.type == "accounting").order_by(OrgUnit.id).limit(1)
+        )
+        accounting_created = accounting is None
+        if accounting is None:
+            accounting = OrgUnit(name=f"Fictional Accounting {suffix}", type="accounting")
+            db.add(accounting)
+            db.flush()
+        service = db.scalar(select(ServiceType).where(ServiceType.code == "accounting_certificate"))
+        service_id = service.id
+        previous_scope = service.responsible_org_unit_id
+        accounting_id = accounting.id
+        service.responsible_org_unit_id = accounting.id
+        staff = User(
+            login=f"revoked-preflight-{suffix}",
+            password_hash="fixture",
+            full_name="Fictional Accounting Reviewer",
+            role="staff",
+            is_active=True,
+        )
+        db.add(staff)
+        db.flush()
+        profile = StaffProfile(user_id=staff.id, org_unit_id=accounting.id)
+        db.add(profile)
+        db.flush()
+        permission = StaffPermission(
+            staff_profile_id=profile.id,
+            permission_code="applications.review",
+            scope_org_unit_id=accounting.id,
+        )
+        db.add(permission)
+        session = AuthSession(
+            user_id=staff.id,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+        db.add(session)
+        db.flush()
+        staff_id, profile_id, permission_id, session_id = (
+            staff.id,
+            profile.id,
+            permission.id,
+            session.id,
+        )
+        staff_token = create_access_token(session, get_settings())["access_token"]
+        application = Application(
+            student_id=context["student_ids"][0],
+            service_type_id=service.id,
+            review_status="approved",
+            document_status="pending",
+            form_data={"purpose": "Демонстрационная проверка доступа"},
+            version=8,
+        )
+        db.add(application)
+        db.flush()
+        application_id = application.id
+        db.add(
+            ApplicationHistory(
+                application_id=application_id,
+                actor_user_id=staff_id,
+                from_status="in_review",
+                to_status="approved",
+                comment=None,
+            )
+        )
+
+    original_preflight = issuer_module._preflight
+    original_operation = issuer_module._run_issued_filesystem_operation
+    preflight_complete = threading.Event()
+    continue_request = threading.Event()
+
+    def pause_after_preflight(application_id, *, actor_kind, actor_id):
+        state = original_preflight(application_id, actor_kind=actor_kind, actor_id=actor_id)
+        preflight_complete.set()
+        assert continue_request.wait(timeout=10)
+        return state
+
+    def fail_storage_prepare(operation, *args, renderer=None):
+        if operation == "prepare_root":
+            raise OSError("injected storage failure after authorization")
+        return original_operation(operation, *args, renderer=renderer)
+
+    monkeypatch.setattr(issuer_module, "_preflight", pause_after_preflight)
+    monkeypatch.setattr(issuer_module, "_run_issued_filesystem_operation", fail_storage_prepare)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        request = executor.submit(
+            context["client"].request,
+            "POST",
+            f"/api/v1/staff/applications/{application_id}/document/retry",
+            access=staff_token,
+        )
+        assert preflight_complete.wait(timeout=10)
+        with Session(engine) as db, db.begin():
+            db.execute(delete(StaffPermission).where(StaffPermission.id == permission_id))
+        continue_request.set()
+        response = request.result(timeout=10)
+
+    assert response.status_code == 404
+    with Session(engine) as db:
+        application = db.get(Application, application_id)
+        history = db.scalars(
+            select(ApplicationHistory).where(ApplicationHistory.application_id == application_id)
+        ).all()
+        assert (application.review_status, application.document_status, application.version) == (
+            "approved",
+            "pending",
+            8,
+        )
+        assert len(history) == 1 and history[0].actor_user_id == staff_id
+        assert (
+            db.scalar(
+                select(IssuedDocument.id).where(IssuedDocument.application_id == application_id)
+            )
+            is None
+        )
+    assert list((context["root"] / "issued_documents").glob("*.pdf")) == []
+
+    _cleanup_application(context, application_id)
+    with Session(engine) as db, db.begin():
+        db.execute(delete(AuthSession).where(AuthSession.id == session_id))
+        db.execute(delete(StaffProfile).where(StaffProfile.id == profile_id))
+        db.execute(delete(User).where(User.id == staff_id))
+        db.get(ServiceType, service_id).responsible_org_unit_id = previous_scope
+        if accounting_created:
+            db.delete(db.get(OrgUnit, accounting_id))
 
 
 def test_explicit_process_approves_existing_automatic_application_once(issue_context, monkeypatch):
@@ -1586,6 +1734,214 @@ def test_issued_document_commit_ack_loss_is_resolved_without_reissue(issue_conte
             == 1
         )
     _cleanup_application(context, identifier)
+
+
+def test_uncertain_commit_cannot_delete_later_committed_pdf(issue_context, monkeypatch):
+    from app.documents import issuer as issuer_module
+    from app.documents.storage import cleanup_orphans
+    from scripts import cleanup_issued_documents
+
+    context = issue_context
+    with Session(context["engine"], expire_on_commit=False) as db, db.begin():
+        service = db.scalar(select(ServiceType).where(ServiceType.code == "study_certificate"))
+        application = Application(
+            student_id=context["student_ids"][0],
+            service_type_id=service.id,
+            review_status="approved",
+            document_status="pending",
+            form_data={"place_of_submission": "Демо из interleaving test"},
+            version=1,
+        )
+        db.add(application)
+        db.flush()
+        application_id = application.id
+
+    original_commit = Session.commit
+    original_close = Session.close
+    original_read_state = issuer_module._read_state
+    original_fs_operation = issuer_module._run_issued_filesystem_operation
+    issuing_session = None
+    captured_key = None
+    stale_read_seen = False
+
+    def issue_session_factory():
+        return Session(context["engine"], expire_on_commit=False)
+
+    def lose_commit_response_before_resolution(session):
+        nonlocal issuing_session
+        if any(
+            isinstance(item, IssuedDocument)
+            for item in [*session.new, *session.identity_map.values()]
+        ):
+            issuing_session = session
+            raise RuntimeError("simulated client error while COMMIT is unresolved")
+        return original_commit(session)
+
+    def keep_uncertain_transaction_open(session):
+        if session is issuing_session:
+            return None
+        return original_close(session)
+
+    def observe_old_mvcc_state(read_application_id):
+        nonlocal stale_read_seen
+        state = original_read_state(read_application_id)
+        if (
+            read_application_id == application_id
+            and issuing_session is not None
+            and not stale_read_seen
+        ):
+            stale_read_seen = True
+            assert (state.document_status, state.document) == ("pending", None)
+            # Resolve the same prepared transaction only after the independent
+            # SELECT observed the older committed version.
+            original_commit(issuing_session)
+            original_close(issuing_session)
+        return state
+
+    def record_published_key(operation, *args, renderer=None):
+        nonlocal captured_key
+        if operation == "render_publish":
+            captured_key = args[2]
+        return original_fs_operation(operation, *args, renderer=renderer)
+
+    monkeypatch.setattr(issuer_module, "SessionLocal", issue_session_factory)
+    monkeypatch.setattr(Session, "commit", lose_commit_response_before_resolution)
+    monkeypatch.setattr(Session, "close", keep_uncertain_transaction_open)
+    monkeypatch.setattr(issuer_module, "_read_state", observe_old_mvcc_state)
+    monkeypatch.setattr(issuer_module, "_run_issued_filesystem_operation", record_published_key)
+
+    state = issuer_module.issue_document(
+        application_id,
+        actor_kind="owner",
+        actor_id=context["student_users"][0],
+    )
+    assert stale_read_seen
+    assert state.document_status == "ready" and state.document is not None
+    assert captured_key is not None
+    pdf_path = context["root"] / "issued_documents" / captured_key
+    committed_bytes = pdf_path.read_bytes()
+    with Session(context["engine"]) as db:
+        application = db.get(Application, application_id)
+        documents = db.scalars(
+            select(IssuedDocument).where(IssuedDocument.application_id == application_id)
+        ).all()
+        history = db.scalars(
+            select(ApplicationHistory).where(ApplicationHistory.application_id == application_id)
+        ).all()
+        version, history_count = application.version, len(history)
+        assert application.document_status == "ready"
+        assert len(documents) == 1 and documents[0].storage_key == captured_key
+
+    monkeypatch.setattr(
+        cleanup_issued_documents,
+        "SessionLocal",
+        lambda: Session(context["engine"], expire_on_commit=False),
+    )
+    assert (
+        cleanup_orphans(
+            context["root"], cleanup_issued_documents.referenced_keys, older_than_seconds=0
+        )
+        == 0
+    )
+    assert pdf_path.read_bytes() == committed_bytes
+
+    token = _login(context)
+    downloaded = context["client"].request(
+        "GET", f"/api/v1/applications/{application_id}/document", access=token
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.content == committed_bytes
+    repeated = context["client"].request(
+        "POST", f"/api/v1/applications/{application_id}/document/retry", access=token
+    )
+    assert repeated.status_code == 200 and repeated.json()["document_status"] == "ready"
+    assert repeated.json()["document"]["id"] == state.document["id"]
+    with Session(context["engine"]) as db:
+        application = db.get(Application, application_id)
+        documents = db.scalars(
+            select(IssuedDocument).where(IssuedDocument.application_id == application_id)
+        ).all()
+        assert application.version == version
+        assert len(documents) == 1 and documents[0].storage_key == captured_key
+        assert (
+            len(
+                db.scalars(
+                    select(ApplicationHistory).where(
+                        ApplicationHistory.application_id == application_id
+                    )
+                ).all()
+            )
+            == history_count
+        )
+    assert pdf_path.read_bytes() == committed_bytes
+    _cleanup_application(context, application_id)
+
+
+def test_issued_pdf_cleanup_aborts_while_commit_holds_application_lock(issue_context, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    from app.documents.storage import cleanup_orphans, issued_root
+    from scripts import cleanup_issued_documents
+
+    context = issue_context
+    with Session(context["engine"]) as db, db.begin():
+        service = db.scalar(select(ServiceType).where(ServiceType.code == "study_certificate"))
+        application = Application(
+            student_id=context["student_ids"][0],
+            service_type_id=service.id,
+            review_status="approved",
+            document_status="pending",
+            form_data={"place_of_submission": "Cleanup race demonstration"},
+            version=1,
+        )
+        db.add(application)
+        db.flush()
+        application_id = application.id
+
+    monkeypatch.setattr(
+        cleanup_issued_documents,
+        "SessionLocal",
+        lambda: Session(context["engine"], expire_on_commit=False),
+    )
+    root = issued_root(context["root"])
+    key = f"{uuid4().hex}.pdf"
+    path = root / key
+    path.write_bytes(b"%PDF-1.4 unresolved commit")
+    with Session(context["engine"]) as db:
+        db.begin()
+        application = db.scalar(
+            select(Application).where(Application.id == application_id).with_for_update()
+        )
+        application.document_status = "ready"
+        application.version += 1
+        db.add(
+            IssuedDocument(
+                application_id=application_id,
+                storage_key=key,
+                filename="study_certificate.pdf",
+                snapshot_data={"service_code": "study_certificate"},
+            )
+        )
+        db.flush()
+        with pytest.raises(OperationalError):
+            cleanup_orphans(
+                context["root"],
+                cleanup_issued_documents.referenced_keys,
+                older_than_seconds=0,
+            )
+        assert path.is_file()
+        db.commit()
+
+    assert (
+        cleanup_orphans(
+            context["root"],
+            cleanup_issued_documents.referenced_keys,
+            older_than_seconds=0,
+        )
+        == 0
+    )
+    assert path.is_file()
+    _cleanup_application(context, application_id)
 
 
 @pytest.mark.parametrize("failed_statement", ["insert_document", "update_ready"])
