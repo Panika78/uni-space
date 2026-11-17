@@ -16,6 +16,10 @@ class StudentParams(PaginationParams):
     student_id: TeachingId | None = None
 
 
+class JournalAttendanceParams(StudentParams):
+    pass
+
+
 class AssessmentParams(PaginationParams):
     assessment_group_id: TeachingId | None = None
 
@@ -47,6 +51,16 @@ class JournalStudent(RequestModel):
     full_name: str
     subgroup_id: Id | None
     academic_status: Literal["enrolled", "academic_leave", "expelled", "graduated"]
+
+
+class JournalAttendanceRow(RequestModel):
+    student_id: Id
+    full_name: str
+    subgroup_id: Id | None
+    academic_status: Literal["enrolled", "academic_leave", "expelled", "graduated"]
+    status: Literal["attended", "absent", "unmarked"]
+    updated_at: DateTime | None
+    can_edit: bool
 
 
 class JournalAssessment(RequestModel):

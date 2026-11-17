@@ -7,7 +7,7 @@ within the authorized course/group pair, before pagination or serialization.
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import and_, exists, or_, select, tuple_
+from sqlalchemy import and_, case, exists, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
@@ -20,6 +20,7 @@ from app.models import (
     Assessment,
     AssessmentGroup,
     AssessmentResult,
+    Attendance,
     CourseOffering,
     Discipline,
     Lesson,
@@ -35,6 +36,7 @@ from app.schedule.participants import get_student_lesson_condition
 from app.teaching.ordering import STUDENT_KEY_PREFIX, get_student_name_key
 from app.teaching.schemas import (
     JournalAssessment,
+    JournalAttendanceRow,
     JournalLesson,
     JournalResult,
     JournalStudent,
@@ -340,6 +342,80 @@ def list_journal_students(db, group_id, params, lesson_id=None):
         query,
         params,
         (name_key, Student.id),
+        (str, int),
+        convert,
+        cursor_prefix=STUDENT_KEY_PREFIX,
+    )
+
+
+def list_journal_attendance(db, course_id, group_id, lesson_id, params):
+    """Read the current lesson roster and only marks from its current membership period."""
+    name_key = get_student_name_key(User.full_name)
+    membership_matches = and_(
+        Attendance.origin_group_id == Student.group_id,
+        Attendance.origin_subgroup_id.is_not_distinct_from(Student.subgroup_id),
+        Attendance.membership_version == Student.membership_version,
+    )
+    now = datetime.now(UTC)
+    student_sort_id = Student.id.label("student_sort_id")
+    can_edit = and_(
+        Lesson.status == "scheduled",
+        Lesson.starts_at <= now,
+        or_(Attendance.lesson_id.is_(None), membership_matches),
+        or_(Attendance.lesson_id.is_not(None), Lesson.starts_at >= Student.membership_changed_at),
+    )
+    query = (
+        select(
+            student_sort_id,
+            User.full_name,
+            Student.subgroup_id,
+            Student.academic_status,
+            case(
+                (and_(Attendance.lesson_id.is_not(None), membership_matches), Attendance.status),
+                else_="unmarked",
+            ).label("attendance_status"),
+            case(
+                (
+                    and_(Attendance.lesson_id.is_not(None), membership_matches),
+                    Attendance.updated_at,
+                ),
+                else_=None,
+            ).label("attendance_updated_at"),
+            can_edit.label("can_edit"),
+            name_key,
+        )
+        .join(User, User.id == Student.user_id)
+        .join(Lesson, Lesson.id == lesson_id)
+        .outerjoin(
+            Attendance,
+            and_(Attendance.lesson_id == Lesson.id, Attendance.student_id == Student.id),
+        )
+        .where(
+            Lesson.course_offering_id == course_id,
+            exists().where(LessonGroup.lesson_id == Lesson.id, LessonGroup.group_id == group_id),
+            Student.group_id == group_id,
+            get_student_lesson_condition(lesson_id, group_id, Student.subgroup_id),
+        )
+    )
+    if params.student_id is not None:
+        query = query.where(Student.id == int(params.student_id))
+
+    def convert(row):
+        return JournalAttendanceRow(
+            student_id=str(row.student_sort_id),
+            full_name=row.full_name,
+            subgroup_id=str(row.subgroup_id) if row.subgroup_id is not None else None,
+            academic_status=row.academic_status,
+            status=row.attendance_status,
+            updated_at=row.attendance_updated_at,
+            can_edit=row.can_edit,
+        )
+
+    return list_page(
+        db,
+        query,
+        params,
+        (name_key, student_sort_id),
         (str, int),
         convert,
         cursor_prefix=STUDENT_KEY_PREFIX,
