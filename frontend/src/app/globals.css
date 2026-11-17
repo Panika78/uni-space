@@ -2555,3 +2555,44 @@ textarea {
     min-height: 220px;
   }
 }
+
+.application-timeline {
+  list-style: none;
+  padding-inline-start: 0.5rem;
+  margin-block: 1rem;
+}
+
+.application-timeline li {
+  position: relative;
+  border-inline-start: 2px solid currentColor;
+  padding: 0 0 1rem 1rem;
+  overflow-wrap: anywhere;
+}
+
+.application-timeline li::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: -5px;
+  inset-block-start: 0.45em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.application-timeline time,
+.application-timeline strong,
+.application-timeline span {
+  display: block;
+}
+
+.application-detail-card,
+.application-correction {
+  margin-block: 1rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.application-detail .form-actions {
+  flex-wrap: wrap;
+}

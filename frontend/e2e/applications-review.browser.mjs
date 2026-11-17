@@ -39,6 +39,8 @@ try {
     }
     await page.route('**/api/v1/applications**', async (route) => {
       const url = new URL(route.request().url())
+      if (url.pathname.endsWith('/history'))
+        return route.fulfill({ json: { items: [], next_cursor: null } })
       if (url.pathname === '/api/v1/applications') {
         const cursor = url.searchParams.get('cursor')
         listRequests.push(cursor)
@@ -137,12 +139,13 @@ try {
       items.map((item) => Number(item.id)),
     )
     const row = page.locator('.applications-table tbody tr').filter({ has: target })
-    assert.equal(await row.locator('.application-field-label').count(), 2)
+    assert.equal(await row.locator('.application-field-label').count(), 3)
     for (const label of await row.locator('.application-field-label').all())
       assert.equal(await label.getAttribute('aria-hidden'), 'true')
     if (width === 360) {
       assert.equal(await row.getByText('Дата подачи', { exact: true }).isVisible(), true)
       assert.equal(await row.getByText('Рассмотрение', { exact: true }).isVisible(), true)
+      assert.equal(await row.getByText('Документ', { exact: true }).isVisible(), true)
       assert.equal(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
         true,
@@ -185,7 +188,12 @@ try {
         document.activeElement.textContent === 'Мои заявления',
     )
     assert.equal(await target.count(), 0)
-    assert.equal(await page.getByRole('columnheader').count(), 3)
+    assert.deepEqual(await page.getByRole('columnheader').allTextContents(), [
+      'Заявление',
+      'Дата подачи',
+      'Рассмотрение',
+      'Документ',
+    ])
     const dateCell = page.locator('.applications-table tbody td[headers$="-date"]').first()
     const headerId = await dateCell.getAttribute('headers')
     assert.equal(await page.locator(`[id="${headerId}"]`).textContent(), 'Дата подачи')

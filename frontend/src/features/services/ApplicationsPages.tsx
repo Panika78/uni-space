@@ -1,16 +1,29 @@
 import { useAccessSuspended } from '../../shared/ui/AccessRecovery'
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  type InfiniteData,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { useEffect, useId, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { apiFetch, apiFetchBlob, ApiClientError } from '../../shared/api/client'
+import { AdditionalApplicationForm, formatRussianDate } from './AdditionalApplicationForm'
+import {
+  applicationDetailKey,
+  applicationHistoryKey,
+  applicationPath,
+  applicationsKey,
+  getApplicationHistory,
+  isApplicationAccessError,
+  type Application,
+} from './applicationQueries'
 import type { components } from '../../shared/api/schema'
 import { Icon } from '../../shared/ui/Icon'
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 
-type Application = components['schemas']['ApplicationResponse']
 type Page = components['schemas']['ApplicationPage']
 type ReturnFocus = { id: string }
-export const applicationsKey = ['applications'] as const
 const returnFocusKey = [...applicationsKey, 'return-focus'] as const
 const reviewLabels: Record<Application['review_status'], string> = {
   submitted: 'Подано',
@@ -75,7 +88,8 @@ export function ApplicationsList() {
     retryOnMount: true,
     gcTime: Infinity,
   })
-  const isDenied = query.error instanceof ApiClientError && query.error.status === 403
+  const denied = isApplicationAccessError(query.error) ? query.error : null
+  const isDenied = denied !== null
   const items = isDenied ? [] : (query.data?.pages.flatMap((page) => page.items) ?? [])
   // A failed refresh leaves the old snapshot/cursors intact. Only a complete
   // refetch can make that snapshot eligible for further pagination again.
@@ -150,8 +164,16 @@ export function ApplicationsList() {
       )}
       {isDenied ? (
         <ErrorState
-          title="Доступ к заявлениям запрещён"
-          description="У вас нет доступа к списку заявлений. Обратитесь к администратору."
+          title={
+            denied?.status === 403
+              ? 'Доступ к заявлениям запрещён'
+              : getAccessErrorTitle(query.error)
+          }
+          description={
+            denied?.status === 401
+              ? 'Войдите в систему заново.'
+              : 'У вас нет доступа к списку заявлений.'
+          }
         />
       ) : (
         query.isError && (
@@ -203,6 +225,9 @@ export function ApplicationsList() {
               <th id={`${tableId}-review`} scope="col">
                 Рассмотрение
               </th>
+              <th id={`${tableId}-document`} scope="col">
+                Документ
+              </th>
             </tr>
           </thead>
           <tbody role="rowgroup">
@@ -253,6 +278,12 @@ export function ApplicationsList() {
                     {reviewLabels[item.review_status]}
                   </span>
                 </td>
+                <td role="cell" headers={`${tableId}-document`}>
+                  <span className="application-field-label" aria-hidden="true">
+                    Документ
+                  </span>
+                  {item.document_status === 'ready' ? 'PDF выдан' : getDocumentStatus(item)}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -271,46 +302,281 @@ export function ApplicationsList() {
     </div>
   )
 }
+function getDocumentStatus(item: Application) {
+  if (item.review_status === 'rejected' && item.document_status === 'pending') return 'Не выдан'
+  return documentLabels[item.document_status]
+}
+
+function getAccessErrorTitle(cause: unknown) {
+  if (!(cause instanceof ApiClientError)) return 'Не удалось открыть заявление'
+  if (cause.status === 401) return 'Сеанс завершён'
+  if (cause.status === 403) return 'Доступ к заявлению запрещён'
+  if (cause.status === 404) return 'Заявление не найдено'
+  if (cause.status === 503) return 'Сервис временно недоступен'
+  return 'Не удалось открыть заявление'
+}
+
+function getFormValue(key: string, value: unknown) {
+  if (value == null || value === '') return '—'
+  if (typeof value !== 'string') return String(value)
+  if (key === 'starts_on' || key === 'ends_on') return formatRussianDate(value) || value
+  if (key === 'basis') {
+    const labels: Record<string, string> = {
+      medical: 'Медицинское',
+      family: 'Семейные обстоятельства',
+      other: 'Иное',
+    }
+    return labels[value] ?? value
+  }
+  return value
+}
+
 export function ApplicationDetailPage() {
-  const isSuspended = useAccessSuspended()
   const { id = '' } = useParams()
+  return <ApplicationDetail key={id} id={id} />
+}
+
+function ApplicationDetail({ id }: { id: string }) {
+  const isSuspended = useAccessSuspended()
   const location = useLocation()
   const navigate = useNavigate()
+  const client = useQueryClient()
   const title = useRef<HTMLHeadingElement>(null)
-  const [downloadingId, setDownloadingId] = useState<string | null>(null)
-  const [downloadError, setDownloadError] = useState('')
+  const editButton = useRef<HTMLButtonElement>(null)
+  const confirmationMessage = useRef<HTMLParagraphElement>(null)
+  const [editing, setEditing] = useState(false)
+  const [confirmation, setConfirmation] = useState<Application | null>(null)
+  const [actionAccessError, setActionAccessError] = useState<ApiClientError | null>(null)
+  const [fileError, setFileError] = useState('')
+  const [needsDocumentRefresh, setNeedsDocumentRefresh] = useState(false)
+  const [busyFile, setBusyFile] = useState<string | null>(null)
+  const request = useRef<AbortController | null>(null)
+  const path = applicationPath(id)
   const query = useQuery({
-    queryKey: [...applicationsKey, 'detail', id],
-    queryFn: ({ signal }) =>
-      apiFetch<Application>(`/api/v1/applications/${encodeURIComponent(id)}`, {
-        authenticated: true,
-        signal,
-      }),
+    queryKey: applicationDetailKey(id),
+    queryFn: ({ signal }) => apiFetch<Application>(path, { authenticated: true, signal }),
+    refetchOnMount: 'always',
   })
+  const history = useInfiniteQuery({
+    queryKey: applicationHistoryKey(id),
+    queryFn: ({ pageParam, signal }) => getApplicationHistory(id, pageParam, signal),
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.next_cursor ?? undefined,
+    enabled: query.isSuccess && !actionAccessError,
+    refetchOnMount: 'always',
+  })
+  const accessError =
+    actionAccessError ??
+    (isApplicationAccessError(query.error) ? query.error : null) ??
+    (isApplicationAccessError(history.error) ? history.error : null)
+  const item = !accessError && (query.isSuccess || editing) ? query.data : undefined
+  const canEdit =
+    item?.review_status === 'needs_correction' &&
+    item.service.processing_mode === 'manual' &&
+    ['academic_leave', 'accounting_certificate'].includes(item.service.code)
   useEffect(() => {
-    if (query.isSuccess && !isSuspended) title.current?.focus({ preventScroll: true })
-  }, [query.data, query.isSuccess, isSuspended])
-  const item = query.isSuccess ? query.data : undefined
-  async function downloadAttachment(id: string, filename: string) {
-    setDownloadingId(id)
-    setDownloadError('')
-    try {
-      const blob = await apiFetchBlob(
-        `/api/v1/applications/attachments/${encodeURIComponent(id)}/download`,
-        { authenticated: true },
-      )
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = filename
-      link.click()
-      URL.revokeObjectURL(url)
-    } catch {
-      setDownloadError('Не удалось скачать вложение. Обновите заявление и повторите попытку.')
-    } finally {
-      setDownloadingId(null)
+    if (item && !isSuspended && document.activeElement === document.body) {
+      title.current?.focus({ preventScroll: true })
+    }
+  }, [item, isSuspended])
+  useEffect(() => {
+    if (confirmation && !isSuspended) confirmationMessage.current?.focus()
+  }, [confirmation, isSuspended])
+  useEffect(() => () => request.current?.abort(), [])
+  useEffect(() => {
+    if (!accessError) return
+    request.current?.abort()
+    for (const queryKey of [applicationDetailKey(id), applicationHistoryKey(id), applicationsKey]) {
+      void client.cancelQueries({ queryKey, exact: true })
+      if (queryKey === applicationsKey && accessError.status === 404) {
+        // Loss of access to one record must not discard other loaded pages.
+        client.setQueryData<InfiniteData<Page>>(
+          queryKey,
+          (current) =>
+            current && {
+              ...current,
+              pages: current.pages.map((page) => ({
+                ...page,
+                items: page.items.filter((entry) => entry.id !== id),
+              })),
+            },
+        )
+      } else {
+        client.getQueryCache().find({ queryKey, exact: true })?.setState({
+          data: undefined,
+          dataUpdatedAt: 0,
+        })
+      }
+    }
+  }, [accessError, client, id])
+
+  async function refresh() {
+    // Refetch through the current observers so an unmounted/auth-cancelled
+    // request cannot populate a new session's private cache.
+    const [latest] = await Promise.all([
+      query.refetch({ throwOnError: true }),
+      history.refetch({ throwOnError: true }),
+    ])
+    if (!latest.data || latest.data.id !== id) {
+      throw new ApiClientError('Некорректный ответ', 'invalid_response')
+    }
+    void client.invalidateQueries({ queryKey: applicationsKey, exact: true })
+    return latest.data
+  }
+
+  async function retryDetail() {
+    const latest = await query.refetch({ cancelRefetch: false })
+    if (latest.isSuccess) {
+      setActionAccessError(null)
+      if (isApplicationAccessError(history.error)) void history.refetch({ cancelRefetch: false })
     }
   }
+
+  function syncApplication(result: Application) {
+    const detailKey = applicationDetailKey(id)
+    void client.cancelQueries({ queryKey: detailKey, exact: true }, { revert: false })
+    const newest = (current: Application | undefined) =>
+      current && current.version > result.version ? current : result
+    client.setQueryData<Application>(detailKey, newest)
+    client.setQueryData<InfiniteData<Page>>(
+      applicationsKey,
+      (current) =>
+        current && {
+          ...current,
+          pages: current.pages.map((page) => ({
+            ...page,
+            items: page.items.map((entry) => (entry.id === id ? newest(entry) : entry)),
+          })),
+        },
+    )
+    void client.invalidateQueries({ queryKey: applicationsKey, exact: true })
+    void client.invalidateQueries({ queryKey: applicationHistoryKey(id), exact: true })
+  }
+
+  async function verifyDocument() {
+    try {
+      const latest = await refresh()
+      setNeedsDocumentRefresh(false)
+      return latest
+    } catch (cause) {
+      if (isApplicationAccessError(cause)) setActionAccessError(cause)
+      setNeedsDocumentRefresh(true)
+      return null
+    }
+  }
+
+  async function downloadFile(filePath: string, filename: string, fileId: string, preview = false) {
+    if (request.current || isSuspended) return
+    const popup = preview ? window.open('about:blank', '_blank') : null
+    if (preview && !popup) {
+      setFileError(
+        'Браузер заблокировал новую вкладку. Разрешите всплывающие окна или скачайте PDF.',
+      )
+      return
+    }
+    if (popup) popup.opener = null
+    const controller = new AbortController()
+    request.current = controller
+    setBusyFile(fileId)
+    setFileError('')
+    try {
+      const blob = await apiFetchBlob(filePath, {
+        authenticated: true,
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90_000)]),
+      })
+      controller.signal.throwIfAborted()
+      if (fileId === 'document' && blob.type !== 'application/pdf') {
+        throw new ApiClientError('PDF недоступен', 'invalid_response', 503)
+      }
+      if (popup?.closed) return
+      const url = URL.createObjectURL(blob)
+      try {
+        if (popup) {
+          popup.location.replace(url)
+        } else {
+          const link = document.createElement('a')
+          link.href = url
+          link.download = filename
+          link.click()
+        }
+      } finally {
+        // The new tab or download must have time to consume the URL.
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      }
+    } catch (cause) {
+      popup?.close()
+      if (controller.signal.aborted) return
+      if (isApplicationAccessError(cause) && (fileId === 'document' || cause.status !== 404)) {
+        setActionAccessError(cause)
+      } else if (isApplicationAccessError(cause)) {
+        setFileError('Вложение недоступно. Обновите заявление.')
+        void query.refetch()
+      } else if (cause instanceof ApiClientError && cause.status === 503) {
+        setFileError(
+          fileId === 'document'
+            ? 'Выданный PDF временно недоступен (503). Попробуйте открыть его позже.'
+            : 'Файл временно недоступен (503). Попробуйте скачать его позже.',
+        )
+      } else {
+        setFileError('Не удалось получить файл. Проверьте соединение и повторите попытку.')
+      }
+    } finally {
+      request.current = null
+      setBusyFile(null)
+    }
+  }
+
+  async function generateDocument(action: 'process' | 'retry') {
+    if (request.current || isSuspended || needsDocumentRefresh) return
+    const controller = new AbortController()
+    request.current = controller
+    setBusyFile('document')
+    setFileError('')
+    try {
+      const result = await apiFetch<Application>(`${path}/document/${action}`, {
+        method: 'POST',
+        authenticated: true,
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90_000)]),
+      })
+      if (result?.id !== id || result.review_status !== 'approved') {
+        throw new ApiClientError('Некорректное подтверждение', 'invalid_response')
+      }
+      syncApplication(result)
+    } catch (cause) {
+      if (controller.signal.aborted) return
+      if (isApplicationAccessError(cause)) {
+        setActionAccessError(cause)
+        return
+      }
+      const latest = await verifyDocument()
+      if (controller.signal.aborted || latest?.document_status === 'ready') return
+      setFileError(
+        cause instanceof ApiClientError && cause.code === 'application_data_invalid'
+          ? 'Сохранённые данные заявления не подходят для формирования документа. Обновите заявление.'
+          : cause instanceof ApiClientError && cause.status === 409
+            ? 'Статус заявления изменился. Проверьте доступные действия.'
+            : latest?.document_status === 'failed'
+              ? 'Подготовка PDF завершилась ошибкой. Можно повторить формирование.'
+              : 'Не удалось подтвердить формирование документа. Проверьте состояние заявления перед повтором.',
+      )
+    } finally {
+      request.current = null
+      setBusyFile(null)
+    }
+  }
+  const historyItems = history.data?.pages.flatMap((page) => page.items) ?? []
+  const metadata = item?.document
+  const documentAction =
+    item?.service.produces_document && item.service.code !== 'academic_leave'
+      ? item.review_status === 'approved' && ['pending', 'failed'].includes(item.document_status)
+        ? 'retry'
+        : item.review_status === 'submitted' &&
+            item.document_status === 'pending' &&
+            ['study_certificate', 'academic_transcript'].includes(item.service.code) &&
+            item.service.processing_mode === 'automatic'
+          ? 'process'
+          : null
+      : null
   return (
     <section className="section-page service-page application-detail" aria-busy={query.isFetching}>
       <Link
@@ -346,17 +612,15 @@ export function ApplicationDetailPage() {
         <Icon name="left" /> К моим заявлениям
       </Link>
       {query.isPending && <LoadingState title="Загружаем заявление…" />}
-      {query.isError && (
+      {(accessError || query.isError) && (
         <ErrorState
-          title={
-            query.error instanceof ApiClientError && query.error.status === 404
-              ? 'Заявление не найдено'
-              : query.error instanceof ApiClientError && query.error.status === 403
-                ? 'Доступ к заявлению запрещён'
-                : 'Не удалось открыть заявление'
+          title={getAccessErrorTitle(accessError ?? query.error)}
+          description={
+            accessError
+              ? 'Проверьте адрес или войдите под своим аккаунтом.'
+              : 'Проверьте соединение и повторите попытку.'
           }
-          description="Проверьте адрес или повторите попытку."
-          onRetry={() => void query.refetch()}
+          onRetry={() => void retryDetail()}
         />
       )}
       {item && (
@@ -376,17 +640,20 @@ export function ApplicationDetailPage() {
                     {(attachment.size_bytes / (1024 * 1024)).toFixed(2)} МБ{' '}
                     <button
                       type="button"
-                      disabled={downloadingId !== null}
+                      disabled={busyFile !== null}
                       onClick={() =>
-                        void downloadAttachment(attachment.id, attachment.original_filename)
+                        void downloadFile(
+                          `/api/v1/applications/attachments/${encodeURIComponent(attachment.id)}/download`,
+                          attachment.original_filename,
+                          attachment.id,
+                        )
                       }
                     >
-                      {downloadingId === attachment.id ? 'Скачиваем…' : 'Скачать'}
+                      {busyFile === attachment.id ? 'Скачиваем…' : 'Скачать'}
                     </button>
                   </li>
                 ))}
               </ul>
-              {downloadError && <p role="alert">{downloadError}</p>}
             </section>
           )}
           <article className="application-detail-card">
@@ -418,13 +685,7 @@ export function ApplicationDetailPage() {
                 return (
                   <div className="application-form-data" key={key}>
                     <dt>{labels[key] ?? key}</dt>
-                    <dd>
-                      {value === null
-                        ? '—'
-                        : typeof value === 'string' || typeof value === 'number'
-                          ? String(value)
-                          : JSON.stringify(value)}
-                    </dd>
+                    <dd>{getFormValue(key, value)}</dd>
                   </div>
                 )
               })}
@@ -435,7 +696,9 @@ export function ApplicationDetailPage() {
                 </span>
               </dd>
               <dt>Документ</dt>
-              <dd>{documentLabels[item.document_status]}</dd>
+              <dd>{getDocumentStatus(item)}</dd>
+              <dt>Версия</dt>
+              <dd>{item.version}</dd>
               {item.feedback !== null && (
                 <>
                   <dt>Обратная связь</dt>
@@ -444,6 +707,157 @@ export function ApplicationDetailPage() {
               )}
             </dl>
           </article>
+          {confirmation && (
+            <p
+              className="application-success"
+              ref={confirmationMessage}
+              tabIndex={-1}
+              role="status"
+            >
+              Заявление № {confirmation.id} подано повторно. Версия {confirmation.version}.
+            </p>
+          )}
+          {canEdit && !editing && (
+            <button
+              className="service-action"
+              ref={editButton}
+              disabled={!query.isSuccess || query.isFetching}
+              onClick={() => setEditing(true)}
+            >
+              Исправить заявление
+            </button>
+          )}
+          {editing && (
+            <AdditionalApplicationForm
+              service={item.service}
+              correction={{
+                item,
+                isCurrent: query.isSuccess,
+                historyIsCurrent: history.isSuccess && !history.isFetching,
+                refresh,
+                onSuccess: (result) => {
+                  syncApplication(result)
+                  setConfirmation(result)
+                  setEditing(false)
+                },
+                onAccessError: setActionAccessError,
+                onCancel: () => {
+                  setEditing(false)
+                  requestAnimationFrame(() => (editButton.current ?? title.current)?.focus())
+                },
+              }}
+            />
+          )}
+          <section className="application-detail-card" aria-labelledby="history-title">
+            <h2 id="history-title">История рассмотрения</h2>
+            <p>
+              <strong>Текущий этап — {reviewLabels[item.review_status]}</strong>
+            </p>
+            {history.isPending && <LoadingState title="Загружаем историю…" />}
+            {history.isError && (
+              <ErrorState
+                title="Не удалось загрузить историю"
+                description="Проверьте соединение и повторите попытку."
+                onRetry={() =>
+                  void (history.isFetchNextPageError
+                    ? history.fetchNextPage({ cancelRefetch: false })
+                    : history.refetch({ cancelRefetch: false }))
+                }
+              />
+            )}
+            {history.isSuccess && !historyItems.length && <p>Событий пока нет.</p>}
+            {historyItems.length > 0 && (
+              <ol className="application-timeline">
+                {historyItems.map((event) => (
+                  <li key={event.id}>
+                    <time dateTime={event.created_at}>{formatDate(event.created_at)}</time>
+                    <strong>
+                      {event.from_status ? `${reviewLabels[event.from_status]} → ` : ''}
+                      {reviewLabels[event.to_status]}
+                    </strong>
+                    {event.actor_user_id && <span>Участник № {event.actor_user_id}</span>}
+                    {event.comment && <p>{event.comment}</p>}
+                  </li>
+                ))}
+              </ol>
+            )}
+            {history.hasNextPage && (
+              <button
+                className="service-action service-action--light"
+                disabled={history.isFetching || history.isRefetchError}
+                onClick={() => void history.fetchNextPage({ cancelRefetch: false })}
+              >
+                {history.isFetchingNextPage ? 'Загружаем…' : 'Показать ещё события'}
+              </button>
+            )}
+          </section>
+          {((metadata && item.review_status === 'approved' && item.document_status === 'ready') ||
+            documentAction) && (
+            <section className="application-detail-card" aria-labelledby="document-title">
+              <h2 id="document-title">{metadata ? 'Выданный PDF' : 'Документ'}</h2>
+              {metadata && (
+                <dl>
+                  <dt>Номер документа</dt>
+                  <dd>{metadata.id}</dd>
+                  <dt>Файл</dt>
+                  <dd>{metadata.filename}</dd>
+                  <dt>Дата выдачи</dt>
+                  <dd>
+                    <time dateTime={metadata.issued_at}>{formatDate(metadata.issued_at)}</time>
+                  </dd>
+                </dl>
+              )}
+              <div className="form-actions">
+                {metadata && (
+                  <>
+                    <button
+                      className="service-action"
+                      disabled={busyFile !== null}
+                      onClick={() =>
+                        void downloadFile(`${path}/document`, metadata.filename, 'document', true)
+                      }
+                    >
+                      Открыть PDF в новой вкладке
+                    </button>
+                    <button
+                      className="service-action service-action--light"
+                      disabled={busyFile !== null}
+                      onClick={() =>
+                        void downloadFile(`${path}/document`, metadata.filename, 'document')
+                      }
+                    >
+                      Скачать PDF
+                    </button>
+                  </>
+                )}
+                {documentAction && (
+                  <button
+                    className="service-action"
+                    disabled={
+                      busyFile !== null || query.isFetching || query.isError || needsDocumentRefresh
+                    }
+                    onClick={() => void generateDocument(documentAction)}
+                  >
+                    {documentAction === 'process'
+                      ? 'Сформировать документ'
+                      : 'Повторить формирование'}
+                  </button>
+                )}
+              </div>
+              {busyFile === 'document' && <p role="status">Выполняем запрос…</p>}
+            </section>
+          )}
+          {fileError && <p role="alert">{fileError}</p>}
+          {needsDocumentRefresh && (
+            <button
+              className="service-action service-action--light"
+              type="button"
+              disabled={query.isFetching || history.isFetching}
+              onClick={() => void verifyDocument()}
+            >
+              Проверить состояние документа
+            </button>
+          )}
         </div>
       )}
     </section>
