@@ -32,6 +32,7 @@
 | POST | `/auth/login` | `LoginRequest` | `200 TokenResponse` + cookie |
 | POST | `/auth/refresh` | Refresh cookie, без тела | `200 TokenResponse` + новая cookie |
 | POST | `/auth/logout` | Refresh cookie, необязательный Bearer fallback, без тела | `200 LogoutResponse`, cookie удалена |
+| POST | `/auth/password` | `ChangePasswordRequest`, активная сессия | `204`, cookie удалена, все сессии отозваны |
 | GET | `/users/me` | — | `200 StudentProfile` |
 | GET | `/schedule` | `date_from`, `date_to` | `200 ScheduleResponse` |
 | GET | `/academics` | — | `200 AcademicsResponse` |
@@ -82,6 +83,21 @@ type LoginRequest = {
   login: string;
   password: string;
 };
+
+type ChangePasswordRequest = {
+  current_password: string;
+  new_password: string;    // 12–128 Unicode code points
+  confirm_password: string;
+};
+
+`/auth/password` доступен любой активной роли. Пароли не обрезаются; новый пароль
+должен содержать 12–128 Unicode code points, подтверждение должно совпадать,
+категории символов не навязываются. Неверный действующий пароль — `401
+invalid_credentials`, повтор действующего пароля — `409 password_unchanged`.
+Ответ `204` удаляет активную refresh-cookie; при COMMIT отзываются все сессии и
+refresh пользователя и создаётся безопасное audit-событие. При сетевой ошибке
+клиент не повторяет запрос и отправляет пользователя ко входу, поскольку COMMIT
+мог состояться без доставленного ответа.
 
 type TokenResponse = {
   access_token: string;
@@ -215,6 +231,12 @@ type AcademicLeaveFormData = {
   basis: "medical" | "family" | "other"; starts_on: Date; ends_on: Date; explanation: string | null;
 };
 type AccountingCertificateFormData = { purpose: string | null };
+type AttachmentMetadata = {
+  id: Id;
+  original_filename: string;
+  mime_type: "application/pdf" | "image/jpeg" | "image/png";
+  size_bytes: number;
+};
 
 type Application = {
   id: Id;
@@ -227,6 +249,7 @@ type Application = {
     | "resubmitted" | "approved" | "rejected";
   document_status: "not_required" | "pending" | "ready" | "failed";
   feedback: string | null;
+  attachments: AttachmentMetadata[]; // только текущие вложения академического отпуска
   created_at: DateTime;
   updated_at: DateTime;
 };
@@ -234,7 +257,7 @@ type Application = {
 
 `study_certificate` сохраняет контракт MVP1: `place_of_submission` обязателен, 1–300 символов после trim. Для выписки входная форма пуста, сохранённый период определяется сервером из текущих периодов, связанных с группой студента через `course_groups` и `course_offerings`; при нуле или нескольких применимых периодах возвращается `409 academic_term_unavailable` или `409 academic_term_ambiguous`. При resubmit период сохраняется прежним.
 
-Академический отпуск принимает основание, даты и пояснение для `other`, но до интеграции защищённой загрузки файлов API отвечает `409 service_unavailable` (или `responsible_unit_unavailable`, если деканат не определён); `submitted` не создаётся. Бухгалтерская справка принимает необязательную цель, ответственное подразделение назначается сервером. Неизвестные поля и клиентские ID/статусы запрещены. Недоступность и требования возвращаются в полях `Service` и доступны для просмотра.
+Академический отпуск подаётся через `multipart/form-data`: поле `form_data` содержит JSON формы, а `files` — подтверждающие файлы PDF/JPG/PNG. Допускается не более 5 текущих файлов размером до 10 МиБ каждый и 50 МиБ суммарно; требуется минимум один технически открываемый файл. Содержимое не сверяется с основанием. Доступность и требования возвращаются в `Service`. Бухгалтерская справка принимает необязательную цель, ответственное подразделение назначается сервером. Неизвестные поля и клиентские ID/статусы запрещены.
 
 Создание доступных услуг возвращает `201 submitted/pending`, без автоматического одобрения или PDF. Ошибки конфигурации — `409 service_unavailable`, `academic_term_unavailable`, `academic_term_ambiguous`, `responsible_unit_unavailable`; ошибки формы — `422 validation_error`.
 
@@ -513,6 +536,7 @@ type ReviewApplicationRequest = {
   action: "start_review" | "approve" | "reject" | "return_for_correction";
   comment?: string | null; // trim, 1..3000 символов; обязательна причина двух отказных действий
 };
+// Академический отпуск передаёт form_data и вложения как multipart/form-data.
 type ResubmitApplicationRequest = {
   expected_version: number;
   form_data: { place_of_submission: string } | Record<string, never> | AcademicLeaveFormData | AccountingCertificateFormData;
@@ -535,7 +559,7 @@ type ApplicationHistoryEvent = {
 ID заявления. Автоматические услуги (включая выписку) возвращают `409 invalid_transition`;
 их сохранённая форма и история остаются без изменений. Схема входа выписки не принимает
 период от клиента, а проверка сохранённой формы не вычисляет его заново. Для
-академического отпуска resubmit также остаётся недоступен, пока услуга закрыта до #75.
+академический отпуск поддерживает атомарную повторную подачу с сохранением выбранных текущих файлов и добавлением новых вложений.
 Тестовые ручные услуги не входят в seed.
 
 `reviewer_user_id` берётся из авторизации при рассмотрении/решении; сотрудники
@@ -696,17 +720,21 @@ ID — положительные BIGINT-строки. Неизвестные п
 | GET `/admin/lookups` | `kind=groups|teachers|org_units`, `q`, `limit`, `after_id`; ограниченный список вариантов профиля, teachers только свободные |
 | GET `/admin/users/{id}` | логин, ФИО, роль, активность, ID профиля/группы/подразделения, permissions; никаких секретов |
 | POST `/admin/users` | `login`, `full_name`, `role`, ровно соответствующий роли `group_id` / `teacher_id` / `org_unit_id`; admin без профиля. 201 `{user,initial_password}` |
+| POST `/admin/users/{id}/password-reset` | только другой пользователь; `{password}` с `Cache-Control: no-store`; 192 случайных бита, выдать один раз |
 | PUT `/admin/users/{id}/active` | `{is_active:boolean}`; блокировка отзывает все сессии/refresh, разблокировка требует нового входа |
 | PUT `/admin/users/{id}/department` | `{org_unit_id}`; все прежние grants удаляются атомарно |
 | PUT / DELETE `/admin/users/{id}/permissions` | `{permission_code,scope_org_unit_id}`; grant/revoke отдельного разрешения, результат — деталь пользователя |
 
-Для teacher имя берётся из выбранной свободной записи; существующие назначения
+Password reset дополнительно требует ровно один разрешённый `Origin`, действующую
+Bearer-сессию и актуальную серверную роль `admin`; пользовательский plaintext во
+входе отсутствует. Для teacher имя берётся из выбранной свободной записи; существующие назначения
 не меняются. Student создаётся с `academic_status=enrolled`, без подгруппы.
-Staff создаётся без разрешений. Роль, логин и пароль существующего аккаунта
-через этот API не меняются. Учебные PermissionCode допустимы только у деканата
+Staff создаётся без разрешений. Роль и логин существующего аккаунта
+через этот API не меняются; пароль меняется только отдельным reset endpoint.
+Учебные PermissionCode допустимы только у деканата
 с NULL scope; `applications.review` / `news.publish` — со scope своего подразделения.
 
-409: `login_exists`, `teacher_unavailable`, `self_block_forbidden`, `last_admin`,
+409: `login_exists`, `teacher_unavailable`, `self_block_forbidden`, `self_reset_forbidden`, `password_unchanged`, `last_admin`,
 `conflict` (конфликт ограничений). 422: `invalid_profile`,
 `invalid_permission_scope`, `validation_error`. No-op не создаёт аудит.
 Создание аккаунта/профиля, grants, перевод, отзыв сессий и аудит атомарны.
@@ -716,8 +744,13 @@ Staff создаётся без разрешений. Роль, логин и п
 UI не помещает его в query cache/storage/history и удаляет при закрытии/уходе.
 При потерянном/неразбираемом ответе или 5xx после отправки POST повтор не выполняется:
 проверить список по уникальному логину. Неизвестный пароль нельзя восстановить
-до #66. Полученный 401 `access_expired` допускает существующий auth-refresh/replay:
-это явный отказ до предметной операции, не потерянный ответ после COMMIT.
+Сброс пароля выполняется отдельным POST и не повторяется автоматически даже после
+`401 access_expired`; потерянный ответ не раскрывает и не восстанавливает пароль.
+Администратор может выполнить новый осознанный сброс после проверки с пользователем.
+Административный reset атомарно меняет только `password_hash`, отзывает сессии и
+пишет audit-событие без данных учётной записи; блокировка, роль, профиль и права
+не меняются. Заблокированная учётная запись остаётся заблокированной. Reset себя
+возвращает `409 self_reset_forbidden`.
 
 Уточнение MVP2-25 по ревью: варианты `/admin/lookups` сохраняют `id/name/type` и
 дополнительно возвращают nullable `context` (кафедра, программа/курс или родительское
@@ -790,7 +823,10 @@ JWT после отзыва разрешения. Student `/schedule` сохра
   только официальные занятия, включая сохранённые cancelled/moved.
 - `GET /lessons/{id}`: полное редактируемое состояние, participants
   (`group_id`, nullable `subgroup_id`), room_ids, version, status, previous/next ID
-  и ID создателя. Историческое чтение не требует текущих teaching_assignments.
+  и ID создателя. Дополнительно `display` возвращает подписи связанных объектов.
+  То же поле включено в элементы `GET /lessons` и ответы `POST /lessons`,
+  `PATCH /lessons/{id}`, `/move`, `/cancel`, `/restore`. Историческое чтение не
+  требует текущих teaching_assignments.
 - `POST /lessons`: создание scheduled, 201; полный `LessonWrite`.
 - `PATCH /lessons/{id}`: полный предполагаемый `LessonWrite` плюс ожидаемая `version`.
 - `POST /lessons/{id}/cancel`, `/restore`: тело только `{version}`.
@@ -801,6 +837,19 @@ JWT после отзыва разрешения. Student `/schedule` сохра
 поясом, kind (lecture/seminar/lab/other), непустые participants, room_ids.
 Клиент не задаёт статус, автора, previous_lesson_id или is_additional. ID — строки
 положительных PostgreSQL bigint. Физический DELETE отсутствует.
+
+`EditorLesson.display` не заменяет существующие ID-поля. `course_offering` содержит
+`id`, `discipline_id`, `discipline_name`, nullable `discipline_code`, `term_id`,
+`term_name`, `term_starts_on`, `term_ends_on`, `attestation_type` и `groups` — список
+связанных `{id, name}` из `course_groups`; ID проведения остаётся идентификатором,
+который различает записи даже при полном совпадении остальных характеристик.
+`teacher` — nullable `{id, full_name}`; при наличии аккаунта `full_name` берётся из
+`users.full_name`, иначе из `teachers.full_name`;
+`participants` — по одной записи на существующего участника с `group_id`,
+`group_name`, nullable `subgroup_id` и `subgroup_name`; `rooms` — по одной записи на
+аудиторию с `id`, `name`, `building_id`, `building_name`. Поэтому одинаковые
+названия не объединяют разные сущности. Подписи загружаются пакетно для страницы
+расписания; catalog lookup не требуется.
 
 Обычное редактирование разрешено только scheduled; cancel: scheduled→cancelled,
 move: scheduled→moved + новая scheduled, restore: cancelled→scheduled.

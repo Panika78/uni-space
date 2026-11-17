@@ -45,6 +45,7 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
     from sqlalchemy.orm import Session
 
     from app.applications import router as router_module
+    from app.applications.storage import cleanup_orphans
     from app.main import RequestBodyLimitMiddleware, app
 
     suffix = uuid4().hex
@@ -111,17 +112,21 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
         db.commit()
         staff_user_id = staff.id
 
+    storage_root = tmp_path / "private-files"
+
     class TestSettings:
-        attachment_storage_path = str(tmp_path / "private-files")
+        attachment_storage_path = str(storage_root)
 
     current_student = [Student(id=student_id, group_id=group_id, user_id=owner_user_id)]
     commit_ack_loss = [False]
+    fail_commit_before_database = [False]
 
     def override_session():
         from sqlalchemy.orm import Session
 
         with Session(postgresql_engine) as session:
             session.info["lose_commit_ack"] = commit_ack_loss[0]
+            session.info["fail_commit_before_database"] = fail_commit_before_database[0]
             yield session
 
     app.dependency_overrides[get_current_student] = lambda: current_student[0]
@@ -138,6 +143,8 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
     original_commit = Session.commit
 
     def commit_then_lose_ack(session):
+        if session.info.pop("fail_commit_before_database", False):
+            raise RuntimeError("fictional uncertain commit before database acknowledgement")
         original_commit(session)
         if session.info.pop("lose_commit_ack", False):
             raise RuntimeError("fictional lost commit acknowledgement")
@@ -174,12 +181,29 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
                     content=stream(b"x" * 129),
                     headers={"Content-Type": "application/json"},
                 )
-                return boundary, exceeded
+                multipart_body = (
+                    b"--fixture-boundary\r\n"
+                    b'Content-Disposition: form-data; name="form_data"\r\n\r\n'
+                    b"{}\r\n--fixture-boundary\r\n"
+                    b'Content-Disposition: form-data; name="files"; filename="large.pdf"\r\n'
+                    b"Content-Type: application/pdf\r\n\r\n"
+                    + b"x" * 256
+                    + b"\r\n--fixture-boundary--\r\n"
+                )
+                multipart_exceeded = await async_client.post(
+                    "/api/v1/applications",
+                    content=stream(multipart_body),
+                    headers={"Content-Type": "multipart/form-data; boundary=fixture-boundary"},
+                )
+                return boundary, exceeded, multipart_exceeded
 
-        boundary, chunked_oversized = asyncio.run(check_streaming_limit())
+        boundary, chunked_oversized, multipart_exceeded = asyncio.run(check_streaming_limit())
         assert boundary.status_code == 422
+
         assert chunked_oversized.status_code == 413
         assert chunked_oversized.json()["error"]["code"] == "request_too_large"
+        assert multipart_exceeded.status_code == 413
+        assert multipart_exceeded.json()["error"]["code"] == "request_too_large"
         monkeypatch.setattr(RequestBodyLimitMiddleware, "limit_bytes", 54 * 1024 * 1024)
         no_file = client.post(
             "/api/v1/applications", json={"service_code": "academic_leave", "form_data": form}
@@ -339,10 +363,10 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
             "keep_attachment_ids": "[]",
         }
 
-        def fail_resubmit_commit(_session):
+        def fail_resubmit_commit(_session, *_args):
             raise RuntimeError("fictional resubmit rollback")
 
-        event.listen(Session, "before_commit", fail_resubmit_commit)
+        event.listen(Session, "before_flush", fail_resubmit_commit)
         try:
             rolled_back = client.post(
                 f"/api/v1/applications/{created_id}/resubmit",
@@ -350,7 +374,7 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
                 files=[("files", ("rollback-replacement.pdf", PDF, "application/pdf"))],
             )
         finally:
-            event.remove(Session, "before_commit", fail_resubmit_commit)
+            event.remove(Session, "before_flush", fail_resubmit_commit)
         assert rolled_back.status_code == 500
         with Session(postgresql_engine) as db:
             assert db.scalar(select(Application.version).where(Application.id == created_id)) == 6
@@ -394,10 +418,38 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
             == PDF
         )
 
-        def fail_commit(_session):
+        with Session(postgresql_engine) as db, db.begin():
+            application = db.get(Application, created_id)
+            application.review_status = "needs_correction"
+            application.version = 8
+        replacement_fields["expected_version"] = "8"
+        fail_commit_before_database[0] = True
+        try:
+            uncertain_resubmit_precommit = client.post(
+                f"/api/v1/applications/{created_id}/resubmit",
+                data=replacement_fields,
+                files=[("files", ("uncertain-replacement.pdf", PDF, "application/pdf"))],
+            )
+        finally:
+            fail_commit_before_database[0] = False
+        assert uncertain_resubmit_precommit.status_code == 500
+        with Session(postgresql_engine) as db:
+            still_current = db.scalar(
+                select(ApplicationAttachment).where(
+                    ApplicationAttachment.application_id == created_id,
+                    ApplicationAttachment.is_current.is_(True),
+                )
+            )
+            committed_keys = set(db.scalars(select(ApplicationAttachment.storage_key)))
+        assert still_current.id == current_after.id
+        storage_root = tmp_path / "private-files"
+        assert cleanup_orphans(storage_root, committed_keys, older_than_seconds=0) == 1
+        assert (storage_root / still_current.storage_key).read_bytes() == PDF
+
+        def fail_commit(_session, *_args):
             raise RuntimeError("fictional attachment commit failure")
 
-        event.listen(Session, "before_commit", fail_commit)
+        event.listen(Session, "before_flush", fail_commit)
         try:
             failed = client.post(
                 "/api/v1/applications",
@@ -405,7 +457,7 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
                 files=[("files", ("rollback.pdf", PDF, "application/pdf"))],
             )
         finally:
-            event.remove(Session, "before_commit", fail_commit)
+            event.remove(Session, "before_flush", fail_commit)
         assert failed.status_code == 500
         stored_files = [
             path
@@ -460,6 +512,34 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
             ).content
             == PDF
         )
+
+        # A COMMIT call that fails before its result can be established must retain
+        # the published blob even while an independent query still sees no row.
+        fail_commit_before_database[0] = True
+        try:
+            uncertain_precommit = client.post(
+                "/api/v1/applications",
+                data={"form_data": __import__("json").dumps(form)},
+                files=[("files", ("uncertain-precommit.pdf", PDF, "application/pdf"))],
+            )
+        finally:
+            fail_commit_before_database[0] = False
+        assert uncertain_precommit.status_code == 500
+        before_cleanup = {
+            path.name
+            for path in storage_root.iterdir()
+            if path.is_file() and not path.name.startswith(".")
+        }
+        with Session(postgresql_engine) as db:
+            committed_keys = set(db.scalars(select(ApplicationAttachment.storage_key)))
+        assert len(before_cleanup - committed_keys) == 1
+        assert cleanup_orphans(storage_root, committed_keys, older_than_seconds=0) == 1
+        after_cleanup = {
+            path.name
+            for path in storage_root.iterdir()
+            if path.is_file() and not path.name.startswith(".")
+        }
+        assert after_cleanup == committed_keys
 
         attachment_queries = []
 

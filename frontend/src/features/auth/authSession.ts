@@ -365,6 +365,32 @@ export class AuthSession {
     }
   }
 
+  finishPasswordChange = async (uncertain = false) => {
+    let epoch: string | undefined
+    try {
+      const sourceEpoch = this.epoch
+      this.synchronize()
+      if (sourceEpoch !== this.epoch) return
+      epoch = this.beginChange(sourceEpoch).epoch
+      await this.withLock(async () => {
+        this.requireCurrent(epoch!)
+        this.writeState({ epoch: epoch!, blocked: true, pending: false, ended: true })
+        this.update(
+          'unauthenticated',
+          uncertain
+            ? 'Результат смены пароля неизвестен. Войдите с новым паролем; если он не подходит, используйте прежний.'
+            : 'Пароль изменён. Войдите снова с новым паролем.',
+        )
+      })
+    } catch {
+      this.clearSession(
+        uncertain
+          ? 'Результат смены пароля неизвестен. Войдите с новым паролем; если он не подходит, используйте прежний.'
+          : 'Пароль изменён. Войдите снова с новым паролем.',
+      )
+    }
+  }
+
   beginRequest = () => {
     this.synchronize()
     if (!this.token) throw new DOMException('Not authenticated', 'AbortError')

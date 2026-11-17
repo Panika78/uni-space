@@ -205,6 +205,41 @@ def set_user_active(db: Session, actor: User, user_id: int, active: bool) -> Use
     return user
 
 
+def reset_user_password(db: Session, actor: User, user_id: int) -> tuple[User, str]:
+    # Match the established 192-bit random password scheme used at account creation.
+    require_admin(db, actor)
+    password = secrets.token_urlsafe(24)
+    password_hash = PASSWORD_HASHER.hash(password)
+    current_actor = require_admin(db, actor, write=True)
+    if current_actor.id == user_id:
+        raise HTTPException(409, "self_reset_forbidden")
+    user = get_user(db, user_id, lock=True)
+    user.password_hash = password_hash
+    sessions = list(
+        db.scalars(
+            select(AuthSession)
+            .where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None))
+            .order_by(AuthSession.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    )
+    # Refresh may create a token while this query waits on a session lock.
+    # Stamp revocations after every lock is acquired so timestamps stay ordered.
+    now = datetime.now(UTC)
+    for session in sessions:
+        revoke_session(db, session, now, "password_reset")
+    audit_change(
+        db,
+        current_actor,
+        user,
+        "reset_password",
+        {"credential_reset": False},
+        {"credential_reset": True},
+    )
+    return user, password
+
+
 def get_staff(db: Session, user_id: int) -> StaffProfile:
     user = get_user(db, user_id, lock=True)
     profile = db.scalar(

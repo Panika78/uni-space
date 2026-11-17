@@ -128,32 +128,17 @@ def attachment_metadata(db: Session, application_id: int) -> list[AttachmentMeta
 
 
 def resolve_published_after_commit_error(
-    db: Session, root: Path, storage_keys: list[str], *, commit_attempted: bool
+    root: Path,
+    storage_keys: list[str],
+    *,
+    commit_attempted: bool,
+    rollback_confirmed: bool,
 ) -> None:
-    """Delete new files only after an independent connection proves no DB reference."""
-    if not storage_keys:
+    """Compensate only a confirmed pre-commit rollback; defer uncertain outcomes."""
+    if not storage_keys or commit_attempted or not rollback_confirmed:
         return
-    referenced: set[str] = set()
-    if commit_attempted:
-        try:
-            bind = db.get_bind()
-            if hasattr(bind, "engine"):
-                bind = bind.engine
-            with Session(bind) as verification:
-                referenced = set(
-                    verification.scalars(
-                        select(ApplicationAttachment.storage_key).where(
-                            ApplicationAttachment.storage_key.in_(storage_keys)
-                        )
-                    )
-                )
-        except Exception:
-            # Unknown commit and unknown verification both mean retain. The locked
-            # orphan cleanup can re-check after DB connectivity is restored.
-            return
     for storage_key in storage_keys:
-        if storage_key not in referenced:
-            storage.delete_key(root, storage_key)
+        storage.delete_key(root, storage_key)
 
 
 async def parse_submission(request: Request, *, resubmit: bool = False):
@@ -383,13 +368,15 @@ async def submit_application(
         commit_attempted = True
         db.commit()
     except Exception:
+        rollback_confirmed = False
         with suppress(Exception):
             db.rollback()
+            rollback_confirmed = True
         resolve_published_after_commit_error(
-            db,
             root,
             [item.storage_key for item in staged],
             commit_attempted=commit_attempted,
+            rollback_confirmed=rollback_confirmed,
         )
         for item in staged:
             storage.discard(item)
@@ -918,13 +905,15 @@ async def resubmit_application(
                 storage.delete_key(root, key)
         return payload
     except Exception:
+        rollback_confirmed = False
         with suppress(Exception):
             db.rollback()
+            rollback_confirmed = True
         resolve_published_after_commit_error(
-            db,
             root,
             [item.storage_key for item in staged],
             commit_attempted=commit_attempted,
+            rollback_confirmed=rollback_confirmed,
         )
         for item in staged:
             storage.discard(item)

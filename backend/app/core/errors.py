@@ -30,6 +30,8 @@ HTTP_ERROR_CODES = {
         "concurrent_change",
         "login_exists",
         "teacher_unavailable",
+        "self_reset_forbidden",
+        "password_unchanged",
         "self_block_forbidden",
         "last_admin",
         "service_unavailable",

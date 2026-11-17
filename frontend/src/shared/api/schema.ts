@@ -107,6 +107,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/users/{user_id}/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset Password */
+        post: operations["reset_password_api_v1_admin_users__user_id__password_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users/{user_id}/permissions": {
         parameters: {
             query?: never;
@@ -328,6 +345,23 @@ export interface paths {
          * @description Refresh-cookie имеет приоритет. При неизвестной/отсутствующей cookie используется необязательный валидный Bearer с проверкой владельца sid. Поле session_revoked сообщает, была ли найдена и отозвана конкретная сессия; cookie удаляется при любом ответе.
          */
         post: operations["logout_session_api_v1_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Change Own Password */
+        post: operations["change_own_password_api_v1_auth_password_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1343,6 +1377,15 @@ export interface components {
             /** Next After Id */
             next_after_id: string | null;
         };
+        /** ChangePasswordRequest */
+        ChangePasswordRequest: {
+            /** Confirm Password */
+            confirm_password: string;
+            /** Current Password */
+            current_password: string;
+            /** New Password */
+            new_password: string;
+        };
         /** CourseOfferingRef */
         CourseOfferingRef: {
             discipline: components["schemas"]["Ref"];
@@ -1384,12 +1427,45 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** EditorCourseOfferingDisplay */
+        EditorCourseOfferingDisplay: {
+            /**
+             * Attestation Type
+             * @enum {string}
+             */
+            attestation_type: "exam" | "pass_fail" | "graded_pass";
+            /** Discipline Code */
+            discipline_code: string | null;
+            /** Discipline Id */
+            discipline_id: string;
+            /** Discipline Name */
+            discipline_name: string;
+            /** Groups */
+            groups: components["schemas"]["EditorOfferingGroupDisplay"][];
+            /** Id */
+            id: string;
+            /**
+             * Term Ends On
+             * Format: date
+             */
+            term_ends_on: string;
+            /** Term Id */
+            term_id: string;
+            /** Term Name */
+            term_name: string;
+            /**
+             * Term Starts On
+             * Format: date
+             */
+            term_starts_on: string;
+        };
         /** EditorLesson */
         EditorLesson: {
             /** Course Offering Id */
             course_offering_id: string;
             /** Created By User Id */
             created_by_user_id: string | null;
+            display: components["schemas"]["EditorLessonDisplay"];
             /**
              * Ends At
              * Format: date-time
@@ -1425,12 +1501,57 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** EditorLessonDisplay */
+        EditorLessonDisplay: {
+            course_offering: components["schemas"]["EditorCourseOfferingDisplay"];
+            /** Participants */
+            participants: components["schemas"]["EditorParticipantDisplay"][];
+            /** Rooms */
+            rooms: components["schemas"]["EditorRoomDisplay"][];
+            teacher: components["schemas"]["EditorTeacherDisplay"] | null;
+        };
+        /** EditorOfferingGroupDisplay */
+        EditorOfferingGroupDisplay: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** EditorParticipantDisplay */
+        EditorParticipantDisplay: {
+            /** Group Id */
+            group_id: string;
+            /** Group Name */
+            group_name: string;
+            /** Subgroup Id */
+            subgroup_id?: string | null;
+            /** Subgroup Name */
+            subgroup_name?: string | null;
+        };
+        /** EditorRoomDisplay */
+        EditorRoomDisplay: {
+            /** Building Id */
+            building_id: string;
+            /** Building Name */
+            building_name: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
         /** EditorSchedule */
         EditorSchedule: {
             /** Items */
             items: components["schemas"]["EditorLesson"][];
             /** Next After Id */
             next_after_id: string | null;
+        };
+        /** EditorTeacherDisplay */
+        EditorTeacherDisplay: {
+            /** Full Name */
+            full_name: string;
+            /** Id */
+            id: string;
         };
         /** EffectivePermission */
         EffectivePermission: {
@@ -1915,6 +2036,11 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+        };
+        /** ResetUserPassword */
+        ResetUserPassword: {
+            /** Password */
+            password: string;
         };
         /** ReviewApplicationRequest */
         ReviewApplicationRequest: {
@@ -2719,6 +2845,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserDetail"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    reset_password_api_v1_admin_users__user_id__password_reset_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Обязательный разрешённый origin */
+                origin?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResetUserPassword"];
                 };
             };
             /** @description Unauthorized */
@@ -3986,6 +4192,76 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["LogoutResponse"];
                 };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Тело auth-запроса превышает 16384 байта */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    change_own_password_api_v1_auth_password_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Обязательный разрешённый origin */
+                origin?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Unauthorized */
             401: {

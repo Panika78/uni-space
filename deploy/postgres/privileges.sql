@@ -131,6 +131,8 @@ SELECT 'REVOKE UPDATE (id) ON public.users FROM uni_space_api'
 WHERE to_regclass('public.users') IS NOT NULL \gexec
 SELECT 'GRANT UPDATE (is_active) ON public.users TO uni_space_api'
 WHERE to_regclass('public.users') IS NOT NULL \gexec
+SELECT 'GRANT UPDATE (password_hash) ON public.users TO uni_space_api'
+WHERE to_regclass('public.users') IS NOT NULL \gexec
 -- Administration: immutable role/password, explicit profiles and append-only audit.
 SELECT format('GRANT INSERT ON public.%I TO uni_space_api', tablename)
 FROM pg_tables WHERE schemaname='public' AND tablename IN

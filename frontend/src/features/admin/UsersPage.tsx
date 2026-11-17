@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { apiFetch, ApiClientError } from '../../shared/api/client'
+import { apiFetch, ApiClientError, isDefinitiveApiRejection } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { staffSections } from '../auth/roleNavigation'
 import { useRoleContext } from '../auth/RoleContext'
@@ -34,6 +34,12 @@ function errorText(error: unknown) {
     if (error.status === 422) return 'Проверьте профиль, подразделение и область разрешения.'
   }
   return 'Не удалось выполнить запрос. Проверьте соединение.'
+}
+
+function isResetPasswordResponse(value: unknown): value is { password: string } {
+  if (typeof value !== 'object' || value === null || !('password' in value)) return false
+  const password = value.password
+  return typeof password === 'string' && /^[A-Za-z0-9_-]{32,128}$/.test(password)
 }
 
 function ProfileSelect({
@@ -345,6 +351,9 @@ function UserDetailContent({ id }: { id: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [resetting, setResetting] = useState(false)
+  const [resetPassword, setResetPassword] = useState<string | null>(null)
+  const [resetUncertain, setResetUncertain] = useState(false)
   const [unit, setUnit] = useState('')
   const [code, setCode] = useState<Grant['permission_code']>('applications.review')
   async function change(path: string, method: string, body: unknown) {
@@ -363,6 +372,22 @@ function UserDetailContent({ id }: { id: string }) {
       setBusy(false)
     }
   }
+  if (resetPassword !== null)
+    return (
+      <section className="admin-users" aria-labelledby="password-reset-title">
+        <h1 id="password-reset-title" tabIndex={-1}>
+          Пароль сброшен
+        </h1>
+        <p>
+          Сохраните пароль сейчас и безопасно передайте пользователю. После закрытия получить его
+          повторно нельзя.
+        </p>
+        <p>
+          Выданный пароль: <strong className="admin-secret">{resetPassword}</strong>
+        </p>
+        <button onClick={() => setResetPassword(null)}>Закрыть и удалить пароль с экрана</button>
+      </section>
+    )
   if (query.isPending) return <p role="status">Загрузка учётной записи…</p>
   if (query.isError)
     return (
@@ -391,6 +416,57 @@ function UserDetailContent({ id }: { id: string }) {
       </p>
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
+      {resetUncertain && (
+        <p role="alert">
+          Не удалось подтвердить результат сброса. Пароль мог измениться, но восстановить выданный
+          секрет нельзя. Проверьте состояние с пользователем перед новым сбросом.
+        </p>
+      )}
+      {user.id !== actor.user_id && (
+        <button
+          disabled={busy || resetting}
+          onClick={async () => {
+            if (!window.confirm('Сбросить пароль? Новый случайный пароль будет показан один раз.'))
+              return
+            setResetting(true)
+            setResetUncertain(false)
+            setError('')
+            try {
+              const result = await apiFetch<components['schemas']['ResetUserPassword']>(
+                `${base}/users/${id}/password-reset`,
+                { authenticated: true, replayAfterRefresh: false, method: 'POST' },
+              )
+              if (!isResetPasswordResponse(result)) {
+                setResetUncertain(true)
+                return
+              }
+              setResetPassword(result.password)
+              setError('')
+              void query.refetch()
+            } catch (resetError) {
+              if (isDefinitiveApiRejection(resetError)) {
+                const statusMessage =
+                  resetError.status === 403
+                    ? 'Сброс отклонён: недостаточно прав.'
+                    : resetError.status === 404
+                      ? 'Сброс отклонён: учётная запись не найдена.'
+                      : resetError.status === 409
+                        ? 'Сброс отклонён: операция недопустима для этой учётной записи.'
+                        : resetError.status === 422
+                          ? 'Сброс отклонён: проверьте запрос.'
+                          : 'Сервер вернул ошибку при сбросе пароля.'
+                setError(statusMessage)
+              } else {
+                setResetUncertain(true)
+              }
+            } finally {
+              setResetting(false)
+            }
+          }}
+        >
+          {resetting ? 'Сбрасываем…' : 'Сбросить пароль'}
+        </button>
+      )}
       <button
         disabled={busy || user.id === actor.user_id}
         onClick={() => {

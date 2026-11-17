@@ -19,7 +19,7 @@ export function createViteConfig(mode: string, envDirectory = process.cwd()) {
     server: {
       proxy: {
         '/api': {
-          target: env.API_PROXY_TARGET || 'http://localhost:8000',
+          target: process.env.API_PROXY_TARGET || env.API_PROXY_TARGET || 'http://localhost:8000',
           changeOrigin: true,
         },
       },

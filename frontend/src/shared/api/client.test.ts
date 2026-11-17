@@ -5,6 +5,7 @@ import {
   apiFetchBlob,
   AUTHENTICATED_GET_DEADLINE_MS,
   configureApiAuth,
+  isDefinitiveApiRejection,
 } from './client'
 
 afterEach(() => {
@@ -144,6 +145,27 @@ describe('apiFetch', () => {
   })
 })
 
+describe('definitive API rejections', () => {
+  it.each([403, 404, 409, 422])('recognizes HTTP %i as a definitive rejection', (status) => {
+    expect(isDefinitiveApiRejection(new ApiClientError('rejected', 'api_error', status))).toBe(true)
+  })
+
+  it.each([200, 401, 429, 500, 503, undefined])(
+    'treats status %s as a potentially committed operation',
+    (status) => {
+      expect(isDefinitiveApiRejection(new ApiClientError('unknown', 'api_error', status))).toBe(
+        false,
+      )
+    },
+  )
+
+  it('treats malformed error responses as uncertain even at a normally definitive status', () => {
+    expect(isDefinitiveApiRejection(new ApiClientError('bad body', 'invalid_response', 403))).toBe(
+      false,
+    )
+  })
+})
+
 it('preserves cancellation instead of turning it into a network error', async () => {
   const abort = new DOMException('cancelled', 'AbortError')
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(abort))
@@ -168,15 +190,16 @@ it('preserves abort while reading the response body', async () => {
 describe('authenticated API destination policy', () => {
   function configureSession() {
     const refresh = vi.fn().mockResolvedValue('fictional-refreshed-token')
+    const invalidate = vi.fn()
     const begin = vi.fn().mockReturnValue({
       token: 'fictional-token',
       signal: new AbortController().signal,
       assertCurrent: vi.fn(),
-      invalidate: vi.fn(),
+      invalidate,
       refresh,
     })
     configureApiAuth(begin)
-    return { begin, refresh }
+    return { begin, refresh, invalidate }
   }
 
   it('refreshes once and downloads private binary data without JSON parsing', async () => {
@@ -211,6 +234,49 @@ describe('authenticated API destination policy', () => {
     expect(
       fetchMock.mock.calls.every(([, init]) => (init as RequestInit).cache === 'no-store'),
     ).toBe(true)
+  })
+
+  it('preserves an authenticated session on invalid current-password credentials', async () => {
+    const { invalidate } = configureSession()
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { error: { code: 'invalid_credentials', message: '', details: [] } },
+            { status: 401 },
+          ),
+        ),
+    )
+    await expect(
+      apiFetch('/api/v1/auth/password', {
+        authenticated: true,
+        replayAfterRefresh: false,
+        method: 'POST',
+      }),
+    ).rejects.toMatchObject({ status: 401, code: 'invalid_credentials' })
+    expect(invalidate).not.toHaveBeenCalled()
+  })
+
+  it('invalidates an authenticated session on session-invalid responses', async () => {
+    const { invalidate } = configureSession()
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { error: { code: 'session_invalid', message: '', details: [] } },
+            { status: 401 },
+          ),
+        ),
+    )
+    await expect(apiFetch('/api/v1/auth/context', { authenticated: true })).rejects.toMatchObject({
+      status: 401,
+      code: 'session_invalid',
+    })
+    expect(invalidate).toHaveBeenCalledOnce()
   })
 
   it.each([
