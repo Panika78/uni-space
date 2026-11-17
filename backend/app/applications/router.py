@@ -477,9 +477,7 @@ async def submit_application(
             coordination.__exit__(None, None, None)
     response.headers["Location"] = f"/api/v1/applications/{application.id}"
     if automatic_document:
-        _issue_after_business_commit(
-            application.id, actor_kind="owner", actor_id=student.user_id
-        )
+        _issue_after_business_commit(application.id, actor_kind="owner", actor_id=student.user_id)
         with SessionLocal() as response_db:
             row = response_db.execute(
                 select(Application, ServiceType)
@@ -600,9 +598,9 @@ def list_application_page(
             tuple_(Application.created_at, Application.id) < (timestamp, application_id)
         )
     rows = db.execute(
-        statement.order_by(Application.created_at.desc(), Application.id.desc()).limit(
-            pagination.limit + 1
-        ).execution_options(populate_existing=True)
+        statement.order_by(Application.created_at.desc(), Application.id.desc())
+        .limit(pagination.limit + 1)
+        .execution_options(populate_existing=True)
     ).all()
     page_rows = rows[: pagination.limit]
     metadata = attachment_metadata_batch(db, [application.id for application, _, _ in page_rows])

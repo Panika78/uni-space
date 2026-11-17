@@ -214,26 +214,30 @@ def test_storage_preflight_failure_preserves_committed_business_response(
                 accounting = OrgUnit(name=f"Fictional Accounting {suffix}", type="accounting")
                 db.add(accounting)
                 db.flush()
-            service = db.scalar(
-                select(ServiceType).where(ServiceType.code == service_code)
-            )
+            service = db.scalar(select(ServiceType).where(ServiceType.code == service_code))
             service.responsible_org_unit_id = accounting.id
             staff = User(
-                login=f"preflight-staff-{suffix}", password_hash="fixture",
-                full_name="Fictional Reviewer", role="staff", is_active=True,
+                login=f"preflight-staff-{suffix}",
+                password_hash="fixture",
+                full_name="Fictional Reviewer",
+                role="staff",
+                is_active=True,
             )
             db.add(staff)
             db.flush()
             profile = StaffProfile(user_id=staff.id, org_unit_id=accounting.id)
             db.add(profile)
             db.flush()
-            db.add(StaffPermission(
-                staff_profile_id=profile.id,
-                permission_code="applications.review",
-                scope_org_unit_id=accounting.id,
-            ))
+            db.add(
+                StaffPermission(
+                    staff_profile_id=profile.id,
+                    permission_code="applications.review",
+                    scope_org_unit_id=accounting.id,
+                )
+            )
             session = AuthSession(
-                user_id=staff.id, created_at=datetime.now(UTC),
+                user_id=staff.id,
+                created_at=datetime.now(UTC),
                 expires_at=datetime.now(UTC) + timedelta(hours=1),
             )
             db.add(session)
@@ -256,60 +260,90 @@ def test_storage_preflight_failure_preserves_committed_business_response(
         monkeypatch.setattr(attachment_storage, "coordination_lock", fail_lock)
 
     created = context["client"].request(
-        "POST", "/api/v1/applications", access=student_token,
-        json={"service_code": service_code, "form_data": (
-            {"place_of_submission": "Демонстрация"} if service_code == "study_certificate"
-            else {"purpose": "Демонстрация"}
-        )},
+        "POST",
+        "/api/v1/applications",
+        access=student_token,
+        json={
+            "service_code": service_code,
+            "form_data": (
+                {"place_of_submission": "Демонстрация"}
+                if service_code == "study_certificate"
+                else {"purpose": "Демонстрация"}
+            ),
+        },
     )
     assert created.status_code == 201, created.text
     identifier = int(created.json()["id"])
     assert created.headers["location"].endswith(f"/applications/{identifier}")
     if service_code == "accounting_certificate":
         assert created.json()["review_status"] == "submitted"
-        assert context["client"].request(
-            "POST", f"/api/v1/staff/applications/{identifier}/review", access=staff_token,
-            json={"expected_version": 1, "action": "start_review"},
-        ).status_code == 200
+        assert (
+            context["client"]
+            .request(
+                "POST",
+                f"/api/v1/staff/applications/{identifier}/review",
+                access=staff_token,
+                json={"expected_version": 1, "action": "start_review"},
+            )
+            .status_code
+            == 200
+        )
         response = context["client"].request(
-            "POST", f"/api/v1/staff/applications/{identifier}/review", access=staff_token,
+            "POST",
+            f"/api/v1/staff/applications/{identifier}/review",
+            access=staff_token,
             json={"expected_version": 2, "action": "approve"},
         )
     else:
         response = created
     assert response.status_code == (200 if service_code == "accounting_certificate" else 201)
     assert (response.json()["review_status"], response.json()["document_status"]) == (
-        "approved", "pending"
+        "approved",
+        "pending",
     )
     with Session(context["engine"]) as db:
         app_row = db.get(Application, identifier)
         version = app_row.version
-        history_count = len(db.scalars(select(ApplicationHistory).where(
-            ApplicationHistory.application_id == identifier
-        )).all())
+        history_count = len(
+            db.scalars(
+                select(ApplicationHistory).where(ApplicationHistory.application_id == identifier)
+            ).all()
+        )
         assert app_row.review_status == "approved" and app_row.document_status == "pending"
-        assert db.scalar(select(IssuedDocument.id).where(
-            IssuedDocument.application_id == identifier
-        )) is None
+        assert (
+            db.scalar(select(IssuedDocument.id).where(IssuedDocument.application_id == identifier))
+            is None
+        )
 
     monkeypatch.setattr(issuer_module, "_run_issued_filesystem_operation", original_operation)
     monkeypatch.setattr(attachment_storage, "coordination_lock", original_lock)
-    retry_path = (f"/api/v1/staff/applications/{identifier}/document/retry"
-                  if service_code == "accounting_certificate"
-                  else f"/api/v1/applications/{identifier}/document/retry")
+    retry_path = (
+        f"/api/v1/staff/applications/{identifier}/document/retry"
+        if service_code == "accounting_certificate"
+        else f"/api/v1/applications/{identifier}/document/retry"
+    )
     retry = context["client"].request(
-        "POST", retry_path,
+        "POST",
+        retry_path,
         access=staff_token if service_code == "accounting_certificate" else student_token,
     )
     assert retry.status_code == 200 and retry.json()["document_status"] == "ready"
     with Session(context["engine"]) as db:
         assert db.get(Application, identifier).version == version + 1
-        assert len(db.scalars(select(ApplicationHistory).where(
-            ApplicationHistory.application_id == identifier
-        )).all()) == history_count
-        assert db.scalar(select(IssuedDocument.id).where(
-            IssuedDocument.application_id == identifier
-        )) is not None
+        assert (
+            len(
+                db.scalars(
+                    select(ApplicationHistory).where(
+                        ApplicationHistory.application_id == identifier
+                    )
+                ).all()
+            )
+            == history_count
+        )
+        assert (
+            db.scalar(select(IssuedDocument.id).where(IssuedDocument.application_id == identifier))
+            is not None
+        )
     _cleanup_application(context, identifier)
 
 
@@ -706,9 +740,12 @@ def test_concurrent_retries_from_pending_issue_once(issue_context):
     with Session(context["engine"]) as db, db.begin():
         service = db.scalar(select(ServiceType).where(ServiceType.code == "study_certificate"))
         application = Application(
-            student_id=context["student_ids"][0], service_type_id=service.id,
-            review_status="approved", document_status="pending",
-            form_data={"place_of_submission": "Демонстрационная справка"}, version=3,
+            student_id=context["student_ids"][0],
+            service_type_id=service.id,
+            review_status="approved",
+            document_status="pending",
+            form_data={"place_of_submission": "Демонстрационная справка"},
+            version=3,
         )
         db.add(application)
         db.flush()
@@ -726,12 +763,12 @@ def test_concurrent_retries_from_pending_issue_once(issue_context):
     assert all(response.json()["document_status"] == "ready" for response in responses)
     with Session(context["engine"]) as db:
         row = db.get(Application, identifier)
-        docs = db.scalars(select(IssuedDocument).where(
-            IssuedDocument.application_id == identifier
-        )).all()
-        events = db.scalars(select(ApplicationHistory).where(
-            ApplicationHistory.application_id == identifier
-        )).all()
+        docs = db.scalars(
+            select(IssuedDocument).where(IssuedDocument.application_id == identifier)
+        ).all()
+        events = db.scalars(
+            select(ApplicationHistory).where(ApplicationHistory.application_id == identifier)
+        ).all()
         assert (row.review_status, row.document_status, row.version) == ("approved", "ready", 4)
         assert len(docs) == 1 and len(events) == 0
         assert (context["root"] / "issued_documents" / docs[0].storage_key).is_file()
@@ -746,42 +783,56 @@ def test_api_process_crash_after_publish_recovers_orphan_and_retry(issue_context
     context = issue_context
     token = _login(context)
     existing_response = context["client"].request(
-        "POST", "/api/v1/applications", access=token,
-        json={"service_code": "study_certificate", "form_data": {
-            "place_of_submission": "Документ, который должен сохраниться"
-        }},
+        "POST",
+        "/api/v1/applications",
+        access=token,
+        json={
+            "service_code": "study_certificate",
+            "form_data": {"place_of_submission": "Документ, который должен сохраниться"},
+        },
     )
     assert existing_response.status_code == 201
     existing_id = int(existing_response.json()["id"])
     with Session(context["engine"]) as db:
-        existing_document = db.scalar(select(IssuedDocument).where(
-            IssuedDocument.application_id == existing_id
-        ))
+        existing_document = db.scalar(
+            select(IssuedDocument).where(IssuedDocument.application_id == existing_id)
+        )
         existing_key = existing_document.storage_key
         existing_bytes = (context["root"] / "issued_documents" / existing_key).read_bytes()
 
     with Session(context["engine"]) as db, db.begin():
         service = db.scalar(select(ServiceType).where(ServiceType.code == "study_certificate"))
         application = Application(
-            student_id=context["student_ids"][0], service_type_id=service.id,
-            review_status="approved", document_status="pending",
-            form_data={"place_of_submission": "Crash recovery demonstration"}, version=2,
+            student_id=context["student_ids"][0],
+            service_type_id=service.id,
+            review_status="approved",
+            document_status="pending",
+            form_data={"place_of_submission": "Crash recovery demonstration"},
+            version=2,
         )
         db.add(application)
         db.flush()
         identifier = application.id
-        db.add(ApplicationHistory(
-            application_id=identifier, actor_user_id=None,
-            from_status="submitted", to_status="approved", comment=None,
-        ))
+        db.add(
+            ApplicationHistory(
+                application_id=identifier,
+                actor_user_id=None,
+                from_status="submitted",
+                to_status="approved",
+                comment=None,
+            )
+        )
 
     marker = tmp_path / "published-before-commit"
     database_url = context["engine"].url.render_as_string(hide_password=False)
     process = multiprocessing.get_context("fork").Process(
         target=_issue_then_pause_before_commit,
         args=(
-            database_url, identifier, context["student_users"][0],
-            str(context["root"]), str(marker),
+            database_url,
+            identifier,
+            context["student_users"][0],
+            str(context["root"]),
+            str(marker),
         ),
     )
     process.start()
@@ -804,12 +855,15 @@ def test_api_process_crash_after_publish_recovers_orphan_and_retry(issue_context
     with Session(context["engine"]) as db:
         crashed = db.get(Application, identifier)
         assert (crashed.review_status, crashed.document_status) == ("approved", "pending")
-        assert db.scalar(select(IssuedDocument.id).where(
-            IssuedDocument.application_id == identifier
-        )) is None
-        history_count = len(db.scalars(select(ApplicationHistory.id).where(
-            ApplicationHistory.application_id == identifier
-        )).all())
+        assert (
+            db.scalar(select(IssuedDocument.id).where(IssuedDocument.application_id == identifier))
+            is None
+        )
+        history_count = len(
+            db.scalars(
+                select(ApplicationHistory.id).where(ApplicationHistory.application_id == identifier)
+            ).all()
+        )
     references = {existing_key}
     assert cleanup_orphans(context["root"], references, older_than_seconds=0) == 1
     assert not crash_orphans[0].exists()
@@ -824,21 +878,31 @@ def test_api_process_crash_after_publish_recovers_orphan_and_retry(issue_context
             db.scalar(select(Application.document_status).where(Application.id == identifier))
             == "ready"
         )
-        assert len(db.scalars(select(IssuedDocument.id).where(
-            IssuedDocument.application_id == identifier
-        )).all()) == 1
-        assert len(db.scalars(select(ApplicationHistory.id).where(
-            ApplicationHistory.application_id == identifier
-        )).all()) == history_count
+        assert (
+            len(
+                db.scalars(
+                    select(IssuedDocument.id).where(IssuedDocument.application_id == identifier)
+                ).all()
+            )
+            == 1
+        )
+        assert (
+            len(
+                db.scalars(
+                    select(ApplicationHistory.id).where(
+                        ApplicationHistory.application_id == identifier
+                    )
+                ).all()
+            )
+            == history_count
+        )
     assert (pdf_root / existing_key).read_bytes() == existing_bytes
     _cleanup_application(context, identifier)
     _cleanup_application(context, existing_id)
 
 
 @pytest.mark.parametrize("read_path", ["list", "detail"])
-def test_application_reads_remain_consistent_during_document_issuance(
-    issue_context, read_path
-):
+def test_application_reads_remain_consistent_during_document_issuance(issue_context, read_path):
     from app.documents import issuer as issuer_module
 
     context = issue_context
@@ -846,9 +910,12 @@ def test_application_reads_remain_consistent_during_document_issuance(
     with Session(context["engine"]) as db, db.begin():
         service = db.scalar(select(ServiceType).where(ServiceType.code == "study_certificate"))
         application = Application(
-            student_id=context["student_ids"][0], service_type_id=service.id,
-            review_status="approved", document_status="pending",
-            form_data={"place_of_submission": "Согласованный снимок"}, version=5,
+            student_id=context["student_ids"][0],
+            service_type_id=service.id,
+            review_status="approved",
+            document_status="pending",
+            form_data={"place_of_submission": "Согласованный снимок"},
+            version=5,
         )
         db.add(application)
         db.flush()
@@ -889,7 +956,10 @@ def test_application_reads_remain_consistent_during_document_issuance(
     else:
         item = response.json()
     assert (item["review_status"], item["document_status"], item["version"], item["document"]) == (
-        "approved", "pending", 5, None
+        "approved",
+        "pending",
+        5,
+        None,
     )
     subsequent = context["client"].request("GET", path, access=token)
     if read_path == "list":
@@ -1564,8 +1634,11 @@ def test_legacy_automatic_application_survives_real_schema_upgrade(
             db.add(faculty)
             db.flush()
             program = Program(
-                code=suffix, name=f"Legacy program {suffix}", direction_code="00.00.00",
-                direction_name="Fictional direction", faculty_id=faculty.id,
+                code=suffix,
+                name=f"Legacy program {suffix}",
+                direction_code="00.00.00",
+                direction_name="Fictional direction",
+                faculty_id=faculty.id,
             )
             db.add(program)
             db.flush()
@@ -1573,13 +1646,16 @@ def test_legacy_automatic_application_survives_real_schema_upgrade(
                 name=f"Legacy group {suffix}", program_id=program.id, course_number=1
             )
             term = AcademicTerm(
-                name=f"Legacy term {suffix}", starts_on=datetime(2026, 9, 1).date(),
+                name=f"Legacy term {suffix}",
+                starts_on=datetime(2026, 9, 1).date(),
                 ends_on=datetime(2027, 1, 31).date(),
             )
             owner = User(
-                login=f"legacy-{suffix}", password_hash="fixture",
+                login=f"legacy-{suffix}",
+                password_hash="fixture",
                 full_name="Legacy Fictional Student",
-                role="student", is_active=True,
+                role="student",
+                is_active=True,
             )
             db.add_all([group, term, owner])
             db.flush()
@@ -1590,8 +1666,10 @@ def test_legacy_automatic_application_survives_real_schema_upgrade(
                 select(ServiceType).where(ServiceType.code == "academic_transcript")
             )
             application = Application(
-                student_id=student.id, service_type_id=service.id,
-                review_status="submitted", document_status="pending",
+                student_id=student.id,
+                service_type_id=service.id,
+                review_status="submitted",
+                document_status="pending",
                 form_data={
                     "academic_term_id": str(term.id),
                     "academic_term_name": term.name,
@@ -1602,12 +1680,18 @@ def test_legacy_automatic_application_survives_real_schema_upgrade(
             )
             db.add(application)
             db.flush()
-            db.add(ApplicationHistory(
-                application_id=application.id, actor_user_id=owner.id,
-                from_status=None, to_status="submitted", comment=None,
-            ))
+            db.add(
+                ApplicationHistory(
+                    application_id=application.id,
+                    actor_user_id=owner.id,
+                    from_status=None,
+                    to_status="submitted",
+                    comment=None,
+                )
+            )
             auth_session = AuthSession(
-                user_id=owner.id, created_at=datetime.now(UTC),
+                user_id=owner.id,
+                created_at=datetime.now(UTC),
                 expires_at=datetime.now(UTC) + timedelta(hours=1),
             )
             db.add(auth_session)
@@ -1620,9 +1704,12 @@ def test_legacy_automatic_application_survives_real_schema_upgrade(
         # Upgrade the existing database, including its pre-#83 application row.
         migrate("head")
         with legacy_engine.connect() as connection:
-            assert connection.exec_driver_sql(
-                "SELECT to_regclass('public.issued_documents')"
-            ).scalar_one() == "issued_documents"
+            assert (
+                connection.exec_driver_sql(
+                    "SELECT to_regclass('public.issued_documents')"
+                ).scalar_one()
+                == "issued_documents"
+            )
 
         class TestSettings:
             attachment_storage_path = str(tmp_path / "legacy-private-volume")
@@ -1630,11 +1717,13 @@ def test_legacy_automatic_application_survives_real_schema_upgrade(
         monkeypatch.setattr(application_router, "get_settings", lambda: TestSettings())
         monkeypatch.setattr(issuer_module, "get_settings", lambda: TestSettings())
         monkeypatch.setattr(
-            issuer_module, "SessionLocal",
+            issuer_module,
+            "SessionLocal",
             lambda: Session(legacy_engine, expire_on_commit=False),
         )
         app = FastAPI()
         app.include_router(application_router.router)
+
         def get_legacy_session():
             with Session(legacy_engine, expire_on_commit=False) as db:
                 yield db
@@ -1642,24 +1731,32 @@ def test_legacy_automatic_application_survives_real_schema_upgrade(
         app.dependency_overrides[get_db_session] = get_legacy_session
         try:
             from app.applications import service as workflow
+
             with Session(legacy_engine) as diagnostic_db:
                 diagnostic_app = diagnostic_db.get(Application, application_id)
                 diagnostic_student = diagnostic_db.get(Student, student_id)
                 diagnostic_service = diagnostic_db.get(ServiceType, diagnostic_app.service_type_id)
-                assert workflow.validate_and_store_form(
-                    diagnostic_db, diagnostic_service, diagnostic_app.form_data,
-                    student=diagnostic_student, existing=diagnostic_app.form_data,
-                )[0] == original_form
+                assert (
+                    workflow.validate_and_store_form(
+                        diagnostic_db,
+                        diagnostic_service,
+                        diagnostic_app.form_data,
+                        student=diagnostic_student,
+                        existing=diagnostic_app.form_data,
+                    )[0]
+                    == original_form
+                )
             client = TestClient(app)
             headers = {"Authorization": f"Bearer {owner_token}"}
             processed = client.post(
                 f"/api/v1/applications/{application_id}/document/process", headers=headers
             )
             assert processed.status_code == 200, processed.text
-            assert (processed.json()["id"], processed.json()["review_status"],
-                    processed.json()["document_status"]) == (
-                str(application_id), "approved", "ready"
-            )
+            assert (
+                processed.json()["id"],
+                processed.json()["review_status"],
+                processed.json()["document_status"],
+            ) == (str(application_id), "approved", "ready")
             document_id = processed.json()["document"]["id"]
             repeated = client.post(
                 f"/api/v1/applications/{application_id}/document/process", headers=headers
@@ -1668,12 +1765,14 @@ def test_legacy_automatic_application_survives_real_schema_upgrade(
             assert repeated.json()["document"]["id"] == document_id
             with Session(legacy_engine) as db:
                 migrated = db.get(Application, application_id)
-                history = db.scalars(select(ApplicationHistory).where(
-                    ApplicationHistory.application_id == application_id
-                ).order_by(ApplicationHistory.id)).all()
-                docs = db.scalars(select(IssuedDocument).where(
-                    IssuedDocument.application_id == application_id
-                )).all()
+                history = db.scalars(
+                    select(ApplicationHistory)
+                    .where(ApplicationHistory.application_id == application_id)
+                    .order_by(ApplicationHistory.id)
+                ).all()
+                docs = db.scalars(
+                    select(IssuedDocument).where(IssuedDocument.application_id == application_id)
+                ).all()
                 assert migrated.form_data == original_form
                 assert migrated.form_data["academic_term_id"] == original_term_id
                 assert migrated.review_status == "approved" and migrated.document_status == "ready"
@@ -1682,8 +1781,11 @@ def test_legacy_automatic_application_survives_real_schema_upgrade(
                 assert history[1].from_status == "submitted" and history[1].to_status == "approved"
                 assert history[1].actor_user_id is None
                 assert len(docs) == 1
-                assert (Path(TestSettings.attachment_storage_path) / "issued_documents"
-                        / docs[0].storage_key).is_file()
+                assert (
+                    Path(TestSettings.attachment_storage_path)
+                    / "issued_documents"
+                    / docs[0].storage_key
+                ).is_file()
         finally:
             app.dependency_overrides.clear()
     finally:
@@ -1693,8 +1795,7 @@ def test_legacy_automatic_application_survives_real_schema_upgrade(
                 f'ALTER DATABASE "{database_name}" WITH ALLOW_CONNECTIONS false'
             )
             connection.exec_driver_sql(
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                "WHERE datname = %s",
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s",
                 (database_name,),
             )
             connection.exec_driver_sql(f'DROP DATABASE "{database_name}"')
