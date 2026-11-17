@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import io
+import os
+import re
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -19,6 +22,7 @@ from app.core.config import get_settings
 from app.models import (
     AcademicTerm,
     Application,
+    ApplicationAttachment,
     ApplicationHistory,
     Assessment,
     AssessmentGroup,
@@ -37,6 +41,125 @@ from app.models import (
     Student,
     User,
 )
+
+
+def _render_empty(_snapshot):
+    return b""
+
+
+def _render_bad_header(_snapshot):
+    return b"not a PDF"
+
+
+def _render_bad_xref(snapshot):
+    from app.documents import pdf
+
+    return re.sub(rb"startxref\s+\d+", b"startxref\n999999999", pdf.render_pdf(snapshot))
+
+
+def _render_truncated(snapshot):
+    from app.documents import pdf
+
+    content = pdf.render_pdf(snapshot)
+    return content[: len(content) // 2]
+
+
+def _render_hung(_snapshot):
+    time.sleep(30)
+    return b""
+
+
+def _render_failure(_snapshot):
+    raise RuntimeError("injected render failure")
+
+
+@pytest.mark.parametrize(
+    "renderer", [_render_empty, _render_bad_header, _render_bad_xref, _render_truncated]
+)
+def test_invalid_renderer_output_stays_failed_without_publication(
+    issue_context, monkeypatch, renderer
+):
+    from app.documents import issuer as issuer_module
+
+    context = issue_context
+    original_operation = issuer_module._run_issued_filesystem_operation
+    renderer_for_test = renderer
+
+    def invalid_pdf_operation(operation, *args, renderer=None):
+        return original_operation(
+            operation,
+            *args,
+            renderer=renderer_for_test if operation == "render_publish" else renderer,
+        )
+
+    monkeypatch.setattr(issuer_module, "_run_issued_filesystem_operation", invalid_pdf_operation)
+
+    token = _login(context)
+    response = context["client"].request(
+        "POST",
+        "/api/v1/applications",
+        access=token,
+        json={
+            "service_code": "study_certificate",
+            "form_data": {"place_of_submission": "Вымышленное место"},
+        },
+    )
+    assert response.status_code == 201, response.text
+    identifier = int(response.json()["id"])
+    assert (response.json()["review_status"], response.json()["document_status"]) == (
+        "approved",
+        "failed",
+    )
+    assert response.json()["document"] is None
+    with Session(context["engine"]) as db:
+        assert (
+            db.scalar(select(IssuedDocument.id).where(IssuedDocument.application_id == identifier))
+            is None
+        )
+    assert list((context["root"] / "issued_documents").glob("*.pdf")) == []
+    _cleanup_application(context, identifier)
+
+
+def test_hung_render_is_killed_and_retry_can_complete(issue_context, monkeypatch):
+    from app.documents import issuer as issuer_module
+
+    context = issue_context
+    original_timeout = issuer_module.ISSUANCE_OPERATION_TIMEOUT_SECONDS
+    monkeypatch.setattr(issuer_module, "ISSUANCE_OPERATION_TIMEOUT_SECONDS", 10)
+    with Session(context["engine"]) as db, db.begin():
+        service = db.scalar(select(ServiceType).where(ServiceType.code == "study_certificate"))
+        application = Application(
+            student_id=context["student_ids"][0],
+            service_type_id=service.id,
+            review_status="approved",
+            document_status="pending",
+            form_data={"place_of_submission": "Вымышленное место"},
+            version=1,
+        )
+        db.add(application)
+        db.flush()
+        identifier = application.id
+    timed_out = issuer_module.issue_document(
+        identifier,
+        actor_kind="owner",
+        actor_id=context["student_users"][0],
+        render_pdf_fn=_render_hung,
+    )
+    assert timed_out.document_status == "failed"
+    with Session(context["engine"]) as db:
+        assert (
+            db.scalar(select(Application.document_status).where(Application.id == identifier))
+            == "failed"
+        )
+    token = _login(context)
+    monkeypatch.setattr(issuer_module, "ISSUANCE_OPERATION_TIMEOUT_SECONDS", original_timeout)
+    retry = context["client"].request(
+        "POST", f"/api/v1/applications/{identifier}/document/retry", access=token
+    )
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["document_status"] == "ready"
+    _cleanup_application(context, identifier)
+
 
 pytestmark = pytest.mark.integration
 PASSWORD = "fictional-issued-document-password"
@@ -74,6 +197,22 @@ def issue_context(postgresql_engine, monkeypatch, tmp_path):
             "root": Path(TestSettings.attachment_storage_path),
         }
     finally:
+        with Session(engine) as db, db.begin():
+            application_ids = select(Application.id).where(Application.student_id.in_(student_ids))
+            db.execute(
+                delete(IssuedDocument).where(IssuedDocument.application_id.in_(application_ids))
+            )
+            db.execute(
+                delete(ApplicationAttachment).where(
+                    ApplicationAttachment.application_id.in_(application_ids)
+                )
+            )
+            db.execute(
+                delete(ApplicationHistory).where(
+                    ApplicationHistory.application_id.in_(application_ids)
+                )
+            )
+            db.execute(delete(Application).where(Application.id.in_(application_ids)))
         auth_generator.close()
 
 
@@ -89,6 +228,143 @@ def _cleanup_application(context, application_id):
     with Session(context["engine"]) as db, db.begin():
         db.execute(delete(IssuedDocument).where(IssuedDocument.application_id == application_id))
         db.execute(delete(Application).where(Application.id == application_id))
+
+
+@pytest.mark.parametrize(
+    ("review_status", "document_status", "service_code", "expected_status"),
+    [
+        ("submitted", "pending", "study_certificate", 409),
+        ("in_review", "pending", "study_certificate", 409),
+        ("rejected", "pending", "study_certificate", 409),
+        ("approved", "pending", "study_certificate", 503),
+        ("approved", "failed", "study_certificate", 503),
+        ("approved", "ready", "study_certificate", 200),
+        ("submitted", "not_required", "academic_leave", 409),
+    ],
+)
+def test_retry_state_and_service_are_checked_before_storage_lock(
+    issue_context, monkeypatch, review_status, document_status, service_code, expected_status
+):
+    from fastapi import HTTPException
+
+    from app.applications import storage as attachment_storage
+    from app.documents import issuer as issuer_module
+
+    context = issue_context
+    lock_attempts = []
+
+    def unavailable_lock(*_args, **_kwargs):
+        lock_attempts.append(True)
+        raise TimeoutError("storage lock unavailable")
+
+    monkeypatch.setattr(attachment_storage, "coordination_lock", unavailable_lock)
+    with Session(context["engine"]) as db, db.begin():
+        service = db.scalar(select(ServiceType).where(ServiceType.code == service_code))
+        application = Application(
+            student_id=context["student_ids"][0],
+            service_type_id=service.id,
+            review_status=review_status,
+            document_status=document_status,
+            form_data=(
+                {"place_of_submission": "Демо"} if service_code == "study_certificate" else {}
+            ),
+            version=1,
+        )
+        db.add(application)
+        db.flush()
+        identifier = application.id
+        if document_status == "ready":
+            from app.documents import pdf as pdf_module
+
+            snapshot = {
+                "service_code": "study_certificate",
+                "document_number": "US-DEMO-123456789ABC",
+                "issued_at": "2026-11-17T10:00:00+03:00",
+                "full_name": "ФИО студента",
+                "group": "Демо 1",
+                "program": "Программа",
+                "direction": "Демо",
+                "academic_status": "enrolled",
+                "place_of_submission": "Демонстрационное место",
+            }
+            from app.documents import storage as document_storage
+
+            root = document_storage.issued_root(context["root"])
+            key = document_storage.create_key()
+            document_storage.publish_bytes(root, key, pdf_module.render_pdf(snapshot))
+            db.add(
+                IssuedDocument(
+                    application_id=identifier,
+                    storage_key=key,
+                    filename="study_certificate.pdf",
+                    snapshot_data=snapshot,
+                )
+            )
+
+    if expected_status == 200:
+        result = issuer_module.issue_document(
+            identifier, actor_kind="owner", actor_id=context["student_users"][0]
+        )
+        assert result.document_status == "ready" and result.document is not None
+        assert lock_attempts == []
+    else:
+        with pytest.raises(HTTPException) as exc:
+            issuer_module.issue_document(
+                identifier, actor_kind="owner", actor_id=context["student_users"][0]
+            )
+        assert exc.value.status_code == expected_status
+        assert bool(lock_attempts) == (expected_status == 503)
+    _cleanup_application(context, identifier)
+
+
+def test_download_handles_missing_and_unavailable_storage_without_chmod(issue_context, monkeypatch):
+    from app.documents import storage as issued_storage
+
+    context = issue_context
+    token = _login(context)
+    created = context["client"].request(
+        "POST",
+        "/api/v1/applications",
+        access=token,
+        json={
+            "service_code": "study_certificate",
+            "form_data": {"place_of_submission": "Тест доступности"},
+        },
+    )
+    identifier = int(created.json()["id"])
+    path = f"/api/v1/applications/{identifier}/document"
+    with Session(context["engine"]) as db:
+        document = db.scalar(
+            select(IssuedDocument).where(IssuedDocument.application_id == identifier)
+        )
+        file_path = context["root"] / "issued_documents" / document.storage_key
+        original_bytes = file_path.read_bytes()
+    file_path.unlink()
+    assert context["client"].request("GET", path, access=token).status_code == 503
+    issued_storage.publish_bytes(
+        context["root"] / "issued_documents", file_path.name, original_bytes
+    )
+    file_path.write_bytes(b"%PDF-broken xref")
+    assert context["client"].request("GET", path, access=token).status_code == 503
+    file_path.write_bytes(original_bytes)
+
+    original_root = issued_storage.existing_issued_root
+
+    def inaccessible(_attachment_root):
+        raise PermissionError("injected directory access error")
+
+    monkeypatch.setattr(issued_storage, "existing_issued_root", inaccessible)
+    assert context["client"].request("GET", path, access=token).status_code == 503
+    monkeypatch.setattr(issued_storage, "existing_issued_root", original_root)
+
+    def chmod_must_not_run(*_args, **_kwargs):
+        raise OSError("GET must not change storage permissions")
+
+    monkeypatch.setattr(Path, "chmod", chmod_must_not_run)
+    downloaded = context["client"].request("GET", path, access=token)
+    assert downloaded.status_code == 200
+    assert downloaded.content == original_bytes
+    _cleanup_application(context, identifier)
 
 
 def test_automatic_certificate_is_approved_before_pdf_and_bytes_never_change(
@@ -155,6 +431,44 @@ def test_automatic_certificate_is_approved_before_pdf_and_bytes_never_change(
     _cleanup_application(context, identifier)
 
 
+def test_document_retry_and_download_reject_foreign_blocked_and_revoked_owners(issue_context):
+    context = issue_context
+    owner_token = _login(context)
+    created = context["client"].request(
+        "POST",
+        "/api/v1/applications",
+        access=owner_token,
+        json={
+            "service_code": "study_certificate",
+            "form_data": {"place_of_submission": "Вымышленное место"},
+        },
+    )
+    identifier = int(created.json()["id"])
+    get_path = f"/api/v1/applications/{identifier}/document"
+    retry_path = f"/api/v1/applications/{identifier}/document/retry"
+    stranger = _login(context, 1)
+    assert context["client"].request("GET", get_path, access=stranger).status_code == 404
+    assert context["client"].request("POST", retry_path, access=stranger).status_code == 404
+
+    with Session(context["engine"]) as db, db.begin():
+        session = db.scalar(
+            select(AuthSession)
+            .where(AuthSession.user_id == context["student_users"][0])
+            .order_by(AuthSession.id.desc())
+        )
+        session.revoked_at = datetime.now(UTC)
+    assert context["client"].request("GET", get_path, access=owner_token).status_code == 401
+
+    active_token = _login(context)
+    with Session(context["engine"]) as db, db.begin():
+        owner = db.get(User, context["student_users"][0])
+        owner.is_active = False
+    assert context["client"].request("POST", retry_path, access=active_token).status_code == 401
+    with Session(context["engine"]) as db, db.begin():
+        db.get(User, context["student_users"][0]).is_active = True
+    _cleanup_application(context, identifier)
+
+
 def test_render_failure_keeps_approval_and_concurrent_retries_issue_once(
     issue_context, monkeypatch
 ):
@@ -162,16 +476,16 @@ def test_render_failure_keeps_approval_and_concurrent_retries_issue_once(
 
     context = issue_context
     owner_token = _login(context)
-    original_render = issuer_module.pdf.render_pdf
-    fail_once = [True]
+    original_operation = issuer_module._run_issued_filesystem_operation
 
-    def render(snapshot):
-        if fail_once[0]:
-            fail_once[0] = False
-            raise RuntimeError("injected render failure")
-        return original_render(snapshot)
+    def failing_operation(operation, *args, renderer=None):
+        return original_operation(
+            operation,
+            *args,
+            renderer=_render_failure if operation == "render_publish" else renderer,
+        )
 
-    monkeypatch.setattr(issuer_module.pdf, "render_pdf", render)
+    monkeypatch.setattr(issuer_module, "_run_issued_filesystem_operation", failing_operation)
     response = context["client"].request(
         "POST",
         "/api/v1/applications",
@@ -196,6 +510,7 @@ def test_render_failure_keeps_approval_and_concurrent_retries_issue_once(
             db.scalar(select(IssuedDocument.id).where(IssuedDocument.application_id == identifier))
             is None
         )
+    monkeypatch.setattr(issuer_module, "_run_issued_filesystem_operation", original_operation)
 
     def retry():
         return context["client"].request(
@@ -382,9 +697,14 @@ def test_accounting_pdf_starts_only_after_scoped_staff_approval(issue_context):
     engine = context["engine"]
     suffix = uuid4().hex
     with Session(engine) as db:
-        accounting = OrgUnit(name=f"Fictional Accounting {suffix}", type="accounting")
-        db.add(accounting)
-        db.flush()
+        accounting = db.scalar(
+            select(OrgUnit).where(OrgUnit.type == "accounting").order_by(OrgUnit.id).limit(1)
+        )
+        accounting_created = accounting is None
+        if accounting is None:
+            accounting = OrgUnit(name=f"Fictional Accounting {suffix}", type="accounting")
+            db.add(accounting)
+            db.flush()
         service = db.scalar(select(ServiceType).where(ServiceType.code == "accounting_certificate"))
         service.responsible_org_unit_id = accounting.id
         service_id = service.id
@@ -417,6 +737,54 @@ def test_accounting_pdf_starts_only_after_scoped_staff_approval(issue_context):
         staff_token = create_access_token(session, get_settings())["access_token"]
         staff_id, profile_id, accounting_id = staff.id, profile.id, accounting.id
         staff_session_id = session.id
+
+        other_scope = OrgUnit(name=f"Fictional Other Scope {suffix}", type="faculty")
+        db.add(other_scope)
+        db.flush()
+        other_scope_id = other_scope.id
+        outside_staff = User(
+            login=f"issued-outside-staff-{suffix}",
+            password_hash="not-used",
+            full_name="Fictional Out-of-scope Reviewer",
+            role="staff",
+            is_active=True,
+        )
+        admin = User(
+            login=f"issued-admin-{suffix}",
+            password_hash="not-used",
+            full_name="Fictional Admin without application permission",
+            role="admin",
+            is_active=True,
+        )
+        db.add_all([outside_staff, admin])
+        db.flush()
+        outside_profile = StaffProfile(user_id=outside_staff.id, org_unit_id=other_scope.id)
+        db.add(outside_profile)
+        db.flush()
+        db.add(
+            StaffPermission(
+                staff_profile_id=outside_profile.id,
+                permission_code="applications.review",
+                scope_org_unit_id=other_scope.id,
+            )
+        )
+        outside_session = AuthSession(
+            user_id=outside_staff.id,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+        admin_session = AuthSession(
+            user_id=admin.id,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+        db.add_all([outside_session, admin_session])
+        db.flush()
+        outside_token = create_access_token(outside_session, get_settings())["access_token"]
+        admin_token = create_access_token(admin_session, get_settings())["access_token"]
+        outside_staff_id, outside_profile_id = outside_staff.id, outside_profile.id
+        admin_id = admin.id
+        outside_session_id, admin_session_id = outside_session.id, admin_session.id
         db.commit()
 
     student_token = _login(context)
@@ -455,6 +823,27 @@ def test_accounting_pdf_starts_only_after_scoped_staff_approval(issue_context):
         "ready",
     )
     assert approved.json()["document"]
+    document_path = f"/api/v1/staff/applications/{identifier}/document"
+    staff_download = context["client"].request("GET", document_path, access=staff_token)
+    assert staff_download.status_code == 200
+    assert staff_download.headers["content-type"] == "application/pdf"
+    staff_retry = context["client"].request(
+        "POST", f"/api/v1/staff/applications/{identifier}/document/retry", access=staff_token
+    )
+    assert staff_retry.status_code == 200
+    assert staff_retry.json()["document"]["id"] == approved.json()["document"]["id"]
+    assert context["client"].request("GET", document_path, access=outside_token).status_code == 404
+    assert (
+        context["client"]
+        .request(
+            "POST",
+            f"/api/v1/staff/applications/{identifier}/document/retry",
+            access=outside_token,
+        )
+        .status_code
+        == 404
+    )
+    assert context["client"].request("GET", document_path, access=admin_token).status_code == 403
     with Session(engine) as db:
         history = db.scalars(
             select(ApplicationHistory).where(ApplicationHistory.application_id == identifier)
@@ -467,11 +856,22 @@ def test_accounting_pdf_starts_only_after_scoped_staff_approval(issue_context):
     with Session(engine) as db, db.begin():
         db.execute(delete(RefreshToken).where(RefreshToken.session_id == staff_session_id))
         db.execute(delete(AuthSession).where(AuthSession.id == staff_session_id))
+        db.execute(
+            delete(AuthSession).where(AuthSession.id.in_([outside_session_id, admin_session_id]))
+        )
         db.execute(delete(StaffPermission).where(StaffPermission.staff_profile_id == profile_id))
+        db.execute(
+            delete(StaffPermission).where(StaffPermission.staff_profile_id == outside_profile_id)
+        )
         db.delete(db.get(StaffProfile, profile_id))
+        db.delete(db.get(StaffProfile, outside_profile_id))
         db.delete(db.get(User, staff_id))
+        db.delete(db.get(User, outside_staff_id))
+        db.delete(db.get(User, admin_id))
         db.get(ServiceType, service_id).responsible_org_unit_id = None
-        db.delete(db.get(OrgUnit, accounting_id))
+        if accounting_created:
+            db.delete(db.get(OrgUnit, accounting_id))
+        db.delete(db.get(OrgUnit, other_scope_id))
 
 
 def test_issued_document_commit_ack_loss_is_resolved_without_reissue(issue_context, monkeypatch):
@@ -581,21 +981,144 @@ def test_sql_publication_failure_keeps_approval_and_removes_uncommitted_pdf(
     _cleanup_application(context, identifier)
 
 
-def test_cleanup_waits_for_pdf_commit_and_keeps_new_reference(issue_context, monkeypatch):
+def test_filesystem_publication_failure_keeps_approval_and_retry_recovers(
+    issue_context, monkeypatch
+):
     from app.documents import issuer as issuer_module
+
+    context = issue_context
+    original_operation = issuer_module._run_issued_filesystem_operation
+
+    def fail_publication(operation, *args, **kwargs):
+        if operation == "render_publish":
+            raise OSError("injected PDF publication failure")
+        return original_operation(operation, *args, **kwargs)
+
+    monkeypatch.setattr(issuer_module, "_run_issued_filesystem_operation", fail_publication)
+    token = _login(context)
+    response = context["client"].request(
+        "POST",
+        "/api/v1/applications",
+        access=token,
+        json={
+            "service_code": "study_certificate",
+            "form_data": {"place_of_submission": "Вымышленное место"},
+        },
+    )
+    assert response.status_code == 201, response.text
+    identifier = int(response.json()["id"])
+    assert (response.json()["review_status"], response.json()["document_status"]) == (
+        "approved",
+        "failed",
+    )
+    with Session(context["engine"]) as db:
+        history = db.scalars(
+            select(ApplicationHistory).where(ApplicationHistory.application_id == identifier)
+        ).all()
+        assert len(history) == 2
+        assert history[-1].to_status == "approved" and history[-1].actor_user_id is None
+        assert (
+            db.scalar(select(IssuedDocument.id).where(IssuedDocument.application_id == identifier))
+            is None
+        )
+    monkeypatch.setattr(issuer_module, "_run_issued_filesystem_operation", original_operation)
+    retry = context["client"].request(
+        "POST", f"/api/v1/applications/{identifier}/document/retry", access=token
+    )
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["document_status"] == "ready"
+    _cleanup_application(context, identifier)
+
+
+def test_delete_failure_does_not_mask_failed_state_and_orphan_cleanup_recovers(
+    issue_context, monkeypatch
+):
+    from app.documents import issuer as issuer_module
+
+    context = issue_context
+    original_operation = issuer_module._run_issued_filesystem_operation
+
+    def fail_delete(operation, *args, **kwargs):
+        if operation == "delete":
+            raise OSError("injected delete fault")
+        return original_operation(operation, *args, **kwargs)
+
+    monkeypatch.setattr(issuer_module, "_run_issued_filesystem_operation", fail_delete)
+    raised = [False]
+
+    def fail_insert(_connection, _cursor, statement, _parameters, _context, _many):
+        if "insert into issued_documents" in statement.lower() and not raised[0]:
+            raised[0] = True
+            raise RuntimeError("injected INSERT failure")
+
+    event.listen(context["engine"], "before_cursor_execute", fail_insert)
+    token = _login(context)
+    try:
+        response = context["client"].request(
+            "POST",
+            "/api/v1/applications",
+            access=token,
+            json={
+                "service_code": "study_certificate",
+                "form_data": {"place_of_submission": "Вымышленное место"},
+            },
+        )
+    finally:
+        event.remove(context["engine"], "before_cursor_execute", fail_insert)
+    assert response.status_code == 201, response.text
+    identifier = int(response.json()["id"])
+    assert response.json()["document_status"] == "failed"
+    orphan_files = list((context["root"] / "issued_documents").glob("*.pdf"))
+    assert len(orphan_files) == 1
+
+    monkeypatch.setattr(issuer_module, "_run_issued_filesystem_operation", original_operation)
+    retry = context["client"].request(
+        "POST", f"/api/v1/applications/{identifier}/document/retry", access=token
+    )
+    assert retry.status_code == 200, retry.text
+    document_key = retry.json()["document"]["id"]
+    with Session(context["engine"]) as db:
+        active_key = db.scalar(
+            select(IssuedDocument.storage_key).where(IssuedDocument.application_id == identifier)
+        )
+    os.utime(orphan_files[0], (time.time() - 7200, time.time() - 7200))
+    from app.documents.storage import cleanup_orphans
+
+    removed = cleanup_orphans(
+        context["root"],
+        lambda: _issued_keys(context["engine"]),
+        older_than_seconds=3600,
+    )
+    assert removed == 1
+    assert not orphan_files[0].exists()
+    assert (context["root"] / "issued_documents" / active_key).is_file()
+    assert document_key == retry.json()["document"]["id"]
+    _cleanup_application(context, identifier)
+
+
+def test_cleanup_waits_for_pdf_commit_and_keeps_new_reference(issue_context, monkeypatch):
+    from app.applications import storage as attachment_storage
     from app.documents.storage import cleanup_orphans
 
     context = issue_context
-    entered_renderer = threading.Event()
-    finish_renderer = threading.Event()
-    original_render = issuer_module.pdf.render_pdf
+    original_lock = attachment_storage.coordination_lock
+    root = context["root"] / "issued_documents"
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    waiting_callers = 0
+    callers_lock = threading.Lock()
+    both_callers_waiting = threading.Event()
 
-    def slow_render(snapshot):
-        entered_renderer.set()
-        assert finish_renderer.wait(timeout=5)
-        return original_render(snapshot)
+    def observed_lock(*args, **kwargs):
+        nonlocal waiting_callers
+        with callers_lock:
+            waiting_callers += 1
+            if waiting_callers == 2:
+                both_callers_waiting.set()
+        return original_lock(*args, **kwargs)
 
-    monkeypatch.setattr(issuer_module.pdf, "render_pdf", slow_render)
+    holder = original_lock(root, timeout_seconds=5)
+    holder.__enter__()
+    monkeypatch.setattr(attachment_storage, "coordination_lock", observed_lock)
     token = _login(context)
 
     def create_document():
@@ -611,16 +1134,18 @@ def test_cleanup_waits_for_pdf_commit_and_keeps_new_reference(issue_context, mon
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         generation = pool.submit(create_document)
-        assert entered_renderer.wait(timeout=5)
         cleanup = pool.submit(
             cleanup_orphans,
             context["root"],
             lambda: {key for key in _issued_keys(context["engine"])},
             older_than_seconds=0,
         )
-        finish_renderer.set()
-        response = generation.result(timeout=10)
-        cleanup.result(timeout=10)
+        try:
+            assert both_callers_waiting.wait(timeout=5)
+        finally:
+            holder.__exit__(None, None, None)
+        response = generation.result(timeout=15)
+        cleanup.result(timeout=15)
     assert response.status_code == 201, response.text
     identifier = int(response.json()["id"])
     document_id = response.json()["document"]["id"]

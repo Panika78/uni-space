@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -865,7 +866,7 @@ def review_application(
 
 
 def _document_response(db: Session, application: Application, service: ServiceType):
-    if application.document_status != "ready":
+    if application.document_status != "ready" or application.review_status != "approved":
         raise HTTPException(409, "document_not_ready")
     document = db.scalar(
         select(IssuedDocument).where(IssuedDocument.application_id == application.id)
@@ -873,18 +874,23 @@ def _document_response(db: Session, application: Application, service: ServiceTy
     if document is None:
         logger.error("ready application %s has no issued document", application.id)
         raise HTTPException(503, "document_unavailable")
-    root = issued_storage.issued_root(Path(get_settings().attachment_storage_path))
+    root = None
+    handle = None
     try:
+        root = issued_storage.existing_issued_root(Path(get_settings().attachment_storage_path))
         handle = issued_storage.open_key(root, document.storage_key)
-        from pypdf import PdfReader
+        import stat
 
-        reader = PdfReader(handle, strict=False)
-        if reader.is_encrypted or len(reader.pages) < 1:
-            raise OSError("stored PDF is invalid")
+        size = os.fstat(handle.fileno()).st_size
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode) or size <= 0:
+            raise OSError("stored PDF is not a regular file")
+        if size > issued_storage.MAX_PDF_BYTES:
+            raise OSError("stored PDF exceeds maximum size")
+        content = handle.read(size + 1)
+        issuer._validate_pdf(content, document.snapshot_data)
         handle.seek(0)
-        size = Path(root / document.storage_key).stat().st_size
     except Exception as exc:
-        if "handle" in locals():
+        if handle is not None:
             handle.close()
         logger.exception("issued PDF unavailable for application %s", application.id)
         raise HTTPException(503, "document_unavailable") from exc
@@ -909,7 +915,17 @@ def _document_response(db: Session, application: Application, service: ServiceTy
     )
 
 
-@router.get("/applications/{id}/document", responses=WORKFLOW_ERRORS)
+@router.get(
+    "/applications/{id}/document",
+    response_class=StreamingResponse,
+    responses={
+        **WORKFLOW_ERRORS,
+        200: {
+            "description": "The immutable issued PDF.",
+            "content": {"application/pdf": {"schema": {"type": "string", "format": "binary"}}},
+        },
+    },
+)
 def download_student_issued_document(
     id: Id,
     student: Annotated[Student, Depends(get_current_student)],
@@ -921,7 +937,17 @@ def download_student_issued_document(
     return _document_response(db, application, service)
 
 
-@router.get("/staff/applications/{id}/document", responses=WORKFLOW_ERRORS)
+@router.get(
+    "/staff/applications/{id}/document",
+    response_class=StreamingResponse,
+    responses={
+        **WORKFLOW_ERRORS,
+        200: {
+            "description": "The immutable issued PDF.",
+            "content": {"application/pdf": {"schema": {"type": "string", "format": "binary"}}},
+        },
+    },
+)
 def download_staff_issued_document(
     id: Id,
     user: Annotated[User, Depends(get_current_user)],

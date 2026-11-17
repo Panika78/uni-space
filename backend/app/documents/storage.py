@@ -21,6 +21,15 @@ def issued_root(attachment_root: Path) -> Path:
     return root
 
 
+def existing_issued_root(attachment_root: Path) -> Path:
+    """Return the private issued directory without creating or changing it."""
+    root = attachment_root / "issued_documents"
+    info = root.lstat()
+    if not root.is_dir() or root.is_symlink() or info.st_mode & 0o077:
+        raise PermissionError("issued document directory is unavailable or not private")
+    return root
+
+
 def create_key() -> str:
     return f"{uuid.uuid4().hex}.pdf"
 
