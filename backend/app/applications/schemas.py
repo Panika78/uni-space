@@ -140,6 +140,13 @@ ReviewStatus = Literal[
 ]
 
 
+class AttachmentMetadata(RequestModel):
+    id: Id
+    original_filename: str
+    mime_type: Literal["application/pdf", "image/jpeg", "image/png"]
+    size_bytes: int
+
+
 class ApplicationResponse(RequestModel):
     id: Id
     service: Service
@@ -155,6 +162,7 @@ class ApplicationResponse(RequestModel):
     created_at: DateTime
     updated_at: DateTime
     version: int
+    attachments: list[AttachmentMetadata] = Field(default_factory=list)
 
 
 class ApplicationPage(Page[ApplicationResponse]):
@@ -191,6 +199,7 @@ class ResubmitApplicationRequest(RequestModel):
         | AcademicLeaveFormData
         | AccountingCertificateFormData
     )
+    keep_attachment_ids: list[Id] = Field(default_factory=list, max_length=5)
 
 
 class ApplicationHistoryEvent(RequestModel):

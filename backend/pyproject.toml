@@ -7,11 +7,14 @@ dependencies = [
     "alembic==1.16.2",
     "argon2-cffi==25.1.0",
     "fastapi==0.115.14",
+    "python-multipart==0.0.20",
     "psycopg[binary]==3.2.9",
     "pydantic-settings==2.10.1",
     "pyjwt==2.10.1",
     "sqlalchemy==2.0.41",
     "uvicorn[standard]==0.34.3",
+    "pypdf==5.9.0",
+    "pillow==11.3.0",
 ]
 
 [dependency-groups]

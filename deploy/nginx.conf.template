@@ -37,6 +37,9 @@ server {
     ssl_certificate /etc/nginx/tls/fullchain.pem;
     ssl_certificate_key /etc/nginx/tls/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
+    client_max_body_size 54m;
+    client_body_timeout 30s;
+    error_page 413 = @request_too_large;
     add_header Strict-Transport-Security 'max-age=31536000' always;
     add_header X-Content-Type-Options nosniff always;
     add_header Content-Security-Policy "frame-ancestors 'none'" always;
@@ -61,6 +64,10 @@ server {
         proxy_set_header Forwarded '';
         proxy_set_header Connection '';
         proxy_redirect off;
+    }
+    location @request_too_large {
+        default_type application/json;
+        return 413 '{"error":{"code":"request_too_large","message":"Размер запроса превышает допустимый предел","details":[]}}';
     }
     location /assets/ {
         gzip on;

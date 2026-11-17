@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiClientError,
   apiFetch,
+  apiFetchBlob,
   AUTHENTICATED_GET_DEADLINE_MS,
   configureApiAuth,
   isDefinitiveApiRejection,
@@ -200,6 +201,40 @@ describe('authenticated API destination policy', () => {
     configureApiAuth(begin)
     return { begin, refresh, invalidate }
   }
+
+  it('refreshes once and downloads private binary data without JSON parsing', async () => {
+    const { refresh } = configureSession()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { code: 'access_expired', message: 'expired', details: [] } },
+          { status: 401 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(new Uint8Array([37, 80, 68, 70]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/pdf', 'Cache-Control': 'no-store' },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const blob = await apiFetchBlob('/api/v1/applications/attachments/1/download', {
+      authenticated: true,
+    })
+    expect(blob.size).toBe(4)
+    expect(blob.type).toBe('application/pdf')
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(
+      fetchMock.mock.calls.map(([, init]) =>
+        new Headers((init as RequestInit).headers).get('Authorization'),
+      ),
+    ).toEqual(['Bearer fictional-token', 'Bearer fictional-refreshed-token'])
+    expect(
+      fetchMock.mock.calls.every(([, init]) => (init as RequestInit).cache === 'no-store'),
+    ).toBe(true)
+  })
 
   it('preserves an authenticated session on invalid current-password credentials', async () => {
     const { invalidate } = configureSession()
