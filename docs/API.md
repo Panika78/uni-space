@@ -40,6 +40,20 @@
 | POST | `/applications` | `CreateApplicationRequest` | `201 Application` |
 | GET | `/applications` | `limit`, `cursor` | `200 Page<Application>` |
 | GET | `/applications/{id}` | ID | `200 Application` |
+| GET | `/applications/{id}/document` | ID заявки | готовый PDF владельцу |
+| POST | `/applications/{id}/document/retry` | ID заявки | `200 Application` и метаданные документа |
+| POST | `/applications/{id}/document/process` | ID старой automatic заявки | `200 Application` и метаданные документа |
+| GET | `/staff/applications/{id}/document` | ID + `applications.review` scope | готовый PDF |
+| POST | `/staff/applications/{id}/document/retry` | ID + `applications.review` scope | `200 StaffApplicationResponse` |
+
+Автоматические `study_certificate` и `academic_transcript` фиксируются как
+`approved` с историей до синхронной генерации. При ошибке выдачи заявка остаётся
+одобренной с `document_status=failed`; потеря ответа создания требует проверки
+списка/детали и не является основанием повторно отправлять POST. Ручное одобрение
+`accounting_certificate` сохраняет `200` и запускает генерацию после commit.
+Ответы заявки содержат `document: null | {id, filename, issued_at}` без storage key
+и файлового URL. Метаданные присутствуют при `ready`; ошибка генерации не откатывает
+одобрение. Для `ready` повтор — no-op над теми же байтами.
 
 Для `academic_leave` `POST /applications` принимает только `multipart/form-data` с
 полем `form_data` (JSON-строка) и одним или несколькими полями `files`.
@@ -525,6 +539,11 @@ MVP1 сохранены, в ответы создания/списка/дета�
 | GET | `/staff/applications/{id}/history` | `limit`, `cursor` | `Page<ApplicationHistoryEvent>` |
 | POST | `/applications/{id}/resubmit` | `ResubmitApplicationRequest` | `Application` |
 | GET | `/applications/{id}/history` | `limit`, `cursor` | `Page<ApplicationHistoryEvent>` |
+| GET | `/applications/{id}/document` | ID владельца | готовый PDF |
+| POST | `/applications/{id}/document/retry` | ID владельца | `Application` |
+| POST | `/applications/{id}/document/process` | ID старой automatic заявки | `Application` |
+| GET | `/staff/applications/{id}/document` | ID + доступный scope | готовый PDF |
+| POST | `/staff/applications/{id}/document/retry` | ID + доступный scope | `StaffApplicationResponse` |
 
 Для академического отпуска `POST /applications/{id}/resubmit` принимает JSON или
 `multipart/form-data`: `expected_version`, JSON-строку `form_data`, JSON-строку
@@ -540,6 +559,17 @@ ID приводят к `409`; прежний набор остаётся тек�
 `503 temporarily_unavailable`. Скачивание авторизуется на каждом запросе, возвращает
 `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` и
 `Cache-Control: no-store`. Неизвестный или чужой ID вложения возвращает одинаковый `404`.
+
+PDF доступен только владельцу или сотруднику с действующим `applications.review`
+в scope заявки. GET никогда не запускает генерацию. При `approved + pending/failed`
+явный retry синхронно выдаёт документ; повтор `ready` возвращает прежние metadata.
+`POST /applications/{id}/document/process` один раз фиксирует переход только для
+старых automatic заявок `submitted/pending`, сохраняет прежний ID и добавляет
+реальное событие истории. `academic_leave` PDF не выдаёт. PDF передаётся как
+`application/pdf` с `Content-Disposition: inline`, `nosniff` и `no-store`; отсутствие
+или повреждение файла при `ready` возвращает `503` без повторной генерации.
+Детали заявки и списки включают только безопасные metadata. Пользовательские
+уведомления о готовности будут подключаться отдельно в #86.
 
 `StaffApplicationResponse` расширяет `Application` полями `student_id: Id` и
 `reviewer_user_id: Id | null`. Список заявлений сортируется по `(created_at, id)`

@@ -173,6 +173,23 @@ UI, ручные услуги/новые формы, вложения, PDF и у
 issues; `study_certificate` сохраняет автоматический режим без ручного одобрения.
 
 Проверки: `pytest -m integration tests/test_application_workflow*.py`.
+
+### Неизменяемые PDF заявлений (MVP2-17)
+
+`study_certificate` и `academic_transcript` одобряются системой с записью реальной
+истории, затем получают PDF в отдельной транзакции. `accounting_certificate`
+генерируется после ручного одобрения сотрудником с правом `applications.review` в
+scope бухгалтерии. Ошибка выдачи сохраняет одобрение; владелец или уполномоченный
+сотрудник может явно повторить генерацию. `ready` возвращает тот же файл. Старые
+automatic заявки `submitted/pending` владелец обрабатывает явным
+`POST /applications/{id}/document/process`; чтение и скачивание не запускают выпуск.
+
+PDF и безопасные metadata доступны по контракту [API.md](docs/API.md); файлы лежат
+в `issued_documents/` того же закрытого постоянного volume, что и вложения. Они
+включаются в существующие backup/restore пары. Для удаления только старых
+осиротевших PDF используйте `python /app/scripts/cleanup_issued_documents.py`;
+обычная очистка вложений их не сканирует. PDF маркируются как демонстрационные,
+содержат встроенный шрифт кириллицы и не являются официальными документами.
 Тест настоящего production ACL использует `psql` из PATH; при запуске PostgreSQL
 через Compose можно передать `POSTGRES_TEST_CONTAINER=uni-space-test-test-db-1`.
 Он применяет `deploy/postgres/privileges.sql` в отдельной временной БД и выполняет

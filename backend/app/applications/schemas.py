@@ -147,6 +147,12 @@ class AttachmentMetadata(RequestModel):
     size_bytes: int
 
 
+class IssuedDocumentMetadata(RequestModel):
+    id: Id
+    filename: str
+    issued_at: DateTime
+
+
 class ApplicationResponse(RequestModel):
     id: Id
     service: Service
@@ -163,6 +169,7 @@ class ApplicationResponse(RequestModel):
     updated_at: DateTime
     version: int
     attachments: list[AttachmentMetadata] = Field(default_factory=list)
+    document: IssuedDocumentMetadata | None = None
 
 
 class ApplicationPage(Page[ApplicationResponse]):

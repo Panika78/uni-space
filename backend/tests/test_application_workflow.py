@@ -39,7 +39,13 @@ def auth(postgresql_engine, monkeypatch):
 
 
 @pytest.fixture
-def context(auth, monkeypatch):
+def context(auth, monkeypatch, tmp_path):
+    from app.applications import router as applications_router
+    from app.documents import issuer
+
+    settings = get_settings().model_copy(update={"attachment_storage_path": str(tmp_path)})
+    monkeypatch.setattr(applications_router, "get_settings", lambda: settings)
+    monkeypatch.setattr(issuer, "get_settings", lambda: settings)
     client, engine, student_users, logins, student_ids = auth
     client.app.include_router(router)
     actors = []
@@ -243,7 +249,7 @@ def test_full_workflow_correction_resubmit_history_and_relogin(context):
         assert (
             db.get(Application, identifier).updated_at > db.get(Application, identifier).created_at
         )
-        assert not db.scalar(text("SELECT to_regclass('issued_documents')"))
+        assert db.scalar(text("SELECT to_regclass('issued_documents')")) == "issued_documents"
 
 
 @pytest.mark.parametrize("action", ["reject", "return_for_correction"])
@@ -417,17 +423,19 @@ def test_submission_records_initial_event_atomically_and_keeps_mvp1_automatic_co
     )
     assert response.status_code == 201
     body = response.json()
-    assert (body["version"], body["review_status"], body["document_status"]) == (
-        1,
-        "submitted",
-        "pending",
-    )
+    assert (body["version"], body["review_status"]) == (2, "approved")
+    assert body["document_status"] in {"ready", "failed"}
     events = history(c, body["id"], token).json()["items"]
-    assert len(events) == 1
+    assert len(events) == 2
     assert (events[0]["from_status"], events[0]["to_status"], events[0]["actor_user_id"]) == (
         None,
         "submitted",
         str(c["student_users"][0]),
+    )
+    assert (events[1]["from_status"], events[1]["to_status"], events[1]["actor_user_id"]) == (
+        "submitted",
+        "approved",
+        None,
     )
 
 

@@ -89,8 +89,9 @@ def test_application_reads_isolate_students_and_page_in_sql(db_session):
         assert first.headers["cache-control"] == "no-store"
         page = first.json()
         assert len(page["items"]) == 20
-        assert "applications.student_id =" in statements[-1][0]
-        assert "LIMIT" in statements[-1][0]
+        page_query = next(s for s, _ in reversed(statements) if "LIMIT" in s)
+        assert "applications.student_id =" in page_query
+        assert "LIMIT" in page_query
         seen = [item["id"] for item in page["items"]]
         # Insert after page one: the cursor continues below the original boundary.
         new = Application(
@@ -148,7 +149,8 @@ def test_application_reads_isolate_students_and_page_in_sql(db_session):
         owned = client.get(f"/api/v1/applications/{rows[0].id}")
         assert owned.status_code == 200
         assert owned.json()["form_data"] == {"place_of_submission": "Place 0"}
-        assert "applications.student_id =" in statements[-1][0]
+        detail_query = next(s for s, _ in reversed(statements) if "applications.student_id =" in s)
+        assert "applications.student_id =" in detail_query
         missing = client.get("/api/v1/applications/9223372036854775807")
         other = client.get(f"/api/v1/applications/{foreign.id}")
         assert missing.status_code == other.status_code == 404

@@ -1,0 +1,1 @@
+"""Private immutable document issuance."""

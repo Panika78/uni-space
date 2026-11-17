@@ -1,6 +1,7 @@
 import json
+import logging
 from contextlib import suppress
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
@@ -22,6 +23,7 @@ from app.applications.schemas import (
     ApplicationResponse,
     AttachmentMetadata,
     CreateApplicationRequest,
+    IssuedDocumentMetadata,
     ResubmitApplicationRequest,
     ReviewApplicationRequest,
     Service,
@@ -31,14 +33,18 @@ from app.applications.schemas import (
 )
 from app.core.body_limit import RequestTooLarge
 from app.core.config import get_settings
+from app.core.database import SessionLocal
 from app.core.pagination import InvalidCursorError, decode_page_cursor, paginate_results
 from app.core.schemas import ApiError, Id, PaginationParams, RequestModel
 from app.dependencies.auth import get_current_student, get_current_user
 from app.dependencies.database import get_db_session
+from app.documents import issuer
+from app.documents import storage as issued_storage
 from app.models import (
     Application,
     ApplicationAttachment,
     ApplicationHistory,
+    IssuedDocument,
     ServiceType,
     Student,
     User,
@@ -51,6 +57,7 @@ from app.permissions import (
 )
 
 router = APIRouter(prefix="/api/v1", tags=["services", "applications"])
+logger = logging.getLogger(__name__)
 WORKFLOW_ERRORS = {code: {"model": ApiError} for code in (401, 403, 404, 409, 422, 413, 503)}
 
 
@@ -125,6 +132,27 @@ def attachment_metadata_batch(
 
 def attachment_metadata(db: Session, application_id: int) -> list[AttachmentMetadata]:
     return attachment_metadata_batch(db, [application_id]).get(application_id, [])
+
+
+def issued_document_metadata(db: Session, application_id: int) -> IssuedDocumentMetadata | None:
+    document = db.scalar(
+        select(IssuedDocument).where(IssuedDocument.application_id == application_id)
+    )
+    if document is None:
+        status = db.scalar(
+            select(Application.document_status).where(Application.id == application_id)
+        )
+        if status == "ready":
+            logger.error("ready application %s has no issued document", application_id)
+            raise HTTPException(503, "document_unavailable")
+        return None
+    status = db.scalar(select(Application.document_status).where(Application.id == application_id))
+    if status != "ready":
+        logger.error("application %s has an unready issued document", application_id)
+        raise HTTPException(503, "document_unavailable")
+    return IssuedDocumentMetadata(
+        id=str(document.id), filename=document.filename, issued_at=document.issued_at
+    )
 
 
 def resolve_published_after_commit_error(
@@ -314,9 +342,11 @@ async def submit_application(
         feedback=None,
         version=1,
     )
+    automatic_document = service.processing_mode == "automatic" and service.produces_document
     coordination = storage.coordination_lock(root) if staged else None
     coordination_acquired = False
     commit_attempted = False
+    recovered_commit = False
     try:
         if coordination is not None:
             try:
@@ -351,6 +381,19 @@ async def submit_application(
                 comment=None,
             )
         )
+        if automatic_document:
+            application.review_status = "approved"
+            application.version = 2
+            application.updated_at = datetime.now(UTC)
+            db.add(
+                ApplicationHistory(
+                    application_id=application.id,
+                    actor_user_id=None,
+                    from_status="submitted",
+                    to_status="approved",
+                    comment=None,
+                )
+            )
         description, requirements = workflow.SERVICE_DETAILS[service.code]
         payload = ApplicationResponse(
             id=str(application.id),
@@ -373,12 +416,13 @@ async def submit_application(
             updated_at=application.updated_at,
             version=application.version,
             attachments=[],
+            document=None,
         )
         db.flush()
         payload.attachments = attachment_metadata(db, application.id)
         commit_attempted = True
         db.commit()
-    except Exception:
+    except Exception as exc:
         rollback_confirmed = False
         with suppress(Exception):
             db.rollback()
@@ -391,11 +435,43 @@ async def submit_application(
         )
         for item in staged:
             storage.discard(item)
-        raise
+        if automatic_document and commit_attempted:
+            try:
+                with SessionLocal() as recovery_db:
+                    recovered = recovery_db.execute(
+                        select(Application, ServiceType)
+                        .join(ServiceType)
+                        .where(
+                            Application.id == application.id,
+                            Application.student_id == student.id,
+                        )
+                    ).one_or_none()
+                    if recovered is not None and recovered[0].review_status == "approved":
+                        payload = serialize_application(recovery_db, *recovered)
+                        recovered_commit = True
+            except Exception as recovery_error:
+                logger.exception("could not resolve application commit result")
+                raise HTTPException(503, "temporarily_unavailable") from recovery_error
+            if not recovered_commit:
+                raise HTTPException(503, "temporarily_unavailable") from exc
+        else:
+            raise
     finally:
         if coordination_acquired:
             coordination.__exit__(None, None, None)
     response.headers["Location"] = f"/api/v1/applications/{application.id}"
+    if automatic_document:
+        issuer.issue_document(application.id, actor_kind="owner", actor_id=student.user_id)
+        with SessionLocal() as response_db:
+            row = response_db.execute(
+                select(Application, ServiceType)
+                .join(ServiceType, Application.service_type_id == ServiceType.id)
+                .where(
+                    Application.id == application.id,
+                    Application.student_id == student.id,
+                )
+            ).one()
+            return serialize_application(response_db, *row)
     return payload
 
 
@@ -430,6 +506,7 @@ def serialize_application(
         attachments=(
             attachment_metadata(db, application.id) if attachments is None else attachments
         ),
+        document=issued_document_metadata(db, application.id),
     )
 
 
@@ -733,16 +810,233 @@ def review_application(
     db: Annotated[Session, Depends(get_db_session)],
     _query: Annotated[RequestModel, Query()],
 ) -> StaffApplicationResponse:
+    application_id = parse_application_id(id)
+    commit_attempted = False
     try:
-        application = workflow.review_application(db, user, parse_application_id(id), request)
-        payload = serialize_staff_application(
-            db, application, db.get(ServiceType, application.service_type_id)
+        application = workflow.review_application(db, user, application_id, request)
+        application_id = application.id
+        should_issue = (
+            request.action == "approve"
+            and db.get(ServiceType, application.service_type_id).code == "accounting_certificate"
         )
+        commit_attempted = True
         db.commit()
-        return payload
+    except Exception:
+        db.rollback()
+        should_issue = False
+        if request.action == "approve" and commit_attempted:
+            try:
+                with SessionLocal() as recovery_db:
+                    recovered = recovery_db.get(Application, application_id)
+                    approval_event = recovery_db.scalar(
+                        select(ApplicationHistory.id).where(
+                            ApplicationHistory.application_id == application_id,
+                            ApplicationHistory.actor_user_id == user.id,
+                            ApplicationHistory.from_status == "in_review",
+                            ApplicationHistory.to_status == "approved",
+                        )
+                    )
+                    if (
+                        recovered is not None
+                        and recovered.review_status == "approved"
+                        and recovered.version == request.expected_version + 1
+                        and approval_event is not None
+                    ):
+                        service = recovery_db.get(ServiceType, recovered.service_type_id)
+                        should_issue = service.code == "accounting_certificate"
+                    else:
+                        raise HTTPException(503, "temporarily_unavailable")
+            except HTTPException:
+                raise
+            except Exception as recovery_error:
+                logger.exception("could not resolve application review commit result")
+                raise HTTPException(503, "temporarily_unavailable") from recovery_error
+        else:
+            raise
+    if should_issue:
+        issuer.issue_document(application_id, actor_kind="staff", actor_id=user.id)
+    with SessionLocal() as response_db:
+        application = require_application_review(response_db, user, application_id)
+        return serialize_staff_application(
+            response_db,
+            application,
+            response_db.get(ServiceType, application.service_type_id),
+        )
+
+
+def _document_response(db: Session, application: Application, service: ServiceType):
+    if application.document_status != "ready":
+        raise HTTPException(409, "document_not_ready")
+    document = db.scalar(
+        select(IssuedDocument).where(IssuedDocument.application_id == application.id)
+    )
+    if document is None:
+        logger.error("ready application %s has no issued document", application.id)
+        raise HTTPException(503, "document_unavailable")
+    root = issued_storage.issued_root(Path(get_settings().attachment_storage_path))
+    try:
+        handle = issued_storage.open_key(root, document.storage_key)
+        from pypdf import PdfReader
+
+        reader = PdfReader(handle, strict=False)
+        if reader.is_encrypted or len(reader.pages) < 1:
+            raise OSError("stored PDF is invalid")
+        handle.seek(0)
+        size = Path(root / document.storage_key).stat().st_size
+    except Exception as exc:
+        if "handle" in locals():
+            handle.close()
+        logger.exception("issued PDF unavailable for application %s", application.id)
+        raise HTTPException(503, "document_unavailable") from exc
+
+    def chunks():
+        try:
+            while block := handle.read(storage.CHUNK_BYTES):
+                yield block
+        finally:
+            handle.close()
+
+    filename = quote(document.filename, safe="")
+    return StreamingResponse(
+        chunks(),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{filename}",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store",
+            "Content-Length": str(size),
+        },
+    )
+
+
+@router.get("/applications/{id}/document", responses=WORKFLOW_ERRORS)
+def download_student_issued_document(
+    id: Id,
+    student: Annotated[Student, Depends(get_current_student)],
+    db: Annotated[Session, Depends(get_db_session)],
+    _query: Annotated[RequestModel, Query()],
+):
+    application = workflow.get_owned_application(db, student, parse_application_id(id))
+    service = db.get(ServiceType, application.service_type_id)
+    return _document_response(db, application, service)
+
+
+@router.get("/staff/applications/{id}/document", responses=WORKFLOW_ERRORS)
+def download_staff_issued_document(
+    id: Id,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db_session)],
+    _query: Annotated[RequestModel, Query()],
+):
+    application = require_application_review(db, user, parse_application_id(id))
+    service = db.get(ServiceType, application.service_type_id)
+    return _document_response(db, application, service)
+
+
+@router.post(
+    "/applications/{id}/document/retry",
+    response_model=ApplicationResponse,
+    responses=WORKFLOW_ERRORS,
+)
+def retry_student_document(
+    id: Id,
+    student: Annotated[Student, Depends(get_current_student)],
+    db: Annotated[Session, Depends(get_db_session)],
+    _query: Annotated[RequestModel, Query()],
+):
+    application = workflow.get_owned_application(db, student, parse_application_id(id))
+    issuer.issue_document(application.id, actor_kind="owner", actor_id=student.user_id)
+    db.expire_all()
+    row = db.execute(
+        select(Application, ServiceType)
+        .join(ServiceType)
+        .where(Application.id == application.id, Application.student_id == student.id)
+    ).one()
+    return serialize_application(db, *row)
+
+
+@router.post(
+    "/staff/applications/{id}/document/retry",
+    response_model=StaffApplicationResponse,
+    responses=WORKFLOW_ERRORS,
+)
+def retry_staff_document(
+    id: Id,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db_session)],
+    _query: Annotated[RequestModel, Query()],
+):
+    application = require_application_review(db, user, parse_application_id(id))
+    issuer.issue_document(application.id, actor_kind="staff", actor_id=user.id)
+    db.expire_all()
+    application = require_application_review(db, user, application.id)
+    service = db.get(ServiceType, application.service_type_id)
+    return serialize_staff_application(db, application, service)
+
+
+@router.post(
+    "/applications/{id}/document/process",
+    response_model=ApplicationResponse,
+    responses=WORKFLOW_ERRORS,
+)
+def process_legacy_automatic_document(
+    id: Id,
+    student: Annotated[Student, Depends(get_current_student)],
+    db: Annotated[Session, Depends(get_db_session)],
+    _query: Annotated[RequestModel, Query()],
+):
+    application_id = parse_application_id(id)
+    application = workflow.get_owned_application(db, student, application_id)
+    service = db.get(ServiceType, application.service_type_id)
+    if service.processing_mode != "automatic" or not service.produces_document:
+        raise HTTPException(409, "document_not_available")
+    try:
+        locked = db.scalar(
+            select(Application)
+            .where(Application.id == application_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if locked.review_status == "submitted" and locked.document_status == "pending":
+            canonical, _ = workflow.validate_and_store_form(
+                db, service, locked.form_data, student=student, existing=locked.form_data
+            )
+            if canonical != locked.form_data:
+                raise HTTPException(409, "application_data_invalid")
+            previous = locked.review_status
+            locked.review_status = "approved"
+            locked.version += 1
+            locked.updated_at = datetime.now(UTC)
+            db.add(
+                ApplicationHistory(
+                    application_id=locked.id,
+                    actor_user_id=None,
+                    from_status=previous,
+                    to_status="approved",
+                    comment=None,
+                )
+            )
+            db.commit()
+        elif locked.review_status != "approved" or locked.document_status not in {
+            "pending",
+            "failed",
+            "ready",
+        }:
+            raise HTTPException(409, "invalid_transition")
+        else:
+            # Release the row lock before issue_document opens its own transaction.
+            db.commit()
     except Exception:
         db.rollback()
         raise
+    issuer.issue_document(application_id, actor_kind="owner", actor_id=student.user_id)
+    db.expire_all()
+    row = db.execute(
+        select(Application, ServiceType)
+        .join(ServiceType)
+        .where(Application.id == application_id, Application.student_id == student.id)
+    ).one()
+    return serialize_application(db, *row)
 
 
 @router.post(
