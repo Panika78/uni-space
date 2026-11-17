@@ -166,9 +166,7 @@ def test_schedule_large_page_has_constant_queries_and_stable_ties(editor):  # no
     ).json()
     expected = [str(lesson.id) for lesson in lessons[:2]]
     assert [first["items"][0]["id"], second["items"][0]["id"]] == expected
-    stale_cursor = e.request_editor(
-        "GET", params=params | {"after_id": "9223372036854775807"}
-    )
+    stale_cursor = e.request_editor("GET", params=params | {"after_id": "9223372036854775807"})
     assert stale_cursor.status_code == 422
     assert stale_cursor.json()["error"]["code"] == "validation_error"
 
