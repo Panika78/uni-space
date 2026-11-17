@@ -565,7 +565,10 @@ PDF доступен только владельцу или сотруднику
 явный retry синхронно выдаёт документ; повтор `ready` возвращает прежние metadata.
 `POST /applications/{id}/document/process` один раз фиксирует переход только для
 старых automatic заявок `submitted/pending`, сохраняет прежний ID и добавляет
-реальное событие истории. `academic_leave` PDF не выдаёт. PDF передаётся как
+реальное событие истории. Для `approved/ready` endpoint является безопасным
+no-op и возвращает существующую заявку, не запуская issuer. Состояния
+`approved/pending`, `approved/failed` и прочие запрещённые состояния возвращают
+`409`; для них используется endpoint retry. `academic_leave` PDF не выдаёт. PDF передаётся как
 `application/pdf` с `Content-Disposition: inline`, `nosniff` и `no-store`; отсутствие
 или повреждение файла при `ready` возвращает `503` без повторной генерации.
 Детали заявки и списки включают только безопасные metadata. Пользовательские

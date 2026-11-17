@@ -251,6 +251,70 @@ def _preflight(application_id: int, *, actor_kind: str, actor_id: int) -> Docume
         )
 
 
+def _record_preflight_failure(application_id: int) -> DocumentState:
+    """Persist only a confirmed pre-pipeline failure without undoing approval."""
+    try:
+        with SessionLocal() as db:
+            application = db.scalar(
+                select(Application)
+                .where(Application.id == application_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if application is None:
+                raise HTTPException(404, "not_found")
+            service = db.get(ServiceType, application.service_type_id)
+            if service is None or not service.produces_document:
+                raise HTTPException(409, "document_not_available")
+            document = db.scalar(
+                select(IssuedDocument).where(IssuedDocument.application_id == application_id)
+            )
+            if application.document_status == "ready":
+                if document is None:
+                    logger.error("ready application %s has no issued document", application_id)
+                    raise HTTPException(503, "document_unavailable")
+                return DocumentState(
+                    application.review_status,
+                    application.document_status,
+                    application.version,
+                    _metadata(document),
+                )
+            if document is not None:
+                logger.error("application %s has an unready issued document", application_id)
+                raise HTTPException(503, "document_unavailable")
+            if application.review_status != "approved" or application.document_status not in {
+                "pending",
+                "failed",
+            }:
+                raise HTTPException(409, "invalid_transition")
+            if application.document_status == "pending":
+                application.document_status = "failed"
+                application.version += 1
+                application.updated_at = func.statement_timestamp()
+                db.commit()
+            return DocumentState(
+                application.review_status,
+                application.document_status,
+                application.version,
+                None,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("could not persist preflight failure for application %s", application_id)
+        # Resolve commit acknowledgement loss. A fresh read is authoritative.
+        try:
+            outcome = _read_state(application_id)
+        except Exception as state_error:
+            logger.exception(
+                "could not resolve preflight failure for application %s", application_id
+            )
+            raise HTTPException(503, "temporarily_unavailable") from state_error
+        if outcome.document_status in {"ready", "failed"}:
+            return outcome
+        raise HTTPException(503, "temporarily_unavailable") from exc
+
+
 def issue_document(
     application_id: int,
     *,
@@ -289,6 +353,9 @@ def issue_document(
         coordination.__enter__()
     except (OSError, TimeoutError) as exc:
         logger.exception("issued PDF storage is temporarily unavailable")
+        outcome = _record_preflight_failure(application_id)
+        if outcome.document_status == "ready" and outcome.document is not None:
+            return outcome
         raise HTTPException(503, "document_unavailable") from exc
     try:
         with SessionLocal() as db:

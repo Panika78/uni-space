@@ -1097,15 +1097,23 @@ def process_legacy_automatic_document(
                 )
             )
             db.commit()
-        elif locked.review_status != "approved" or locked.document_status not in {
-            "pending",
-            "failed",
-            "ready",
-        }:
-            raise HTTPException(409, "invalid_transition")
-        else:
-            # Release the row lock before issue_document opens its own transaction.
+        elif locked.review_status == "approved" and locked.document_status == "ready":
+            document = db.scalar(
+                select(IssuedDocument).where(IssuedDocument.application_id == application_id)
+            )
+            if document is None:
+                raise HTTPException(503, "document_unavailable")
+            # Processing is idempotent once ready: do not reissue or touch the snapshot.
             db.commit()
+            db.expire_all()
+            row = db.execute(
+                select(Application, ServiceType)
+                .join(ServiceType)
+                .where(Application.id == application_id, Application.student_id == student.id)
+            ).one()
+            return serialize_application(db, *row)
+        else:
+            raise HTTPException(409, "invalid_transition")
     except Exception:
         db.rollback()
         raise

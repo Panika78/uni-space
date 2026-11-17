@@ -299,7 +299,7 @@ def test_storage_preflight_failure_preserves_committed_business_response(
     assert response.status_code == (200 if service_code == "accounting_certificate" else 201)
     assert (response.json()["review_status"], response.json()["document_status"]) == (
         "approved",
-        "pending",
+        "failed",
     )
     with Session(context["engine"]) as db:
         app_row = db.get(Application, identifier)
@@ -309,7 +309,7 @@ def test_storage_preflight_failure_preserves_committed_business_response(
                 select(ApplicationHistory).where(ApplicationHistory.application_id == identifier)
             ).all()
         )
-        assert app_row.review_status == "approved" and app_row.document_status == "pending"
+        assert app_row.review_status == "approved" and app_row.document_status == "failed"
         assert (
             db.scalar(select(IssuedDocument.id).where(IssuedDocument.application_id == identifier))
             is None
@@ -343,6 +343,73 @@ def test_storage_preflight_failure_preserves_committed_business_response(
         assert (
             db.scalar(select(IssuedDocument.id).where(IssuedDocument.application_id == identifier))
             is not None
+        )
+    _cleanup_application(context, identifier)
+
+
+def test_storage_preflight_failure_does_not_overwrite_concurrent_ready(issue_context, monkeypatch):
+    from app.documents import issuer as issuer_module
+
+    context = issue_context
+    with Session(context["engine"], expire_on_commit=False) as db, db.begin():
+        service = db.scalar(select(ServiceType).where(ServiceType.code == "study_certificate"))
+        application = Application(
+            student_id=context["student_ids"][0],
+            service_type_id=service.id,
+            review_status="approved",
+            document_status="pending",
+            form_data={"place_of_submission": "Демо"},
+            version=2,
+        )
+        db.add(application)
+        db.flush()
+        identifier = application.id
+
+    original_operation = issuer_module._run_issued_filesystem_operation
+    original_record_failure = issuer_module._record_preflight_failure
+    first_thread_id = None
+    preflight_failed = threading.Event()
+    continue_failure_record = threading.Event()
+
+    def fail_only_first_prepare(operation, *args, renderer=None):
+        if operation == "prepare_root" and threading.get_ident() == first_thread_id:
+            raise OSError("injected preflight failure")
+        return original_operation(operation, *args, renderer=renderer)
+
+    def pause_failure_record(application_id):
+        preflight_failed.set()
+        assert continue_failure_record.wait(timeout=10)
+        return original_record_failure(application_id)
+
+    monkeypatch.setattr(issuer_module, "_run_issued_filesystem_operation", fail_only_first_prepare)
+    monkeypatch.setattr(issuer_module, "_record_preflight_failure", pause_failure_record)
+
+    def failing_attempt():
+        nonlocal first_thread_id
+        first_thread_id = threading.get_ident()
+        return issuer_module.issue_document(
+            identifier,
+            actor_kind="owner",
+            actor_id=context["student_users"][0],
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first = executor.submit(failing_attempt)
+        assert preflight_failed.wait(timeout=10)
+        winner = issuer_module.issue_document(
+            identifier,
+            actor_kind="owner",
+            actor_id=context["student_users"][0],
+        )
+        assert winner.document_status == "ready" and winner.document is not None
+        continue_failure_record.set()
+        loser = first.result(timeout=10)
+    assert loser.document_status == "ready" and loser.document is not None
+    with Session(context["engine"]) as db:
+        application = db.get(Application, identifier)
+        assert application.document_status == "ready" and application.version == 3
+        assert db.scalar(
+            select(IssuedDocument.id).where(IssuedDocument.application_id == identifier)
         )
     _cleanup_application(context, identifier)
 
@@ -970,7 +1037,7 @@ def test_application_reads_remain_consistent_during_document_issuance(issue_cont
     _cleanup_application(context, identifier)
 
 
-def test_explicit_process_approves_existing_automatic_application_once(issue_context):
+def test_explicit_process_approves_existing_automatic_application_once(issue_context, monkeypatch):
     context = issue_context
     token = _login(context)
     with Session(context["engine"]) as db, db.begin():
@@ -1000,9 +1067,33 @@ def test_explicit_process_approves_existing_automatic_application_once(issue_con
     assert result.status_code == 200, result.text
     assert result.json()["id"] == str(identifier)
     assert result.json()["document_status"] == "ready"
+    with Session(context["engine"]) as db:
+        before = db.get(Application, identifier)
+        version = before.version
+        document = db.scalar(
+            select(IssuedDocument).where(IssuedDocument.application_id == identifier)
+        )
+        document_id, issued_at, storage_key = document.id, document.issued_at, document.storage_key
+        pdf_bytes = (context["root"] / "issued_documents" / storage_key).read_bytes()
+    from app.documents import issuer as issuer_module
+
+    def fail_if_reissued(*_args, **_kwargs):
+        raise AssertionError("ready process must not invoke the issuer")
+
+    monkeypatch.setattr(issuer_module, "issue_document", fail_if_reissued)
     again = context["client"].request("POST", path, access=token)
     assert again.status_code == 200, again.text
     assert again.json()["document"]["id"] == result.json()["document"]["id"]
+    with Session(context["engine"]) as db:
+        after = db.get(Application, identifier)
+        document = db.scalar(
+            select(IssuedDocument).where(IssuedDocument.application_id == identifier)
+        )
+        assert after.version == version
+        assert document.id == document_id and document.issued_at == issued_at
+        assert (
+            context["root"] / "issued_documents" / document.storage_key
+        ).read_bytes() == pdf_bytes
     with Session(context["engine"]) as db:
         history = db.scalars(
             select(ApplicationHistory).where(ApplicationHistory.application_id == identifier)
@@ -1010,6 +1101,155 @@ def test_explicit_process_approves_existing_automatic_application_once(issue_con
         assert len(history) == 2
         assert history[-1].from_status == "submitted"
         assert history[-1].to_status == "approved" and history[-1].actor_user_id is None
+    _cleanup_application(context, identifier)
+
+
+@pytest.mark.parametrize(
+    ("review_status", "document_status"),
+    [
+        ("approved", "pending"),
+        ("approved", "failed"),
+        ("rejected", "pending"),
+        ("in_review", "pending"),
+    ],
+)
+def test_explicit_process_rejects_nonlegacy_states(issue_context, review_status, document_status):
+    context = issue_context
+    token = _login(context)
+    with Session(context["engine"]) as db, db.begin():
+        service = db.scalar(select(ServiceType).where(ServiceType.code == "study_certificate"))
+        application = Application(
+            student_id=context["student_ids"][0],
+            service_type_id=service.id,
+            review_status=review_status,
+            document_status=document_status,
+            form_data={"place_of_submission": "Демонстрация"},
+            version=7,
+        )
+        db.add(application)
+        db.flush()
+        identifier = application.id
+        db.add(ApplicationHistory(application_id=identifier, to_status=review_status))
+    response = context["client"].request(
+        "POST", f"/api/v1/applications/{identifier}/document/process", access=token
+    )
+    assert response.status_code == 409
+    with Session(context["engine"]) as db:
+        application = db.get(Application, identifier)
+        assert (application.review_status, application.document_status, application.version) == (
+            review_status,
+            document_status,
+            7,
+        )
+        assert (
+            db.scalar(select(IssuedDocument.id).where(IssuedDocument.application_id == identifier))
+            is None
+        )
+    _cleanup_application(context, identifier)
+
+
+def test_explicit_process_rejects_foreign_and_non_document_applications(issue_context):
+    context = issue_context
+    owner_token = _login(context)
+    with Session(context["engine"]) as db, db.begin():
+        service = db.scalar(select(ServiceType).where(ServiceType.code == "study_certificate"))
+        application = Application(
+            student_id=context["student_ids"][0],
+            service_type_id=service.id,
+            review_status="submitted",
+            document_status="pending",
+            form_data={"place_of_submission": "Демонстрация"},
+            version=1,
+        )
+        db.add(application)
+        db.flush()
+        identifier = application.id
+    foreign = context["client"].request(
+        "POST",
+        f"/api/v1/applications/{identifier}/document/process",
+        access=_login(context, 1),
+    )
+    assert foreign.status_code == 404
+    with Session(context["engine"]) as db, db.begin():
+        db.execute(delete(Application).where(Application.id == identifier))
+        service = db.scalar(select(ServiceType).where(ServiceType.code == "academic_leave"))
+        application = Application(
+            student_id=context["student_ids"][0],
+            service_type_id=service.id,
+            review_status="submitted",
+            document_status="not_required",
+            form_data={"basis": "other", "starts_on": "2026-12-01", "ends_on": "2026-12-02"},
+            version=1,
+        )
+        db.add(application)
+        db.flush()
+        identifier = application.id
+    response = context["client"].request(
+        "POST",
+        f"/api/v1/applications/{identifier}/document/process",
+        access=owner_token,
+    )
+    assert response.status_code == 409
+    _cleanup_application(context, identifier)
+
+
+@pytest.mark.parametrize(
+    "academic_term_id",
+    ["abc", None, "-1", "0", "999999999999999999999", "9223372036854775808", 42, [], "999999999"],
+)
+def test_legacy_transcript_with_invalid_saved_period_is_unchanged(issue_context, academic_term_id):
+    context = issue_context
+    token = _login(context)
+    with Session(context["engine"]) as db, db.begin():
+        service = db.scalar(select(ServiceType).where(ServiceType.code == "academic_transcript"))
+        application = Application(
+            student_id=context["student_ids"][0],
+            service_type_id=service.id,
+            review_status="submitted",
+            document_status="pending",
+            form_data={
+                "academic_term_id": academic_term_id,
+                "academic_term_name": "Сохранённый период",
+                "starts_on": "2026-01-01",
+                "ends_on": "2026-12-31",
+            },
+            version=3,
+        )
+        db.add(application)
+        db.flush()
+        identifier = application.id
+        db.add(
+            ApplicationHistory(
+                application_id=identifier,
+                from_status=None,
+                to_status="submitted",
+            )
+        )
+    response = context["client"].request(
+        "POST", f"/api/v1/applications/{identifier}/document/process", access=token
+    )
+    assert response.status_code == 409, response.text
+    with Session(context["engine"]) as db:
+        application = db.get(Application, identifier)
+        assert (application.review_status, application.document_status, application.version) == (
+            "submitted",
+            "pending",
+            3,
+        )
+        assert (
+            len(
+                db.scalars(
+                    select(ApplicationHistory).where(
+                        ApplicationHistory.application_id == identifier
+                    )
+                ).all()
+            )
+            == 1
+        )
+        assert (
+            db.scalar(select(IssuedDocument.id).where(IssuedDocument.application_id == identifier))
+            is None
+        )
     _cleanup_application(context, identifier)
 
 

@@ -152,16 +152,19 @@ def validate_and_store_form(
         except MultipleResultsFound as exc:
             raise HTTPException(409, "academic_term_ambiguous") from exc
         if existing is not None:
-            term_id = existing.get("academic_term_id")
-            if not term_id:
-                raise HTTPException(409, "academic_term_unavailable")
-            term = db.get(AcademicTerm, int(term_id))
-            if term is None:
-                raise HTTPException(409, "academic_term_unavailable")
             try:
                 saved_form = AcademicTranscriptFormData.model_validate(existing)
             except Exception as exc:
                 raise HTTPException(409, "academic_term_unavailable") from exc
+            saved_term_id = saved_form.academic_term_id
+            if len(saved_term_id) > 19:
+                raise HTTPException(409, "academic_term_unavailable")
+            term_id = int(saved_term_id)
+            if term_id > 9_223_372_036_854_775_807:
+                raise HTTPException(409, "academic_term_unavailable")
+            term = db.get(AcademicTerm, term_id)
+            if term is None:
+                raise HTTPException(409, "academic_term_unavailable")
             return saved_form.model_dump(mode="json"), None
         if term is None:
             raise HTTPException(409, "academic_term_unavailable")
