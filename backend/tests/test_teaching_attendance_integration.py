@@ -331,6 +331,13 @@ def test_attendance_journal_uses_constant_sql_count_and_russian_keyset(teaching_
                 academic_status="enrolled",
             )
         )
+    expected = s.db.execute(
+        select(Student.id, User.full_name)
+        .join(User, User.id == Student.user_id)
+        .where(Student.group_id == s.groups[0].id)
+        .order_by(get_student_name_key(User.full_name), Student.id)
+    ).all()
+    expected_ids = [str(row.id) for row in expected]
     queries = []
 
     def record(_conn, _cursor, statement, _parameters, _context, _executemany):
@@ -352,6 +359,7 @@ def test_attendance_journal_uses_constant_sql_count_and_russian_keyset(teaching_
                 if cursor is None:
                     break
             assert len(page_ids) == len(set(page_ids))
+            assert page_ids == expected_ids
             all_ids = page_ids
         attendance_queries = [
             query
@@ -363,14 +371,6 @@ def test_attendance_journal_uses_constant_sql_count_and_russian_keyset(teaching_
         assert len(attendance_queries) == expected_page_count
         assert all("LIMIT" in query.upper() for query in attendance_queries)
         assert len(all_ids) == len(set(all_ids))
-        expected = s.db.execute(
-            select(Student.id, User.full_name)
-            .join(User, User.id == Student.user_id)
-            .where(Student.group_id == s.groups[0].id)
-            .order_by(get_student_name_key(User.full_name), Student.id)
-        ).all()
-        expected_ids = [str(row.id) for row in expected]
-        assert all_ids == expected_ids
         transliteration = str.maketrans(NAME_KEY_SOURCE, NAME_KEY_TARGET)
         assert [(row.full_name.translate(transliteration), row.id) for row in expected] == sorted(
             (row.full_name.translate(transliteration), row.id) for row in expected
