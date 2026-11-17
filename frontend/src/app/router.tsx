@@ -28,6 +28,7 @@ import {
 } from '../features/students/StaffStudentsPage'
 import { StaffNewsPage } from '../features/news/StaffNewsPage'
 import { StaffSchedulePage } from '../features/schedule/StaffSchedulePage'
+import { TeacherJournalsPage } from '../features/teacher/TeacherJournalsPage'
 import type { ReactNode } from 'react'
 import type { RouteObject } from 'react-router-dom'
 
@@ -177,7 +178,7 @@ export const appRoutes: RouteObject[] = [
                     children: [
                       {
                         path: '/teacher/journals',
-                        element: <ModuleUnavailable title="Мои журналы" />,
+                        element: <TeacherJournalsPage />,
                       },
                       {
                         path: '/teacher/schedule',

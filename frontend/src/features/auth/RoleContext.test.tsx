@@ -21,7 +21,11 @@ beforeEach(() => {
   vi.stubGlobal('innerWidth', 360)
   context = { user_id: '42', role: 'teacher', org_unit_id: null, permissions: [] }
   vi.mocked(apiFetch).mockImplementation(async (url) =>
-    String(url).startsWith('/api/v1/admin/users') ? { items: [], next_after_id: null } : context,
+    String(url).startsWith('/api/v1/admin/users')
+      ? { items: [], next_after_id: null }
+      : String(url).startsWith('/api/v1/teaching/assignments')
+        ? { items: [], next_cursor: null }
+        : context,
   )
 })
 afterEach(() => {
@@ -55,6 +59,7 @@ it.each([
       .mock.calls.every(
         ([url]) =>
           url === '/api/v1/auth/context' ||
+          (role === 'teacher' && String(url).startsWith('/api/v1/teaching/assignments')) ||
           (role === 'admin' && String(url).startsWith('/api/v1/admin/users')),
       ),
   ).toBe(true)
