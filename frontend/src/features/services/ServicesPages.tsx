@@ -16,6 +16,7 @@ type CreateApplicationRequest =
 
 type AdditionalFormField = 'basis' | 'starts_on' | 'ends_on' | 'explanation' | 'purpose'
 type AdditionalFormErrors = Partial<Record<AdditionalFormField, string>>
+const LEAVE_UPLOAD_TIMEOUT_MS = 180_000
 
 const isPythonWhitespace = (character: string) => {
   const codePoint = character.codePointAt(0) ?? 0
@@ -501,7 +502,7 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
       const result = await apiFetch<unknown>('/api/v1/applications', {
         method: 'POST',
         authenticated: true,
-        signal: AbortSignal.timeout(30_000),
+        signal: AbortSignal.timeout(isLeave ? LEAVE_UPLOAD_TIMEOUT_MS : 30_000),
         body,
       })
       const expectedForm = isTranscript

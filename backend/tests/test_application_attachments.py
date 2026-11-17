@@ -1,11 +1,15 @@
 """PostgreSQL and private filesystem acceptance tests for academic leave files."""
 
+import asyncio
+import shutil
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from uuid import uuid4
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, event, select
+from sqlalchemy import delete, event, func, select
 
 from app.dependencies.auth import get_current_student, get_current_user
 from app.dependencies.database import get_db_session
@@ -15,6 +19,7 @@ from app.models import (
     ApplicationHistory,
     OrgUnit,
     Program,
+    ServiceType,
     StaffPermission,
     StaffProfile,
     Student,
@@ -24,7 +29,14 @@ from app.models import (
 
 pytestmark = pytest.mark.integration
 
-PDF = b"%PDF-1.4\nfictional supporting record\n%%EOF"
+PDF = Path(__file__).with_name("fixtures").joinpath("minimal.pdf").read_bytes()
+
+
+@pytest.fixture
+def real_auth(postgresql_engine, monkeypatch):
+    from test_auth_integration import auth as auth_fixture
+
+    yield from auth_fixture.__wrapped__(postgresql_engine, monkeypatch)
 
 
 def test_academic_leave_upload_download_and_atomic_resubmit(
@@ -33,7 +45,7 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
     from sqlalchemy.orm import Session
 
     from app.applications import router as router_module
-    from app.main import app
+    from app.main import RequestBodyLimitMiddleware, app
 
     suffix = uuid4().hex
     with Session(postgresql_engine) as db:
@@ -103,32 +115,72 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
         attachment_storage_path = str(tmp_path / "private-files")
 
     current_student = [Student(id=student_id, group_id=group_id, user_id=owner_user_id)]
+    commit_ack_loss = [False]
 
     def override_session():
         from sqlalchemy.orm import Session
 
         with Session(postgresql_engine) as session:
+            session.info["lose_commit_ack"] = commit_ack_loss[0]
             yield session
 
     app.dependency_overrides[get_current_student] = lambda: current_student[0]
     app.dependency_overrides[get_db_session] = override_session
     monkeypatch.setattr(router_module, "get_settings", lambda: TestSettings())
     client = TestClient(app)
+    monkeypatch.setattr(RequestBodyLimitMiddleware, "limit_bytes", 128)
     form = {
         "basis": "medical",
         "starts_on": "2026-12-01",
         "ends_on": "2026-12-31",
         "explanation": None,
     }
+    original_commit = Session.commit
+
+    def commit_then_lose_ack(session):
+        original_commit(session)
+        if session.info.pop("lose_commit_ack", False):
+            raise RuntimeError("fictional lost commit acknowledgement")
+
+    monkeypatch.setattr(Session, "commit", commit_then_lose_ack)
     created_id = None
     try:
         oversized = client.post(
             "/api/v1/applications",
-            content=b"body is rejected by declared size before parsing",
-            headers={"Content-Length": str(54 * 1024 * 1024 + 1)},
+            content=b"x",
+            headers={"Content-Length": "129", "Content-Type": "application/json"},
         )
         assert oversized.status_code == 413
         assert oversized.json()["error"]["code"] == "request_too_large"
+        assert oversized.headers.get("x-request-id")
+        assert oversized.headers["cache-control"] == "no-store"
+        assert oversized.headers["x-content-type-options"] == "nosniff"
+
+        async def check_streaming_limit():
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as async_client:
+
+                async def stream(body):
+                    yield body
+
+                boundary = await async_client.post(
+                    "/api/v1/applications",
+                    content=stream(b"x" * 128),
+                    headers={"Content-Type": "application/json"},
+                )
+                exceeded = await async_client.post(
+                    "/api/v1/applications",
+                    content=stream(b"x" * 129),
+                    headers={"Content-Type": "application/json"},
+                )
+                return boundary, exceeded
+
+        boundary, chunked_oversized = asyncio.run(check_streaming_limit())
+        assert boundary.status_code == 422
+        assert chunked_oversized.status_code == 413
+        assert chunked_oversized.json()["error"]["code"] == "request_too_large"
+        monkeypatch.setattr(RequestBodyLimitMiddleware, "limit_bytes", 54 * 1024 * 1024)
         no_file = client.post(
             "/api/v1/applications", json={"service_code": "academic_leave", "form_data": form}
         )
@@ -233,6 +285,7 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
                 db.scalar(select(Application.review_status).where(Application.id == created_id))
                 == "resubmitted"
             )
+
             assert (
                 db.scalar(
                     select(ApplicationHistory.to_status)
@@ -276,6 +329,71 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
                 == 1
             )
 
+        with Session(postgresql_engine) as db, db.begin():
+            application = db.get(Application, created_id)
+            application.review_status = "needs_correction"
+            application.version = 6
+        replacement_fields = {
+            "expected_version": "6",
+            "form_data": __import__("json").dumps(form),
+            "keep_attachment_ids": "[]",
+        }
+
+        def fail_resubmit_commit(_session):
+            raise RuntimeError("fictional resubmit rollback")
+
+        event.listen(Session, "before_commit", fail_resubmit_commit)
+        try:
+            rolled_back = client.post(
+                f"/api/v1/applications/{created_id}/resubmit",
+                data=replacement_fields,
+                files=[("files", ("rollback-replacement.pdf", PDF, "application/pdf"))],
+            )
+        finally:
+            event.remove(Session, "before_commit", fail_resubmit_commit)
+        assert rolled_back.status_code == 500
+        with Session(postgresql_engine) as db:
+            assert db.scalar(select(Application.version).where(Application.id == created_id)) == 6
+            current_before = db.scalar(
+                select(ApplicationAttachment).where(
+                    ApplicationAttachment.application_id == created_id,
+                    ApplicationAttachment.is_current.is_(True),
+                )
+            )
+        assert current_before.id == int(attachment["id"])
+
+        commit_ack_loss[0] = True
+        try:
+            uncertain_resubmit = client.post(
+                f"/api/v1/applications/{created_id}/resubmit",
+                data=replacement_fields,
+                files=[("files", ("replacement.pdf", PDF, "application/pdf"))],
+            )
+        finally:
+            commit_ack_loss[0] = False
+        assert uncertain_resubmit.status_code == 500
+        with Session(postgresql_engine) as db:
+            assert db.scalar(select(Application.version).where(Application.id == created_id)) == 7
+            current_after = db.scalar(
+                select(ApplicationAttachment).where(
+                    ApplicationAttachment.application_id == created_id,
+                    ApplicationAttachment.is_current.is_(True),
+                )
+            )
+            latest_history = db.scalar(
+                select(ApplicationHistory.to_status)
+                .where(ApplicationHistory.application_id == created_id)
+                .order_by(ApplicationHistory.id.desc())
+                .limit(1)
+            )
+        assert current_after.id != current_before.id
+        assert latest_history == "resubmitted"
+        assert (tmp_path / "private-files" / current_after.storage_key).read_bytes() == PDF
+        assert (
+            client.get(f"/api/v1/applications/attachments/{current_after.id}/download").content
+            == PDF
+        )
+
         def fail_commit(_session):
             raise RuntimeError("fictional attachment commit failure")
 
@@ -289,8 +407,73 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
         finally:
             event.remove(Session, "before_commit", fail_commit)
         assert failed.status_code == 500
-        stored_files = [path for path in (tmp_path / "private-files").iterdir() if path.is_file()]
-        assert len(stored_files) == 1
+        stored_files = [
+            path
+            for path in (tmp_path / "private-files").iterdir()
+            if path.is_file() and not path.name.startswith(".")
+        ]
+        assert len(stored_files) == 2
+        with Session(postgresql_engine) as db:
+            assert (
+                db.scalar(
+                    select(func.count())
+                    .select_from(Application)
+                    .where(Application.student_id == student_id)
+                )
+                == 1
+            )
+
+        commit_ack_loss[0] = True
+        try:
+            uncertain = client.post(
+                "/api/v1/applications",
+                data={"form_data": __import__("json").dumps(form)},
+                files=[("files", ("committed.pdf", PDF, "application/pdf"))],
+            )
+        finally:
+            commit_ack_loss[0] = False
+        assert uncertain.status_code == 500
+        with Session(postgresql_engine) as db:
+            uncertain_id = db.scalar(
+                select(Application.id)
+                .where(Application.student_id == student_id)
+                .order_by(Application.id.desc())
+            )
+            uncertain_attachment = db.scalar(
+                select(ApplicationAttachment).where(
+                    ApplicationAttachment.application_id == uncertain_id
+                )
+            )
+            assert uncertain_attachment is not None
+            assert (
+                db.scalar(
+                    select(ApplicationHistory.id).where(
+                        ApplicationHistory.application_id == uncertain_id
+                    )
+                )
+                is not None
+            )
+        assert (tmp_path / "private-files" / uncertain_attachment.storage_key).read_bytes() == PDF
+        assert (
+            client.get(
+                f"/api/v1/applications/attachments/{uncertain_attachment.id}/download"
+            ).content
+            == PDF
+        )
+
+        attachment_queries = []
+
+        def count_attachment_queries(_connection, _cursor, statement, _parameters, _context, _many):
+            if "application_attachments" in statement.lower():
+                attachment_queries.append(statement)
+
+        event.listen(postgresql_engine, "before_cursor_execute", count_attachment_queries)
+        try:
+            listed = client.get("/api/v1/applications?limit=50")
+        finally:
+            event.remove(postgresql_engine, "before_cursor_execute", count_attachment_queries)
+        assert listed.status_code == 200
+        assert len(attachment_queries) == 1
 
         invalid = client.post(
             "/api/v1/applications",
@@ -302,8 +485,7 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
     finally:
         app.dependency_overrides.clear()
         with Session(postgresql_engine) as db, db.begin():
-            if created_id:
-                db.execute(delete(Application).where(Application.id == created_id))
+            db.execute(delete(Application).where(Application.student_id == student_id))
             db.execute(delete(Student).where(Student.id.in_([student_id, other_student_id])))
             db.execute(
                 delete(User).where(User.login.in_([f"attach-{suffix}", f"attach-other-{suffix}"]))
@@ -326,3 +508,186 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
                     )
                 )
             )
+
+
+def test_download_authorization_uses_real_tokens_and_hides_attachment_existence(
+    real_auth, monkeypatch, tmp_path
+):
+    from sqlalchemy.orm import Session
+    from test_auth_integration import PASSWORD, PASSWORD_HASHER
+
+    from app.applications import router as router_module
+    from app.models import AuthSession, RefreshToken
+
+    client, engine, _student_user_ids, student_logins, student_ids = real_auth
+    app = client.app
+    app.include_router(router_module.router)
+    suffix = uuid4().hex
+    with Session(engine) as db:
+        faculty_id = db.scalar(
+            select(Program.faculty_id)
+            .join(StudyGroup, StudyGroup.program_id == Program.id)
+            .join(Student, Student.group_id == StudyGroup.id)
+            .where(Student.id == student_ids[0])
+        )
+        office = OrgUnit(
+            name=f"Auth Attachment Office {suffix}", type="dean_office", parent_id=faculty_id
+        )
+        foreign_faculty = OrgUnit(name=f"Foreign Faculty {suffix}", type="faculty")
+        db.add_all([office, foreign_faculty])
+        db.flush()
+        foreign_office = OrgUnit(
+            name=f"Foreign Office {suffix}", type="dean_office", parent_id=foreign_faculty.id
+        )
+        db.add(foreign_office)
+        db.flush()
+        service = db.scalar(select(ServiceType).where(ServiceType.code == "academic_leave"))
+        assert service is not None
+        staff_users = [
+            User(
+                login=f"attachment-staff-{suffix}-{index}",
+                password_hash=PASSWORD_HASHER.hash(PASSWORD),
+                full_name=f"Attachment Staff {index}",
+                role="staff",
+                is_active=True,
+            )
+            for index in range(2)
+        ]
+        no_permission = User(
+            login=f"attachment-no-permission-{suffix}",
+            password_hash=PASSWORD_HASHER.hash(PASSWORD),
+            full_name="Attachment Staff Without Permission",
+            role="staff",
+            is_active=True,
+        )
+        administrator = User(
+            login=f"attachment-admin-{suffix}",
+            password_hash=PASSWORD_HASHER.hash(PASSWORD),
+            full_name="Attachment Administrator",
+            role="admin",
+            is_active=True,
+        )
+        db.add_all([*staff_users, no_permission, administrator])
+        db.flush()
+        profiles = [
+            StaffProfile(user_id=staff_users[0].id, org_unit_id=office.id),
+            StaffProfile(user_id=staff_users[1].id, org_unit_id=foreign_office.id),
+            StaffProfile(user_id=no_permission.id, org_unit_id=office.id),
+        ]
+        db.add_all(profiles)
+        db.flush()
+        db.add_all(
+            [
+                StaffPermission(
+                    staff_profile_id=profiles[0].id,
+                    permission_code="applications.review",
+                    scope_org_unit_id=office.id,
+                ),
+                StaffPermission(
+                    staff_profile_id=profiles[1].id,
+                    permission_code="applications.review",
+                    scope_org_unit_id=foreign_office.id,
+                ),
+            ]
+        )
+        student_applications = [
+            Application(
+                student_id=student_ids[0],
+                service_type_id=service.id,
+                review_status="submitted",
+                document_status="not_required",
+                form_data={"basis": "medical"},
+                assigned_org_unit_id=office.id,
+                version=1,
+            ),
+            Application(
+                student_id=student_ids[0],
+                service_type_id=service.id,
+                review_status="submitted",
+                document_status="not_required",
+                form_data={"basis": "medical"},
+                assigned_org_unit_id=foreign_office.id,
+                version=1,
+            ),
+        ]
+        db.add_all(student_applications)
+        db.flush()
+        attachment_keys = [f"{uuid4().hex}.pdf" for _ in range(3)]
+        owned, stale, foreign = [
+            ApplicationAttachment(
+                application_id=student_applications[1 if index == 2 else 0].id,
+                storage_key=attachment_keys[index],
+                original_filename=f"proof-{index}.pdf",
+                mime_type="application/pdf",
+                size_bytes=429,
+                is_current=index != 1,
+            )
+            for index in range(3)
+        ]
+        db.add_all([owned, stale, foreign])
+        db.flush()
+        ids = [owned.id, stale.id, foreign.id]
+        app_ids = [item.id for item in student_applications]
+        staff_ids = [item.id for item in staff_users] + [no_permission.id, administrator.id]
+        staff_logins = [item.login for item in staff_users] + [
+            no_permission.login,
+            administrator.login,
+        ]
+        office_ids = [office.id, foreign_office.id, foreign_faculty.id]
+        db.commit()
+
+    class TestSettings:
+        attachment_storage_path = str(tmp_path / "private-files")
+
+    monkeypatch.setattr(router_module, "get_settings", lambda: TestSettings())
+    storage = tmp_path / "private-files"
+    storage.mkdir(mode=0o700)
+    pdf = Path(__file__).with_name("fixtures").joinpath("minimal.pdf").read_bytes()
+    for key in attachment_keys:
+        (storage / key).write_bytes(pdf)
+
+    def access(login):
+        response = client.login(json={"login": login, "password": PASSWORD})
+        assert response.status_code == 200, response.text
+        return response.json()["access_token"]
+
+    tokens = [access(login) for login in student_logins + staff_logins]
+    owner, stranger, scoped, foreign_scope, no_grant, admin = tokens
+    try:
+
+        def download(token, attachment_id, *, staff=False):
+            prefix = (
+                "/api/v1/staff/applications/attachments"
+                if staff
+                else "/api/v1/applications/attachments"
+            )
+            return client.request("GET", f"{prefix}/{attachment_id}/download", access=token)
+
+        assert download(owner, ids[0]).status_code == 200
+        assert download(stranger, ids[0]).status_code == 404
+        assert download(scoped, ids[0], staff=True).status_code == 200
+        assert download(scoped, ids[1], staff=True).status_code == 404
+        assert download(foreign_scope, ids[0], staff=True).status_code == 404
+        assert download(no_grant, ids[0], staff=True).status_code == 404
+        assert download(admin, ids[0], staff=True).status_code == 404
+        unknown_id = max(ids) + 999
+        assert download(foreign_scope, unknown_id, staff=True).status_code == 404
+        assert download(no_grant, unknown_id, staff=True).status_code == 404
+        assert download(admin, unknown_id, staff=True).status_code == 404
+        assert download(scoped, unknown_id, staff=True).status_code == 404
+    finally:
+        with Session(engine) as db, db.begin():
+            db.execute(delete(ApplicationAttachment).where(ApplicationAttachment.id.in_(ids)))
+            db.execute(delete(Application).where(Application.id.in_(app_ids)))
+            profile_ids = select(StaffProfile.id).where(StaffProfile.user_id.in_(staff_ids))
+            db.execute(
+                delete(StaffPermission).where(StaffPermission.staff_profile_id.in_(profile_ids))
+            )
+            db.execute(delete(StaffProfile).where(StaffProfile.user_id.in_(staff_ids)))
+            sessions = select(AuthSession.id).where(AuthSession.user_id.in_(staff_ids))
+            db.execute(delete(RefreshToken).where(RefreshToken.session_id.in_(sessions)))
+            db.execute(delete(AuthSession).where(AuthSession.user_id.in_(staff_ids)))
+            db.execute(delete(User).where(User.id.in_(staff_ids)))
+            db.execute(delete(OrgUnit).where(OrgUnit.id.in_([office_ids[0], office_ids[1]])))
+            db.execute(delete(OrgUnit).where(OrgUnit.id == office_ids[2]))
+        shutil.rmtree(storage, ignore_errors=True)

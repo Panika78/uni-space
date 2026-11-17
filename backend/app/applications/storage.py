@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import os
 import re
 import tempfile
 import uuid
+import warnings
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
 from fastapi import HTTPException
+from PIL import Image
+from pypdf import PdfReader
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_FILES = 5
@@ -28,6 +35,42 @@ class StagedAttachment:
     filename: str
     mime_type: str
     size_bytes: int
+    lock_fd: int
+
+
+@contextmanager
+def coordination_lock(root: Path) -> Iterator[None]:
+    """Serialize publication/commit and orphan cleanup across API processes."""
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    root.chmod(0o700)
+    descriptor = os.open(root / ".coordination.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
+def _valid_document(path: Path, mime_type: str) -> bool:
+    try:
+        if mime_type == "application/pdf":
+            reader = PdfReader(path, strict=False)
+            if reader.is_encrypted:
+                return False
+            return len(reader.pages) > 0
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(path) as image:
+                if image.format not in {"JPEG", "PNG"}:
+                    return False
+                image.verify()
+            with Image.open(path) as image:
+                image.load()
+        return True
+    except Exception:
+        return False
 
 
 def detect_mime(header: bytes, filename: str) -> str:
@@ -57,10 +100,12 @@ def stage_upload(source: BinaryIO, filename: str, root: Path) -> StagedAttachmen
     fd, temporary_name = tempfile.mkstemp(prefix="upload-", dir=staging)
     path = Path(temporary_name)
     os.fchmod(fd, 0o600)
+    lock_fd = os.dup(fd)
     digest = hashlib.sha256()
     size = 0
     prefix = b""
     try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
         with os.fdopen(fd, "wb") as target:
             while chunk := source.read(CHUNK_BYTES):
                 size += len(chunk)
@@ -77,21 +122,17 @@ def stage_upload(source: BinaryIO, filename: str, root: Path) -> StagedAttachmen
         mime = detect_mime(prefix, filename)
         if mime not in ALLOWED_TYPES:
             raise HTTPException(422, "invalid_attachment")
-        # Basic structural checks catch truncated common files without claiming semantic review.
-        with path.open("rb") as saved:
-            saved.seek(max(0, size - 1024))
-            trailer = saved.read()
-        if mime == "application/pdf" and b"%%EOF" not in trailer:
-            raise HTTPException(422, "invalid_attachment")
-        if mime == "image/jpeg" and not trailer.endswith(b"\xff\xd9"):
-            raise HTTPException(422, "invalid_attachment")
-        if mime == "image/png" and not trailer.endswith(b"IEND\xaeB`\x82"):
+        if not _valid_document(path, mime):
             raise HTTPException(422, "invalid_attachment")
         extension = _SAFE_EXTENSION[mime]
         key = f"{uuid.uuid4().hex}{extension}"
-        return StagedAttachment(path, key, filename, mime, size)
+        return StagedAttachment(path, key, filename, mime, size, lock_fd)
     except BaseException:
         path.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            os.close(fd)
+        with contextlib.suppress(OSError):
+            os.close(lock_fd)
         raise
 
 
@@ -105,11 +146,16 @@ def publish(staged: StagedAttachment, root: Path) -> Path:
         os.fsync(directory_fd)
     finally:
         os.close(directory_fd)
+    os.close(staged.lock_fd)
     return destination
 
 
 def discard(staged: StagedAttachment) -> None:
-    staged.stage_path.unlink(missing_ok=True)
+    try:
+        staged.stage_path.unlink(missing_ok=True)
+    finally:
+        with contextlib.suppress(OSError):
+            os.close(staged.lock_fd)
 
 
 def delete_key(root: Path, storage_key: str) -> None:
@@ -127,31 +173,42 @@ def open_key(root: Path, storage_key: str):
 
 
 def cleanup_orphans(
-    root: Path, referenced_keys: set[str], *, older_than_seconds: int = 3600
+    root: Path,
+    referenced_keys: set[str] | Callable[[], set[str]],
+    *,
+    older_than_seconds: int = 3600,
 ) -> int:
-    """Idempotently remove stale staging/orphan files; active recent uploads are retained."""
+    """Delete old orphans while holding the same cross-process publication lock."""
     import time
 
     cutoff = time.time() - older_than_seconds
     removed = 0
-    staging = root / ".staging"
-    if staging.exists():
-        for path in staging.iterdir():
+    with coordination_lock(root):
+        references = referenced_keys() if callable(referenced_keys) else referenced_keys
+        staging = root / ".staging"
+        if staging.exists():
+            for path in staging.iterdir():
+                try:
+                    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+                    try:
+                        try:
+                            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except BlockingIOError:
+                            continue
+                        if os.fstat(descriptor).st_mtime < cutoff:
+                            path.unlink(missing_ok=True)
+                            removed += 1
+                    finally:
+                        os.close(descriptor)
+                except FileNotFoundError:
+                    continue
+        for path in root.iterdir():
+            if path.name.startswith("."):
+                continue
             try:
-                if path.is_file() and path.stat().st_mtime < cutoff:
+                if path.is_file() and path.name not in references and path.stat().st_mtime < cutoff:
                     path.unlink(missing_ok=True)
                     removed += 1
             except FileNotFoundError:
                 continue
-    for path in root.iterdir():
-        try:
-            if (
-                path.is_file()
-                and path.name not in referenced_keys
-                and path.stat().st_mtime < cutoff
-            ):
-                path.unlink(missing_ok=True)
-                removed += 1
-        except FileNotFoundError:
-            continue
     return removed

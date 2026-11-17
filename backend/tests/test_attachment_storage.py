@@ -1,13 +1,21 @@
 import os
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from contextlib import suppress
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 
-from app.applications.storage import cleanup_orphans, stage_upload
+from app.applications.storage import (
+    cleanup_orphans,
+    coordination_lock,
+    discard,
+    publish,
+    stage_upload,
+)
 
-PDF = b"%PDF-1.4\nvalid fictional file\n%%EOF"
+PDF = Path(__file__).with_name("fixtures").joinpath("minimal.pdf").read_bytes()
 
 
 def test_stages_pdf_with_private_permissions_and_rejects_spoofed_or_oversized_files(tmp_path):
@@ -20,11 +28,19 @@ def test_stages_pdf_with_private_permissions_and_rejects_spoofed_or_oversized_fi
         assert (tmp_path / ".staging").stat().st_mode & 0o777 == 0o700
         assert staged.stage_path.stat().st_mode & 0o777 == 0o600
     finally:
-        staged.stage_path.unlink(missing_ok=True)
+        discard(staged)
 
     with pytest.raises(HTTPException) as invalid:
         stage_upload(BytesIO(b"not a pdf"), "proof.pdf", tmp_path)
     assert invalid.value.status_code == 422
+
+    for filename, fake_document in (
+        ("spoof.pdf", b"%PDF-1.4\nfictional but invalid document\n%%EOF"),
+        ("spoof.png", b"\x89PNG\r\n\x1a\nnot actually a PNG"),
+    ):
+        with pytest.raises(HTTPException) as invalid_document:
+            stage_upload(BytesIO(fake_document), filename, tmp_path)
+        assert invalid_document.value.status_code == 422
 
     with pytest.raises(HTTPException) as oversized:
         stage_upload(
@@ -61,3 +77,36 @@ def test_cleanup_is_repeatable_concurrent_and_preserves_recent_or_referenced_obj
     assert current.exists()
     assert recent.exists()
     assert clean() == 0
+
+
+def test_cleanup_waits_for_publication_and_preserves_the_committed_reference(tmp_path):
+    staged = stage_upload(BytesIO(PDF), "proof.pdf", tmp_path)
+    coordinator = coordination_lock(tmp_path)
+    coordinator.__enter__()
+    lock_held = True
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            cleanup = executor.submit(cleanup_orphans, tmp_path, lambda: {staged.storage_key})
+            with pytest.raises(TimeoutError):
+                cleanup.result(timeout=0.1)
+            published = publish(staged, tmp_path)
+            coordinator.__exit__(None, None, None)
+            lock_held = False
+            assert cleanup.result(timeout=5) == 0
+        assert published.read_bytes() == PDF
+    finally:
+        # publish closes the staging lock. The context may already be released.
+        if lock_held:
+            with suppress(OSError):
+                coordinator.__exit__(None, None, None)
+        discard(staged)
+
+
+def test_cleanup_skips_a_stage_held_open_by_an_active_upload(tmp_path):
+    staged = stage_upload(BytesIO(PDF), "proof.pdf", tmp_path)
+    os.utime(staged.stage_path, (1, 1))
+    try:
+        assert cleanup_orphans(tmp_path, set(), older_than_seconds=1) == 0
+        assert staged.stage_path.exists()
+    finally:
+        discard(staged)

@@ -6,6 +6,7 @@ from app.admin.router import router as admin_router
 from app.applications.router import router as applications_router
 from app.attendance.router import router as attendance_router
 from app.auth.router import router as auth_router
+from app.core.body_limit import RequestTooLarge
 from app.core.config import get_settings
 from app.core.errors import install_exception_handlers
 from app.core.middleware import ApiHeadersMiddleware
@@ -41,7 +42,6 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
     redoc_url=None,
 )
-app.add_middleware(ApiHeadersMiddleware)
 
 
 class RequestBodyLimitMiddleware:
@@ -106,11 +106,8 @@ class RequestBodyLimitMiddleware:
         await send({"type": "http.response.body", "body": body})
 
 
-class RequestTooLarge(Exception):
-    pass
-
-
 app.add_middleware(RequestBodyLimitMiddleware)
+app.add_middleware(ApiHeadersMiddleware)
 install_exception_handlers(app)
 app.include_router(admin_router)
 app.include_router(attendance_router)

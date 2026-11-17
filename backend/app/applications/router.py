@@ -29,6 +29,7 @@ from app.applications.schemas import (
     StaffApplicationPage,
     StaffApplicationResponse,
 )
+from app.core.body_limit import RequestTooLarge
 from app.core.config import get_settings
 from app.core.pagination import InvalidCursorError, decode_page_cursor, paginate_results
 from app.core.schemas import ApiError, Id, PaginationParams, RequestModel
@@ -96,24 +97,63 @@ def list_services(
     return ServiceList(items=items)
 
 
-def attachment_metadata(db: Session, application_id: int) -> list[AttachmentMetadata]:
+def attachment_metadata_batch(
+    db: Session, application_ids: list[int]
+) -> dict[int, list[AttachmentMetadata]]:
+    if not application_ids:
+        return {}
     rows = db.scalars(
         select(ApplicationAttachment)
         .where(
-            ApplicationAttachment.application_id == application_id,
+            ApplicationAttachment.application_id.in_(application_ids),
             ApplicationAttachment.is_current.is_(True),
         )
-        .order_by(ApplicationAttachment.id)
+        .order_by(ApplicationAttachment.application_id, ApplicationAttachment.id)
     ).all()
-    return [
-        AttachmentMetadata(
-            id=str(row.id),
-            original_filename=row.original_filename,
-            mime_type=row.mime_type,
-            size_bytes=row.size_bytes,
+    grouped: dict[int, list[AttachmentMetadata]] = {}
+    for row in rows:
+        grouped.setdefault(row.application_id, []).append(
+            AttachmentMetadata(
+                id=str(row.id),
+                original_filename=row.original_filename,
+                mime_type=row.mime_type,
+                size_bytes=row.size_bytes,
+            )
         )
-        for row in rows
-    ]
+    return grouped
+
+
+def attachment_metadata(db: Session, application_id: int) -> list[AttachmentMetadata]:
+    return attachment_metadata_batch(db, [application_id]).get(application_id, [])
+
+
+def resolve_published_after_commit_error(
+    db: Session, root: Path, storage_keys: list[str], *, commit_attempted: bool
+) -> None:
+    """Delete new files only after an independent connection proves no DB reference."""
+    if not storage_keys:
+        return
+    referenced: set[str] = set()
+    if commit_attempted:
+        try:
+            bind = db.get_bind()
+            if hasattr(bind, "engine"):
+                bind = bind.engine
+            with Session(bind) as verification:
+                referenced = set(
+                    verification.scalars(
+                        select(ApplicationAttachment.storage_key).where(
+                            ApplicationAttachment.storage_key.in_(storage_keys)
+                        )
+                    )
+                )
+        except Exception:
+            # Unknown commit and unknown verification both mean retain. The locked
+            # orphan cleanup can re-check after DB connectivity is restored.
+            return
+    for storage_key in storage_keys:
+        if storage_key not in referenced:
+            storage.delete_key(root, storage_key)
 
 
 async def parse_submission(request: Request, *, resubmit: bool = False):
@@ -131,6 +171,8 @@ async def parse_submission(request: Request, *, resubmit: bool = False):
             raise HTTPException(422, "validation_error") from exc
     try:
         form = await request.form(max_files=5, max_fields=3, max_part_size=8192)
+    except RequestTooLarge as exc:
+        raise HTTPException(413, "request_too_large") from exc
     except Exception as exc:
         raise HTTPException(422, "validation_error") from exc
     expected = {"form_data", "files"} | (
@@ -263,7 +305,6 @@ async def submit_application(
         raise HTTPException(422, "attachment_limit_exceeded")
     root = Path(get_settings().attachment_storage_path)
     staged = []
-    published = []
     try:
         for item in uploaded:
             staged.append(storage.stage_upload(item.file, item.filename or "attachment", root))
@@ -283,9 +324,15 @@ async def submit_application(
         feedback=None,
         version=1,
     )
+    coordination = storage.coordination_lock(root) if staged else None
+    coordination_acquired = False
+    commit_attempted = False
     try:
+        if coordination is not None:
+            coordination.__enter__()
+            coordination_acquired = True
         for item in staged:
-            published.append(storage.publish(item, root))
+            storage.publish(item, root)
         db.add(application)
         db.flush()
         for item in staged:
@@ -333,20 +380,33 @@ async def submit_application(
         )
         db.flush()
         payload.attachments = attachment_metadata(db, application.id)
+        commit_attempted = True
         db.commit()
     except Exception:
-        db.rollback()
-        for path in published:
-            path.unlink(missing_ok=True)
+        with suppress(Exception):
+            db.rollback()
+        resolve_published_after_commit_error(
+            db,
+            root,
+            [item.storage_key for item in staged],
+            commit_attempted=commit_attempted,
+        )
         for item in staged:
             storage.discard(item)
         raise
+    finally:
+        if coordination_acquired:
+            coordination.__exit__(None, None, None)
     response.headers["Location"] = f"/api/v1/applications/{application.id}"
     return payload
 
 
 def serialize_application(
-    db: Session, application: Application, service: ServiceType
+    db: Session,
+    application: Application,
+    service: ServiceType,
+    *,
+    attachments: list[AttachmentMetadata] | None = None,
 ) -> ApplicationResponse:
     description, requirements = workflow.SERVICE_DETAILS.get(service.code, ("", []))
     return ApplicationResponse(
@@ -369,7 +429,9 @@ def serialize_application(
         created_at=application.created_at,
         updated_at=application.updated_at,
         version=application.version,
-        attachments=attachment_metadata(db, application.id),
+        attachments=(
+            attachment_metadata(db, application.id) if attachments is None else attachments
+        ),
     )
 
 
@@ -424,11 +486,17 @@ def list_application_page(
             pagination.limit + 1
         )
     ).all()
+    page_rows = rows[: pagination.limit]
+    metadata = attachment_metadata_batch(db, [application.id for application, _ in page_rows])
     page = paginate_results(
         [
-            serialize_staff_application(db, application, service)
+            serialize_staff_application(
+                db, application, service, attachments=metadata.get(application.id, [])
+            )
             if staff
-            else serialize_application(db, application, service)
+            else serialize_application(
+                db, application, service, attachments=metadata.get(application.id, [])
+            )
             for application, service in rows
         ],
         key=lambda item: (item.created_at.isoformat(), int(item.id)),
@@ -471,20 +539,32 @@ def get_student_application(
 def attachment_download(
     db: Session, attachment_id: int, *, student: Student | None = None, user: User | None = None
 ):
-    row = db.execute(
+    scope_ids = None
+    if user is not None:
+        context = get_authorization_context(db, user)
+        scope_ids = [
+            int(permission.scope_org_unit_id)
+            for permission in context.permissions
+            if permission.permission_code == PermissionCode.APPLICATIONS_REVIEW
+            and permission.scope_org_unit_id is not None
+        ]
+        if not scope_ids:
+            raise HTTPException(404, "not_found")
+    statement = (
         select(ApplicationAttachment, Application)
         .join(Application, Application.id == ApplicationAttachment.application_id)
         .where(
             ApplicationAttachment.id == attachment_id, ApplicationAttachment.is_current.is_(True)
         )
-    ).one_or_none()
+    )
+    if scope_ids is not None:
+        statement = statement.where(get_application_scope().in_(scope_ids))
+    row = db.execute(statement).one_or_none()
     if row is None:
         raise HTTPException(404, "not_found")
     attachment, application = row
     if student is not None and application.student_id != student.id:
         raise HTTPException(404, "not_found")
-    if user is not None:
-        require_application_review(db, user, application.id)
     try:
         handle = storage.open_key(
             Path(get_settings().attachment_storage_path), attachment.storage_key
@@ -589,10 +669,14 @@ def parse_application_id(identifier: str) -> int:
 
 
 def serialize_staff_application(
-    db: Session, application: Application, service: ServiceType
+    db: Session,
+    application: Application,
+    service: ServiceType,
+    *,
+    attachments: list[AttachmentMetadata] | None = None,
 ) -> StaffApplicationResponse:
     return StaffApplicationResponse(
-        **serialize_application(db, application, service).model_dump(),
+        **serialize_application(db, application, service, attachments=attachments).model_dump(),
         student_id=str(application.student_id),
         reviewer_user_id=str(application.reviewer_user_id)
         if application.reviewer_user_id
@@ -725,7 +809,6 @@ async def resubmit_application(
     identifier = parse_application_id(id)
     root = Path(get_settings().attachment_storage_path)
     staged = []
-    published = []
     try:
         for item in uploaded:
             staged.append(storage.stage_upload(item.file, item.filename or "attachment", root))
@@ -736,8 +819,13 @@ async def resubmit_application(
             storage.discard(item)
         raise
     removed_keys = []
-    committed = False
+    coordination = storage.coordination_lock(root) if staged else None
+    coordination_acquired = False
+    commit_attempted = False
     try:
+        if coordination is not None:
+            coordination.__enter__()
+            coordination_acquired = True
         # The lock serializes simultaneous replacement attempts before they inspect
         # the current attachment set; the version predicate remains the final guard.
         application = db.scalar(
@@ -810,7 +898,7 @@ async def resubmit_application(
                 old.is_current = False
                 removed_keys.append(old.storage_key)
         for item in staged:
-            published.append(storage.publish(item, root))
+            storage.publish(item, root)
             db.add(
                 ApplicationAttachment(
                     application_id=application.id,
@@ -823,20 +911,27 @@ async def resubmit_application(
             )
         db.flush()
         payload = serialize_application(db, changed, service)
+        commit_attempted = True
         db.commit()
-        committed = True
         for key in removed_keys:
             with suppress(OSError):
                 storage.delete_key(root, key)
         return payload
     except Exception:
-        db.rollback()
-        if not committed:
-            for path in published:
-                path.unlink(missing_ok=True)
+        with suppress(Exception):
+            db.rollback()
+        resolve_published_after_commit_error(
+            db,
+            root,
+            [item.storage_key for item in staged],
+            commit_attempted=commit_attempted,
+        )
         for item in staged:
             storage.discard(item)
         raise
+    finally:
+        if coordination_acquired:
+            coordination.__exit__(None, None, None)
 
 
 def list_application_history(

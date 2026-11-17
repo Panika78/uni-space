@@ -11,12 +11,15 @@ from app.models import ApplicationAttachment
 
 if __name__ == "__main__":
     root = Path(get_settings().attachment_storage_path)
-    with SessionLocal() as session:
-        referenced = set(
-            session.scalars(
-                select(ApplicationAttachment.storage_key).where(
-                    ApplicationAttachment.is_current.is_(True)
+
+    def referenced_keys() -> set[str]:
+        with SessionLocal() as session:
+            return set(
+                session.scalars(
+                    select(ApplicationAttachment.storage_key).where(
+                        ApplicationAttachment.is_current.is_(True)
+                    )
                 )
             )
-        )
-    print(f"Removed {cleanup_orphans(root, referenced)} stale attachment objects")
+
+    print(f"Removed {cleanup_orphans(root, referenced_keys)} stale attachment objects")

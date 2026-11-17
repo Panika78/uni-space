@@ -20,7 +20,8 @@ trap restart_api EXIT
 bash "$repo_root/scripts/backup-postgres.sh" "$destination/database.dump"
 # The API is stopped, so the database dump and volume archive describe one state.
 docker run --rm --network none --volumes-from "$api_container:ro" \
-    -v "$destination:/backup" --entrypoint python "$api_image" -c \
-    'import tarfile; from pathlib import Path; root=Path("/var/lib/uni-space/attachments"); out=Path("/backup/attachments.tar.gz"); tar=tarfile.open(out, "w:gz"); [tar.add(path, arcname=path.relative_to(root)) for path in root.rglob("*") if path.is_file()]; tar.close(); out.chmod(0o600)'
+    --entrypoint python "$api_image" -c \
+    'import sys, tarfile; from pathlib import Path; root=Path("/var/lib/uni-space/attachments"); tar=tarfile.open(fileobj=sys.stdout.buffer, mode="w|gz"); [tar.add(path, arcname=path.relative_to(root)) for path in root.rglob("*") if path.is_file() and not path.is_symlink()]; tar.close()' \
+    > "$destination/attachments.tar.gz"
 chmod 600 "$destination/database.dump" "$destination/attachments.tar.gz"
 echo 'Consistent database and attachment backup completed'

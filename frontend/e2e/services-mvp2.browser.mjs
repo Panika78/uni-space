@@ -8,6 +8,9 @@ const baseURL = process.env.SERVICES_TEST_URL || 'http://localhost:5173'
 const login = process.env.SERVICES_TEST_LOGIN
 const password = process.env.SERVICES_TEST_PASSWORD
 assert.ok(login && password, 'Provide a fictional browser test student')
+const validPdf = await readFile(
+  new URL('../../backend/tests/fixtures/minimal.pdf', import.meta.url),
+)
 
 const browser = await chromium.launch({
   ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
@@ -136,7 +139,7 @@ try {
   await page.locator('#leave-files').setInputFiles({
     name: 'fictional-proof.pdf',
     mimeType: 'application/pdf',
-    buffer: Buffer.from('%PDF-1.4\nfictional e2e supporting document\n%%EOF'),
+    buffer: validPdf,
   })
   await page.getByText(/fictional-proof\.pdf/).waitFor()
   await page.getByRole('button', { name: 'Отправить заявление' }).click()
@@ -150,10 +153,7 @@ try {
   await page.getByRole('button', { name: 'Скачать' }).click()
   const download = await downloadPromise
   assert.equal(download.suggestedFilename(), 'fictional-proof.pdf')
-  assert.deepEqual(
-    await readFile(await download.path()),
-    Buffer.from('%PDF-1.4\nfictional e2e supporting document\n%%EOF'),
-  )
+  assert.deepEqual(await readFile(await download.path()), validPdf)
   assert.ok(accessToken)
   assert.ok(detailHref)
   const applicationId = detailHref.split('/').at(-1)

@@ -51,7 +51,10 @@ function render(ui: ReactNode) {
 beforeEach(() => {
   apiFetch.mockReset()
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 const catalogService = (id: string, title: string) => ({
   id,
@@ -591,6 +594,7 @@ it('isolates the next student catalog when a cleared query receives an old respo
 })
 
 it('submits the academic leave form and selected file as multipart data', async () => {
+  vi.spyOn(AbortSignal, 'timeout').mockReturnValue(new AbortController().signal)
   const leaveService = additionalService('academic_leave', 'Академический отпуск')
   apiFetch.mockResolvedValueOnce({ items: [leaveService] }).mockResolvedValueOnce(
     additionalApplication(
@@ -620,6 +624,7 @@ it('submits the academic leave form and selected file as multipart data', async 
   expect(screen.queryByText(/заявление могло сохраниться/i)).not.toBeInTheDocument()
   const body = apiFetch.mock.calls[1][1].body as FormData
   expect(body.get('files')).toMatchObject({ name: file.name, type: file.type, size: file.size })
+  expect(AbortSignal.timeout).toHaveBeenCalledWith(180_000)
   expect(JSON.parse(body.get('form_data') as string)).toEqual({
     basis: 'medical',
     starts_on: '2028-02-29',

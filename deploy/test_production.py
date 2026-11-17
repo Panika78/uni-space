@@ -1675,6 +1675,9 @@ with SessionLocal.begin() as db:
     faculty = OrgUnit(name=login, type="faculty")
     db.add(faculty)
     db.flush()
+    dean = OrgUnit(name=login + '-dean', type='dean_office', parent_id=faculty.id)
+    db.add(dean)
+    db.flush()
     program = Program(code=login, name=login, direction_code=login,
                       direction_name=login, faculty_id=faculty.id)
     db.add(program)
@@ -1700,6 +1703,29 @@ with SessionLocal.begin() as db:
                     student_headers = {
                         **origin,
                         "Authorization": f"Bearer {student_auth.json()['access_token']}",
+                    }
+                    stranger_headers = {
+                        **origin,
+                        "Authorization": "Bearer "
+                        + dc(
+                            "exec",
+                            "-T",
+                            "api",
+                            "sh",
+                            "docker-entrypoint.sh",
+                            "python",
+                            "-c",
+                            "from datetime import UTC, datetime, timedelta; "
+                            "from sqlalchemy import select; "
+                            "from app.auth.security import create_access_token; "
+                            "from app.core.config import get_settings; "
+                            "from app.core.database import SessionLocal; "
+                            "from app.models import AuthSession, User; "
+                            "\nwith SessionLocal.begin() as db:\n"
+                            " user=db.scalar(select(User).where(User.login == 'schedule-fixture-2'))\n"
+                            " session=AuthSession(user_id=user.id, expires_at=datetime.now(UTC)+timedelta(hours=1))\n"
+                            " db.add(session); db.flush(); print(create_access_token(session, get_settings())['access_token'])",
+                        ).stdout.strip().splitlines()[-1],
                     }
                     assert (
                         student_client.get(
@@ -1731,6 +1757,50 @@ with SessionLocal.begin() as db:
                     )
                     assert application_page.status_code == 200
                     assert submitted.json() in application_page.json()["items"]
+                    leave_pdf = (ROOT / "backend/tests/fixtures/minimal.pdf").read_bytes()
+                    leave_form = {
+                        "basis": "medical",
+                        "starts_on": "2027-01-01",
+                        "ends_on": "2027-01-10",
+                        "explanation": None,
+                    }
+                    leave = student_client.post(
+                        "/api/v1/applications",
+                        headers=student_headers,
+                        data={"form_data": json.dumps(leave_form)},
+                        files=[("files", ("proof.pdf", leave_pdf, "application/pdf"))],
+                    )
+                    assert leave.status_code == 201, leave.text
+                    attachment = leave.json()["attachments"][0]
+                    attachment_id = int(attachment["id"])
+                    attachment_download_path = (
+                        f"/api/v1/applications/attachments/{attachment_id}/download"
+                    )
+                    assert student_client.get(
+                        attachment_download_path, headers=student_headers
+                    ).content == leave_pdf
+                    foreign_download = student_client.get(
+                        attachment_download_path, headers=stranger_headers
+                    )
+                    assert foreign_download.status_code == 404, foreign_download.text
+                    oversized_proxy = student_client.post(
+                        "/api/v1/applications",
+                        headers=student_headers,
+                        data={"form_data": json.dumps(leave_form)},
+                        files=[
+                            (
+                                "files",
+                                ("oversized.pdf", b"x" * (55 * 1024 * 1024), "application/pdf"),
+                            )
+                        ],
+                        timeout=60,
+                    )
+                    assert oversized_proxy.status_code == 413
+                    assert oversized_proxy.json()["error"]["code"] == "request_too_large"
+                    attachment_key = sql(
+                        f"SELECT storage_key FROM application_attachments WHERE id={attachment_id}"
+                    )
+                    assert attachment_key
                 persisted_before = sql(
                     f"SELECT to_jsonb(a) FROM applications a WHERE id={application_id}"
                 )
@@ -1768,8 +1838,132 @@ with SessionLocal.begin() as db:
                     "PASS: PostgreSQL application row unchanged after API and DB restart with persistent volume",
                     flush=True,
                 )
+                # The coordinated archive must restore the same attachment bytes and
+                # database references into a separate database and named volume.
+                backup_dir = temp / "application-data-backup"
+                run(
+                    ["bash", "scripts/backup-application-data.sh", str(backup_dir)],
+                    env=env,
+                    timeout=300,
+                )
+                assert (backup_dir / "database.dump").stat().st_mode & 0o777 == 0o600
+                assert (backup_dir / "attachments.tar.gz").stat().st_mode & 0o777 == 0o600
+                restored_database = f"restore_attachments_{secrets.token_hex(4)}"
+                restored_volume = f"restore_attachments_{secrets.token_hex(4)}"
+                run(
+                    [
+                        "bash",
+                        "scripts/restore-application-data.sh",
+                        str(backup_dir),
+                        restored_database,
+                        restored_volume,
+                    ],
+                    env=env,
+                    timeout=300,
+                )
+                restored_key = sql(
+                    f"SELECT storage_key FROM application_attachments WHERE id={attachment_id}",
+                    database=restored_database,
+                )
+                assert restored_key == attachment_key
+                api_image = dc("images", "-q", "api").stdout.strip().splitlines()[0]
+                restored_file_hash = run(
+                    [
+                        "docker",
+                        "run",
+                        "--rm",
+                        "--network",
+                        "none",
+                        "-v",
+                        f"{restored_volume}:/restore:ro",
+                        "--entrypoint",
+                        "python",
+                        api_image,
+                        "-c",
+                        "import hashlib; from pathlib import Path; print(hashlib.sha256(Path('/restore/"
+                        + restored_key
+                        + "').read_bytes()).hexdigest())",
+                    ],
+                    env=env,
+                ).stdout.strip()
+                assert restored_file_hash == hashlib.sha256(leave_pdf).hexdigest()
+                recovery = temp / "application-data-recovery.yaml"
+                recovery.write_text(
+                    f"""services:
+  api:
+    environment:
+      DATABASE_NAME: {restored_database}
+    volumes: !override
+      - restored_attachments:/var/lib/uni-space/attachments
+volumes:
+  restored_attachments:
+    external: true
+    name: {restored_volume}
+"""
+                )
+                dc("stop", "nginx", "api")
+                wait_for_stopped_api_containers()
+                run(
+                    ["bash", "scripts/configure-postgres.sh", restored_database],
+                    env=env,
+                )
+                recovery_compose = [*compose, "-f", str(recovery)]
+                run(
+                    [
+                        *recovery_compose,
+                        "up",
+                        "-d",
+                        "--force-recreate",
+                        "--wait",
+                        "--wait-timeout",
+                        "120",
+                        "api",
+                        "nginx",
+                    ],
+                    env=env,
+                    timeout=180,
+                )
+                with httpx.Client(
+                    base_url=public_origin, verify=context, trust_env=False, timeout=20
+                ) as recovered:
+                    owner_download = recovered.get(
+                        attachment_download_path, headers=student_headers
+                    )
+                    assert owner_download.status_code == 200
+                    assert owner_download.content == leave_pdf
+                    assert (
+                        recovered.get(
+                            attachment_download_path, headers=stranger_headers
+                        ).status_code
+                        == 404
+                    )
+                print(
+                    "PASS: combined database and volume recovery preserves attachment bytes and private access",
+                    flush=True,
+                )
+                run(
+                    [*recovery_compose, "stop", "nginx", "api"],
+                    env=env,
+                )
+                wait_for_stopped_api_containers()
+                run(["bash", "scripts/configure-postgres.sh"], env=env)
+                dc("up", "-d", "--force-recreate", "--wait", "--wait-timeout", "120", "api", "nginx")
+                dc(
+                    "exec",
+                    "-T",
+                    "api",
+                    "python",
+                    "-c",
+                    "from pathlib import Path; from app.applications.storage import delete_key; "
+                    "delete_key(Path('/var/lib/uni-space/attachments'), '"
+                    + attachment_key
+                    + "')",
+                )
                 sql(
                     f"""DELETE FROM applications WHERE id={application_id};
+DELETE FROM applications WHERE student_id IN (
+    SELECT id FROM students WHERE user_id=(SELECT id FROM users WHERE login='{student_login}')
+);
 DELETE FROM refresh_tokens WHERE session_id IN (
     SELECT id FROM auth_sessions WHERE user_id=(SELECT id FROM users WHERE login='{student_login}')
 );
@@ -1778,8 +1972,22 @@ DELETE FROM students WHERE user_id=(SELECT id FROM users WHERE login='{student_l
 DELETE FROM users WHERE login='{student_login}';
 DELETE FROM study_groups WHERE name='{student_login}';
 DELETE FROM programs WHERE code='{student_login}';
+DELETE FROM org_units WHERE name='{student_login}-dean';
 DELETE FROM org_units WHERE name='{student_login}';"""
                 )
+                dc(
+                    "exec",
+                    "-T",
+                    "db",
+                    "psql",
+                    "-U",
+                    "deployment_check",
+                    "-d",
+                    "deployment_check",
+                    "-c",
+                    f"DROP DATABASE {restored_database}",
+                )
+                run(["docker", "volume", "rm", restored_volume], env=env)
             print(
                 "PASS: verified TLS, SPA/API, scheme, Origin, auth and cookie",
                 flush=True,
