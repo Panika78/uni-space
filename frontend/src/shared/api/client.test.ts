@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiClientError, apiFetch, AUTHENTICATED_GET_DEADLINE_MS, configureApiAuth } from './client'
+import {
+  ApiClientError,
+  apiFetch,
+  AUTHENTICATED_GET_DEADLINE_MS,
+  configureApiAuth,
+  isDefinitiveApiRejection,
+} from './client'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -135,6 +141,27 @@ describe('apiFetch', () => {
       code: 'network_error',
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('definitive API rejections', () => {
+  it.each([403, 404, 409, 422])('recognizes HTTP %i as a definitive rejection', (status) => {
+    expect(isDefinitiveApiRejection(new ApiClientError('rejected', 'api_error', status))).toBe(true)
+  })
+
+  it.each([200, 401, 429, 500, 503, undefined])(
+    'treats status %s as a potentially committed operation',
+    (status) => {
+      expect(isDefinitiveApiRejection(new ApiClientError('unknown', 'api_error', status))).toBe(
+        false,
+      )
+    },
+  )
+
+  it('treats malformed error responses as uncertain even at a normally definitive status', () => {
+    expect(isDefinitiveApiRejection(new ApiClientError('bad body', 'invalid_response', 403))).toBe(
+      false,
+    )
   })
 })
 

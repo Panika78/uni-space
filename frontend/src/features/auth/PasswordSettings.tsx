@@ -7,6 +7,7 @@ import { CabinetLayout, UserMenu } from '../../app/CabinetLayout'
 import { getStudentInitials } from '../profile/StudentProfile'
 import { studentNavigation } from '../../app/StudentLayout'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
+import { AccessRecovery, isTemporaryAccessError } from '../../shared/ui/AccessRecovery'
 import { getRoleNavigation, getStartRoute } from './roleNavigation'
 import { useRoleContext } from './RoleContext'
 import { useAuth } from './AuthProvider'
@@ -32,9 +33,10 @@ function StudentPasswordSettings() {
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   })
+  const forbidden = query.error instanceof ApiClientError && query.error.status === 403
+  const canRecover = query.data !== undefined && isTemporaryAccessError(query.error)
   if (query.isPending) return <LoadingState title="Загружаем профиль…" />
-  if (query.isError) {
-    const forbidden = query.error instanceof ApiClientError && query.error.status === 403
+  if (query.isError && !canRecover) {
     return (
       <ErrorState
         title={forbidden ? 'Доступ запрещён' : 'Не удалось загрузить профиль'}
@@ -50,6 +52,15 @@ function StudentPasswordSettings() {
     )
   }
   if (!query.data) return null
+  const failure = (
+    <ErrorState
+      title="Не удалось загрузить профиль"
+      description="Проверьте соединение и повторите попытку."
+      onRetry={() => void query.refetch()}
+    >
+      <UserMenu logoutOnly />
+    </ErrorState>
+  )
   return (
     <CabinetLayout
       navigation={studentNavigation}
@@ -57,7 +68,9 @@ function StudentPasswordSettings() {
       home="/schedule"
       initials={getStudentInitials(query.data.full_name)}
     >
-      <PasswordSettingsForm />
+      <AccessRecovery blocked={query.isError} fallback={failure}>
+        <PasswordSettingsForm />
+      </AccessRecovery>
     </CabinetLayout>
   )
 }

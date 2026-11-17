@@ -82,6 +82,54 @@ try {
     await assertNoHorizontalOverflow(page, 360, `${role} cabinet`)
     await openSettingsFromMenu(page)
     await assertNoHorizontalOverflow(page, 360, `${role} settings`)
+    if (role === 'student') {
+      const currentField = page.getByRole('textbox', { name: 'Действующий пароль', exact: true })
+      const newField = page.getByRole('textbox', { name: 'Новый пароль', exact: true })
+      const confirmationField = page.getByRole('textbox', {
+        name: 'Повторите новый пароль',
+        exact: true,
+      })
+      await currentField.focus()
+      await page.keyboard.press('Tab')
+      assert.equal(
+        await page.evaluate(() => document.activeElement?.getAttribute('aria-label')),
+        'Показать действующий пароль',
+      )
+      await page.keyboard.press('Enter')
+      assert.equal(await currentField.getAttribute('type'), 'text')
+      await page.keyboard.press('Tab')
+      assert.equal(await newField.evaluate((input) => input === document.activeElement), true)
+      await page.keyboard.press('Tab')
+      assert.equal(
+        await page.evaluate(() => document.activeElement?.getAttribute('aria-label')),
+        'Показать новый пароль',
+      )
+      await page.keyboard.press('Enter')
+      assert.equal(await newField.getAttribute('type'), 'text')
+      await page.keyboard.press('Tab')
+      assert.equal(
+        await confirmationField.evaluate((input) => input === document.activeElement),
+        true,
+      )
+      await page.keyboard.press('Tab')
+      assert.equal(
+        await page.evaluate(() => document.activeElement?.getAttribute('aria-label')),
+        'Показать подтверждение пароля',
+      )
+      await page.keyboard.press('Enter')
+      assert.equal(await confirmationField.getAttribute('type'), 'text')
+      await page.keyboard.press('Tab')
+      assert.equal(
+        await page
+          .getByRole('button', { name: 'Сменить пароль' })
+          .evaluate((button) => button === document.activeElement),
+        true,
+      )
+      await page.getByRole('button', { name: 'Скрыть действующий пароль' }).click()
+      await page.getByRole('button', { name: 'Скрыть новый пароль' }).click()
+      await page.getByRole('button', { name: 'Скрыть подтверждение пароля' }).click()
+      await confirmationField.focus()
+    }
     assert.equal(
       await page
         .getByRole('textbox', { name: 'Действующий пароль', exact: true })
@@ -168,7 +216,49 @@ try {
     await login(devicePage, loginName, initialPassword)
 
     const newPassword = `Fictional ${role} phrase ${index + 1} 2026`
-    await fillAndChange(page, initialPassword, newPassword)
+    if (role === 'student') {
+      let releasePost
+      let signalRequest
+      const requestStarted = new Promise((resolve) => {
+        signalRequest = resolve
+      })
+      const holdRequest = new Promise((resolve) => {
+        releasePost = resolve
+      })
+      let delayedPostCount = 0
+      await page.route('**/api/v1/auth/password', async (route) => {
+        delayedPostCount += 1
+        signalRequest()
+        await holdRequest
+        await route.continue()
+      })
+      await page
+        .getByRole('textbox', { name: 'Действующий пароль', exact: true })
+        .fill(initialPassword)
+      await page.getByRole('textbox', { name: 'Новый пароль', exact: true }).fill(newPassword)
+      const confirmation = page.getByRole('textbox', {
+        name: 'Повторите новый пароль',
+        exact: true,
+      })
+      await confirmation.fill(newPassword)
+      await confirmation.press('Enter')
+      await requestStarted
+      const pendingButton = page.getByRole('button', { name: 'Сохраняем…', exact: true })
+      await pendingButton.waitFor()
+      assert.equal(await pendingButton.isDisabled(), true)
+      assert.equal(
+        await page.getByRole('textbox', { name: 'Новый пароль', exact: true }).isDisabled(),
+        true,
+      )
+      await page.keyboard.press('Enter')
+      assert.equal(delayedPostCount, 1, 'A delayed password change must not submit twice')
+      releasePost()
+      await page.getByRole('heading', { name: 'Вход в систему' }).waitFor()
+      await page.unroute('**/api/v1/auth/password')
+      assert.equal(delayedPostCount, 1, 'The successful delayed change must be submitted once')
+    } else {
+      await fillAndChange(page, initialPassword, newPassword)
+    }
     await page.getByRole('status').filter({ hasText: 'Пароль изменён' }).waitFor()
     await sibling.getByRole('heading', { name: 'Вход в систему' }).waitFor()
 
@@ -227,9 +317,76 @@ try {
   })
   page.on('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: 'Сбросить пароль' }).click()
-  await page.getByRole('alert').filter({ hasText: 'Ответ на сброс не получен' }).waitFor()
+  await page.getByRole('alert').filter({ hasText: 'Пароль мог измениться' }).waitFor()
   assert.equal(lostResponseCount, 1, 'A reset with a lost response must not be retried')
   await page.unroute(`**/api/v1/admin/users/${teacherId}/password-reset`)
+  await page.getByRole('button', { name: 'Сбросить пароль' }).click()
+  const lostResponseRecoveredSecret = await page.locator('.admin-secret').textContent()
+  assert.ok(lostResponseRecoveredSecret && lostResponseRecoveredSecret.length >= 32)
+
+  // Commit a reset, then fail only the follow-up GET. The one-time secret must
+  // remain visible until explicitly closed, without retrying the POST.
+  let committedGetFailures = 0
+  let committedPostCount = 0
+  await page.route(`**/api/v1/admin/users/${teacherId}`, async (route) => {
+    if (route.request().method() === 'GET') {
+      committedGetFailures += 1
+      await route.fulfill({ status: 503, contentType: 'application/json', body: '{}' })
+    } else {
+      await route.continue()
+    }
+  })
+  await page.getByRole('button', { name: 'Закрыть и удалить пароль с экрана' }).click()
+  await page.getByRole('heading', { name: 'Fictional Password E2E teacher' }).waitFor()
+  const handleCommittedReset = async (route) => {
+    committedPostCount += 1
+    await route.continue()
+  }
+  await page.route(`**/api/v1/admin/users/${teacherId}/password-reset`, handleCommittedReset)
+  await page.getByRole('button', { name: 'Сбросить пароль' }).click()
+  const secretAfterGetFailure = await page.locator('.admin-secret').textContent()
+  assert.ok(secretAfterGetFailure && secretAfterGetFailure.length >= 32)
+  await page.getByRole('heading', { name: 'Пароль сброшен' }).waitFor()
+  assert.equal(committedGetFailures, 1, 'The post-commit user GET must fail once')
+  assert.equal(committedPostCount, 1, 'The successful reset must not be retried')
+  await page.getByRole('button', { name: 'Закрыть и удалить пароль с экрана' }).click()
+  await page.getByRole('alert').waitFor()
+  assert.equal(await page.locator('.admin-secret').count(), 0)
+  await page.unroute(`**/api/v1/admin/users/${teacherId}/password-reset`, handleCommittedReset)
+  await page.unroute(`**/api/v1/admin/users/${teacherId}`)
+  await page.getByRole('link', { name: 'К списку', exact: true }).click()
+  await page.getByRole('heading', { name: 'Пользователи' }).waitFor()
+  await page.getByRole('link', { name: new RegExp(teacherLogin) }).click()
+  await page.getByRole('heading', { name: 'Fictional Password E2E teacher' }).waitFor()
+  assert.equal(
+    await page.locator('.admin-secret').count(),
+    0,
+    'Closing and remounting must discard the secret',
+  )
+
+  // The server commits but malformed success payloads cannot expose or recover
+  // the secret, and neither fault injection path may trigger an automatic POST retry.
+  for (const [label, responseBody] of [
+    ['malformed JSON', '{'],
+    ['empty JSON', '{}'],
+  ]) {
+    let faultPostCount = 0
+    await page.route(`**/api/v1/admin/users/${teacherId}/password-reset`, async (route) => {
+      faultPostCount += 1
+      await route.fetch()
+      await route.fulfill({ status: 200, contentType: 'application/json', body: responseBody })
+    })
+    await page.getByRole('button', { name: 'Сбросить пароль' }).click()
+    await page.getByRole('alert').filter({ hasText: 'Пароль мог измениться' }).waitFor()
+    assert.equal(faultPostCount, 1, `${label} must not cause an automatic retry`)
+    assert.equal(await page.locator('.admin-secret').count(), 0)
+    await page.unroute(`**/api/v1/admin/users/${teacherId}/password-reset`)
+    await page.getByRole('link', { name: 'К списку пользователей' }).click()
+    await page.getByRole('heading', { name: 'Пользователи' }).waitFor()
+    await page.getByRole('link', { name: new RegExp(teacherLogin) }).click()
+    await page.getByRole('heading', { name: 'Fictional Password E2E teacher' }).waitFor()
+  }
+
   await page.getByRole('button', { name: 'Сбросить пароль' }).click()
   const secret = await page.locator('.admin-secret').textContent()
   assert.ok(secret && secret.length >= 32)

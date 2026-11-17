@@ -786,7 +786,10 @@ JWT после отзыва разрешения. Student `/schedule` сохра
   только официальные занятия, включая сохранённые cancelled/moved.
 - `GET /lessons/{id}`: полное редактируемое состояние, participants
   (`group_id`, nullable `subgroup_id`), room_ids, version, status, previous/next ID
-  и ID создателя. Историческое чтение не требует текущих teaching_assignments.
+  и ID создателя. Дополнительно `display` возвращает подписи связанных объектов.
+  То же поле включено в элементы `GET /lessons` и ответы `POST /lessons`,
+  `PATCH /lessons/{id}`, `/move`, `/cancel`, `/restore`. Историческое чтение не
+  требует текущих teaching_assignments.
 - `POST /lessons`: создание scheduled, 201; полный `LessonWrite`.
 - `PATCH /lessons/{id}`: полный предполагаемый `LessonWrite` плюс ожидаемая `version`.
 - `POST /lessons/{id}/cancel`, `/restore`: тело только `{version}`.
@@ -797,6 +800,19 @@ JWT после отзыва разрешения. Student `/schedule` сохра
 поясом, kind (lecture/seminar/lab/other), непустые participants, room_ids.
 Клиент не задаёт статус, автора, previous_lesson_id или is_additional. ID — строки
 положительных PostgreSQL bigint. Физический DELETE отсутствует.
+
+`EditorLesson.display` не заменяет существующие ID-поля. `course_offering` содержит
+`id`, `discipline_id`, `discipline_name`, nullable `discipline_code`, `term_id`,
+`term_name`, `term_starts_on`, `term_ends_on`, `attestation_type` и `groups` — список
+связанных `{id, name}` из `course_groups`; ID проведения остаётся идентификатором,
+который различает записи даже при полном совпадении остальных характеристик.
+`teacher` — nullable `{id, full_name}`; при наличии аккаунта `full_name` берётся из
+`users.full_name`, иначе из `teachers.full_name`;
+`participants` — по одной записи на существующего участника с `group_id`,
+`group_name`, nullable `subgroup_id` и `subgroup_name`; `rooms` — по одной записи на
+аудиторию с `id`, `name`, `building_id`, `building_name`. Поэтому одинаковые
+названия не объединяют разные сущности. Подписи загружаются пакетно для страницы
+расписания; catalog lookup не требуется.
 
 Обычное редактирование разрешено только scheduled; cancel: scheduled→cancelled,
 move: scheduled→moved + новая scheduled, restore: cancelled→scheduled.

@@ -24,6 +24,17 @@ export class ApiClientError extends Error {
   }
 }
 
+// These responses are produced by validation/authorization checks before the
+// password reset can commit. Other statuses, malformed bodies, and transport
+// failures may arrive after a commit and must be treated as uncertain.
+export function isDefinitiveApiRejection(error: unknown): error is ApiClientError {
+  return (
+    error instanceof ApiClientError &&
+    error.code !== 'invalid_response' &&
+    [403, 404, 409, 422].includes(error.status ?? 0)
+  )
+}
+
 function isApiError(value: unknown): value is { error: ApiErrorBody } {
   if (typeof value !== 'object' || value === null || !('error' in value)) return false
   const error = value.error

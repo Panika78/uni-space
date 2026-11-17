@@ -97,6 +97,62 @@ def test_admin_operations_with_production_acl(admin, runtime_engine):  # noqa: F
         )
 
 
+def test_self_change_and_foreign_admin_reset_with_production_runtime_role(admin, runtime_engine):  # noqa: F811
+    """Exercise both password writes through HTTP while the app uses uni_space_api."""
+    from app.dependencies.database import get_db_session
+
+    owner, engine = runtime_engine
+
+    def runtime_session():
+        with Session(engine, expire_on_commit=False) as db:
+            yield db
+
+    client, _old_admin_access, _admin_id, *_ = admin
+    created = create(admin, "student", login="runtime-password-student")
+    target_id = created["user"]["id"]
+    self_admin = create(admin, "admin", login="runtime-password-admin")
+    self_admin_login = client.login(
+        json={"login": "runtime-password-admin", "password": self_admin["initial_password"]}
+    )
+    assert self_admin_login.status_code == 200, self_admin_login.text
+    admin[0].app.dependency_overrides[get_db_session] = runtime_session
+
+    new_admin_password = "runtime admin self-change phrase 2026"
+    changed = client.request(
+        "POST",
+        "/api/v1/auth/password",
+        access=self_admin_login.json()["access_token"],
+        json={
+            "current_password": self_admin["initial_password"],
+            "new_password": new_admin_password,
+            "confirm_password": new_admin_password,
+        },
+    )
+    assert changed.status_code == 204, changed.text
+
+    new_admin_login = client.login(
+        json={"login": "runtime-password-admin", "password": new_admin_password}
+    )
+    assert new_admin_login.status_code == 200, new_admin_login.text
+    reset = client.request(
+        "POST",
+        f"/api/v1/admin/users/{target_id}/password-reset",
+        access=new_admin_login.json()["access_token"],
+    )
+    assert reset.status_code == 200, reset.text
+    with Session(owner) as db:
+        reset_user = db.get(User, int(target_id))
+        assert reset_user is not None
+        assert verify_password(reset_user.password_hash, reset.json()["password"])
+
+    target_login = client.login(
+        json={"login": "runtime-password-student", "password": reset.json()["password"]}
+    )
+    assert target_login.status_code == 200, target_login.text
+    with engine.connect() as db:
+        assert db.scalar(text("SELECT current_user")) == "uni_space_api"
+
+
 def test_bootstrap_with_production_runtime_acl(runtime_engine):  # noqa: F811
     from sqlalchemy import select
 

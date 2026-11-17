@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
@@ -7,9 +7,10 @@ import { PasswordSettingsPage } from './PasswordSettings'
 import { ApiClientError, apiFetch } from '../../shared/api/client'
 
 const auth = vi.hoisted(() => ({ finishPasswordChange: vi.fn() }))
+const role = vi.hoisted(() => ({ value: 'staff' }))
 vi.mock('./AuthProvider', () => ({ useAuth: () => auth }))
 vi.mock('./RoleContext', () => ({
-  useRoleContext: () => ({ user_id: '1', role: 'staff', permissions: [] }),
+  useRoleContext: () => ({ user_id: '1', role: role.value, permissions: [] }),
 }))
 vi.mock('../../shared/api/client', async (original) => ({
   ...(await original<typeof import('../../shared/api/client')>()),
@@ -18,10 +19,12 @@ vi.mock('../../shared/api/client', async (original) => ({
 
 afterEach(() => {
   cleanup()
+  role.value = 'staff'
   vi.resetAllMocks()
 })
 
 function mount() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const router = createMemoryRouter(
     [
       { path: '/settings', element: <PasswordSettingsPage /> },
@@ -30,10 +33,11 @@ function mount() {
     { initialEntries: ['/settings'] },
   )
   render(
-    <QueryClientProvider client={new QueryClient()}>
+    <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   )
+  return queryClient
 }
 
 it.each([360, 1440])('renders a single settings form at %i px', async (width) => {
@@ -163,4 +167,62 @@ it('reveals only the password field whose visibility control is activated', asyn
   expect(next).toHaveAttribute('type', 'text')
   expect(current).toHaveAttribute('type', 'password')
   expect(confirm).toHaveAttribute('type', 'password')
+})
+
+it('keeps the student password form and drafts mounted during a temporary profile refetch failure', async () => {
+  role.value = 'student'
+  let unavailable = false
+  vi.mocked(apiFetch).mockImplementation(async (url) => {
+    if (url === '/api/v1/users/me') {
+      if (unavailable) throw new ApiClientError('Unavailable', 'http_error', 503)
+      return { full_name: 'Вымышленный студент' }
+    }
+    throw new Error(`Unexpected API request: ${String(url)}`)
+  })
+  const queryClient = mount()
+  const user = userEvent.setup()
+  const current = await screen.findByLabelText('Действующий пароль')
+  const next = screen.getByLabelText('Новый пароль')
+  const confirm = screen.getByLabelText('Повторите новый пароль')
+  await user.type(current, 'fictional-current')
+  await user.type(next, 'fictional draft phrase')
+  await user.type(confirm, 'fictional draft phrase')
+
+  unavailable = true
+  await queryClient.invalidateQueries({ queryKey: ['student-profile'] })
+  expect(await screen.findByRole('region', { name: 'Восстановление доступа' })).toBeInTheDocument()
+  expect(document.getElementById('current-password')).toBe(current)
+  expect(current).toHaveValue('fictional-current')
+  expect(next).toHaveValue('fictional draft phrase')
+  expect(confirm).toHaveValue('fictional draft phrase')
+  expect(vi.mocked(apiFetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
+
+  unavailable = false
+  await queryClient.invalidateQueries({ queryKey: ['student-profile'] })
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('region', { name: 'Восстановление доступа' }),
+    ).not.toBeInTheDocument(),
+  )
+  expect(screen.getByLabelText('Действующий пароль')).toBe(current)
+  expect(current).toHaveValue('fictional-current')
+  expect(next).toHaveValue('fictional draft phrase')
+  expect(confirm).toHaveValue('fictional draft phrase')
+})
+
+it.each([401, 403])('does not retain the student password form after HTTP %i', async (status) => {
+  role.value = 'student'
+  let denied = false
+  vi.mocked(apiFetch).mockImplementation(async (url) => {
+    if (url === '/api/v1/users/me') {
+      if (denied) throw new ApiClientError('Access denied', 'access_denied', status)
+      return { full_name: 'Вымышленный студент' }
+    }
+    throw new Error(`Unexpected API request: ${String(url)}`)
+  })
+  const queryClient = mount()
+  await screen.findByLabelText('Действующий пароль')
+  denied = true
+  await queryClient.invalidateQueries({ queryKey: ['student-profile'] })
+  await waitFor(() => expect(screen.queryByLabelText('Действующий пароль')).not.toBeInTheDocument())
 })

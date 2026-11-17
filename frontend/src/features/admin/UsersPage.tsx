@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { apiFetch, ApiClientError } from '../../shared/api/client'
+import { apiFetch, ApiClientError, isDefinitiveApiRejection } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { staffSections } from '../auth/roleNavigation'
 import { useRoleContext } from '../auth/RoleContext'
@@ -34,6 +34,12 @@ function errorText(error: unknown) {
     if (error.status === 422) return 'Проверьте профиль, подразделение и область разрешения.'
   }
   return 'Не удалось выполнить запрос. Проверьте соединение.'
+}
+
+function isResetPasswordResponse(value: unknown): value is { password: string } {
+  if (typeof value !== 'object' || value === null || !('password' in value)) return false
+  const password = value.password
+  return typeof password === 'string' && /^[A-Za-z0-9_-]{32,128}$/.test(password)
 }
 
 function ProfileSelect({
@@ -366,17 +372,6 @@ function UserDetailContent({ id }: { id: string }) {
       setBusy(false)
     }
   }
-  if (query.isPending) return <p role="status">Загрузка учётной записи…</p>
-  if (query.isError)
-    return (
-      <section className="admin-users">
-        <h1>Пользователь</h1>
-        <p role="alert">{errorText(query.error)}</p>
-        <button onClick={() => void query.refetch()}>Повторить</button>
-        <Link to="/admin/users">К списку</Link>
-      </section>
-    )
-  const user = query.data
   if (resetPassword !== null)
     return (
       <section className="admin-users" aria-labelledby="password-reset-title">
@@ -393,6 +388,17 @@ function UserDetailContent({ id }: { id: string }) {
         <button onClick={() => setResetPassword(null)}>Закрыть и удалить пароль с экрана</button>
       </section>
     )
+  if (query.isPending) return <p role="status">Загрузка учётной записи…</p>
+  if (query.isError)
+    return (
+      <section className="admin-users">
+        <h1>Пользователь</h1>
+        <p role="alert">{errorText(query.error)}</p>
+        <button onClick={() => void query.refetch()}>Повторить</button>
+        <Link to="/admin/users">К списку</Link>
+      </section>
+    )
+  const user = query.data
   const availableSections = staffSections.filter((section) =>
     user.available_permission_codes?.includes(section.permission),
   )
@@ -412,8 +418,8 @@ function UserDetailContent({ id }: { id: string }) {
       {notice && <p role="status">{notice}</p>}
       {resetUncertain && (
         <p role="alert">
-          Ответ на сброс не получен. Пароль мог измениться, но его нельзя восстановить. Проверьте
-          состояние с пользователем перед новым сбросом.
+          Не удалось подтвердить результат сброса. Пароль мог измениться, но восстановить выданный
+          секрет нельзя. Проверьте состояние с пользователем перед новым сбросом.
         </p>
       )}
       {user.id !== actor.user_id && (
@@ -430,11 +436,15 @@ function UserDetailContent({ id }: { id: string }) {
                 `${base}/users/${id}/password-reset`,
                 { authenticated: true, replayAfterRefresh: false, method: 'POST' },
               )
+              if (!isResetPasswordResponse(result)) {
+                setResetUncertain(true)
+                return
+              }
               setResetPassword(result.password)
               setError('')
               void query.refetch()
             } catch (resetError) {
-              if (resetError instanceof ApiClientError && resetError.status !== undefined) {
+              if (isDefinitiveApiRejection(resetError)) {
                 const statusMessage =
                   resetError.status === 403
                     ? 'Сброс отклонён: недостаточно прав.'

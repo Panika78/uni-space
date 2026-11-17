@@ -230,7 +230,7 @@ it('shows an administrative reset secret once without placing it in a retryable 
   }
   vi.mocked(apiFetch).mockImplementation(async (url, init) => {
     if (init?.method === 'POST' && String(url).endsWith('/password-reset'))
-      return { password: 'fictional-one-time-reset-secret' }
+      return { password: 'abcdefghijklmnopqrstuvwxyzABCDEF' }
     return detail
   })
   render(
@@ -246,11 +246,189 @@ it('shows an administrative reset secret once without placing it in a retryable 
   )
   const user = userEvent.setup()
   await user.click(await screen.findByRole('button', { name: 'Сбросить пароль' }))
-  expect(await screen.findByText('fictional-one-time-reset-secret')).toBeInTheDocument()
+  expect(await screen.findByText('abcdefghijklmnopqrstuvwxyzABCDEF')).toBeInTheDocument()
   const request = vi.mocked(apiFetch).mock.calls.find(([, init]) => init?.method === 'POST')
   expect(request?.[1]).toMatchObject({ authenticated: true, replayAfterRefresh: false })
   await user.click(screen.getByRole('button', { name: 'Закрыть и удалить пароль с экрана' }))
-  expect(screen.queryByText('fictional-one-time-reset-secret')).not.toBeInTheDocument()
+  expect(screen.queryByText('abcdefghijklmnopqrstuvwxyzABCDEF')).not.toBeInTheDocument()
+  expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(
+    1,
+  )
+})
+
+it('keeps a committed reset secret visible if its follow-up user GET fails', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  const detail: components['schemas']['UserDetail'] = {
+    id: '9',
+    login: 'fictional-reset-user',
+    full_name: 'Вымышленный пользователь',
+    role: 'student',
+    is_active: true,
+    student_id: '19',
+    group_id: '29',
+    teacher_id: null,
+    staff_profile_id: null,
+    org_unit_id: null,
+    permissions: [],
+    available_permission_codes: [],
+  }
+  let userGetCount = 0
+  vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+    if (init?.method === 'POST' && String(url).endsWith('/password-reset'))
+      return { password: 'abcdefghijklmnopqrstuvwxyz-123456' }
+    if (String(url).endsWith('/users/9')) {
+      userGetCount += 1
+      if (userGetCount > 1) throw new ApiClientError('Unavailable', 'http_error', 503)
+      return detail
+    }
+    throw new Error(`Unexpected API request: ${String(url)}`)
+  })
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <RouterProvider
+        router={createMemoryRouter([{ path: '/admin/users/:id', element: <UserDetailPage /> }], {
+          initialEntries: ['/admin/users/9'],
+        })}
+      />
+    </QueryClientProvider>,
+  )
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: 'Сбросить пароль' }))
+  expect(await screen.findByText('abcdefghijklmnopqrstuvwxyz-123456')).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Пароль сброшен' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Закрыть и удалить пароль с экрана' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Не удалось выполнить запрос')
+  expect(screen.queryByText('abcdefghijklmnopqrstuvwxyz-123456')).not.toBeInTheDocument()
+  expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(
+    1,
+  )
+})
+
+it.each([
+  ['empty response', {}],
+  ['empty password', { password: '' }],
+  ['non-string password', { password: 42 }],
+  ['malformed password', { password: 'contains/not-a-token' }],
+])('treats an HTTP 200 %s as an uncertain reset result', async (_name, response) => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+    if (init?.method === 'POST' && String(url).endsWith('/password-reset')) return response
+    if (String(url).endsWith('/users/9'))
+      return {
+        id: '9',
+        login: 'fictional-reset-user',
+        full_name: 'Вымышленный пользователь',
+        role: 'student',
+        is_active: true,
+        student_id: '19',
+        group_id: '29',
+        teacher_id: null,
+        staff_profile_id: null,
+        org_unit_id: null,
+        permissions: [],
+        available_permission_codes: [],
+      }
+    throw new Error(`Unexpected API request: ${String(url)}`)
+  })
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RouterProvider
+        router={createMemoryRouter([{ path: '/admin/users/:id', element: <UserDetailPage /> }], {
+          initialEntries: ['/admin/users/9'],
+        })}
+      />
+    </QueryClientProvider>,
+  )
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: 'Сбросить пароль' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Пароль мог измениться')
+  expect(screen.queryByText('Выданный пароль:')).not.toBeInTheDocument()
+  expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(
+    1,
+  )
+})
+
+it('treats an invalid HTTP 200 reset body as uncertain rather than rejected', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+    if (init?.method === 'POST' && String(url).endsWith('/password-reset'))
+      throw new ApiClientError('Malformed success response', 'invalid_response', 200)
+    if (String(url).endsWith('/users/9'))
+      return {
+        id: '9',
+        login: 'fictional-reset-user',
+        full_name: 'Вымышленный пользователь',
+        role: 'student',
+        is_active: true,
+        student_id: '19',
+        group_id: '29',
+        teacher_id: null,
+        staff_profile_id: null,
+        org_unit_id: null,
+        permissions: [],
+        available_permission_codes: [],
+      }
+    throw new Error(`Unexpected API request: ${String(url)}`)
+  })
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RouterProvider
+        router={createMemoryRouter([{ path: '/admin/users/:id', element: <UserDetailPage /> }], {
+          initialEntries: ['/admin/users/9'],
+        })}
+      />
+    </QueryClientProvider>,
+  )
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: 'Сбросить пароль' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Пароль мог измениться')
+  expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(
+    1,
+  )
+})
+
+it.each([
+  [403, 'Сброс отклонён: недостаточно прав.'],
+  [404, 'Сброс отклонён: учётная запись не найдена.'],
+  [409, 'Сброс отклонён: операция недопустима для этой учётной записи.'],
+  [422, 'Сброс отклонён: проверьте запрос.'],
+])('shows HTTP %i as a definitive reset rejection', async (status, message) => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+    if (init?.method === 'POST' && String(url).endsWith('/password-reset'))
+      throw new ApiClientError('rejected', 'api_error', status)
+    if (String(url).endsWith('/users/9'))
+      return {
+        id: '9',
+        login: 'fictional-reset-user',
+        full_name: 'Вымышленный пользователь',
+        role: 'student',
+        is_active: true,
+        student_id: '19',
+        group_id: '29',
+        teacher_id: null,
+        staff_profile_id: null,
+        org_unit_id: null,
+        permissions: [],
+        available_permission_codes: [],
+      }
+    throw new Error(`Unexpected API request: ${String(url)}`)
+  })
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RouterProvider
+        router={createMemoryRouter([{ path: '/admin/users/:id', element: <UserDetailPage /> }], {
+          initialEntries: ['/admin/users/9'],
+        })}
+      />
+    </QueryClientProvider>,
+  )
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: 'Сбросить пароль' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent(message)
+  expect(screen.queryByText('Пароль мог измениться')).not.toBeInTheDocument()
   expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(
     1,
   )
@@ -305,7 +483,6 @@ it.each([
   [404, 'Сброс отклонён: учётная запись не найдена.'],
   [409, 'Сброс отклонён: операция недопустима для этой учётной записи.'],
   [422, 'Сброс отклонён: проверьте запрос.'],
-  [500, 'Сервер вернул ошибку при сбросе пароля.'],
 ])('reports the definitive administrative reset rejection for HTTP %i', async (status, message) => {
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   vi.mocked(apiFetch).mockImplementation(async (_url, init) => {
@@ -327,34 +504,40 @@ it.each([
   await screen.findByRole('heading', { name: resetErrorDetail.full_name })
   await user.click(screen.getByRole('button', { name: 'Сбросить пароль' }))
   expect(await screen.findByRole('alert')).toHaveTextContent(message)
-  expect(screen.queryByText(/Ответ на сброс не получен/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/Пароль мог измениться/)).not.toBeInTheDocument()
   expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(
     1,
   )
 })
 
-it('shows uncertainty for an administrative reset with no HTTP response and never retries', async () => {
-  vi.spyOn(window, 'confirm').mockReturnValue(true)
-  vi.mocked(apiFetch).mockImplementation(async (_url, init) => {
-    if (init?.method === 'POST') throw new TypeError('network failure')
-    return resetErrorDetail
-  })
-  render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
-      <RouterProvider
-        router={createMemoryRouter([{ path: '/admin/users/:id', element: <UserDetailPage /> }], {
-          initialEntries: ['/admin/users/9'],
-        })}
-      />
-    </QueryClientProvider>,
-  )
-  const user = userEvent.setup()
-  await screen.findByRole('heading', { name: resetErrorDetail.full_name })
-  await user.click(screen.getByRole('button', { name: 'Сбросить пароль' }))
-  expect(await screen.findByText(/Ответ на сброс не получен/)).toBeInTheDocument()
-  expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(
-    1,
-  )
-})
+it.each([undefined, 500, 503])(
+  'shows uncertainty for a reset outcome with HTTP status %s and never retries',
+  async (status) => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    vi.mocked(apiFetch).mockImplementation(async (_url, init) => {
+      if (init?.method === 'POST') {
+        if (status === undefined) throw new TypeError('network failure')
+        throw new ApiClientError('Internal error', 'internal_error', status)
+      }
+      return resetErrorDetail
+    })
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <RouterProvider
+          router={createMemoryRouter([{ path: '/admin/users/:id', element: <UserDetailPage /> }], {
+            initialEntries: ['/admin/users/9'],
+          })}
+        />
+      </QueryClientProvider>,
+    )
+    const user = userEvent.setup()
+    await screen.findByRole('heading', { name: resetErrorDetail.full_name })
+    await user.click(screen.getByRole('button', { name: 'Сбросить пароль' }))
+    expect(await screen.findByText(/Пароль мог измениться/)).toBeInTheDocument()
+    expect(
+      vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'POST'),
+    ).toHaveLength(1)
+  },
+)
