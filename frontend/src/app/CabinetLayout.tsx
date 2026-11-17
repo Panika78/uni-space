@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import type { FocusEvent } from 'react'
+import type { FocusEvent, ReactNode } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../features/auth/AuthProvider'
 import { UnsavedChangesProvider, type ExitProtectionStatus } from './UnsavedChangesContext'
@@ -150,16 +150,13 @@ export function UserMenu({
           id="user-menu-panel"
         >
           {student && (
-            <>
-              {' '}
-              <Link to="/profile" onClick={() => setIsOpen(false)}>
-                Мой профиль
-              </Link>
-              <Link to="/settings" onClick={() => setIsOpen(false)}>
-                Настройки <span>Скоро</span>
-              </Link>
-            </>
+            <Link to="/profile" onClick={() => setIsOpen(false)}>
+              Мой профиль
+            </Link>
           )}
+          <Link to="/settings" onClick={() => setIsOpen(false)}>
+            Настройки
+          </Link>
           <button
             onClick={() => {
               setIsOpen(false)
@@ -337,20 +334,22 @@ export function CabinetLayout({
   student = false,
   home,
   initials = '—',
+  children,
 }: {
   navigation: readonly NavigationItem[]
   student?: boolean
   home: string
   initials?: string
+  children?: ReactNode
 }) {
   return (
     <ShellContext.Provider value={{ navigation, student, home, initials }}>
-      <CabinetShell />
+      <CabinetShell>{children}</CabinetShell>
     </ShellContext.Provider>
   )
 }
 
-function CabinetShell() {
+function CabinetShell({ children }: { children?: ReactNode }) {
   const isSuspended = useAccessSuspended()
   const { student, home } = useContext(ShellContext)
   const [isCollapsed, setIsCollapsed] = useState(false)
@@ -474,9 +473,19 @@ function CabinetShell() {
           <UserMenu student={student} exitStatus={exitStatus} />
         </header>
         <main className="student-content" id="main-content" ref={mainContentRef} tabIndex={-1}>
-          <UnsavedChangesProvider value={{ status: exitStatus, setStatus: setExitStatus }}>
-            <Outlet />
-          </UnsavedChangesProvider>
+          {children !== undefined ? (
+            student ? (
+              <UnsavedChangesProvider value={{ status: exitStatus, setStatus: setExitStatus }}>
+                {children}
+              </UnsavedChangesProvider>
+            ) : (
+              children
+            )
+          ) : (
+            <UnsavedChangesProvider value={{ status: exitStatus, setStatus: setExitStatus }}>
+              <Outlet />
+            </UnsavedChangesProvider>
+          )}
         </main>
       </div>
       <MobileDrawer isOpen={isDrawerOpen} onClose={closeDrawer} />

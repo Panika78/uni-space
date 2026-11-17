@@ -107,6 +107,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/users/{user_id}/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset Password */
+        post: operations["reset_password_api_v1_admin_users__user_id__password_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/users/{user_id}/permissions": {
         parameters: {
             query?: never;
@@ -294,6 +311,23 @@ export interface paths {
          * @description Refresh-cookie имеет приоритет. При неизвестной/отсутствующей cookie используется необязательный валидный Bearer с проверкой владельца sid. Поле session_revoked сообщает, была ли найдена и отозвана конкретная сессия; cookie удаляется при любом ответе.
          */
         post: operations["logout_session_api_v1_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Change Own Password */
+        post: operations["change_own_password_api_v1_auth_password_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1261,6 +1295,15 @@ export interface components {
             /** Next After Id */
             next_after_id: string | null;
         };
+        /** ChangePasswordRequest */
+        ChangePasswordRequest: {
+            /** Confirm Password */
+            confirm_password: string;
+            /** Current Password */
+            current_password: string;
+            /** New Password */
+            new_password: string;
+        };
         /** CourseOfferingRef */
         CourseOfferingRef: {
             discipline: components["schemas"]["Ref"];
@@ -1947,6 +1990,11 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+        };
+        /** ResetUserPassword */
+        ResetUserPassword: {
+            /** Password */
+            password: string;
         };
         /** ResubmitApplicationRequest */
         ResubmitApplicationRequest: {
@@ -2756,6 +2804,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserDetail"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    reset_password_api_v1_admin_users__user_id__password_reset_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Обязательный разрешённый origin */
+                origin?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResetUserPassword"];
                 };
             };
             /** @description Unauthorized */
@@ -3747,6 +3875,76 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["LogoutResponse"];
                 };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Тело auth-запроса превышает 16384 байта */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    change_own_password_api_v1_auth_password_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Обязательный разрешённый origin */
+                origin?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Unauthorized */
             401: {

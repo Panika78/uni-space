@@ -603,8 +603,12 @@ with engine.connect() as c:
     for column in ('id','created_at'):
         assert c.execute(text("SELECT has_column_privilege(current_user,'audit_events',:column,'SELECT')"), {'column': column}).scalar_one()
     assert not c.execute(text("SELECT has_sequence_privilege(current_user,'audit_events_id_seq','USAGE')")).scalar_one()
-    for column in ('id','role','password_hash','login','full_name'):
+    for column in ('id','role','login','full_name'):
         assert not c.execute(text("SELECT has_column_privilege(current_user,'users',:column,'UPDATE')"), {'column': column}).scalar_one()
+    assert c.execute(text("SELECT has_column_privilege(current_user,'users','password_hash','UPDATE')")).scalar_one()
+    c.execute(text("SAVEPOINT password_hash_acl_probe"))
+    c.execute(text("UPDATE users SET password_hash=password_hash WHERE id=(SELECT min(id) FROM users)"))
+    c.execute(text("ROLLBACK TO SAVEPOINT password_hash_acl_probe"))
     assert c.execute(text("SELECT has_column_privilege(current_user,'users','is_active','UPDATE')")).scalar_one()
     assert c.execute(text("SELECT has_table_privilege(current_user,'audit_events','INSERT')")).scalar_one()
     for privilege in ('SELECT','UPDATE','DELETE','TRUNCATE'):

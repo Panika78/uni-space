@@ -17,7 +17,8 @@ def test_bootstrap_refuses_non_interactive_terminal(monkeypatch, capsys):
 
 def test_bootstrap_is_not_exposed_over_http():
     paths = app.openapi()["paths"]
-    assert all("bootstrap" not in path and "reset" not in path for path in paths)
+    assert all("bootstrap" not in path for path in paths)
+    assert "/api/v1/admin/users/{user_id}/password-reset" in paths
 
 
 def test_creation_rejects_incompatible_profiles_and_permission_code():

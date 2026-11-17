@@ -11,12 +11,13 @@ import { StudentAccess, StudentProfilePage } from '../features/profile/StudentPr
 import { createBrowserRouter, Link, Navigate, Outlet, ScrollRestoration } from 'react-router-dom'
 
 import { LoginPage, ProtectedRoute } from '../features/auth/AuthPages'
+import { PasswordSettingsPage } from '../features/auth/PasswordSettings'
 import { AcademicsPage } from '../features/academics/AcademicsPage'
 import { SchedulePage } from '../features/schedule/SchedulePage'
 import { useAuth } from '../features/auth/AuthProvider'
 import { Icon } from '../shared/ui/Icon'
 import { LoadingState } from '../shared/ui/StatusStates'
-import { StudentLayout, UnavailableSection } from './StudentLayout'
+import { StudentLayout } from './StudentLayout'
 import { ApplicationDetailPage } from '../features/services/ApplicationsPages'
 import { ApplicationFormPage, ServicesPage } from '../features/services/ServicesPages'
 import { NewsDetailPage, NewsFeedPage } from '../features/news/NewsPages'
@@ -143,6 +144,7 @@ export const appRoutes: RouteObject[] = [
             element: <RoleAccess />,
             children: [
               { path: '/cabinet', element: <RoleStart /> },
+              { path: '/settings', element: <PasswordSettingsPage /> },
               {
                 element: <RoleGuard role="student" />,
                 children: [
@@ -161,7 +163,6 @@ export const appRoutes: RouteObject[] = [
                           { path: '/news/:id', element: <NewsDetailPage /> },
                           { path: '/notifications', element: null },
                           { path: '/profile', element: <StudentProfilePage /> },
-                          { path: '/settings', element: <UnavailableSection title="Настройки" /> },
                         ],
                       },
                     ],

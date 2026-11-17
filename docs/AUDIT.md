@@ -88,6 +88,8 @@ except Exception:
 | `user` | `create` | `role`, `is_active` |
 | `user` | `set_role` | `role` |
 | `user` | `set_active` | `is_active` |
+| `user` | `change_password` | `credential_changed` |
+| `user` | `reset_password` | `credential_reset` |
 | `student` | `set_academic_status` | `academic_status` |
 | `student` | `create` | `user_id`, `group_id`, `academic_status` (`enrolled`) |
 | `teacher` | `link_user` | `user_id` |
@@ -133,6 +135,13 @@ except Exception:
 `reason` nullable; writer принимает только коды `correction`, `administrative_change`,
 `schedule_change`, а не свободный текст клиента. Новые коды требуют ревью.
 Идентификаторы субъектов и результаты сами являются ограниченно доступными данными.
+
+Изменение/сброс пароля используют события `user.change_password` и
+`user.reset_password` в той же транзакции, что запись Argon2id-хеша и отзыв
+сессий. Снимки содержат только булевы маркеры `credential_changed` /
+`credential_reset`; login, ФИО, пароль, хеш и токены в аудит не записываются.
+Runtime ACL для этой операции дополнительно разрешает только
+`UPDATE (password_hash)` на `users`.
 
 ## Независимое расширение и чтение
 

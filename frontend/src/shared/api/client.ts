@@ -24,6 +24,17 @@ export class ApiClientError extends Error {
   }
 }
 
+// These responses are produced by validation/authorization checks before the
+// password reset can commit. Other statuses, malformed bodies, and transport
+// failures may arrive after a commit and must be treated as uncertain.
+export function isDefinitiveApiRejection(error: unknown): error is ApiClientError {
+  return (
+    error instanceof ApiClientError &&
+    error.code !== 'invalid_response' &&
+    [403, 404, 409, 422].includes(error.status ?? 0)
+  )
+}
+
 function isApiError(value: unknown): value is { error: ApiErrorBody } {
   if (typeof value !== 'object' || value === null || !('error' in value)) return false
   const error = value.error
@@ -53,14 +64,17 @@ export function configureApiAuth(begin: () => AuthRequest) {
   beginAuthRequest = begin
 }
 
-export type ApiRequestInit = RequestInit & { authenticated?: boolean }
+export type ApiRequestInit = RequestInit & {
+  authenticated?: boolean
+  replayAfterRefresh?: boolean
+}
 
 // Bounded API pages still need room for slow mobile connections and an auth
 // refresh. This is one wall-clock budget for the initial GET and any replay.
 export const AUTHENTICATED_GET_DEADLINE_MS = 90_000
 
 export async function apiFetch<T>(input: RequestInfo | URL, init: ApiRequestInit = {}): Promise<T> {
-  const { authenticated, ...requestInit } = init
+  const { authenticated, replayAfterRefresh = true, ...requestInit } = init
   if (!authenticated) return sendRequest<T>(input, requestInit)
   const target = requireApiDestination(input)
   if (!beginAuthRequest) throw new Error('Auth provider is unavailable')
@@ -106,6 +120,7 @@ export async function apiFetch<T>(input: RequestInfo | URL, init: ApiRequestInit
         error.code !== 'access_expired'
       )
         throw error
+      if (!replayAfterRefresh) throw error
       // Cancel this waiter promptly without aborting the shared cookie rotation.
       const token = await new Promise<string>((resolve, reject) => {
         const handleAbort = () => reject(signal.reason)
@@ -145,7 +160,15 @@ export async function apiFetch<T>(input: RequestInfo | URL, init: ApiRequestInit
   } catch (error) {
     assertBaseRequestCurrent()
     if (timeoutController?.signal.aborted) throw createRequestTimeoutError()
-    if (error instanceof ApiClientError && error.status === 401) auth.invalidate()
+    // Password verification deliberately returns 401 invalid_credentials while
+    // the authenticated session remains valid. Preserve that form/session; all
+    // other 401s still end an unusable authenticated session.
+    if (
+      error instanceof ApiClientError &&
+      error.status === 401 &&
+      error.code !== 'invalid_credentials'
+    )
+      auth.invalidate()
     throw error
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId)

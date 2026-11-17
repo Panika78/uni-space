@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -14,12 +14,14 @@ from app.admin.schemas import (
     LookupPage,
     LookupParams,
     PermissionGrant,
+    ResetUserPassword,
     SetActive,
     SetDepartment,
     UserDetail,
     UserListParams,
     UserPage,
 )
+from app.auth.router import require_auth_origin
 from app.core.schemas import ApiError
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_db_session
@@ -144,6 +146,25 @@ def create_user(data: CreateUser, db: Db, actor: Actor):
 
     result = commit_change(db, create)
     return CreatedUser(user=result, initial_password=password)
+
+
+@router.post(
+    "/users/{user_id}/password-reset",
+    response_model=ResetUserPassword,
+    dependencies=[Depends(require_auth_origin)],
+    responses={200: {"headers": {"Cache-Control": {"schema": {"type": "string"}}}}},
+)
+def reset_password(user_id: AdminId, db: Db, actor: Actor, response: Response):
+    password = None
+
+    def reset():
+        nonlocal password
+        user, password = service.reset_user_password(db, actor, parse_id(user_id))
+        return user
+
+    commit_change(db, reset)
+    response.headers["Cache-Control"] = "no-store"
+    return ResetUserPassword(password=password)
 
 
 @router.put("/users/{user_id}/active", response_model=UserDetail)
