@@ -1729,7 +1729,9 @@ with SessionLocal.begin() as db:
                             " user=db.scalar(select(User).where(User.login == 'schedule-fixture-2'))\n"
                             " session=AuthSession(user_id=user.id, expires_at=datetime.now(UTC)+timedelta(hours=1))\n"
                             " db.add(session); db.flush(); print(create_access_token(session, get_settings())['access_token'])",
-                        ).stdout.strip().splitlines()[-1],
+                        )
+                        .stdout.strip()
+                        .splitlines()[-1],
                     }
                     assert (
                         student_client.get(
@@ -1761,7 +1763,9 @@ with SessionLocal.begin() as db:
                     )
                     assert application_page.status_code == 200
                     assert submitted.json() in application_page.json()["items"]
-                    leave_pdf = (ROOT / "backend/tests/fixtures/minimal.pdf").read_bytes()
+                    leave_pdf = (
+                        ROOT / "backend/tests/fixtures/minimal.pdf"
+                    ).read_bytes()
                     leave_form = {
                         "basis": "medical",
                         "starts_on": "2027-01-01",
@@ -1780,9 +1784,12 @@ with SessionLocal.begin() as db:
                     attachment_download_path = (
                         f"/api/v1/applications/attachments/{attachment_id}/download"
                     )
-                    assert student_client.get(
-                        attachment_download_path, headers=student_headers
-                    ).content == leave_pdf
+                    assert (
+                        student_client.get(
+                            attachment_download_path, headers=student_headers
+                        ).content
+                        == leave_pdf
+                    )
                     foreign_download = student_client.get(
                         attachment_download_path, headers=stranger_headers
                     )
@@ -1794,13 +1801,19 @@ with SessionLocal.begin() as db:
                         files=[
                             (
                                 "files",
-                                ("oversized.pdf", b"x" * (55 * 1024 * 1024), "application/pdf"),
+                                (
+                                    "oversized.pdf",
+                                    b"x" * (55 * 1024 * 1024),
+                                    "application/pdf",
+                                ),
                             )
                         ],
                         timeout=60,
                     )
                     assert oversized_proxy.status_code == 413
-                    assert oversized_proxy.json()["error"]["code"] == "request_too_large"
+                    assert (
+                        oversized_proxy.json()["error"]["code"] == "request_too_large"
+                    )
                     attachment_key = sql(
                         f"SELECT storage_key FROM application_attachments WHERE id={attachment_id}"
                     )
@@ -1851,7 +1864,9 @@ with SessionLocal.begin() as db:
                     timeout=300,
                 )
                 assert (backup_dir / "database.dump").stat().st_mode & 0o777 == 0o600
-                assert (backup_dir / "attachments.tar.gz").stat().st_mode & 0o777 == 0o600
+                assert (
+                    backup_dir / "attachments.tar.gz"
+                ).stat().st_mode & 0o777 == 0o600
                 restored_database = f"restore_attachments_{secrets.token_hex(4)}"
                 restored_volume = f"restore_attachments_{secrets.token_hex(4)}"
                 run(
@@ -1951,7 +1966,16 @@ volumes:
                 )
                 wait_for_stopped_api_containers()
                 run(["bash", "scripts/configure-postgres.sh"], env=env)
-                dc("up", "-d", "--force-recreate", "--wait", "--wait-timeout", "120", "api", "nginx")
+                dc(
+                    "up",
+                    "-d",
+                    "--force-recreate",
+                    "--wait",
+                    "--wait-timeout",
+                    "120",
+                    "api",
+                    "nginx",
+                )
                 dc(
                     "exec",
                     "-T",
