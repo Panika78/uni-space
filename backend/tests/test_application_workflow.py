@@ -21,6 +21,7 @@ from app.models import (
     Application,
     ApplicationHistory,
     AuthSession,
+    IssuedDocument,
     OrgUnit,
     RefreshToken,
     ServiceType,
@@ -152,7 +153,24 @@ def context(auth, monkeypatch, tmp_path):
     try:
         yield ctx
     finally:
+        from app.documents.storage import delete_key, issued_root
+
+        with Session(engine) as db:
+            issued_keys = db.scalars(
+                select(IssuedDocument.storage_key)
+                .join(Application, IssuedDocument.application_id == Application.id)
+                .where(Application.student_id.in_(student_ids))
+            ).all()
+        for key in issued_keys:
+            delete_key(issued_root(tmp_path), key)
         with Session(engine) as db, db.begin():
+            db.execute(
+                delete(IssuedDocument).where(
+                    IssuedDocument.application_id.in_(
+                        select(Application.id).where(Application.student_id.in_(student_ids))
+                    )
+                )
+            )
             db.execute(delete(Application).where(Application.student_id.in_(student_ids)))
             db.execute(
                 delete(StaffPermission).where(StaffPermission.staff_profile_id.in_(profiles))
@@ -423,7 +441,7 @@ def test_submission_records_initial_event_atomically_and_keeps_mvp1_automatic_co
     )
     assert response.status_code == 201
     body = response.json()
-    assert (body["version"], body["review_status"]) == (2, "approved")
+    assert (body["version"], body["review_status"]) == (3, "approved")
     assert body["document_status"] in {"ready", "failed"}
     events = history(c, body["id"], token).json()["items"]
     assert len(events) == 2

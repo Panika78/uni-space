@@ -81,9 +81,12 @@ def test_demo_data_documentation_matches_seed_date_constants():
     assert "временной PostgreSQL-БД" in content
 
 
-def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monkeypatch):
+def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monkeypatch, tmp_path):
+    from app.applications import router as applications_router
     from app.auth import router as auth_routes
     from app.auth.rate_limit import LoginRateLimiter
+    from app.core.config import get_settings
+    from app.documents import issuer
 
     # Each acceptance fixture owns its limiter; retain the real default limit.
     monkeypatch.setattr(auth_routes, "login_rate_limiter", LoginRateLimiter())
@@ -107,6 +110,11 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
             return new_session()
 
     monkeypatch.setattr(seed, "SessionLocal", SessionFactory())
+    settings = get_settings().model_copy(update={"attachment_storage_path": str(tmp_path)})
+    monkeypatch.setattr(applications_router, "get_settings", lambda: settings)
+    monkeypatch.setattr(applications_router, "SessionLocal", SessionFactory())
+    monkeypatch.setattr(issuer, "get_settings", lambda: settings)
+    monkeypatch.setattr(issuer, "SessionLocal", SessionFactory())
 
     seed.seed_demo_data()
     pz = db_session.scalar(select(Student).join(User).where(User.login == "demo-pz101"))

@@ -18,6 +18,7 @@ from app.models import (
     CourseGroup,
     CourseOffering,
     Discipline,
+    IssuedDocument,
     OrgUnit,
     Program,
     RefreshToken,
@@ -29,10 +30,19 @@ from app.models import (
 
 
 @pytest.mark.integration
-def test_application_http_routes_use_real_bearer_authentication(postgresql_engine):
+def test_application_http_routes_use_real_bearer_authentication(
+    postgresql_engine, monkeypatch, tmp_path
+):
     """Exercise login, Bearer validation, role checks, and ownership without auth overrides."""
+    from app.applications import router as applications_router
     from app.auth.security import PASSWORD_HASHER
+    from app.core.config import get_settings
+    from app.documents import issuer
     from app.main import app
+
+    settings = get_settings().model_copy(update={"attachment_storage_path": str(tmp_path)})
+    monkeypatch.setattr(applications_router, "get_settings", lambda: settings)
+    monkeypatch.setattr(issuer, "get_settings", lambda: settings)
 
     suffix = uuid4().hex
     password = "Task013-real-auth-test-password"
@@ -314,6 +324,9 @@ def test_application_http_routes_use_real_bearer_authentication(postgresql_engin
         ]
     finally:
         if created_ids:
+            session.query(IssuedDocument).filter(
+                IssuedDocument.application_id.in_(created_ids)
+            ).delete(synchronize_session=False)
             session.query(Application).filter(Application.id.in_(created_ids)).delete(
                 synchronize_session=False
             )
@@ -491,7 +504,7 @@ def test_application_submission_is_owned_and_returns_location_and_server_state(
             },
         )
         event.remove(db_session, "before_commit", fail_before_commit)
-        assert failed_commit.status_code == 500
+        assert failed_commit.status_code == 503
         assert db_session.query(Application).filter_by(student_id=student.id).count() == 2
 
         second_user = User(
@@ -674,6 +687,13 @@ def test_application_routes_work_with_minimal_postgresql_role(
         if api_engine is not None:
             api_engine.dispose()
         if student is not None:
+            admin.execute(
+                delete(IssuedDocument).where(
+                    IssuedDocument.application_id.in_(
+                        select(Application.id).where(Application.student_id == student.id)
+                    )
+                )
+            )
             admin.execute(delete(Application).where(Application.student_id == student.id))
             admin.delete(student)
             admin.flush()

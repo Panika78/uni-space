@@ -74,8 +74,8 @@ async function compareApplication(page, created) {
     await field(scope, 'Место предоставления').innerText(),
     created.form_data.place_of_submission,
   )
-  assert.equal(await field(scope, 'Рассмотрение').innerText(), 'Подано')
-  assert.equal(await field(scope, 'Документ').innerText(), 'Ожидает подготовки')
+  assert.equal(await field(scope, 'Рассмотрение').innerText(), 'Одобрено')
+  assert.equal(await field(scope, 'Документ').innerText(), 'Готов')
   assert.equal(
     await field(scope, 'Дата подачи').locator('time').getAttribute('datetime'),
     created.created_at,
