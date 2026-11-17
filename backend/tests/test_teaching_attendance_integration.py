@@ -1,14 +1,25 @@
 """Protected teacher attendance reads over real PostgreSQL/API boundaries."""
 
+import base64
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import event, select
+from sqlalchemy import event, func, select
 from test_teaching_integration import journal as journal_fixture
 
 from app.attendance.router import router as attendance_router
-from app.models import Attendance, AuthSession, Lesson, LessonGroup, Student, Subgroup, User
+from app.models import (
+    Attendance,
+    AuditEvent,
+    AuthSession,
+    Lesson,
+    LessonGroup,
+    Student,
+    Subgroup,
+    User,
+)
 from app.student_service import update_student_group
 from app.teaching.ordering import NAME_KEY_SOURCE, NAME_KEY_TARGET, get_student_name_key
 
@@ -89,6 +100,28 @@ def test_teacher_reads_attended_absent_unmarked_and_delete(teaching_attendance):
     assert rows[str(s.students[3].id)]["status"] == "unmarked"
     assert rows[str(s.students[3].id)]["updated_at"] is None
 
+    # Reads return persisted state without touching attendance or audit rows.
+    before = s.db.get(Attendance, (s.lesson.id, s.students[0].id))
+    before_state = (
+        before.status,
+        before.updated_at,
+        before.origin_group_id,
+        before.membership_version,
+    )
+    audits_before = s.db.scalar(select(func.count()).select_from(AuditEvent))
+    assert s.read(student_id=str(s.students[0].id)).json()["items"][0]["student_id"] == str(
+        s.students[0].id
+    )
+    s.db.expire_all()
+    after = s.db.get(Attendance, (s.lesson.id, s.students[0].id))
+    assert (
+        after.status,
+        after.updated_at,
+        after.origin_group_id,
+        after.membership_version,
+    ) == before_state
+    assert s.db.scalar(select(func.count()).select_from(AuditEvent)) == audits_before
+
     assert s.write(None, method="delete").status_code == 200
     reloaded = {row["student_id"]: row for row in s.read().json()["items"]}
     assert reloaded[str(s.students[0].id)]["status"] == "unmarked"
@@ -130,6 +163,75 @@ def test_teacher_scope_shared_lesson_and_foreign_ids(teaching_attendance):
     assert s.read().status_code == 404
 
 
+def test_legacy_attendance_without_membership_metadata_is_unmarked_and_immutable(
+    teaching_attendance,
+):
+    s = teaching_attendance
+    legacy = s.add(
+        Attendance,
+        lesson_id=s.lesson.id,
+        student_id=s.students[0].id,
+        status="attended",
+        marked_by_user_id=s.teacher_users[0].id,
+        origin_group_id=None,
+        origin_subgroup_id=None,
+        membership_version=None,
+        updated_at=datetime.now(UTC) - timedelta(days=1),
+    )
+    s.db.flush()
+    original = (
+        legacy.status,
+        legacy.updated_at,
+        legacy.origin_group_id,
+        legacy.origin_subgroup_id,
+        legacy.membership_version,
+    )
+    audits_before = s.db.scalar(select(func.count()).select_from(AuditEvent))
+    response = s.read()
+    assert response.status_code == 200, response.text
+    row = next(
+        item for item in response.json()["items"] if item["student_id"] == str(s.students[0].id)
+    )
+    assert row["status"] == "unmarked"
+    assert row["updated_at"] is None
+    assert row["can_edit"] is False
+    s.db.expire_all()
+    preserved = s.db.get(Attendance, (s.lesson.id, s.students[0].id))
+    assert (
+        preserved.status,
+        preserved.updated_at,
+        preserved.origin_group_id,
+        preserved.origin_subgroup_id,
+        preserved.membership_version,
+    ) == original
+    assert s.db.scalar(select(func.count()).select_from(AuditEvent)) == audits_before
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        ["ru-v1:\x00bad", 1],
+        ["ru-v1:\ud800", 1],
+        ["wrong-prefix", 1],
+        [1, 1],
+        ["ru-v1:а"],
+        ["ru-v1:а", 1, 2],
+        ["ru-v1:а", 2**63],
+    ],
+)
+def test_invalid_attendance_cursors_return_422(teaching_attendance, key):
+    s = teaching_attendance
+    token = (
+        base64.urlsafe_b64encode(
+            json.dumps({"v": 2, "direction": "asc", "key": key}, separators=(",", ":")).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
+    response = s.read(cursor=token)
+    assert response.status_code == 422, response.text
+
+
 def test_teacher_roster_respects_subgroups_and_current_membership(teaching_attendance):
     s = teaching_attendance
     first = s.add(Subgroup, group_id=s.groups[0].id, name="A")
@@ -146,16 +248,29 @@ def test_teacher_roster_respects_subgroups_and_current_membership(teaching_atten
     assert [row["student_id"] for row in data] == [str(s.students[0].id)]
 
     # A mark from the prior membership period remains stored, but never resurfaces
-    # as a current mark after leaving and returning to the same group/subgroup.
+    # after changing subgroups and then returning to the original subgroup.
     assert s.write("attended").status_code == 200
-    update_student_group(s.db, s.students[0].id, s.groups[1].id)
+    stored = s.db.get(Attendance, (s.lesson.id, s.students[0].id))
+    stored_state = (
+        stored.status,
+        stored.updated_at,
+        stored.origin_group_id,
+        stored.origin_subgroup_id,
+    )
+    update_student_group(s.db, s.students[0].id, s.groups[0].id, second.id)
     assert str(s.students[0].id) not in {row["student_id"] for row in s.read().json()["items"]}
     update_student_group(s.db, s.students[0].id, s.groups[0].id, first.id)
     row = s.read().json()["items"][0]
     assert row["status"] == "unmarked"
     assert row["updated_at"] is None
     assert row["can_edit"] is False
-    assert s.db.get(Attendance, (s.lesson.id, s.students[0].id)) is not None
+    stored = s.db.get(Attendance, (s.lesson.id, s.students[0].id))
+    assert (
+        stored.status,
+        stored.updated_at,
+        stored.origin_group_id,
+        stored.origin_subgroup_id,
+    ) == stored_state
 
 
 def test_current_role_and_session_are_checked_with_old_jwt(teaching_attendance):
@@ -176,13 +291,24 @@ def test_current_role_and_session_are_checked_with_old_jwt(teaching_attendance):
 @pytest.mark.parametrize("state", ["future", "cancelled", "moved"])
 def test_can_edit_is_false_for_future_cancelled_and_moved_lessons(teaching_attendance, state):
     s = teaching_attendance
+    assert s.write("attended").status_code == 200
+    original = s.db.get(Attendance, (s.lesson.id, s.students[0].id))
+    original_state = (original.status, original.updated_at)
     if state == "future":
         s.lesson.starts_at = datetime.now(UTC) + timedelta(hours=1)
         s.lesson.ends_at = s.lesson.starts_at + timedelta(hours=1)
     else:
         s.lesson.status = state
     s.db.flush()
-    assert all(not row["can_edit"] for row in s.read().json()["items"])
+    rows = {row["student_id"]: row for row in s.read().json()["items"]}
+    assert all(not row["can_edit"] for row in rows.values())
+    assert rows[str(s.students[0].id)]["status"] == "attended"
+    assert (
+        datetime.fromisoformat(rows[str(s.students[0].id)]["updated_at"].replace("Z", "+00:00"))
+        == original_state[1]
+    )
+    current = s.db.get(Attendance, (s.lesson.id, s.students[0].id))
+    assert (current.status, current.updated_at) == original_state
 
 
 def test_attendance_journal_uses_constant_sql_count_and_russian_keyset(teaching_attendance):
@@ -213,24 +339,28 @@ def test_attendance_journal_uses_constant_sql_count_and_russian_keyset(teaching_
 
     event.listen(s.db.bind, "before_cursor_execute", record)
     try:
-        cursor = None
         all_ids = []
-        while True:
-            response = s.read(limit=25, **({"cursor": cursor} if cursor else {}))
-            assert response.status_code == 200, response.text
-            page = response.json()
-            all_ids.extend(row["student_id"] for row in page["items"])
-            cursor = page["next_cursor"]
-            if cursor is None:
-                break
+        for limit in (1, 20):
+            cursor = None
+            page_ids = []
+            while True:
+                response = s.read(limit=limit, **({"cursor": cursor} if cursor else {}))
+                assert response.status_code == 200, response.text
+                page = response.json()
+                page_ids.extend(row["student_id"] for row in page["items"])
+                cursor = page["next_cursor"]
+                if cursor is None:
+                    break
+            assert len(page_ids) == len(set(page_ids))
+            all_ids = page_ids
         attendance_queries = [
             query
             for query in queries
             if "from students" in query.lower() and "attendance" in query.lower()
         ]
-        page_count = (len(all_ids) + 24) // 25
-        assert len(queries) <= page_count * 8 + 8
-        assert len(attendance_queries) == page_count
+        assert len(queries) <= len(attendance_queries) * 8 + 8
+        expected_page_count = sum((len(all_ids) + limit - 1) // limit for limit in (1, 20))
+        assert len(attendance_queries) == expected_page_count
         assert all("LIMIT" in query.upper() for query in attendance_queries)
         assert len(all_ids) == len(set(all_ids))
         expected = s.db.execute(

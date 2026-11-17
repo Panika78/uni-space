@@ -356,6 +356,10 @@ def list_journal_attendance(db, course_id, group_id, lesson_id, params):
         Attendance.origin_subgroup_id.is_not_distinct_from(Student.subgroup_id),
         Attendance.membership_version == Student.membership_version,
     )
+    # Legacy rows may predate membership provenance. SQL comparisons against
+    # their NULL origin fields yield NULL, which must never leak into a bool
+    # response or make the historical mark appear current.
+    membership_matches = membership_matches.is_(True)
     now = datetime.now(UTC)
     student_sort_id = Student.id.label("student_sort_id")
     can_edit = and_(
