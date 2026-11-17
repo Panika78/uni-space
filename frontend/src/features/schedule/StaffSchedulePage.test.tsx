@@ -424,7 +424,7 @@ it('keeps a network-failed mutation uncertain and never retries it automatically
   expect(within(dialog).getByRole('button', { name: 'Перечитать данные' })).toBeInTheDocument()
   expect(patchCount).toBe(1)
   await user.click(within(dialog).getByRole('button', { name: 'Перечитать данные' }))
-  await within(dialog).findByText(/Сверка завершена: показано текущее занятие/)
+  await within(dialog).findByText(/Сверка показала текущее состояние записи/)
   expect(
     vi
       .mocked(apiFetch)
@@ -476,6 +476,90 @@ it('creates a complete lesson with a timezone-aware Moscow timestamp', async () 
       }),
     }),
   )
+})
+
+it('reconciles a lost create response by group and submitted range without claiming causality', async () => {
+  const user = userEvent.setup()
+  let postCount = 0
+  let candidate = lesson
+  const original = vi.mocked(apiFetch).getMockImplementation()!
+  vi.mocked(apiFetch).mockImplementation(async (input, init) => {
+    const url = new URL(String(input), window.location.href)
+    if (url.pathname.endsWith('/staff/schedule/lessons') && init?.method === 'POST') {
+      postCount += 1
+      const submitted = JSON.parse(String(init.body)) as components['schemas']['LessonWrite']
+      candidate = { ...lesson, ...submitted, id: 'candidate', version: 1 }
+      throw new TypeError('connection lost after request')
+    }
+    if (url.pathname.endsWith('/staff/schedule/lessons') && !init?.method)
+      return { items: [candidate], next_after_id: null } as never
+    return original(input, init) as never
+  })
+  mount()
+  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
+  const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
+  const offering = within(dialog).getByRole('combobox', { name: 'Дисциплина и проведение' })
+  await user.click(offering)
+  await user.click(await within(dialog).findByRole('option', { name: /Алгоритмы/ }))
+  const group = within(dialog).getByRole('combobox', { name: 'Группы' })
+  await user.click(group)
+  await user.click(await within(dialog).findByRole('option', { name: /^ИВТ-21$/ }))
+  await user.clear(within(dialog).getByLabelText('Время начала · Москва'))
+  await user.type(within(dialog).getByLabelText('Время начала · Москва'), '13:00')
+  await user.clear(within(dialog).getByLabelText('Время окончания · Москва'))
+  await user.type(within(dialog).getByLabelText('Время окончания · Москва'), '14:15')
+  await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
+  expect(await within(dialog).findByText(/Результат операции неизвестен/)).toBeInTheDocument()
+  expect(postCount).toBe(1)
+  await user.click(within(dialog).getByRole('button', { name: 'Перечитать данные' }))
+  expect(
+    await within(dialog).findByText(/Найдена одна запись с совпадающими полями/),
+  ).toBeInTheDocument()
+  expect(within(dialog).getByText(/2026-11-17 13:00–2026-11-17 14:15/)).toBeInTheDocument()
+  const listing = vi.mocked(apiFetch).mock.calls.find(([url, init]) => {
+    const candidateUrl = new URL(String(url), window.location.href)
+    return (
+      candidateUrl.pathname.endsWith('/staff/schedule/lessons') &&
+      !init?.method &&
+      candidateUrl.searchParams.get('resource') === 'group' &&
+      candidateUrl.searchParams.get('resource_id') === '3' &&
+      candidateUrl.searchParams.get('date_to') === '2026-11-17'
+    )
+  })
+  const query = new URL(String(listing?.[0]), window.location.href).searchParams
+  expect(query.get('resource')).toBe('group')
+  expect(query.get('resource_id')).toBe('3')
+  expect(query.get('date_from')).toBe('2026-11-17')
+  expect(query.get('date_to')).toBe('2026-11-17')
+  expect(postCount).toBe(1)
+})
+
+it('resolves a room selection by ID and uses only its room name as the catalog query', async () => {
+  const original = vi.mocked(apiFetch).getMockImplementation()!
+  vi.mocked(apiFetch).mockImplementation(async (input, init) => {
+    const url = new URL(String(input), window.location.href)
+    if (url.pathname.endsWith('/catalog/rooms'))
+      return {
+        items: [
+          { id: '6', name: '205', building_name: 'Корпус А' },
+          { id: '9', name: '205', building_name: 'Корпус Б' },
+        ],
+        next_after_id: null,
+      } as never
+    return original(input, init) as never
+  })
+  mount(
+    '/staff/schedule?resource=room&resource_id=9&resource_name=Корпус%20Б%20%C2%B7%20205&date=2026-11-17',
+  )
+  await waitFor(() =>
+    expect(screen.getByLabelText('Поиск: аудитории')).toHaveValue('Корпус Б · 205'),
+  )
+  expect(screen.getByLabelText('Выберите: аудитории')).toHaveValue('9')
+  const roomRequest = vi
+    .mocked(apiFetch)
+    .mock.calls.find(([url]) => String(url).includes('/catalog/rooms?'))
+  expect(new URL(String(roomRequest?.[0]), window.location.href).searchParams.get('q')).toBe('205')
 })
 
 it('keeps a version-conflict draft until the user explicitly adopts the fresh version', async () => {

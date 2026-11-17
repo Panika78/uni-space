@@ -211,6 +211,31 @@ try {
   await firstPage.getByText('20:00–21:30').waitFor()
   assert.equal(await firstPage.getByLabel('Выбрать дату').inputValue(), firstMoveDate)
   assert.ok((await firstPage.getByLabel('Поиск: аудитории').inputValue()).includes(secondRoomName))
+  const selectedTargetRoomId = await roomSelect
+    .locator('option')
+    .filter({ hasText: secondRoomName })
+    .getAttribute('value')
+  assert.equal(await roomSelect.inputValue(), selectedTargetRoomId)
+  await firstPage.reload()
+  await firstPage.getByRole('heading', { name: 'Редактор расписания' }).waitFor()
+  await firstPage.waitForFunction(
+    ({ id }) => document.querySelector('select[aria-label="Выберите: аудитории"]')?.value === id,
+    { id: selectedTargetRoomId },
+    { timeout: 5000 },
+  )
+  assert.ok((await firstPage.getByLabel('Поиск: аудитории').inputValue()).includes(secondRoomName))
+  await firstPage.goBack()
+  await firstPage.waitForFunction(
+    ({ id }) => document.querySelector('select[aria-label="Выберите: аудитории"]')?.value === id,
+    { id: room205Id },
+    { timeout: 5000 },
+  )
+  await firstPage.goForward()
+  await firstPage.waitForFunction(
+    ({ id }) => document.querySelector('select[aria-label="Выберите: аудитории"]')?.value === id,
+    { id: selectedTargetRoomId },
+    { timeout: 5000 },
+  )
   const firstMoved = firstPage
     .locator('.staff-schedule__lesson')
     .filter({ hasText: subjectName })
@@ -313,6 +338,49 @@ try {
   await firstPage.getByText('22:20–23:05').waitFor()
   assert.equal(lostResponseMutationCount, 1)
   pass('committed mutation with lost response is read back without an automatic retry')
+  await uncertainDialog.getByRole('button', { name: 'Отмена' }).click()
+  await firstPage
+    .getByRole('alertdialog', { name: 'Закрыть черновик?' })
+    .getByRole('button', { name: 'Закрыть без сохранения' })
+    .click()
+  await uncertainDialog.waitFor({ state: 'hidden' })
+
+  const cancelTarget = firstPage
+    .locator('.staff-schedule__lesson')
+    .filter({ hasText: subjectName })
+    .filter({ hasText: '22:20–23:05' })
+  await cancelTarget.getByRole('button', { name: 'Отменить' }).click()
+  const uncertainCancel = firstPage.getByRole('dialog', { name: 'Отменить занятие?' })
+  let cancelPostCount = 0
+  await firstPage.route(/\/api\/v1\/staff\/schedule\/lessons\/\d+\/cancel$/, async (route) => {
+    cancelPostCount += 1
+    await route.abort('failed')
+  })
+  await secondPage.goto(`${baseURL}/staff/schedule?date=${encodeURIComponent(secondMoveDate)}`)
+  await secondPage.getByRole('heading', { name: 'Редактор расписания' }).waitFor()
+  await secondPage.getByRole('combobox', { name: 'Поиск: группы' }).fill(secondGroupName)
+  await secondPage.getByLabel('Выберите: группы').selectOption({ label: secondGroupName })
+  const concurrentMoveCard = secondPage
+    .locator('.staff-schedule__lesson')
+    .filter({ hasText: subjectName })
+    .filter({ hasText: '22:20–23:05' })
+  await concurrentMoveCard.getByRole('button', { name: 'Перенести' }).click()
+  const concurrentMove = secondPage.getByRole('dialog', { name: 'Перенести занятие' })
+  await concurrentMove.getByLabel('Время начала · Москва').fill('22:30')
+  await concurrentMove.getByLabel('Время окончания · Москва').fill('23:30')
+  await concurrentMove.getByRole('button', { name: 'Сохранить' }).click()
+  await concurrentMove.waitFor({ state: 'hidden' })
+  await uncertainCancel.getByRole('button', { name: 'Подтвердить отмену' }).click()
+  await uncertainCancel.getByText(/Отмена могла сохраниться/).waitFor()
+  await uncertainCancel.getByRole('button', { name: 'Перечитать состояние занятия' }).click()
+  await firstPage
+    .getByRole('alert')
+    .getByText(/Запись перенесена\. Это не подтверждает отмену/)
+    .waitFor()
+  assert.equal(cancelPostCount, 1)
+  await uncertainCancel.waitFor({ state: 'hidden' })
+  await firstPage.unroute(/\/api\/v1\/staff\/schedule\/lessons\/\d+\/cancel$/)
+  pass('a concurrent move is not misreported as a confirmed cancellation; no retry is sent')
 
   const studentContext = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
@@ -327,7 +395,7 @@ try {
     await route.fulfill({ response })
   })
   await studentPage.getByLabel('Дата').fill(secondMoveDate)
-  await studentPage.getByText('22:20').waitFor()
+  await studentPage.getByText('22:30', { exact: true }).waitFor()
   assert.ok(studentSchedule, 'the authenticated student schedule response was captured')
   assert.ok(
     studentSchedule.items.some(
@@ -338,17 +406,11 @@ try {
           hour: '2-digit',
           minute: '2-digit',
           hourCycle: 'h23',
-        }).format(new Date(item.starts_at)) === '22:20',
+        }).format(new Date(item.starts_at)) === '22:30',
     ),
   )
   pass('student schedule shows the latest server position after two cross-week transfers')
   await studentContext.close()
-  await uncertainDialog.getByRole('button', { name: 'Отмена' }).click()
-  await firstPage
-    .getByRole('alertdialog', { name: 'Закрыть черновик?' })
-    .getByRole('button', { name: 'Закрыть без сохранения' })
-    .click()
-  await uncertainDialog.waitFor({ state: 'hidden' })
 
   await secondContext.close()
   await firstPage.setViewportSize({ width: 360, height: 800 })
@@ -361,25 +423,50 @@ try {
   await firstPage.keyboard.press('Escape')
   const closeWarning = firstPage.getByRole('alertdialog', { name: 'Закрыть черновик?' })
   await closeWarning.getByRole('button', { name: 'Продолжить редактирование' }).click()
+  const mobileStart = mobileDialog.getByLabel('Время начала · Москва')
+  assert.ok(await mobileDialog.evaluate((dialog) => dialog.open))
+  await firstPage.waitForFunction(
+    (element) => document.activeElement === element,
+    await mobileStart.elementHandle(),
+    { timeout: 3000 },
+  )
   await firstPage.goBack()
   const navigationWarning = firstPage.getByRole('dialog', { name: 'Выйти без сохранения?' })
   await navigationWarning.getByRole('button', { name: 'Продолжить редактирование' }).click()
   assert.equal(await mobileDialog.getByLabel('Время начала · Москва').inputValue(), '09:15')
+  await firstPage.waitForFunction(
+    (element) => document.activeElement === element,
+    await mobileStart.elementHandle(),
+    { timeout: 3000 },
+  )
   await mobileDialog.getByRole('button', { name: 'Отмена' }).click()
   await firstPage
     .getByRole('alertdialog', { name: 'Закрыть черновик?' })
     .getByRole('button', { name: 'Закрыть без сохранения' })
     .click()
   await mobileDialog.waitFor({ state: 'hidden' })
-  assert.ok(await addTrigger.evaluate((element) => document.activeElement === element))
+  await firstPage.waitForFunction(
+    (element) => document.activeElement === element,
+    await addTrigger.elementHandle(),
+    { timeout: 3000 },
+  )
   await firstPage.setViewportSize({ width: 1440, height: 1000 })
-  pass('360/1440px layout, Escape, unsaved draft warning and restored trigger focus')
+  await firstPage.getByRole('button', { name: 'Добавить занятие' }).click()
+  const desktopDialog = firstPage.getByRole('dialog', { name: 'Добавить занятие' })
+  await desktopDialog.getByRole('button', { name: 'Отмена' }).click()
+  await desktopDialog.waitFor({ state: 'hidden' })
+  await firstPage.waitForFunction(
+    (element) => document.activeElement === element,
+    await addTrigger.elementHandle(),
+    { timeout: 3000 },
+  )
+  pass('360/1440px layout, Escape, Back, Cancel, and bounded focus restoration')
 
   await openSchedule(firstPage, secondGroupName, secondMoveDate)
   const revocationCard = firstPage
     .locator('.staff-schedule__lesson')
     .filter({ hasText: subjectName })
-    .filter({ hasText: '22:20–23:05' })
+    .filter({ hasText: '22:30–23:30' })
   await revocationCard.getByRole('button', { name: 'Отменить' }).click()
   const revocationDialog = firstPage.getByRole('dialog', { name: 'Отменить занятие?' })
   execFileSync(

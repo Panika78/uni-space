@@ -1,6 +1,12 @@
 import type { components } from '../../shared/api/schema'
 
 export type Lesson = components['schemas']['LessonResponse']
+export type TimedLesson = {
+  id: string
+  starts_at: string
+  ends_at: string
+  status: string
+}
 const timezone = 'Europe/Moscow'
 
 export function isValidCalendarDate(value: string): boolean {
@@ -83,7 +89,7 @@ const boundaryTime = new Intl.DateTimeFormat('en-GB', {
   second: '2-digit',
 })
 
-export function listDayLessons(items: Lesson[], date: string): Lesson[] {
+export function listDayLessons<T extends TimedLesson>(items: T[], date: string): T[] {
   return items.filter((lesson) => {
     const startDate = getMoscowDate(new Date(lesson.starts_at))
     if (lesson.status !== 'scheduled') return startDate === date
@@ -94,6 +100,22 @@ export function listDayLessons(items: Lesson[], date: string): Lesson[] {
     const endsAtMidnight = boundaryTime.format(end) === '00:00:00' && !/[1-9]/.test(fraction)
     return startDate <= date && (endDate > date || (endDate === date && !endsAtMidnight))
   })
+}
+
+export function groupLessonsByVisibleDays<T extends TimedLesson>(
+  items: T[],
+  dateFrom: string,
+  dateTo: string,
+): Record<string, T[]> {
+  const sorted = [...items].sort(
+    (a, b) => a.starts_at.localeCompare(b.starts_at) || a.id.localeCompare(b.id),
+  )
+  const grouped: Record<string, T[]> = {}
+  for (let day = dateFrom, count = 0; day <= dateTo && count < 31; day = addDays(day, 1), count++) {
+    const matching = listDayLessons(sorted, day)
+    if (matching.length) grouped[day] = matching
+  }
+  return grouped
 }
 
 export interface ScheduleGap {

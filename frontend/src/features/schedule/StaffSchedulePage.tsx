@@ -9,6 +9,7 @@ import {
   addDays,
   formatDate,
   formatTime,
+  groupLessonsByVisibleDays,
   getMoscowDate,
   getWeekStart,
   isValidCalendarDate,
@@ -169,11 +170,12 @@ function describeLesson(lesson: Lesson) {
 }
 
 function getLessonResource(lesson: Lesson, preferred: Resource, selectedId: string) {
-  const resources: Array<{ resource: Resource; id: string; name: string }> = [
+  const resources: Array<{ resource: Resource; id: string; name: string; search: string }> = [
     ...lesson.display.participants.map((item) => ({
       resource: 'group' as const,
       id: item.group_id,
       name: item.group_name,
+      search: item.group_name,
     })),
     ...(lesson.display.teacher
       ? [
@@ -181,6 +183,7 @@ function getLessonResource(lesson: Lesson, preferred: Resource, selectedId: stri
             resource: 'teacher' as const,
             id: lesson.display.teacher.id,
             name: lesson.display.teacher.full_name,
+            search: lesson.display.teacher.full_name,
           },
         ]
       : []),
@@ -188,6 +191,7 @@ function getLessonResource(lesson: Lesson, preferred: Resource, selectedId: stri
       resource: 'room' as const,
       id: item.id,
       name: `${item.building_name} · ${item.name}`,
+      search: item.name,
     })),
   ]
   return (
@@ -196,6 +200,22 @@ function getLessonResource(lesson: Lesson, preferred: Resource, selectedId: stri
     resources[0] ??
     null
   )
+}
+
+function getResourceQuery(resource: Resource, params: URLSearchParams) {
+  const query = params.get('q')
+  if (query !== null) return query
+  const unverifiedLabel = params.get('resource_name')
+  if (!unverifiedLabel) return ''
+  // The URL label is only a search hint. The selected ID must still resolve in
+  // the protected catalog before a name is displayed as authoritative.
+  return resource === 'room' ? (unverifiedLabel.split(' · ').at(-1)?.trim() ?? '') : unverifiedLabel
+}
+
+function getResourceLabel(resource: Resource, item: CatalogItem) {
+  return resource === 'room' && item.building_name
+    ? `${item.building_name} · ${item.name}`
+    : item.name
 }
 
 function catalogUrl(
@@ -211,6 +231,65 @@ function catalogUrl(
     if (value) params.set(key, value)
   })
   return `${base}/catalog/${kind}?${params}`
+}
+
+function participantPairs(participants: LessonWrite['participants']) {
+  return participants
+    .map(({ group_id, subgroup_id }) => `${group_id}:${subgroup_id ?? ''}`)
+    .sort()
+    .join('|')
+}
+
+function matchesLessonWrite(lesson: Lesson, body: LessonWrite) {
+  return (
+    lesson.course_offering_id === body.course_offering_id &&
+    Date.parse(lesson.starts_at) === Date.parse(body.starts_at) &&
+    Date.parse(lesson.ends_at) === Date.parse(body.ends_at) &&
+    lesson.kind === body.kind &&
+    lesson.teacher_id === body.teacher_id &&
+    participantPairs(lesson.participants) === participantPairs(body.participants) &&
+    [...lesson.room_ids].sort().join('|') === [...body.room_ids].sort().join('|')
+  )
+}
+
+async function listLessonsForCreateReconciliation(body: LessonWrite): Promise<Lesson[]> {
+  const groupId = body.participants[0]?.group_id
+  if (!groupId) return []
+  const firstDate = getMoscowDate(new Date(body.starts_at))
+  const lastDate = getMoscowDate(new Date(body.ends_at))
+  const results = new Map<string, Lesson>()
+  let rangeFrom = firstDate
+  while (rangeFrom <= lastDate) {
+    let rangeTo = lastDate
+    for (let day = 0; day < 30; day++) {
+      const candidate = addDays(rangeFrom, day + 1)
+      if (candidate > lastDate || candidate === rangeFrom) break
+      rangeTo = candidate
+    }
+    let afterId: string | null = null
+    const seenCursors = new Set<string>()
+    do {
+      const params = new URLSearchParams({
+        resource: 'group',
+        resource_id: groupId,
+        date_from: rangeFrom,
+        date_to: rangeTo,
+        limit: '100',
+      })
+      if (afterId) params.set('after_id', afterId)
+      const page = await apiFetch<components['schemas']['EditorSchedule']>(
+        `${base}/lessons?${params}`,
+        { authenticated: true },
+      )
+      page.items.forEach((item) => results.set(item.id, item))
+      afterId = page.next_after_id
+      if (afterId && seenCursors.has(afterId)) throw new Error('Repeated schedule cursor')
+      if (afterId) seenCursors.add(afterId)
+    } while (afterId)
+    if (rangeTo === lastDate) break
+    rangeFrom = addDays(rangeTo, 1)
+  }
+  return [...results.values()]
 }
 
 function CatalogPicker({
@@ -497,6 +576,9 @@ function ScheduleForm({
   const continueCloseRef = useRef<HTMLButtonElement>(null)
   const continueNavigationRef = useRef<HTMLButtonElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
+  const lastFormFocusRef = useRef<HTMLElement | null>(null)
+  const closeReturnFocusRef = useRef<HTMLElement | null>(null)
+  const navigationReturnFocusRef = useRef<HTMLElement | null>(null)
   const [courseOffering, setCourseOffering] = useState(lesson?.course_offering_id ?? '')
   const [teacherIds, setTeacherIds] = useState(lesson?.teacher_id ? [lesson.teacher_id] : [])
   const [participantState, setParticipantState] = useState(() =>
@@ -522,6 +604,7 @@ function ScheduleForm({
   const [errorDetails, setErrorDetails] = useState<components['schemas']['ErrorDetail'][]>([])
   const [latestVersion, setLatestVersion] = useState<Lesson | null>(null)
   const [readBackLesson, setReadBackLesson] = useState<Lesson | null>(null)
+  const [readBackCandidates, setReadBackCandidates] = useState<Lesson[]>([])
   const [reconcileMessage, setReconcileMessage] = useState('')
   const [confirmOverwrite, setConfirmOverwrite] = useState(false)
   const [submittedBody, setSubmittedBody] = useState<LessonWrite | null>(null)
@@ -533,6 +616,12 @@ function ScheduleForm({
   const exitStatus = busy ? 'submitting' : uncertain ? 'uncertain' : dirty ? 'draft' : 'none'
   const { setStatus: setExitStatus } = useUnsavedChanges()
   const blocker = useBlocker(exitStatus !== 'none')
+  const getDialogFocusTarget = useCallback(() => {
+    const activeElement = document.activeElement as HTMLElement | null
+    return activeElement && dialogRef.current?.contains(activeElement)
+      ? activeElement
+      : lastFormFocusRef.current
+  }, [])
   const assignmentsQueries = useQueries({
     queries: groupIds.map((groupId) => ({
       queryKey: ['staff-schedule', userId, 'assignments', courseOffering, groupId],
@@ -594,21 +683,26 @@ function ScheduleForm({
   useLayoutEffect(() => {
     const dialog = navigationDialogRef.current
     if (blocker.state === 'blocked') {
+      navigationReturnFocusRef.current = getDialogFocusTarget()
       if (!dialog?.open) dialog?.showModal()
       continueNavigationRef.current?.focus()
-    } else if (dialog?.open) dialog.close()
-    return () => {
-      if (dialog?.open) dialog.close()
+    } else if (dialog?.open) {
+      dialog.close()
+      if (dialogRef.current && !dialogRef.current.open) dialogRef.current.showModal()
+      const returnFocus = navigationReturnFocusRef.current
+      window.requestAnimationFrame(() => returnFocus?.focus())
     }
-  }, [blocker.state])
+  }, [blocker.state, getDialogFocusTarget])
   useLayoutEffect(() => {
     const dialog = closeDialogRef.current
     if (confirmLeave) {
       if (!dialog?.open) dialog?.showModal()
       continueCloseRef.current?.focus()
-    } else if (dialog?.open) dialog.close()
-    return () => {
-      if (dialog?.open) dialog.close()
+    } else if (dialog?.open) {
+      dialog.close()
+      if (dialogRef.current && !dialogRef.current.open) dialogRef.current.showModal()
+      const returnFocus = closeReturnFocusRef.current
+      window.requestAnimationFrame(() => returnFocus?.focus())
     }
   }, [confirmLeave])
   const detailFor = (field: string) => errorDetails.filter((item) => item.field === field)
@@ -649,6 +743,7 @@ function ScheduleForm({
     }
     setSubmittedBody(body)
     setReadBackLesson(null)
+    setReadBackCandidates([])
     setReconcileMessage('')
     if (
       operation === 'move' &&
@@ -714,39 +809,45 @@ function ScheduleForm({
           })
         }
         queryClient.setQueryData(['staff-schedule', userId, 'lesson', actual.id], actual)
-      }
-      const currentLessons = await onReadSchedule()
-      const found =
-        actual ??
-        currentLessons.find((item) => {
-          if (!submittedBody) return false
-          return (
-            item.course_offering_id === submittedBody.course_offering_id &&
-            item.starts_at === submittedBody.starts_at &&
-            item.ends_at === submittedBody.ends_at &&
-            item.kind === submittedBody.kind &&
-            item.teacher_id === submittedBody.teacher_id &&
-            JSON.stringify(item.participants) === JSON.stringify(submittedBody.participants) &&
-            JSON.stringify([...item.room_ids].sort()) ===
-              JSON.stringify([...submittedBody.room_ids].sort())
-          )
-        }) ??
-        null
-      setReadBackLesson(found)
-      if (found) {
+        await onReadSchedule()
+        setReadBackLesson(actual)
+        setReadBackCandidates([actual])
         setUncertain(false)
         setReconcileMessage(
-          operation === 'create'
-            ? 'Сверка завершена: найдено сохранённое занятие. Новый запрос не отправлялся.'
-            : 'Сверка завершена: показано текущее занятие на сервере. Черновик сохранён отдельно.',
+          operation === 'move' && actual.id !== lesson.id
+            ? 'Сверка показала связанную текущую запись переноса. Новый запрос не отправлялся.'
+            : 'Сверка показала текущее состояние записи. Черновик сохранён отдельно; мутация не повторялась.',
+        )
+        void queryClient.invalidateQueries({ queryKey: ['staff-schedule', userId, 'lessons'] })
+        return
+      }
+      if (!submittedBody) {
+        setReadBackLesson(null)
+        setReadBackCandidates([])
+        setUncertain(true)
+        setReconcileMessage('Нет данных для сверки. Результат создания остаётся неопределённым.')
+        return
+      }
+      const listed = await listLessonsForCreateReconciliation(submittedBody)
+      const matches = listed.filter((item) => matchesLessonWrite(item, submittedBody))
+      setReadBackCandidates(matches)
+      setReadBackLesson(matches.length === 1 ? matches[0] : null)
+      setUncertain(true)
+      if (matches.length === 1) {
+        setReconcileMessage(
+          'Найдена одна запись с совпадающими полями. Существующий API не подтверждает, что её создал именно этот запрос; результат остаётся неопределённым. POST не повторялся.',
+        )
+      } else if (matches.length > 1) {
+        setReconcileMessage(
+          `Найдено ${matches.length} записей с совпадающими полями. Нельзя определить результат этого запроса; POST не повторялся.`,
         )
       } else {
         setReconcileMessage(
-          'В текущем расписании совпадение не найдено. Результат остаётся неопределённым; повторите чтение после проверки фильтра.',
+          'Совпадение не найдено в расписании выбранной группы за период занятия. Результат остаётся неопределённым; POST не повторялся.',
         )
       }
-      void queryClient.invalidateQueries({ queryKey: ['staff-schedule', userId, 'lessons'] })
     } catch (caught) {
+      setUncertain(true)
       setReconcileMessage(getErrorMessage(caught))
       if (caught instanceof ApiClientError && caught.status === 403) onForbidden()
     }
@@ -767,8 +868,24 @@ function ScheduleForm({
   }
   const close = () => {
     if (busy) return
-    if (dirty && !confirmLeave) setConfirmLeave(true)
-    else onClose()
+    if (dirty && !confirmLeave) {
+      closeReturnFocusRef.current = getDialogFocusTarget()
+      setConfirmLeave(true)
+    } else onClose()
+  }
+  const continueEditing = () => {
+    if (closeDialogRef.current?.open) closeDialogRef.current.close()
+    setConfirmLeave(false)
+    if (dialogRef.current && !dialogRef.current.open) dialogRef.current.showModal()
+    const returnFocus = closeReturnFocusRef.current
+    window.requestAnimationFrame(() => returnFocus?.focus())
+  }
+  const continueNavigation = () => {
+    if (navigationDialogRef.current?.open) navigationDialogRef.current.close()
+    blocker.reset?.()
+    if (dialogRef.current && !dialogRef.current.open) dialogRef.current.showModal()
+    const returnFocus = navigationReturnFocusRef.current
+    window.requestAnimationFrame(() => returnFocus?.focus())
   }
   const fieldError = (field: string) =>
     fieldMessage(field) ? (
@@ -783,6 +900,10 @@ function ScheduleForm({
         onCancel={(event) => {
           event.preventDefault()
           close()
+        }}
+        onFocusCapture={(event) => {
+          if (event.target instanceof HTMLElement && event.target !== event.currentTarget)
+            lastFormFocusRef.current = event.target
         }}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
@@ -1099,6 +1220,17 @@ function ScheduleForm({
               </dl>
             </section>
           )}
+          {readBackCandidates.length > 1 && (
+            <ul aria-label="Записи с совпадающими полями">
+              {readBackCandidates.map((candidate) => (
+                <li key={candidate.id}>
+                  {candidate.id} · {formatDate(getMoscowDate(new Date(candidate.starts_at)), true)}{' '}
+                  · {formatTime(candidate.starts_at)}–{formatTime(candidate.ends_at)} ·{' '}
+                  {candidate.status}
+                </li>
+              ))}
+            </ul>
+          )}
           {reconcileMessage && <p role="status">{reconcileMessage}</p>}
           <footer>
             <button
@@ -1123,7 +1255,7 @@ function ScheduleForm({
           aria-labelledby="staff-schedule-close-title"
           onCancel={(event) => {
             event.preventDefault()
-            setConfirmLeave(false)
+            continueEditing()
           }}
         >
           <h2 id="staff-schedule-close-title">Закрыть черновик?</h2>
@@ -1133,7 +1265,7 @@ function ScheduleForm({
               ref={continueCloseRef}
               type="button"
               className="staff-schedule__secondary"
-              onClick={() => setConfirmLeave(false)}
+              onClick={continueEditing}
             >
               Продолжить редактирование
             </button>
@@ -1150,7 +1282,7 @@ function ScheduleForm({
           aria-labelledby="staff-schedule-navigation-title"
           onCancel={(event) => {
             event.preventDefault()
-            blocker.reset?.()
+            continueNavigation()
           }}
         >
           <h2 id="staff-schedule-navigation-title">
@@ -1168,7 +1300,7 @@ function ScheduleForm({
               ref={continueNavigationRef}
               type="button"
               className="staff-schedule__secondary"
-              onClick={() => blocker.reset?.()}
+              onClick={continueNavigation}
             >
               Продолжить редактирование
             </button>
@@ -1244,22 +1376,13 @@ function StaffSchedulePageContent() {
     setActionError,
     setActionUncertain,
   ])
+  const resourceQuery = getResourceQuery(resource, searchParams)
   const catalog = useInfiniteQuery({
-    queryKey: [
-      'staff-schedule',
-      userId,
-      'catalog',
-      resource,
-      searchParams.get('q') ?? searchParams.get('resource_name') ?? '',
-    ],
+    queryKey: ['staff-schedule', userId, 'catalog', resource, resourceQuery],
     initialPageParam: null as string | null,
     queryFn: ({ signal, pageParam }) =>
       apiFetch<components['schemas']['CatalogPage']>(
-        catalogUrl(
-          resourceKinds[resource],
-          searchParams.get('q') ?? searchParams.get('resource_name') ?? '',
-          pageParam,
-        ),
+        catalogUrl(resourceKinds[resource], resourceQuery, pageParam),
         { authenticated: true, signal },
       ),
     getNextPageParam: (lastPage) => lastPage.next_after_id,
@@ -1270,8 +1393,10 @@ function StaffSchedulePageContent() {
     [403, 404].includes(catalog.error.status ?? 0)
       ? []
       : (catalog.data?.pages.flatMap((page) => page.items) ?? [])
-  const selectedResourceName =
-    resourceItems.find((item) => item.id === selectedResourceId)?.name ?? ''
+  const selectedResourceItem = resourceItems.find((item) => item.id === selectedResourceId)
+  const selectedResourceName = selectedResourceItem
+    ? getResourceLabel(resource, selectedResourceItem)
+    : ''
   const schedule = useInfiniteQuery({
     queryKey: ['staff-schedule', userId, 'lessons', resource, selectedResourceId, dateFrom, dateTo],
     initialPageParam: null as string | null,
@@ -1341,37 +1466,24 @@ function StaffSchedulePageContent() {
     dateFrom,
     dateTo,
   ])
-  const grouped = useMemo(() => {
-    const sorted = [...lessons].sort(
-      (a, b) => a.starts_at.localeCompare(b.starts_at) || a.id.localeCompare(b.id),
-    )
-    return sorted.reduce<Record<string, Lesson[]>>((acc, lesson) => {
-      const day = getMoscowDate(new Date(lesson.starts_at))
-      ;(acc[day] ??= []).push(lesson)
-      return acc
-    }, {})
-  }, [lessons])
+  const grouped = groupLessonsByVisibleDays(lessons, dateFrom, dateTo)
   const changeResource = (next: Resource) => {
     setSearchParams({ resource: next, date, view: mode })
   }
   const updateDate = (next: string) => {
     if (!isValidCalendarDate(next)) return
-    setSearchParams({
-      resource,
-      resource_id: selectedResourceId,
-      q: selectedResourceName || searchParams.get('resource_name') || '',
-      date: next,
-      view: mode,
-    })
+    const params = new URLSearchParams(searchParams)
+    params.set('resource', resource)
+    params.set('date', next)
+    params.set('view', mode)
+    setSearchParams(params)
   }
   const changeMode = (next: 'day' | 'week') => {
-    setSearchParams({
-      resource,
-      resource_id: selectedResourceId,
-      q: selectedResourceName || searchParams.get('resource_name') || '',
-      date,
-      view: next,
-    })
+    const params = new URLSearchParams(searchParams)
+    params.set('resource', resource)
+    params.set('date', date)
+    params.set('view', next)
+    setSearchParams(params)
   }
   const mutateStatus = async (lesson: Lesson, action: 'cancel' | 'restore') => {
     setBusyId(lesson.id)
@@ -1407,7 +1519,7 @@ function StaffSchedulePageContent() {
       setActionUncertain(false)
       queryClient.setQueryData(['staff-schedule', userId, 'lesson', actual.id], actual)
       if (
-        (lastAction?.action === 'cancel' && actual.status !== 'scheduled') ||
+        (lastAction?.action === 'cancel' && actual.status === 'cancelled') ||
         (lastAction?.action === 'restore' && actual.status === 'scheduled')
       ) {
         setConfirmCancel(null)
@@ -1417,6 +1529,14 @@ function StaffSchedulePageContent() {
             : 'Сверка подтвердила восстановление. Список обновлён; запрос повторно не отправлялся.',
         )
       } else {
+        if (lastAction?.action === 'cancel' && actual.status === 'moved') {
+          setConfirmCancel(null)
+          setActionError(
+            'Запись перенесена. Это не подтверждает отмену; запрос повторно не отправлялся.',
+          )
+          void queryClient.invalidateQueries({ queryKey: ['staff-schedule', userId, 'lessons'] })
+          return
+        }
         setActionError(
           'Сверка завершена. Запись не перешла в запрошенное состояние; повторное действие требует отдельного подтверждения.',
         )
@@ -1454,7 +1574,7 @@ function StaffSchedulePageContent() {
         resource: target.resource,
         resource_id: target.id,
         resource_name: target.name,
-        q: target.name,
+        q: target.search,
         date: positionDate,
         view: mode,
       })
@@ -1541,11 +1661,7 @@ function StaffSchedulePageContent() {
             aria-label={`Поиск: ${resourceLabels[resource].toLowerCase()}`}
             aria-expanded="true"
             placeholder="Начните вводить название"
-            value={
-              selectedResourceId
-                ? selectedResourceName || searchParams.get('q') || ''
-                : (searchParams.get('q') ?? '')
-            }
+            value={selectedResourceId ? selectedResourceName : resourceQuery}
             onChange={(event) => {
               const params = new URLSearchParams(searchParams)
               params.set('q', event.target.value)
@@ -1564,7 +1680,7 @@ function StaffSchedulePageContent() {
                 params.set('resource', resource)
                 params.set('resource_id', event.target.value)
                 if (selectedItem) {
-                  params.set('resource_name', selectedItem.name)
+                  params.set('resource_name', getResourceLabel(resource, selectedItem))
                   params.set('q', selectedItem.name)
                 }
                 params.set('date', date)
@@ -1575,7 +1691,7 @@ function StaffSchedulePageContent() {
               <option value="">Выберите объект</option>
               {resourceItems.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.name}
+                  {getResourceLabel(resource, item)}
                 </option>
               ))}
             </select>
