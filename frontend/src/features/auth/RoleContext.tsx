@@ -154,6 +154,10 @@ export function StaffHome() {
             <p>
               <Link to="/staff/news">Открыть редактор новостей</Link>
             </p>
+          ) : permission === 'schedule.edit' ? (
+            <p>
+              <Link to="/staff/schedule">Открыть редактор расписания</Link>
+            </p>
           ) : (
             <p>
               Модуль пока недоступен. Полномочие предоставлено, функциональность будет подключена на

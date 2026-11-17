@@ -474,13 +474,9 @@ function CabinetShell() {
           <UserMenu student={student} exitStatus={exitStatus} />
         </header>
         <main className="student-content" id="main-content" ref={mainContentRef} tabIndex={-1}>
-          {student ? (
-            <UnsavedChangesProvider value={{ status: exitStatus, setStatus: setExitStatus }}>
-              <Outlet />
-            </UnsavedChangesProvider>
-          ) : (
+          <UnsavedChangesProvider value={{ status: exitStatus, setStatus: setExitStatus }}>
             <Outlet />
-          )}
+          </UnsavedChangesProvider>
         </main>
       </div>
       <MobileDrawer isOpen={isDrawerOpen} onClose={closeDrawer} />

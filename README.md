@@ -827,5 +827,10 @@ production ACL по существующей процедуре [PRODUCTION.md](
 Контракт: [API](docs/API.md), [аудит](docs/AUDIT.md). Перед запуском применить
 `alembic upgrade head` (миграции `20261116_04` и `20261116_05`) и штатный production ACL script
 для существующих volumes. Предыдущие миграции не меняются.
-Проверки: `pytest -m integration tests/test_schedule_editor*.py` и регрессии
+Проверки backend: `pytest -m integration tests/test_schedule_editor*.py` и регрессии
 `tests/test_assessed_lesson_participants.py`; нужны PostgreSQL и runtime ACL.
+Frontend #82 подключает адаптивный `/staff/schedule` к этим контрактам. Для полного
+browser E2E на отдельной тестовой PostgreSQL установите pinned Playwright 1.57.0,
+задайте `PLAYWRIGHT_MODULE` и выполните
+`bash scripts/staff-schedule-browser-e2e.sh`. Runner создаёт только вымышленные
+фикстуры в `uni_space_test` и удаляет тестовый Compose volume при завершении.
