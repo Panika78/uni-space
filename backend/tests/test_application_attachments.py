@@ -212,6 +212,77 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
         assert no_file.json()["error"]["code"] == "attachment_required"
         assert client.get("/api/v1/services").json()["items"]
 
+        def application_state():
+            with Session(postgresql_engine) as db:
+                application_count = db.scalar(
+                    select(func.count())
+                    .select_from(Application)
+                    .where(Application.student_id == student_id)
+                )
+                attachment_count = db.scalar(
+                    select(func.count())
+                    .select_from(ApplicationAttachment)
+                    .join(Application)
+                    .where(Application.student_id == student_id)
+                )
+                history_count = db.scalar(
+                    select(func.count())
+                    .select_from(ApplicationHistory)
+                    .join(Application)
+                    .where(Application.student_id == student_id)
+                )
+                return application_count, attachment_count, history_count
+
+        def submit_storage_fault(filename):
+            return client.post(
+                "/api/v1/applications",
+                data={"form_data": __import__("json").dumps(form)},
+                files=[("files", (filename, PDF, "application/pdf"))],
+            )
+
+        def assert_storage_unavailable(response):
+            assert response.status_code == 503
+            assert response.json()["error"]["code"] == "temporarily_unavailable"
+            assert str(storage_root) not in response.text
+            assert "storage_key" not in response.text
+
+        empty_application_state = application_state()
+        from errno import EACCES, EIO, ENOSPC
+
+        def fail_mkstemp(*_args, **_kwargs):
+            raise OSError(ENOSPC, "full", str(storage_root))
+
+        with monkeypatch.context() as fault:
+            fault.setattr(
+                router_module.storage.tempfile,
+                "mkstemp",
+                fail_mkstemp,
+            )
+            assert_storage_unavailable(submit_storage_fault("full.pdf"))
+        assert application_state() == empty_application_state
+
+        with monkeypatch.context() as fault:
+            fault.setattr(
+                router_module.storage.os,
+                "fchmod",
+                lambda *_args: (_ for _ in ()).throw(PermissionError(EACCES, "denied")),
+            )
+            assert_storage_unavailable(submit_storage_fault("denied.pdf"))
+        assert application_state() == empty_application_state
+
+        real_link = router_module.storage.os.link
+
+        def publish_then_fail(source, destination, *args, **kwargs):
+            real_link(source, destination, *args, **kwargs)
+            raise OSError(EIO, "injected publish failure", str(storage_root))
+
+        with monkeypatch.context() as fault:
+            fault.setattr(router_module.storage.os, "link", publish_then_fail)
+            assert_storage_unavailable(submit_storage_fault("publish-failure.pdf"))
+        assert application_state() == empty_application_state
+        assert [path for path in storage_root.iterdir() if not path.name.startswith(".")] == []
+        assert list((storage_root / ".staging").iterdir()) == []
+
         created = client.post(
             "/api/v1/applications",
             data={"form_data": __import__("json").dumps(form)},
@@ -276,9 +347,37 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
             application.review_status = "needs_correction"
             application.version = 2
             application.feedback = "Fictional correction"
-        form["basis"] = "family"
-        form["explanation"] = None
-        resubmitted = client.post(
+
+        attachment_path = storage_root / key
+
+        def application_snapshot():
+            with Session(postgresql_engine) as db:
+                application = db.get(Application, created_id)
+                history = db.scalars(
+                    select(ApplicationHistory)
+                    .where(ApplicationHistory.application_id == created_id)
+                    .order_by(ApplicationHistory.id)
+                ).all()
+                current_attachments = db.scalars(
+                    select(ApplicationAttachment.id)
+                    .where(
+                        ApplicationAttachment.application_id == created_id,
+                        ApplicationAttachment.is_current.is_(True),
+                    )
+                    .order_by(ApplicationAttachment.id)
+                ).all()
+                return (
+                    application.version,
+                    application.review_status,
+                    application.form_data,
+                    application.feedback,
+                    [(item.id, item.from_status, item.to_status, item.comment) for item in history],
+                    current_attachments,
+                )
+
+        state_before_missing_file = application_snapshot()
+        attachment_path.unlink()
+        missing_file_resubmit = client.post(
             f"/api/v1/applications/{created_id}/resubmit",
             json={
                 "expected_version": 2,
@@ -286,6 +385,95 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
                 "keep_attachment_ids": [attachment["id"]],
             },
         )
+        assert_storage_unavailable(missing_file_resubmit)
+        assert application_snapshot() == state_before_missing_file
+        assert not attachment_path.exists()
+        attachment_path.write_bytes(PDF)
+        attachment_path.chmod(0o600)
+
+        class FailingReadHandle:
+            closed = False
+
+            def read(self, _size):
+                raise OSError(EIO, "injected read error", str(attachment_path))
+
+            def close(self):
+                self.closed = True
+
+        failing_handle = FailingReadHandle()
+        with monkeypatch.context() as fault:
+            fault.setattr(
+                router_module.storage,
+                "open_key",
+                lambda *_args, **_kwargs: failing_handle,
+            )
+            read_error_resubmit = client.post(
+                f"/api/v1/applications/{created_id}/resubmit",
+                json={
+                    "expected_version": 2,
+                    "form_data": form,
+                    "keep_attachment_ids": [attachment["id"]],
+                },
+            )
+        assert_storage_unavailable(read_error_resubmit)
+        assert failing_handle.closed
+        assert application_snapshot() == state_before_missing_file
+
+        form["basis"] = "family"
+        form["explanation"] = None
+        from threading import Event
+
+        read_started = Event()
+        allow_read = Event()
+        open_key = router_module.storage.open_key
+        real_handle = open_key(storage_root, key)
+
+        class BlockingReadHandle:
+            def read(self, size):
+                read_started.set()
+                assert allow_read.wait(timeout=5)
+                return real_handle.read(size)
+
+            def close(self):
+                real_handle.close()
+
+        request_body = {
+            "expected_version": 2,
+            "form_data": form,
+            "keep_attachment_ids": [attachment["id"]],
+        }
+        with Session(postgresql_engine) as db:
+            all_referenced_keys = set(
+                db.scalars(
+                    select(ApplicationAttachment.storage_key)
+                    .join(Application)
+                    .where(Application.student_id == student_id)
+                )
+            )
+        with monkeypatch.context() as fault:
+            fault.setattr(
+                router_module.storage,
+                "open_key",
+                lambda *_args, **_kwargs: BlockingReadHandle(),
+            )
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                submission = executor.submit(
+                    client.post,
+                    f"/api/v1/applications/{created_id}/resubmit",
+                    json=request_body,
+                )
+                assert read_started.wait(timeout=5)
+                cleanup = executor.submit(
+                    cleanup_orphans,
+                    storage_root,
+                    all_referenced_keys,
+                    older_than_seconds=0,
+                )
+                with pytest.raises(TimeoutError):
+                    cleanup.result(timeout=0.1)
+                allow_read.set()
+                resubmitted = submission.result(timeout=5)
+                assert cleanup.result(timeout=5) == 0
         assert resubmitted.status_code == 200, resubmitted.text
         assert resubmitted.json()["form_data"]["basis"] == "family"
         assert [item["id"] for item in resubmitted.json()["attachments"]] == [attachment["id"]]
@@ -440,7 +628,13 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
                     ApplicationAttachment.is_current.is_(True),
                 )
             )
-            committed_keys = set(db.scalars(select(ApplicationAttachment.storage_key)))
+            committed_keys = set(
+                db.scalars(
+                    select(ApplicationAttachment.storage_key)
+                    .join(Application)
+                    .where(Application.student_id == student_id)
+                )
+            )
         assert still_current.id == current_after.id
         storage_root = tmp_path / "private-files"
         assert cleanup_orphans(storage_root, committed_keys, older_than_seconds=0) == 1
@@ -531,7 +725,13 @@ def test_academic_leave_upload_download_and_atomic_resubmit(
             if path.is_file() and not path.name.startswith(".")
         }
         with Session(postgresql_engine) as db:
-            committed_keys = set(db.scalars(select(ApplicationAttachment.storage_key)))
+            committed_keys = set(
+                db.scalars(
+                    select(ApplicationAttachment.storage_key)
+                    .join(Application)
+                    .where(Application.student_id == student_id)
+                )
+            )
         assert len(before_cleanup - committed_keys) == 1
         assert cleanup_orphans(storage_root, committed_keys, older_than_seconds=0) == 1
         after_cleanup = {

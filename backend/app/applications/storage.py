@@ -69,6 +69,12 @@ def _valid_document(path: Path, mime_type: str) -> bool:
             with Image.open(path) as image:
                 image.load()
         return True
+    except OSError as exc:
+        # Image/PDF parsers may use errno-less OSError for malformed content;
+        # real filesystem failures carry an errno and must reach the API mapper.
+        if exc.errno is not None:
+            raise
+        return False
     except Exception:
         return False
 
@@ -99,14 +105,17 @@ def stage_upload(source: BinaryIO, filename: str, root: Path) -> StagedAttachmen
     staging.chmod(0o700)
     fd, temporary_name = tempfile.mkstemp(prefix="upload-", dir=staging)
     path = Path(temporary_name)
-    os.fchmod(fd, 0o600)
-    lock_fd = os.dup(fd)
+    lock_fd = None
     digest = hashlib.sha256()
     size = 0
     prefix = b""
     try:
+        os.fchmod(fd, 0o600)
+        lock_fd = os.dup(fd)
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
-        with os.fdopen(fd, "wb") as target:
+        target = os.fdopen(fd, "wb")
+        fd = None
+        with target:
             while chunk := source.read(CHUNK_BYTES):
                 size += len(chunk)
                 if size > MAX_FILE_BYTES:
@@ -128,11 +137,14 @@ def stage_upload(source: BinaryIO, filename: str, root: Path) -> StagedAttachmen
         key = f"{uuid.uuid4().hex}{extension}"
         return StagedAttachment(path, key, filename, mime, size, lock_fd)
     except BaseException:
-        path.unlink(missing_ok=True)
         with contextlib.suppress(OSError):
-            os.close(fd)
-        with contextlib.suppress(OSError):
-            os.close(lock_fd)
+            path.unlink(missing_ok=True)
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        if lock_fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(lock_fd)
         raise
 
 
@@ -152,7 +164,8 @@ def publish(staged: StagedAttachment, root: Path) -> Path:
 
 def discard(staged: StagedAttachment) -> None:
     try:
-        staged.stage_path.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            staged.stage_path.unlink(missing_ok=True)
     finally:
         with contextlib.suppress(OSError):
             os.close(staged.lock_fd)

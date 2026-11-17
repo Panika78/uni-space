@@ -138,7 +138,8 @@ def resolve_published_after_commit_error(
     if not storage_keys or commit_attempted or not rollback_confirmed:
         return
     for storage_key in storage_keys:
-        storage.delete_key(root, storage_key)
+        with suppress(OSError):
+            storage.delete_key(root, storage_key)
 
 
 async def parse_submission(request: Request, *, resubmit: bool = False):
@@ -295,6 +296,10 @@ async def submit_application(
             staged.append(storage.stage_upload(item.file, item.filename or "attachment", root))
         if sum(item.size_bytes for item in staged) > storage.MAX_TOTAL_BYTES:
             raise HTTPException(422, "attachment_limit_exceeded")
+    except OSError as exc:
+        for item in staged:
+            storage.discard(item)
+        raise HTTPException(503, "temporarily_unavailable") from exc
     except Exception:
         for item in staged:
             storage.discard(item)
@@ -314,10 +319,16 @@ async def submit_application(
     commit_attempted = False
     try:
         if coordination is not None:
-            coordination.__enter__()
+            try:
+                coordination.__enter__()
+            except OSError as exc:
+                raise HTTPException(503, "temporarily_unavailable") from exc
             coordination_acquired = True
         for item in staged:
-            storage.publish(item, root)
+            try:
+                storage.publish(item, root)
+            except OSError as exc:
+                raise HTTPException(503, "temporarily_unavailable") from exc
         db.add(application)
         db.flush()
         for item in staged:
@@ -801,17 +812,27 @@ async def resubmit_application(
             staged.append(storage.stage_upload(item.file, item.filename or "attachment", root))
         if sum(item.size_bytes for item in staged) > storage.MAX_TOTAL_BYTES:
             raise HTTPException(422, "attachment_limit_exceeded")
+    except OSError as exc:
+        for item in staged:
+            storage.discard(item)
+        raise HTTPException(503, "temporarily_unavailable") from exc
     except Exception:
         for item in staged:
             storage.discard(item)
         raise
     removed_keys = []
-    coordination = storage.coordination_lock(root) if staged else None
+    coordination = (
+        storage.coordination_lock(root) if staged or resubmission.keep_attachment_ids else None
+    )
     coordination_acquired = False
     commit_attempted = False
+    retained_handles = []
     try:
         if coordination is not None:
-            coordination.__enter__()
+            try:
+                coordination.__enter__()
+            except OSError as exc:
+                raise HTTPException(503, "temporarily_unavailable") from exc
             coordination_acquired = True
         # The lock serializes simultaneous replacement attempts before they inspect
         # the current attachment set; the version predicate remains the final guard.
@@ -853,6 +874,22 @@ async def resubmit_application(
         ):
             raise HTTPException(409, "version_conflict")
         retained = [current_by_id[item] for item in keep_ids]
+        if service.code == "academic_leave":
+            for attachment in retained:
+                handle = None
+                try:
+                    handle = storage.open_key(root, attachment.storage_key)
+                    readable_size = 0
+                    while chunk := handle.read(storage.CHUNK_BYTES):
+                        readable_size += len(chunk)
+                    if not readable_size:
+                        raise OSError("stored attachment is empty")
+                except OSError as exc:
+                    if handle is not None:
+                        with suppress(OSError):
+                            handle.close()
+                    raise HTTPException(503, "temporarily_unavailable") from exc
+                retained_handles.append(handle)
         if service.code == "academic_leave" and not (retained or staged):
             raise HTTPException(422, "attachment_required")
         if len(retained) + len(staged) > storage.MAX_FILES:
@@ -885,7 +922,10 @@ async def resubmit_application(
                 old.is_current = False
                 removed_keys.append(old.storage_key)
         for item in staged:
-            storage.publish(item, root)
+            try:
+                storage.publish(item, root)
+            except OSError as exc:
+                raise HTTPException(503, "temporarily_unavailable") from exc
             db.add(
                 ApplicationAttachment(
                     application_id=application.id,
@@ -919,6 +959,9 @@ async def resubmit_application(
             storage.discard(item)
         raise
     finally:
+        for handle in retained_handles:
+            with suppress(OSError):
+                handle.close()
         if coordination_acquired:
             coordination.__exit__(None, None, None)
 
