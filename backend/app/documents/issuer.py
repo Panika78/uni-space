@@ -140,7 +140,9 @@ def _validate_pdf(content: bytes, snapshot: dict) -> None:
         if snapshot.get("purpose") is not None:
             required.append(snapshot.get("purpose"))
     if any(
-        not isinstance(value, str) or not value.strip() or " ".join(value.split()) not in extracted
+        not isinstance(value, str)
+        or not value.strip()
+        or " ".join(pdf.normalize_font_text(value).split()) not in extracted
         for value in required
     ):
         raise ValueError("PDF is missing required readable document fields")

@@ -98,6 +98,16 @@ def test_pdf_is_searchable_cyrillic_multi_page_and_clearly_marked():
     assert "ДЕМО · НЕ ОФИЦИАЛЬНЫЙ ДОКУМЕНТ" in text
 
 
+def test_pdf_uses_visible_replacement_for_characters_missing_from_embedded_font():
+    snapshot = _certificate_snapshot() | {"place_of_submission": "Отдел — 東京"}
+    content = pdf.render_pdf(snapshot)
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(io.BytesIO(content)).pages)
+
+    issuer._validate_pdf(content, snapshot)
+    assert "Отдел — ��" in text
+    assert "\x00" not in text
+
+
 def test_pdf_storage_cleanup_preserves_referenced_and_recent_objects(tmp_path):
     attachment_root = tmp_path / "private"
     root = storage.issued_root(attachment_root)

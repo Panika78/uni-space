@@ -54,8 +54,18 @@ def _register_font() -> None:
         pdfmetrics.registerFont(TTFont("UniSpaceDejaVu", str(FONT_PATH)))
 
 
+def normalize_font_text(value: object) -> str:
+    """Replace codepoints absent from the embedded font with a visible glyph."""
+    _register_font()
+    supported = pdfmetrics.getFont("UniSpaceDejaVu").face.charWidths
+    return "".join(char if ord(char) in supported else "\ufffd" for char in str(value))
+
+
 def _text(value: object) -> str:
-    return escape(str(value)).replace("\n", "<br/>")
+    # ReportLab otherwise emits NUL text for codepoints missing from the
+    # embedded font. Keep the document readable and searchable with an
+    # explicit replacement glyph instead of producing invalid text operators.
+    return escape(normalize_font_text(value)).replace("\n", "<br/>")
 
 
 def _snapshot(db: Session, application: Application, issued_number: str) -> dict:
