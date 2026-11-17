@@ -396,3 +396,77 @@ it('retains final grade drafts and retry across journal tabs, then reconciles cl
   expect(date).toHaveValue('')
   expect(location).toHaveValue('')
 })
+
+it('keeps retake fields locked until a debt is confirmed by the server', async () => {
+  const user = userEvent.setup()
+  Object.assign(fixtures.final, { grade_value: 4, has_debt: false })
+  renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
+  const finals = await screen.findByRole('region', { name: /Итоги аттестации/ })
+  const grade = await within(finals).findByLabelText('Итог: Анна Иванова')
+  const date = await within(finals).findByLabelText('Дата пересдачи: Анна Иванова')
+  const location = await within(finals).findByLabelText('Место пересдачи: Анна Иванова')
+  expect(grade).toHaveValue('4')
+  expect(date).toBeDisabled()
+  expect(location).toBeDisabled()
+
+  failNextFinalWrite = true
+  await user.selectOptions(grade, '2')
+  await screen.findByRole('button', { name: 'Повторить' })
+  expect(grade).toHaveValue('2')
+  expect(date).toBeDisabled()
+  expect(location).toBeDisabled()
+  expect(fixtures.final.grade_value).toBe(4)
+
+  await user.click(screen.getByRole('button', { name: 'Повторить' }))
+  await waitFor(() => expect(fixtures.final.grade_value).toBe(2))
+  await waitFor(() => expect(date).toBeEnabled())
+  await user.type(date, '2027-01-10')
+  await user.tab()
+  await waitFor(() => expect(fixtures.final.retake_date).toBe('2027-01-10'))
+})
+
+it('does not confirm or clear a final draft when a successful response normalizes it', async () => {
+  const user = userEvent.setup()
+  Object.assign(fixtures.final, { grade_value: 2, has_debt: true })
+  let normalizeRetakeResponse = true
+  vi.mocked(apiFetch).mockImplementation(async (input, init = {}) => {
+    const url = String(input)
+    if (url.startsWith('/api/v1/teaching/assignments')) return page([assignment])
+    if (url.endsWith('/students?limit=100')) return page(fixtures.marks.map((row) => ({ ...row })))
+    if (url.endsWith('/lessons?limit=100')) return page([lesson])
+    if (url.endsWith('/assessments?limit=100')) return page([assessment])
+    if (url.endsWith('/final-results?limit=100')) return page([{ ...fixtures.final }])
+    if (url.includes('/final-results/courses/11/students/')) {
+      if (init.body) {
+        Object.assign(fixtures.final, JSON.parse(String(init.body)))
+        return {
+          ...fixtures.final,
+          retake_date: normalizeRetakeResponse ? null : fixtures.final.retake_date,
+        }
+      }
+      return { ...fixtures.final }
+    }
+    if (url.endsWith('/lessons/31/attendance?limit=100')) return page(fixtures.marks)
+    if (url.includes('/lessons/31/attendance?')) return page([])
+    if (url.endsWith('/assessments/44/results?limit=100')) return page(fixtures.scores)
+    if (url.includes('/assessments/44/results?')) return page([])
+    if (url.endsWith('/dates')) return { items: [] }
+    throw new Error(`Unexpected journal request: ${url}`)
+  })
+
+  renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
+  const finals = await screen.findByRole('region', { name: /Итоги аттестации/ })
+  const date = await within(finals).findByLabelText('Дата пересдачи: Студент 1')
+  await user.type(date, '2027-01-10')
+  await user.tab()
+  await screen.findByText(/Сервер сохранил другое значение/)
+  expect(date).toHaveValue('2027-01-10')
+  expect(fixtures.final.retake_date).toBe('2027-01-10')
+  expect(screen.queryByText('Сохранено')).not.toBeInTheDocument()
+
+  normalizeRetakeResponse = false
+  await user.clear(date)
+  await user.type(date, '2027-01-10')
+  await user.tab()
+  await waitFor(() => expect(within(finals).getByText('Сохранено')).toBeInTheDocument())
+})

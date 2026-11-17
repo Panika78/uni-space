@@ -22,6 +22,7 @@ from app.models import (
     CourseGroup,
     CourseOffering,
     Discipline,
+    FinalResult,
     Lesson,
     LessonGroup,
     OrgUnit,
@@ -74,8 +75,26 @@ def main() -> None:
                 )
             )
         return
+    if mode == "verify-retake":
+        course_id = int(os.environ["TEACHER_JOURNAL_COURSE_A"])
+        student_id = int(os.environ["TEACHER_JOURNAL_STUDENT_A"])
+        with SessionLocal() as db:
+            final = db.scalar(
+                select(FinalResult).where(
+                    FinalResult.course_offering_id == course_id,
+                    FinalResult.student_id == student_id,
+                )
+            )
+            if (
+                final is None
+                or final.grade_value != 2
+                or final.retake_date != date(2027, 1, 10)
+                or final.retake_location != "A-101"
+            ):
+                raise SystemExit("Expected retake values were not persisted in PostgreSQL")
+        return
     if mode != "seed":
-        raise SystemExit("Supported modes are seed and revoke")
+        raise SystemExit("Supported modes are seed, revoke, and verify-retake")
 
     suffix = uuid4().hex[:10]
     password = "Fictional-Teacher-Journal-E2E-2026"

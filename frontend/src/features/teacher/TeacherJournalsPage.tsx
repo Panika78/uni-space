@@ -744,8 +744,17 @@ export function TeacherJournalsPage() {
         if (currentInputRevision(key) === inputRevision) setSave(key, { phase: 'saved' }, revision)
         void finalsQuery.refetch()
       } else {
+        reconcileFinalQuery(actual, row.student_id)
         if (currentInputRevision(key) === inputRevision)
-          setSave(key, { phase: 'error', retry }, revision)
+          setSave(
+            key,
+            {
+              phase: 'error',
+              message: 'Сервер не подтвердил это изменение. Черновик оставлен.',
+              retry,
+            },
+            revision,
+          )
       }
     } catch {
       if (currentInputRevision(key) !== inputRevision) return
@@ -774,13 +783,55 @@ export function TeacherJournalsPage() {
       async (revision) => {
         if (currentInputRevision(key) !== inputRevision) return
         try {
+          if ('retake_date' in patch || 'retake_location' in patch) {
+            const confirmed = await apiFetch<FinalResult>(
+              `/api/v1/final-results/courses/${encodeURIComponent(selectedCourse)}/students/${encodeURIComponent(row.student_id)}`,
+              { authenticated: true, cache: 'no-store' },
+            )
+            if (!confirmed.has_debt) {
+              reconcileFinalQuery(confirmed, row.student_id)
+              if (currentInputRevision(key) === inputRevision)
+                setSave(
+                  key,
+                  {
+                    phase: 'error',
+                    message:
+                      'Пересдача недоступна: сервер не подтвердил задолженность. Сначала сохраните долг.',
+                  },
+                  revision,
+                )
+              return
+            }
+          }
           const actual = await apiFetch<FinalResult>(
             `/api/v1/final-results/courses/${encodeURIComponent(selectedCourse)}/students/${encodeURIComponent(row.student_id)}`,
             { authenticated: true, method: 'PATCH', body: JSON.stringify(patch) },
           )
-          applyFinalServerResult(actual, row.student_id, key, inputRevision)
-          if (currentInputRevision(key) === inputRevision)
-            setSave(key, { phase: 'saved' }, revision)
+          const matches = Object.entries(patch).every(
+            ([name, value]) => actual[name as keyof FinalResult] === value,
+          )
+          const expectsRetakeCleanup =
+            (typeof patch.grade_value === 'number' && patch.grade_value >= 3) ||
+            patch.passed === true
+          const retakeWasCleared =
+            !expectsRetakeCleanup || (!actual.retake_date && !actual.retake_location)
+          if (matches && retakeWasCleared) {
+            applyFinalServerResult(actual, row.student_id, key, inputRevision)
+            if (currentInputRevision(key) === inputRevision)
+              setSave(key, { phase: 'saved' }, revision)
+          } else {
+            reconcileFinalQuery(actual, row.student_id)
+            if (currentInputRevision(key) === inputRevision)
+              setSave(
+                key,
+                {
+                  phase: 'error',
+                  message:
+                    'Сервер сохранил другое значение. Черновик оставлен; проверьте итог и введите значение заново.',
+                },
+                revision,
+              )
+          }
           void finalsQuery.refetch()
         } catch {
           await verifyFinal(row, patch, key, revision, retry, inputRevision)
@@ -796,9 +847,7 @@ export function TeacherJournalsPage() {
     changedKey: string,
     changedInputRevision: number,
   ) {
-    queryClient.setQueryData<FinalResult[]>(finalsQueryKey, (current) =>
-      current?.map((item) => (item.student_id === studentId ? actual : item)),
-    )
+    reconcileFinalQuery(actual, studentId)
     clearDraft(changedKey, changedInputRevision)
     if (!actual.has_debt) {
       const baseKey = scopedKey(`final:${studentId}`)
@@ -814,6 +863,12 @@ export function TeacherJournalsPage() {
         }
       }
     }
+  }
+
+  function reconcileFinalQuery(actual: FinalResult, studentId: string) {
+    queryClient.setQueryData<FinalResult[]>(finalsQueryKey, (current) =>
+      current?.map((item) => (item.student_id === studentId ? actual : item)),
+    )
   }
 
   useEffect(
@@ -1392,11 +1447,7 @@ function FinalResultsSection({
             const retakeLocationKey = `${key}:retake_location`
             const retakeDate = drafts[retakeDateKey] ?? row.retake_date ?? ''
             const retakeLocation = drafts[retakeLocationKey] ?? row.retake_location ?? ''
-            const draftedHasDebt = dirtyDrafts[key]
-              ? attestationType === 'pass_fail'
-                ? value === 'false'
-                : value === '2'
-              : row.has_debt
+            const draftedHasDebt = row.has_debt
             return (
               <article className="journal-student journal-student--final" key={row.student_id}>
                 <div className="journal-student__identity">

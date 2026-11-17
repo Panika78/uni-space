@@ -279,26 +279,57 @@ try {
     page,
     env.TEACHER_JOURNAL_COURSE_A,
     env.TEACHER_JOURNAL_STUDENT_A,
-    { grade_value: 2 },
-    () => page.getByLabel('Итог: Анна Иванова').selectOption('2'),
-  )
-  await page.getByText('Есть долг').waitFor()
-  await saveFinal(
-    page,
-    env.TEACHER_JOURNAL_COURSE_A,
-    env.TEACHER_JOURNAL_STUDENT_A,
     { grade_value: 4 },
     () => page.getByLabel('Итог: Анна Иванова').selectOption('4'),
   )
-  await page.getByText('Долга нет').waitFor()
-  assert.ok(await page.getByText(/сумма баллов не преобразуется/).isVisible())
-  await saveFinal(
-    page,
-    env.TEACHER_JOURNAL_COURSE_A,
-    env.TEACHER_JOURNAL_STUDENT_A,
-    { grade_value: 2 },
-    () => page.getByLabel('Итог: Анна Иванова').selectOption('2'),
+  const gradeControl = page.getByLabel('Итог: Анна Иванова')
+  const dateControl = page.getByLabel('Дата пересдачи: Анна Иванова')
+  const locationControl = page.getByLabel('Место пересдачи: Анна Иванова')
+  assert.equal(await gradeControl.inputValue(), '4')
+  let rejectDebtOnce = true
+  const finalEndpoint = `**/api/v1/final-results/courses/${env.TEACHER_JOURNAL_COURSE_A}/students/${env.TEACHER_JOURNAL_STUDENT_A}`
+  await page.route(finalEndpoint, async (route) => {
+    const payload = JSON.parse(route.request().postData() || '{}')
+    if (route.request().method() === 'PATCH' && payload.grade_value === 2 && rejectDebtOnce) {
+      rejectDebtOnce = false
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 400))
+      await route.fulfill({ status: 503, contentType: 'application/json', body: '{}' })
+    } else {
+      await route.continue()
+    }
+  })
+  const failedDebtResponse = page.waitForResponse(
+    (response) => response.status() === 503 && response.url().includes('/final-results/courses/'),
   )
+  const debtRequest = page.waitForRequest(
+    (request) =>
+      request.method() === 'PATCH' && JSON.parse(request.postData() || '{}').grade_value === 2,
+  )
+  await gradeControl.selectOption('2')
+  await debtRequest
+  assert.equal(await dateControl.isDisabled(), true)
+  assert.equal(await locationControl.isDisabled(), true)
+  await failedDebtResponse
+  const finalRow = page.locator('.journal-student--final').filter({ hasText: 'Анна Иванова' })
+  await finalRow.getByRole('button', { name: 'Повторить' }).waitFor()
+  assert.equal(await gradeControl.inputValue(), '2')
+  assert.equal(await dateControl.isDisabled(), true)
+  assert.equal(await locationControl.isDisabled(), true)
+  await finalRow.getByText('Сервер не подтвердил это изменение').waitFor()
+  const successfulDebtResponse = page.waitForResponse(
+    (response) =>
+      response.status() === 200 &&
+      response.request().method() === 'PATCH' &&
+      JSON.parse(response.request().postData() || '{}').grade_value === 2,
+  )
+  await finalRow.getByRole('button', { name: 'Повторить' }).click()
+  const successfulDebt = await successfulDebtResponse
+  assert.equal((await successfulDebt.json()).grade_value, 2)
+  await page.waitForFunction(
+    () => !document.querySelector('[aria-label="Дата пересдачи: Анна Иванова"]')?.disabled,
+  )
+  await page.unroute(finalEndpoint)
+  await page.getByText('Есть долг').waitFor()
   const retakeDate = page.getByLabel('Дата пересдачи: Анна Иванова')
   await retakeDate.fill('2027-01-10')
   await saveFinal(
@@ -317,17 +348,78 @@ try {
     { retake_location: 'A-101' },
     () => retakeLocation.blur(),
   )
+  const concurrentPage = await context.newPage()
+  await concurrentPage.goto(`${baseURL}/teacher/journals`)
+  await concurrentPage.getByRole('heading', { name: 'Мои журналы' }).waitFor()
+  await selectJournal(concurrentPage, env.TEACHER_JOURNAL_COURSE_A, env.TEACHER_JOURNAL_GROUP_A)
+  await concurrentPage.getByRole('tab', { name: 'Работы и баллы' }).click()
+  await concurrentPage.getByLabel('Итог: Анна Иванова').waitFor()
+  await page.route(finalEndpoint, async (route) => {
+    const patch = JSON.parse(route.request().postData() || '{}')
+    if (route.request().method() === 'PATCH' && patch.retake_date === '2027-01-12') {
+      const concurrentUpdate = await saveFinal(
+        concurrentPage,
+        env.TEACHER_JOURNAL_COURSE_A,
+        env.TEACHER_JOURNAL_STUDENT_A,
+        { grade_value: 4 },
+        () => concurrentPage.getByLabel('Итог: Анна Иванова').selectOption('4'),
+      )
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(concurrentUpdate),
+      })
+    } else {
+      await route.continue()
+    }
+  })
+  await retakeDate.fill('2027-01-12')
+  await retakeDate.blur()
+  await page.getByText(/Сервер сохранил другое значение/).waitFor()
+  assert.equal(await retakeDate.inputValue(), '2027-01-12')
+  assert.equal(await page.getByLabel('Итог: Анна Иванова').inputValue(), '4')
+  assert.equal(await retakeDate.isDisabled(), true)
+  assert.match(
+    await page.locator('.journal-retake-fields [role="status"]').first().innerText(),
+    /Сервер сохранил другое значение/,
+  )
+  await page.unroute(finalEndpoint)
+  await concurrentPage.close()
+  await saveFinal(
+    page,
+    env.TEACHER_JOURNAL_COURSE_A,
+    env.TEACHER_JOURNAL_STUDENT_A,
+    { grade_value: 2 },
+    () => page.getByLabel('Итог: Анна Иванова').selectOption('2'),
+  )
+  await page.waitForFunction(
+    () => !document.querySelector('[aria-label="Дата пересдачи: Анна Иванова"]')?.disabled,
+  )
+  await retakeDate.fill('2027-01-10')
+  await retakeDate.blur()
+  await page.getByText('Сохранено').last().waitFor()
+  await retakeLocation.fill('A-101')
+  await retakeLocation.blur()
+  await page.getByText('Сохранено').last().waitFor()
+  fixture('verify-retake')
+  await page.reload()
+  await page.getByRole('tab', { name: 'Работы и баллы' }).click()
+  assert.equal(await page.getByLabel('Итог: Анна Иванова').inputValue(), '2')
+  assert.equal(await page.getByLabel('Дата пересдачи: Анна Иванова').inputValue(), '2027-01-10')
+  assert.equal(await page.getByLabel('Место пересдачи: Анна Иванова').inputValue(), 'A-101')
+  const reloadedFinalGrade = page.getByLabel('Итог: Анна Иванова')
   const clearedFinal = await saveFinal(
     page,
     env.TEACHER_JOURNAL_COURSE_A,
     env.TEACHER_JOURNAL_STUDENT_A,
     { grade_value: 4 },
-    () => page.getByLabel('Итог: Анна Иванова').selectOption('4'),
+    () => reloadedFinalGrade.selectOption('4'),
   )
   assert.equal(clearedFinal.retake_date, null)
   assert.equal(clearedFinal.retake_location, null)
   assert.equal(await retakeDate.inputValue(), '')
   assert.equal(await retakeLocation.inputValue(), '')
+  assert.ok(await page.getByText(/сумма баллов не преобразуется/).isVisible())
   await page.reload()
   await page.getByRole('tab', { name: 'Работы и баллы' }).click()
   await page.getByLabel('Итог: Анна Иванова').waitFor()
@@ -395,7 +487,9 @@ try {
   assert.equal(await page.getByLabel('Итог: Анна Иванова').inputValue(), '4')
   assert.equal(await page.getByLabel('Дата пересдачи: Анна Иванова').inputValue(), '')
   assert.equal(await page.getByLabel('Место пересдачи: Анна Иванова').inputValue(), '')
-  check('score bounds, Moscow dates, F05 retake clearing and F12 retained final retry')
+  check(
+    'score bounds, F05 retake clearing, F12 retry and F16 confirmed debt and retake persistence',
+  )
 
   let rejectScoreOnce = true
   await page.route(
@@ -559,11 +653,16 @@ try {
   await secondPage.getByLabel('Работа').selectOption(env.TEACHER_JOURNAL_ASSESSMENT_B)
   const studentBFinal = secondPage.getByLabel(/Итог: Вымышленная студентка группы Б/)
   const studentBId = env.TEACHER_JOURNAL_FOREIGN_STUDENT
+  const studentBRetakeDate = secondPage.getByLabel(/Дата пересдачи: Вымышленная студентка группы Б/)
+  assert.equal(await studentBRetakeDate.isDisabled(), true)
   await saveFinal(secondPage, env.TEACHER_JOURNAL_COURSE_B, studentBId, { passed: false }, () =>
     studentBFinal.selectOption('false'),
   )
-  await secondPage.getByLabel(/Дата пересдачи: Вымышленная студентка группы Б/).fill('2027-02-02')
-  const studentBRetakeDate = secondPage.getByLabel(/Дата пересдачи: Вымышленная студентка группы Б/)
+  await secondPage.waitForFunction(
+    () =>
+      !document.querySelector('[aria-label^="Дата пересдачи: Вымышленная студентка"]')?.disabled,
+  )
+  await studentBRetakeDate.fill('2027-02-02')
   await saveFinal(
     secondPage,
     env.TEACHER_JOURNAL_COURSE_B,
