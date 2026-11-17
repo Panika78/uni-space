@@ -25,6 +25,7 @@ from app.models import (
     Room,
     StaffPermission,
     StaffProfile,
+    Student,
     StudyGroup,
     Subgroup,
     Teacher,
@@ -88,8 +89,9 @@ def main() -> None:
             discipline_id=discipline.id, term_id=term.id, attestation_type="exam"
         )
         room = Room(name="205", building_id=building.id)
+        second_room = Room(name="206", building_id=building.id)
         teacher = Teacher(full_name=f"Вымышленный преподаватель {suffix}")
-        session.add_all([offering, room, teacher])
+        session.add_all([offering, room, second_room, teacher])
         session.flush()
         session.add_all(
             [
@@ -119,7 +121,18 @@ def main() -> None:
             for index, login in enumerate(logins, 1)
         ]
         session.add_all(staff_users)
+        student_user = User(
+            login=f"staff-schedule-student-{suffix}",
+            password_hash=password_hash,
+            full_name="Вымышленный студент браузерного сценария",
+            role="student",
+            is_active=True,
+        )
+        session.add(student_user)
         session.flush()
+        session.add(
+            Student(user_id=student_user.id, group_id=groups[1].id, academic_status="enrolled")
+        )
         profiles = [StaffProfile(user_id=user.id, org_unit_id=office.id) for user in staff_users]
         session.add_all(profiles)
         session.flush()
@@ -148,8 +161,11 @@ def main() -> None:
             "STAFF_SCHEDULE_LOGIN": logins[0],
             "STAFF_SCHEDULE_SECOND_LOGIN": logins[1],
             "STAFF_SCHEDULE_NO_PERMISSION_LOGIN": logins[2],
+            "STAFF_SCHEDULE_STUDENT_LOGIN": student_user.login,
             "STAFF_SCHEDULE_PASSWORD": password,
             "STAFF_SCHEDULE_GROUP": groups[0].name,
+            "STAFF_SCHEDULE_SECOND_GROUP": groups[1].name,
+            "STAFF_SCHEDULE_SECOND_ROOM": second_room.name,
             "STAFF_SCHEDULE_DATE": moscow_today.isoformat(),
             "STAFF_SCHEDULE_LESSON": str(lesson.id),
             "STAFF_SCHEDULE_SUFFIX": suffix,

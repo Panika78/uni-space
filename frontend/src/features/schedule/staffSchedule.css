@@ -361,6 +361,68 @@
 .staff-schedule__confirm p {
   line-height: 1.5;
 }
+.staff-schedule__participant-group {
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid rgba(97, 122, 136, 0.3);
+  border-radius: 12px;
+}
+.staff-schedule__participant-group legend {
+  padding-inline: 5px;
+  font-weight: 650;
+}
+.staff-schedule__participant-group > label,
+.staff-schedule__subgroup-options > label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 38px;
+}
+.staff-schedule__participant-group input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+.staff-schedule__subgroup-options {
+  display: grid;
+  gap: 6px;
+  padding-inline-start: 22px;
+}
+.staff-schedule__snapshot {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.staff-schedule__snapshot > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr);
+  gap: 12px;
+  padding-block: 6px;
+  border-bottom: 1px solid rgba(97, 122, 136, 0.2);
+}
+.staff-schedule__snapshot dt {
+  font-weight: 650;
+}
+.staff-schedule__snapshot dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.staff-schedule__overwrite-confirm {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #a36a12;
+  border-radius: 10px;
+}
+.staff-schedule__notice .staff-schedule__snapshot {
+  margin-top: 10px;
+}
+.staff-schedule__forbidden {
+  max-width: 760px;
+}
 .staff-schedule__confirm footer {
   margin-top: 20px;
 }
@@ -448,5 +510,9 @@
   .staff-schedule__form > footer button,
   .staff-schedule__confirm footer button {
     width: 100%;
+  }
+  .staff-schedule__snapshot > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 }

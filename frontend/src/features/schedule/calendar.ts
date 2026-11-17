@@ -3,6 +3,23 @@ import type { components } from '../../shared/api/schema'
 export type Lesson = components['schemas']['LessonResponse']
 const timezone = 'Europe/Moscow'
 
+export function isValidCalendarDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return false
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > 31) return false
+  const parsed = new Date(0)
+  parsed.setUTCFullYear(year, month - 1, day)
+  parsed.setUTCHours(12, 0, 0, 0)
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  )
+}
+
 export function getMoscowDate(now = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: timezone,

@@ -1,11 +1,18 @@
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useInfiniteQuery, useQueries, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useBlocker } from 'react-router-dom'
 import { ApiClientError, apiFetch } from '../../shared/api/client'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 import type { components } from '../../shared/api/schema'
-import { addDays, formatDate, formatTime, getMoscowDate, getWeekStart } from './calendar'
+import {
+  addDays,
+  formatDate,
+  formatTime,
+  getMoscowDate,
+  getWeekStart,
+  isValidCalendarDate,
+} from './calendar'
 import { useRoleContext } from '../auth/RoleContext'
 import { useUnsavedChanges } from '../../app/UnsavedChangesContext'
 import './staffSchedule.css'
@@ -14,10 +21,50 @@ type Kind = components['schemas']['EditorLesson']['kind']
 type Lesson = components['schemas']['EditorLesson']
 type LessonWrite = components['schemas']['LessonWrite']
 type LessonChange = components['schemas']['LessonChange']
+type CatalogItem = components['schemas']['CatalogItem']
 type CatalogKind =
   'groups' | 'subgroups' | 'teachers' | 'rooms' | 'course-offerings' | 'teaching-assignments'
 type Resource = 'group' | 'teacher' | 'room'
 type Operation = 'create' | 'edit' | 'move'
+type ParticipantSelection = { wholeGroup: boolean; subgroupIds: string[] }
+
+function getInitialParticipantSelection(lesson: Lesson | null) {
+  const grouped = new Map<string, string[]>()
+  const wholeGroups = new Set<string>()
+  for (const participant of lesson?.participants ?? []) {
+    const groupId = participant.group_id
+    const subgroupId = participant.subgroup_id ?? null
+    if (subgroupId === null) wholeGroups.add(groupId)
+    else grouped.set(groupId, [...(grouped.get(groupId) ?? []), subgroupId])
+  }
+  const groupIds = [...new Set(lesson?.participants.map((item) => item.group_id) ?? [])]
+  const selections = Object.fromEntries(
+    groupIds.map((groupId) => [
+      groupId,
+      wholeGroups.has(groupId)
+        ? { wholeGroup: true, subgroupIds: [] }
+        : { wholeGroup: false, subgroupIds: grouped.get(groupId) ?? [] },
+    ]),
+  ) as Record<string, ParticipantSelection>
+  return { groupIds, selections }
+}
+
+async function fetchCatalogItems(
+  kind: CatalogKind,
+  filters: Record<string, string | undefined>,
+  signal: AbortSignal,
+) {
+  const items: CatalogItem[] = []
+  let afterId: string | null = null
+  do {
+    const result: components['schemas']['CatalogPage'] = await apiFetch<
+      components['schemas']['CatalogPage']
+    >(catalogUrl(kind, '', afterId, filters), { authenticated: true, signal })
+    items.push(...result.items)
+    afterId = result.next_after_id
+  } while (afterId)
+  return items
+}
 
 const kinds: Record<Kind, string> = {
   lecture: 'Лекция',
@@ -96,6 +143,61 @@ function isMutationOutcomeUncertain(error: unknown) {
   )
 }
 
+function describeLesson(lesson: Lesson) {
+  const start = localDateTime(lesson.starts_at)
+  const end = localDateTime(lesson.ends_at)
+  return [
+    [
+      'Дисциплина и проведение',
+      `${lesson.display.course_offering.discipline_name} · ${lesson.display.course_offering.term_name}`,
+    ],
+    ['Время', `${start.date} ${start.time}–${end.date} ${end.time} · Москва`],
+    ['Вид занятия', kinds[lesson.kind]],
+    ['Преподаватель', lesson.display.teacher?.full_name ?? 'Не указан'],
+    [
+      'Участники',
+      lesson.display.participants
+        .map((item) => `${item.group_name}${item.subgroup_name ? ` · ${item.subgroup_name}` : ''}`)
+        .join(', '),
+    ],
+    [
+      'Аудитории',
+      lesson.display.rooms.map((room) => `${room.building_name} · ${room.name}`).join(', ') ||
+        'Не указаны',
+    ],
+  ] as const
+}
+
+function getLessonResource(lesson: Lesson, preferred: Resource, selectedId: string) {
+  const resources: Array<{ resource: Resource; id: string; name: string }> = [
+    ...lesson.display.participants.map((item) => ({
+      resource: 'group' as const,
+      id: item.group_id,
+      name: item.group_name,
+    })),
+    ...(lesson.display.teacher
+      ? [
+          {
+            resource: 'teacher' as const,
+            id: lesson.display.teacher.id,
+            name: lesson.display.teacher.full_name,
+          },
+        ]
+      : []),
+    ...lesson.display.rooms.map((item) => ({
+      resource: 'room' as const,
+      id: item.id,
+      name: `${item.building_name} · ${item.name}`,
+    })),
+  ]
+  return (
+    resources.find((item) => item.resource === preferred && item.id === selectedId) ??
+    resources.find((item) => item.resource === preferred) ??
+    resources[0] ??
+    null
+  )
+}
+
 function catalogUrl(
   kind: CatalogKind,
   q: string,
@@ -121,6 +223,9 @@ function CatalogPicker({
   labelOverrides = {},
   allowedIds,
   invalid = false,
+  clearLabel,
+  onForbidden,
+  onResolvedItem,
 }: {
   kind: CatalogKind
   value: string[]
@@ -131,9 +236,13 @@ function CatalogPicker({
   labelOverrides?: Record<string, string>
   allowedIds?: string[]
   invalid?: boolean
+  clearLabel?: string
+  onForbidden?: () => void
+  onResolvedItem?: (item: CatalogItem) => void
 }) {
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState(false)
+  const [resolvedLabels, setResolvedLabels] = useState<Record<string, string>>(labelOverrides)
   const { user_id: userId } = useRoleContext()
   const query = useInfiniteQuery({
     queryKey: ['staff-schedule', userId, 'catalog-picker', kind, search, filters],
@@ -146,8 +255,21 @@ function CatalogPicker({
     getNextPageParam: (lastPage) => lastPage.next_after_id,
     enabled: expanded,
   })
-  const items = query.data?.pages.flatMap((page) => page.items) ?? []
+  const items = useMemo(() => query.data?.pages.flatMap((page) => page.items) ?? [], [query.data])
+  const selectedLabels = {
+    ...resolvedLabels,
+    ...Object.fromEntries(items.map((item) => [item.id, item.name])),
+    ...labelOverrides,
+  }
+  useEffect(() => {
+    if (query.error instanceof ApiClientError && query.error.status === 403) onForbidden?.()
+  }, [query.error, onForbidden])
   const toggle = (id: string) => {
+    const selected = items.find((item) => item.id === id)
+    if (selected) {
+      setResolvedLabels((previous) => ({ ...previous, [id]: selected.name }))
+      onResolvedItem?.(selected)
+    }
     if (!multiple) {
       onChange([id])
       setSearch('')
@@ -156,9 +278,7 @@ function CatalogPicker({
     }
     onChange(value.includes(id) ? value.filter((item) => item !== id) : [...value, id])
   }
-  const selectedNames = value
-    .map((id) => labelOverrides[id] ?? items.find((item) => item.id === id)?.name)
-    .filter(Boolean)
+  const selectedNames = value.map((id) => selectedLabels[id] ?? 'Название недоступно')
   const visibleItems = allowedIds ? items.filter((item) => allowedIds.includes(item.id)) : items
   return (
     <div className="staff-schedule__picker">
@@ -182,11 +302,16 @@ function CatalogPicker({
           }}
         />
       </label>
+      {clearLabel && value.length > 0 && (
+        <button type="button" className="staff-schedule__text-button" onClick={() => onChange([])}>
+          {clearLabel}
+        </button>
+      )}
       {value.length > 0 && multiple && (
         <div className="staff-schedule__chips">
           {value.map((id) => (
             <button type="button" key={id} onClick={() => toggle(id)}>
-              {labelOverrides[id] ?? items.find((item) => item.id === id)?.name ?? 'Выбрано'} ×
+              {selectedLabels[id] ?? 'Название недоступно'} ×
             </button>
           ))}
         </div>
@@ -235,16 +360,133 @@ function CatalogPicker({
   )
 }
 
+function GroupParticipantEditor({
+  userId,
+  groupId,
+  groupName,
+  selection,
+  knownSubgroupNames,
+  onChange,
+  onForbidden,
+}: {
+  userId: string
+  groupId: string
+  groupName: string
+  selection: ParticipantSelection
+  knownSubgroupNames: Record<string, string>
+  onChange: (selection: ParticipantSelection) => void
+  onForbidden: () => void
+}) {
+  const query = useInfiniteQuery({
+    queryKey: ['staff-schedule', userId, 'subgroups', groupId],
+    initialPageParam: null as string | null,
+    queryFn: ({ signal, pageParam }) =>
+      apiFetch<components['schemas']['CatalogPage']>(
+        catalogUrl('subgroups', '', pageParam, { group_id: groupId }),
+        { authenticated: true, signal },
+      ),
+    getNextPageParam: (lastPage) => lastPage.next_after_id,
+    retry: false,
+  })
+  const subgroups = useMemo(
+    () => query.data?.pages.flatMap((page) => page.items) ?? [],
+    [query.data],
+  )
+  const hasNextPage = query.hasNextPage
+  const isFetchingNextPage = query.isFetchingNextPage
+  const fetchNextPage = query.fetchNextPage
+  useEffect(() => {
+    if (query.error instanceof ApiClientError && query.error.status === 403) onForbidden()
+  }, [query.error, onForbidden])
+  useEffect(() => {
+    if (
+      hasNextPage &&
+      !isFetchingNextPage &&
+      selection.subgroupIds.some((id) => !subgroups.some((item) => item.id === id))
+    )
+      void fetchNextPage()
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, selection.subgroupIds, subgroups])
+  const selectedLabels = selection.subgroupIds
+    .map((id) => knownSubgroupNames[id] ?? subgroups.find((item) => item.id === id)?.name)
+    .filter((name): name is string => !!name)
+  return (
+    <fieldset className="staff-schedule__participant-group">
+      <legend>{groupName}</legend>
+      <label>
+        <input
+          type="checkbox"
+          checked={selection.wholeGroup}
+          onChange={(event) =>
+            onChange(
+              event.target.checked
+                ? { wholeGroup: true, subgroupIds: [] }
+                : { wholeGroup: false, subgroupIds: [] },
+            )
+          }
+        />
+        Вся группа
+      </label>
+      {!selection.wholeGroup && selectedLabels.length > 0 && (
+        <p>Выбраны подгруппы: {selectedLabels.join(', ')}</p>
+      )}
+      {query.isPending ? (
+        <p>Загружаем подгруппы…</p>
+      ) : query.isError ? (
+        <p role="alert">
+          Не удалось загрузить подгруппы.{' '}
+          <button type="button" onClick={() => void query.refetch()}>
+            Повторить
+          </button>
+        </p>
+      ) : (
+        <div className="staff-schedule__subgroup-options">
+          {subgroups.map((subgroup) => (
+            <label key={subgroup.id}>
+              <input
+                type="checkbox"
+                checked={selection.subgroupIds.includes(subgroup.id)}
+                disabled={selection.wholeGroup}
+                onChange={(event) => {
+                  const subgroupIds = event.target.checked
+                    ? [...selection.subgroupIds, subgroup.id]
+                    : selection.subgroupIds.filter((id) => id !== subgroup.id)
+                  onChange({ wholeGroup: false, subgroupIds })
+                }}
+              />
+              {subgroup.name}
+            </label>
+          ))}
+          {hasNextPage && (
+            <button
+              type="button"
+              className="staff-schedule__text-button"
+              disabled={isFetchingNextPage}
+              onClick={() => void fetchNextPage()}
+            >
+              {isFetchingNextPage ? 'Загружаем…' : 'Показать ещё подгруппы'}
+            </button>
+          )}
+          {!subgroups.length && <p>Формальных подгрупп нет.</p>}
+        </div>
+      )}
+    </fieldset>
+  )
+}
+
 function ScheduleForm({
   lesson,
   operation,
   onClose,
   onSaved,
+  onForbidden,
+  onReadSchedule,
 }: {
   lesson: Lesson | null
   operation: Operation
   onClose: () => void
   onSaved: () => void
+  onForbidden: () => void
+  onReadSchedule: () => Promise<Lesson[]>
 }) {
   const queryClient = useQueryClient()
   const { user_id: userId } = useRoleContext()
@@ -257,12 +499,13 @@ function ScheduleForm({
   const returnFocusRef = useRef<HTMLElement | null>(null)
   const [courseOffering, setCourseOffering] = useState(lesson?.course_offering_id ?? '')
   const [teacherIds, setTeacherIds] = useState(lesson?.teacher_id ? [lesson.teacher_id] : [])
-  const [groupIds, setGroupIds] = useState(lesson?.participants.map((item) => item.group_id) ?? [])
-  const [subgroupIds, setSubgroupIds] = useState<Record<string, string>>(
+  const [participantState, setParticipantState] = useState(() =>
+    getInitialParticipantSelection(lesson),
+  )
+  const { groupIds, selections: participantSelections } = participantState
+  const [groupLabels, setGroupLabels] = useState<Record<string, string>>(() =>
     Object.fromEntries(
-      lesson?.participants
-        .filter((item) => item.subgroup_id)
-        .map((item) => [item.group_id, item.subgroup_id!]) ?? [],
+      lesson?.display.participants.map((item) => [item.group_id, item.group_name]) ?? [],
     ),
   )
   const [roomIds, setRoomIds] = useState(lesson?.room_ids ?? [])
@@ -278,6 +521,10 @@ function ScheduleForm({
   const [errorCode, setErrorCode] = useState('')
   const [errorDetails, setErrorDetails] = useState<components['schemas']['ErrorDetail'][]>([])
   const [latestVersion, setLatestVersion] = useState<Lesson | null>(null)
+  const [readBackLesson, setReadBackLesson] = useState<Lesson | null>(null)
+  const [reconcileMessage, setReconcileMessage] = useState('')
+  const [confirmOverwrite, setConfirmOverwrite] = useState(false)
+  const [submittedBody, setSubmittedBody] = useState<LessonWrite | null>(null)
   const [expectedVersion, setExpectedVersion] = useState(lesson?.version ?? 0)
   const [busy, setBusy] = useState(false)
   const [uncertain, setUncertain] = useState(false)
@@ -286,45 +533,39 @@ function ScheduleForm({
   const exitStatus = busy ? 'submitting' : uncertain ? 'uncertain' : dirty ? 'draft' : 'none'
   const { setStatus: setExitStatus } = useUnsavedChanges()
   const blocker = useBlocker(exitStatus !== 'none')
-  const subgroupsQuery = useQuery({
-    queryKey: ['staff-schedule', userId, 'subgroups', groupIds],
-    queryFn: async ({ signal }) =>
-      Promise.all(
-        groupIds.map(async (groupId) => {
-          const result = await apiFetch<components['schemas']['CatalogPage']>(
-            catalogUrl('subgroups', '', null, { group_id: groupId }),
-            { authenticated: true, signal },
-          )
-          return [groupId, result.items] as const
-        }),
-      ),
-    enabled: groupIds.length > 0,
+  const assignmentsQueries = useQueries({
+    queries: groupIds.map((groupId) => ({
+      queryKey: ['staff-schedule', userId, 'assignments', courseOffering, groupId],
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
+        fetchCatalogItems(
+          'teaching-assignments',
+          { course_offering_id: courseOffering, group_id: groupId },
+          signal,
+        ),
+      enabled: !!courseOffering,
+      retry: false,
+    })),
   })
-  const assignmentsQuery = useQuery({
-    queryKey: ['staff-schedule', userId, 'assignments', courseOffering, groupIds],
-    queryFn: async ({ signal }) =>
-      Promise.all(
-        groupIds.map(async (groupId) => {
-          const result = await apiFetch<components['schemas']['CatalogPage']>(
-            catalogUrl('teaching-assignments', '', null, {
-              course_offering_id: courseOffering,
-              group_id: groupId,
-            }),
-            { authenticated: true, signal },
-          )
-          return result.items
+  const assignmentsForbidden = assignmentsQueries.some(
+    (query) => query.error instanceof ApiClientError && query.error.status === 403,
+  )
+  useEffect(() => {
+    if (assignmentsForbidden) onForbidden()
+  }, [assignmentsForbidden, onForbidden])
+  const assignmentResults = assignmentsQueries.map((query) => query.data)
+  const eligibleTeacherIds =
+    !courseOffering ||
+    !groupIds.length ||
+    assignmentsQueries.some((query) => query.isPending || query.isError) ||
+    assignmentResults.some((items) => !items)
+      ? undefined
+      : (assignmentResults as CatalogItem[][]).reduce(
+          (eligible, assignments) =>
+            eligible.filter((id) => assignments.some((assignment) => assignment.teacher_id === id)),
+          (assignmentResults[0] ?? [])
             .map((assignment) => assignment.teacher_id)
-            .filter((id): id is string => !!id)
-        }),
-      ),
-    enabled: !!courseOffering && groupIds.length > 0,
-  })
-  const eligibleTeacherIds = assignmentsQuery.data?.length
-    ? assignmentsQuery.data.reduce(
-        (eligible, groupTeachers) => eligible.filter((id) => groupTeachers.includes(id)),
-        assignmentsQuery.data[0],
-      )
-    : undefined
+            .filter((id): id is string => !!id),
+        )
   useLayoutEffect(() => {
     const dialog = dialogRef.current
     if (!dialog) return
@@ -381,8 +622,14 @@ function ScheduleForm({
     setErrorCode('')
     setErrorDetails([])
     setUncertain(false)
-    if (!courseOffering || !groupIds.length) {
-      setError('Выберите проведение дисциплины и хотя бы одну группу.')
+    const participants = groupIds.flatMap<LessonWrite['participants'][number]>((group_id) => {
+      const selection = participantSelections[group_id]
+      if (!selection) return []
+      if (selection.wholeGroup) return [{ group_id, subgroup_id: null }]
+      return selection.subgroupIds.map((subgroup_id) => ({ group_id, subgroup_id }))
+    })
+    if (!courseOffering || !groupIds.length || !participants.length) {
+      setError('Выберите проведение и хотя бы одну группу или подгруппу.')
       return
     }
     if (
@@ -397,12 +644,12 @@ function ScheduleForm({
       starts_at: dateAtMoscow(startDate, startTime),
       ends_at: dateAtMoscow(endDate, endTime),
       kind,
-      participants: groupIds.map((group_id) => ({
-        group_id,
-        subgroup_id: subgroupIds[group_id] || null,
-      })),
+      participants,
       room_ids: roomIds,
     }
+    setSubmittedBody(body)
+    setReadBackLesson(null)
+    setReconcileMessage('')
     if (
       operation === 'move' &&
       lesson &&
@@ -445,7 +692,7 @@ function ScheduleForm({
         setUncertain(isMutationOutcomeUncertain(caught))
         if (caught.status === 403) {
           queryClient.removeQueries({ queryKey: ['staff-schedule'] })
-          onClose()
+          onForbidden()
         }
       } else setUncertain(true)
       requestAnimationFrame(() =>
@@ -456,25 +703,65 @@ function ScheduleForm({
     }
   }
   const readBack = async () => {
-    if (!lesson) {
-      await queryClient.invalidateQueries({ queryKey: ['staff-schedule', userId, 'lessons'] })
-      return
+    setReconcileMessage('Проверяем актуальное состояние на сервере…')
+    try {
+      let actual: Lesson | null = null
+      if (lesson) {
+        actual = await apiFetch<Lesson>(`${base}/lessons/${lesson.id}`, { authenticated: true })
+        if (operation === 'move' && actual.next_lesson_id) {
+          actual = await apiFetch<Lesson>(`${base}/lessons/${actual.next_lesson_id}`, {
+            authenticated: true,
+          })
+        }
+        queryClient.setQueryData(['staff-schedule', userId, 'lesson', actual.id], actual)
+      }
+      const currentLessons = await onReadSchedule()
+      const found =
+        actual ??
+        currentLessons.find((item) => {
+          if (!submittedBody) return false
+          return (
+            item.course_offering_id === submittedBody.course_offering_id &&
+            item.starts_at === submittedBody.starts_at &&
+            item.ends_at === submittedBody.ends_at &&
+            item.kind === submittedBody.kind &&
+            item.teacher_id === submittedBody.teacher_id &&
+            JSON.stringify(item.participants) === JSON.stringify(submittedBody.participants) &&
+            JSON.stringify([...item.room_ids].sort()) ===
+              JSON.stringify([...submittedBody.room_ids].sort())
+          )
+        }) ??
+        null
+      setReadBackLesson(found)
+      if (found) {
+        setUncertain(false)
+        setReconcileMessage(
+          operation === 'create'
+            ? 'Сверка завершена: найдено сохранённое занятие. Новый запрос не отправлялся.'
+            : 'Сверка завершена: показано текущее занятие на сервере. Черновик сохранён отдельно.',
+        )
+      } else {
+        setReconcileMessage(
+          'В текущем расписании совпадение не найдено. Результат остаётся неопределённым; повторите чтение после проверки фильтра.',
+        )
+      }
+      void queryClient.invalidateQueries({ queryKey: ['staff-schedule', userId, 'lessons'] })
+    } catch (caught) {
+      setReconcileMessage(getErrorMessage(caught))
+      if (caught instanceof ApiClientError && caught.status === 403) onForbidden()
     }
-    await queryClient.invalidateQueries({
-      queryKey: ['staff-schedule', userId, 'lesson', lesson.id],
-    })
-    await queryClient.invalidateQueries({ queryKey: ['staff-schedule', userId, 'lessons'] })
   }
   const fetchLatestVersion = async () => {
     if (!lesson) return
     try {
       const latest = await apiFetch<Lesson>(`${base}/lessons/${lesson.id}`, { authenticated: true })
       setLatestVersion(latest)
+      setConfirmOverwrite(false)
     } catch (caught) {
       setError(getErrorMessage(caught))
       if (caught instanceof ApiClientError && caught.status === 403) {
         queryClient.removeQueries({ queryKey: ['staff-schedule'] })
-        onClose()
+        onForbidden()
       }
     }
   }
@@ -553,10 +840,10 @@ function ScheduleForm({
               onChange={(ids) => {
                 setDirty(true)
                 setCourseOffering(ids[0] ?? '')
-                setGroupIds([])
-                setSubgroupIds({})
+                setParticipantState({ groupIds: [], selections: {} })
                 setTeacherIds([])
               }}
+              onForbidden={onForbidden}
             />
             {fieldError('course_offering_id')}
             <CatalogPicker
@@ -565,6 +852,7 @@ function ScheduleForm({
               value={teacherIds}
               invalid={!!fieldMessage('teacher_id')}
               allowedIds={eligibleTeacherIds}
+              clearLabel="Убрать преподавателя"
               labelOverrides={
                 lesson?.display.teacher
                   ? { [lesson.display.teacher.id]: lesson.display.teacher.full_name }
@@ -574,9 +862,10 @@ function ScheduleForm({
                 setDirty(true)
                 setTeacherIds(ids)
               }}
+              onForbidden={onForbidden}
             />
             {fieldError('teacher_id')}
-            {assignmentsQuery.isError && (
+            {assignmentsQueries.some((query) => query.isError) && (
               <p className="staff-schedule__field-error">
                 Не удалось проверить предметные назначения. Сервер всё равно проверит преподавателя
                 при сохранении.
@@ -588,50 +877,49 @@ function ScheduleForm({
               filters={{ course_offering_id: courseOffering || undefined }}
               value={groupIds}
               invalid={!!(fieldMessage('participants') || fieldMessage('group_id'))}
-              labelOverrides={Object.fromEntries(
-                lesson?.display.participants.map((item) => [item.group_id, item.group_name]) ?? [],
-              )}
+              labelOverrides={groupLabels}
               onChange={(ids) => {
                 setDirty(true)
-                setGroupIds(ids)
-                setSubgroupIds((old) =>
-                  Object.fromEntries(Object.entries(old).filter(([group]) => ids.includes(group))),
-                )
+                setParticipantState((old) => ({
+                  groupIds: ids,
+                  selections: Object.fromEntries(
+                    ids.map((id) => [
+                      id,
+                      old.selections[id] ?? { wholeGroup: true, subgroupIds: [] },
+                    ]),
+                  ),
+                }))
               }}
+              onResolvedItem={(item) =>
+                setGroupLabels((previous) => ({ ...previous, [item.id]: item.name }))
+              }
+              onForbidden={onForbidden}
               multiple
             />
             {fieldError('participants')}
             {fieldError('group_id')}
             {fieldError('subgroup_id')}
             {groupIds.map((groupId) => (
-              <label key={groupId}>
-                Подгруппа ·{' '}
-                {subgroupsQuery.data
-                  ?.find(([id]) => id === groupId)?.[1]
-                  .find((sub) => sub.id === subgroupIds[groupId])?.name ?? 'вся группа'}
-                <select
-                  aria-invalid={!!fieldMessage('subgroup_id') || undefined}
-                  value={subgroupIds[groupId] ?? ''}
-                  onChange={(event) => {
-                    setDirty(true)
-                    setSubgroupIds((old) => ({ ...old, [groupId]: event.target.value }))
-                  }}
-                >
-                  <option value="">Вся группа</option>
-                  {subgroupsQuery.data
-                    ?.find(([id]) => id === groupId)?.[1]
-                    .map((sub) => (
-                      <option key={sub.id} value={sub.id}>
-                        {sub.name}
-                      </option>
-                    ))}
-                </select>
-                {subgroupsQuery.isError && (
-                  <small className="staff-schedule__field-error">
-                    Не удалось загрузить подгруппы. Сохранение может быть неполным.
-                  </small>
+              <GroupParticipantEditor
+                key={groupId}
+                userId={userId}
+                groupId={groupId}
+                groupName={groupLabels[groupId] ?? 'Название группы недоступно'}
+                selection={participantSelections[groupId]}
+                knownSubgroupNames={Object.fromEntries(
+                  lesson?.display.participants
+                    .filter((item) => item.group_id === groupId && item.subgroup_id)
+                    .map((item) => [item.subgroup_id!, item.subgroup_name ?? '']) ?? [],
                 )}
-              </label>
+                onChange={(selection) => {
+                  setDirty(true)
+                  setParticipantState((previous) => ({
+                    ...previous,
+                    selections: { ...previous.selections, [groupId]: selection },
+                  }))
+                }}
+                onForbidden={onForbidden}
+              />
             ))}
             <CatalogPicker
               label="Аудитории"
@@ -648,6 +936,7 @@ function ScheduleForm({
                 setDirty(true)
                 setRoomIds(ids)
               }}
+              onForbidden={onForbidden}
               multiple
             />
             {fieldError('room_ids')}
@@ -737,7 +1026,7 @@ function ScheduleForm({
               )}
               {errorCode === 'version_conflict' && (
                 <button type="button" onClick={() => void fetchLatestVersion()}>
-                  Загрузить актуальную версию отдельно
+                  Загрузить актуальную запись для сравнения
                 </button>
               )}
               {errorCode === 'invalid_transition' && (
@@ -750,26 +1039,67 @@ function ScheduleForm({
           {latestVersion && (
             <div className="staff-schedule__form-alert" role="status">
               <p>
-                На сервере сейчас версия {latestVersion.version}:{' '}
-                {formatDate(getMoscowDate(new Date(latestVersion.starts_at)), true)},{' '}
-                {formatTime(latestVersion.starts_at)}–{formatTime(latestVersion.ends_at)}; «
-                {latestVersion.display.course_offering.discipline_name}».
+                На сервере версия {latestVersion.version}. Поля формы слева — ваш локальный
+                черновик; сверьте его с актуальными значениями:
               </p>
-              <p>Ваш черновик остался без изменений.</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setExpectedVersion(latestVersion.version)
-                  setLatestVersion(null)
-                  setError(
-                    'Выбран актуальный номер версии. Проверьте черновик и явно нажмите «Сохранить» ещё раз.',
-                  )
-                }}
-              >
-                Использовать только номер версии {latestVersion.version}
-              </button>
+              <dl className="staff-schedule__snapshot">
+                {describeLesson(latestVersion).map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p>Повторное сохранение заменит перечисленные значения серверной записи.</p>
+              {!confirmOverwrite ? (
+                <button type="button" onClick={() => setConfirmOverwrite(true)}>
+                  Я сравнил поля — показать подтверждение перезаписи
+                </button>
+              ) : (
+                <div className="staff-schedule__overwrite-confirm" role="alert">
+                  <p>Подтвердите перезапись версии {latestVersion.version} локальным черновиком.</p>
+                  <button
+                    type="button"
+                    className="staff-schedule__danger"
+                    onClick={() => {
+                      setExpectedVersion(latestVersion.version)
+                      setLatestVersion(null)
+                      setConfirmOverwrite(false)
+                      setError(
+                        'Вы явно подтвердили перезапись. Проверьте черновик и нажмите «Сохранить».',
+                      )
+                    }}
+                  >
+                    Подтвердить перезапись моим черновиком
+                  </button>
+                  <button type="button" onClick={() => setConfirmOverwrite(false)}>
+                    Отмена
+                  </button>
+                </div>
+              )}
             </div>
           )}
+          {readBackLesson && (
+            <section
+              className="staff-schedule__form-alert"
+              aria-labelledby="staff-schedule-readback-title"
+            >
+              <h3 id="staff-schedule-readback-title">Актуальная запись на сервере</h3>
+              <p>
+                Версия {readBackLesson.version} · статус {readBackLesson.status}. Ваш черновик
+                остался в полях формы.
+              </p>
+              <dl className="staff-schedule__snapshot">
+                {describeLesson(readBackLesson).map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          )}
+          {reconcileMessage && <p role="status">{reconcileMessage}</p>}
           <footer>
             <button
               type="button"
@@ -858,17 +1188,30 @@ function ScheduleForm({
 
 export function StaffSchedulePage() {
   const { user_id: userId } = useRoleContext()
+  return <StaffSchedulePageContent key={userId} />
+}
+
+function StaffSchedulePageContent() {
+  const { user_id: userId } = useRoleContext()
   const [searchParams, setSearchParams] = useSearchParams()
+  const rawDate = searchParams.get('date')
+  const invalidDate = rawDate !== null && !isValidCalendarDate(rawDate)
   const resource = (
     ['group', 'teacher', 'room'].includes(searchParams.get('resource') ?? '')
       ? searchParams.get('resource')
       : 'group'
   ) as Resource
   const selectedResourceId = searchParams.get('resource_id') ?? ''
-  const date = searchParams.get('date') ?? getMoscowDate()
+  const date = rawDate && !invalidDate ? rawDate : getMoscowDate()
   const mode = searchParams.get('view') === 'day' ? 'day' : 'week'
   const [form, setForm] = useState<{ operation: Operation; lesson: Lesson | null } | null>(null)
   const [confirmCancel, setConfirmCancel] = useState<Lesson | null>(null)
+  const [actionReadBack, setActionReadBack] = useState<Lesson | null>(null)
+  const [lastAction, setLastAction] = useState<{
+    lessonId: string
+    action: 'cancel' | 'restore'
+  } | null>(null)
+  const [accessDenied, setAccessDenied] = useState(false)
   const [actionError, setActionError] = useState('')
   const [actionUncertain, setActionUncertain] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -877,12 +1220,46 @@ export function StaffSchedulePage() {
   const dateFrom = mode === 'day' ? date : weekStart
   const dateTo = mode === 'day' ? date : addDays(weekStart, 6)
   const queryClient = useQueryClient()
+  useEffect(() => {
+    if (!invalidDate) return
+    const params = new URLSearchParams(searchParams)
+    params.set('date', date)
+    setSearchParams(params, { replace: true })
+  }, [date, invalidDate, searchParams, setSearchParams])
+  const denyAccess = useCallback(() => {
+    setAccessDenied(true)
+    setForm(null)
+    setConfirmCancel(null)
+    setActionReadBack(null)
+    setActionError('')
+    setActionUncertain(false)
+    queryClient.removeQueries({ queryKey: ['staff-schedule', userId] })
+  }, [
+    queryClient,
+    userId,
+    setAccessDenied,
+    setForm,
+    setConfirmCancel,
+    setActionReadBack,
+    setActionError,
+    setActionUncertain,
+  ])
   const catalog = useInfiniteQuery({
-    queryKey: ['staff-schedule', userId, 'catalog', resource, searchParams.get('q') ?? ''],
+    queryKey: [
+      'staff-schedule',
+      userId,
+      'catalog',
+      resource,
+      searchParams.get('q') ?? searchParams.get('resource_name') ?? '',
+    ],
     initialPageParam: null as string | null,
     queryFn: ({ signal, pageParam }) =>
       apiFetch<components['schemas']['CatalogPage']>(
-        catalogUrl(resourceKinds[resource], searchParams.get('q') ?? '', pageParam),
+        catalogUrl(
+          resourceKinds[resource],
+          searchParams.get('q') ?? searchParams.get('resource_name') ?? '',
+          pageParam,
+        ),
         { authenticated: true, signal },
       ),
     getNextPageParam: (lastPage) => lastPage.next_after_id,
@@ -893,6 +1270,8 @@ export function StaffSchedulePage() {
     [403, 404].includes(catalog.error.status ?? 0)
       ? []
       : (catalog.data?.pages.flatMap((page) => page.items) ?? [])
+  const selectedResourceName =
+    resourceItems.find((item) => item.id === selectedResourceId)?.name ?? ''
   const schedule = useInfiniteQuery({
     queryKey: ['staff-schedule', userId, 'lessons', resource, selectedResourceId, dateFrom, dateTo],
     initialPageParam: null as string | null,
@@ -912,7 +1291,14 @@ export function StaffSchedulePage() {
     },
     getNextPageParam: (lastPage) => lastPage.next_after_id,
     enabled: !!selectedResourceId,
+    retry: false,
   })
+  const queryAccessDenied = [catalog.error, schedule.error].some(
+    (error) => error instanceof ApiClientError && error.status === 403,
+  )
+  useEffect(() => {
+    if (queryAccessDenied) queryClient.removeQueries({ queryKey: ['staff-schedule', userId] })
+  }, [queryAccessDenied, queryClient, userId])
   const unavailable =
     schedule.isError &&
     schedule.error instanceof ApiClientError &&
@@ -923,14 +1309,16 @@ export function StaffSchedulePage() {
   )
   useEffect(() => {
     if (
+      !schedule.isFetchNextPageError ||
       !(schedule.error instanceof ApiClientError) ||
-      schedule.error.status !== 422 ||
-      (schedule.data?.pages.length ?? 0) < 2
+      schedule.error.status !== 422
     )
       return
-    const selectionKey = `${userId}:${resource}:${selectedResourceId}:${dateFrom}:${dateTo}`
-    if (retriedCursor.current.has(selectionKey)) return
-    retriedCursor.current.add(selectionKey)
+    const cursor = schedule.data?.pages.at(-1)?.next_after_id
+    if (!cursor) return
+    const retryKey = `${userId}:${resource}:${selectedResourceId}:${dateFrom}:${dateTo}:${cursor}`
+    if (retriedCursor.current.has(retryKey)) return
+    retriedCursor.current.add(retryKey)
     void queryClient.resetQueries({
       queryKey: [
         'staff-schedule',
@@ -945,6 +1333,7 @@ export function StaffSchedulePage() {
   }, [
     schedule.error,
     schedule.data,
+    schedule.isFetchNextPageError,
     queryClient,
     userId,
     resource,
@@ -966,15 +1355,30 @@ export function StaffSchedulePage() {
     setSearchParams({ resource: next, date, view: mode })
   }
   const updateDate = (next: string) => {
-    setSearchParams({ resource, resource_id: selectedResourceId, date: next, view: mode })
+    if (!isValidCalendarDate(next)) return
+    setSearchParams({
+      resource,
+      resource_id: selectedResourceId,
+      q: selectedResourceName || searchParams.get('resource_name') || '',
+      date: next,
+      view: mode,
+    })
   }
   const changeMode = (next: 'day' | 'week') => {
-    setSearchParams({ resource, resource_id: selectedResourceId, date, view: next })
+    setSearchParams({
+      resource,
+      resource_id: selectedResourceId,
+      q: selectedResourceName || searchParams.get('resource_name') || '',
+      date,
+      view: next,
+    })
   }
   const mutateStatus = async (lesson: Lesson, action: 'cancel' | 'restore') => {
     setBusyId(lesson.id)
     setActionError('')
     setActionUncertain(false)
+    setActionReadBack(null)
+    setLastAction({ lessonId: lesson.id, action })
     try {
       await apiFetch<Lesson>(`${base}/lessons/${lesson.id}/${action}`, {
         authenticated: true,
@@ -987,8 +1391,7 @@ export function StaffSchedulePage() {
       setActionError(getErrorMessage(error))
       setActionUncertain(isMutationOutcomeUncertain(error))
       if (error instanceof ApiClientError && error.status === 403) {
-        setForm(null)
-        queryClient.removeQueries({ queryKey: ['staff-schedule'] })
+        denyAccess()
       }
       if (error instanceof ApiClientError && (error.status === undefined || error.status >= 500))
         setActionError(`${getErrorMessage(error)} Повторно операция не отправлялась.`)
@@ -996,15 +1399,69 @@ export function StaffSchedulePage() {
       setBusyId(null)
     }
   }
+  const readActionBack = async (lessonId: string) => {
+    setActionError('Проверяем актуальное состояние…')
+    try {
+      const actual = await apiFetch<Lesson>(`${base}/lessons/${lessonId}`, { authenticated: true })
+      setActionReadBack(actual)
+      setActionUncertain(false)
+      queryClient.setQueryData(['staff-schedule', userId, 'lesson', actual.id], actual)
+      if (
+        (lastAction?.action === 'cancel' && actual.status !== 'scheduled') ||
+        (lastAction?.action === 'restore' && actual.status === 'scheduled')
+      ) {
+        setConfirmCancel(null)
+        setActionError(
+          lastAction.action === 'cancel'
+            ? 'Сверка подтвердила отмену. Список обновлён; запрос повторно не отправлялся.'
+            : 'Сверка подтвердила восстановление. Список обновлён; запрос повторно не отправлялся.',
+        )
+      } else {
+        setActionError(
+          'Сверка завершена. Запись не перешла в запрошенное состояние; повторное действие требует отдельного подтверждения.',
+        )
+      }
+      void queryClient.invalidateQueries({ queryKey: ['staff-schedule', userId, 'lessons'] })
+    } catch (error) {
+      setActionError(getErrorMessage(error))
+      if (error instanceof ApiClientError && error.status === 403) denyAccess()
+    }
+  }
+  const useCurrentActionVersion = () => {
+    if (!actionReadBack || actionReadBack.status !== 'scheduled') return
+    setConfirmCancel(actionReadBack)
+    setActionReadBack(null)
+    setActionError(
+      'Показана текущая версия. Повторите отмену только если подтверждаете это действие.',
+    )
+  }
+  const retryRestoreWithCurrentVersion = () => {
+    if (!actionReadBack || actionReadBack.status !== 'cancelled') return
+    void mutateStatus(actionReadBack, 'restore')
+  }
   const navigateHistory = async (id: string) => {
     try {
       const lesson = await apiFetch<Lesson>(`${base}/lessons/${id}`, { authenticated: true })
       const positionDate = getMoscowDate(new Date(lesson.starts_at))
-      setSearchParams({ resource, resource_id: selectedResourceId, date: positionDate, view: mode })
+      const target = getLessonResource(lesson, resource, selectedResourceId)
+      if (!target) {
+        setActionError('Связанное занятие не содержит доступного объекта для просмотра.')
+        return
+      }
+      setActionError('')
+      queryClient.setQueryData(['staff-schedule', userId, 'lesson', lesson.id], lesson)
+      setSearchParams({
+        resource: target.resource,
+        resource_id: target.id,
+        resource_name: target.name,
+        q: target.name,
+        date: positionDate,
+        view: mode,
+      })
     } catch (error) {
       setActionError(getErrorMessage(error))
       if (error instanceof ApiClientError && error.status === 403) {
-        queryClient.removeQueries({ queryKey: ['staff-schedule'] })
+        denyAccess()
       }
     }
   }
@@ -1015,13 +1472,12 @@ export function StaffSchedulePage() {
     } catch (error) {
       setActionError(getErrorMessage(error))
       if (error instanceof ApiClientError && error.status === 403) {
-        queryClient.removeQueries({ queryKey: ['staff-schedule'] })
+        denyAccess()
       }
     }
   }
   const prevWeek = () => updateDate(addDays(date, mode === 'day' ? -1 : -7))
   const nextWeek = () => updateDate(addDays(date, mode === 'day' ? 1 : 7))
-  const resourceName = resourceItems.find((item) => item.id === selectedResourceId)?.name
   const refetch = () => {
     void queryClient.resetQueries({
       queryKey: [
@@ -1036,6 +1492,18 @@ export function StaffSchedulePage() {
     })
   }
   const dates = Object.keys(grouped).sort()
+  if (accessDenied || queryAccessDenied) {
+    return (
+      <section
+        className="section-page staff-schedule__forbidden"
+        aria-labelledby="staff-schedule-forbidden-title"
+      >
+        <p className="section-eyebrow">Кабинет сотрудника</p>
+        <h1 id="staff-schedule-forbidden-title">Доступ запрещён</h1>
+        <p>Разрешение schedule.edit отозвано. Данные расписания скрыты.</p>
+      </section>
+    )
+  }
   return (
     <main className="section-page staff-schedule" aria-labelledby="staff-schedule-title">
       <div className="staff-schedule__heading">
@@ -1074,14 +1542,15 @@ export function StaffSchedulePage() {
             aria-expanded="true"
             placeholder="Начните вводить название"
             value={
-              resourceItems.find((item) => item.id === selectedResourceId)?.name ??
-              searchParams.get('q') ??
-              ''
+              selectedResourceId
+                ? selectedResourceName || searchParams.get('q') || ''
+                : (searchParams.get('q') ?? '')
             }
             onChange={(event) => {
               const params = new URLSearchParams(searchParams)
               params.set('q', event.target.value)
               params.delete('resource_id')
+              params.delete('resource_name')
               setSearchParams(params, { replace: true })
             }}
           />
@@ -1090,7 +1559,17 @@ export function StaffSchedulePage() {
               aria-label={`Выберите: ${resourceLabels[resource].toLowerCase()}`}
               value={selectedResourceId}
               onChange={(event) => {
-                setSearchParams({ resource, resource_id: event.target.value, date, view: mode })
+                const selectedItem = resourceItems.find((item) => item.id === event.target.value)
+                const params = new URLSearchParams(searchParams)
+                params.set('resource', resource)
+                params.set('resource_id', event.target.value)
+                if (selectedItem) {
+                  params.set('resource_name', selectedItem.name)
+                  params.set('q', selectedItem.name)
+                }
+                params.set('date', date)
+                params.set('view', mode)
+                setSearchParams(params)
               }}
             >
               <option value="">Выберите объект</option>
@@ -1148,7 +1627,7 @@ export function StaffSchedulePage() {
         </div>
       </section>
       <p className="staff-schedule__caption">
-        {resourceName ? `${resourceName} · ` : ''}
+        {selectedResourceName ? `${selectedResourceName} · ` : ''}
         {mode === 'day'
           ? formatDate(date, true)
           : `${formatDate(dateFrom, true)} — ${formatDate(dateTo, true)}`}{' '}
@@ -1167,15 +1646,35 @@ export function StaffSchedulePage() {
       {selectedResourceId && schedule.isPending && (
         <LoadingState title="Загружаем расписание…" variant="compact" />
       )}
-      {actionError && (
-        <p className="staff-schedule__notice" role="alert">
-          {actionError}
-          {actionUncertain && (
-            <button type="button" onClick={refetch}>
-              Перечитать расписание
+      {actionError && !confirmCancel && (
+        <div className="staff-schedule__notice" role="alert">
+          <p>{actionError}</p>
+          {actionUncertain && lastAction && (
+            <button type="button" onClick={() => void readActionBack(lastAction.lessonId)}>
+              Перечитать данные занятия
             </button>
           )}
-        </p>
+          {actionReadBack && (
+            <>
+              <p>
+                Сервер: версия {actionReadBack.version}, статус {actionReadBack.status}.
+              </p>
+              <dl className="staff-schedule__snapshot">
+                {describeLesson(actionReadBack).map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              {actionReadBack.status === 'cancelled' && lastAction?.action === 'restore' && (
+                <button type="button" onClick={retryRestoreWithCurrentVersion}>
+                  Повторно подтвердить восстановление с актуальной версией
+                </button>
+              )}
+            </>
+          )}
+        </div>
       )}
       {schedule.isError && (
         <ErrorState
@@ -1313,8 +1812,13 @@ export function StaffSchedulePage() {
         <CancelDialog
           lesson={confirmCancel}
           busy={busyId === confirmCancel.id}
+          error={actionError}
+          uncertain={actionUncertain}
+          currentLesson={actionReadBack}
           onClose={() => setConfirmCancel(null)}
           onConfirm={() => void mutateStatus(confirmCancel, 'cancel')}
+          onReadBack={() => void readActionBack(confirmCancel.id)}
+          onUseCurrent={useCurrentActionVersion}
         />
       )}
       {form && (
@@ -1323,6 +1827,11 @@ export function StaffSchedulePage() {
           {...form}
           onClose={() => setForm(null)}
           onSaved={() => setForm(null)}
+          onForbidden={denyAccess}
+          onReadSchedule={async () => {
+            const result = await schedule.refetch()
+            return result.data?.pages.flatMap((page) => page.items) ?? []
+          }}
         />
       )}
     </main>
@@ -1332,22 +1841,36 @@ export function StaffSchedulePage() {
 function CancelDialog({
   lesson,
   busy,
+  error,
+  uncertain,
+  currentLesson,
   onClose,
   onConfirm,
+  onReadBack,
+  onUseCurrent,
 }: {
   lesson: Lesson
   busy: boolean
+  error: string
+  uncertain: boolean
+  currentLesson: Lesson | null
   onClose: () => void
   onConfirm: () => void
+  onReadBack: () => void
+  onUseCurrent: () => void
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   const cancelRef = useRef<HTMLButtonElement>(null)
+  const triggerRef = useRef<HTMLElement | null>(null)
   useEffect(() => {
     const dialog = ref.current
+    triggerRef.current = document.activeElement as HTMLElement | null
     dialog?.showModal()
     cancelRef.current?.focus()
     return () => {
       if (dialog?.open) dialog.close()
+      const trigger = triggerRef.current
+      window.requestAnimationFrame(() => trigger?.focus())
     }
   }, [])
   return (
@@ -1367,6 +1890,36 @@ function CancelDialog({
         {formatTime(lesson.starts_at)}
       </p>
       <p>Запись останется в истории. Студенты увидят отметку «Отменено».</p>
+      {error && (
+        <div className="staff-schedule__form-alert" role="alert">
+          <p>{error}</p>
+          {uncertain && <p>Отмена могла сохраниться. Повторно подтвердите только после сверки.</p>}
+          <button type="button" onClick={onReadBack} disabled={busy}>
+            Перечитать состояние занятия
+          </button>
+        </div>
+      )}
+      {currentLesson && (
+        <div className="staff-schedule__form-alert" role="status">
+          <p>
+            На сервере: версия {currentLesson.version}, статус {currentLesson.status}. Проверьте
+            актуальные поля:
+          </p>
+          <dl className="staff-schedule__snapshot">
+            {describeLesson(currentLesson).map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+          {currentLesson.status === 'scheduled' && (
+            <button type="button" onClick={onUseCurrent} disabled={busy}>
+              Использовать актуальную версию для нового подтверждения
+            </button>
+          )}
+        </div>
+      )}
       <footer>
         <button
           ref={cancelRef}
