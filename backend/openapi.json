@@ -1833,6 +1833,78 @@
         "title": "JournalAssessment",
         "type": "object"
       },
+      "JournalAttendanceRow": {
+        "additionalProperties": false,
+        "properties": {
+          "academic_status": {
+            "enum": [
+              "enrolled",
+              "academic_leave",
+              "expelled",
+              "graduated"
+            ],
+            "title": "Academic Status",
+            "type": "string"
+          },
+          "can_edit": {
+            "title": "Can Edit",
+            "type": "boolean"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "attended",
+              "absent",
+              "unmarked"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "student_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Student Id",
+            "type": "string"
+          },
+          "subgroup_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subgroup Id"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "student_id",
+          "full_name",
+          "subgroup_id",
+          "academic_status",
+          "status",
+          "updated_at",
+          "can_edit"
+        ],
+        "title": "JournalAttendanceRow",
+        "type": "object"
+      },
       "JournalLesson": {
         "additionalProperties": false,
         "properties": {
@@ -2776,6 +2848,35 @@
           "next_cursor"
         ],
         "title": "Page[JournalAssessment]",
+        "type": "object"
+      },
+      "Page_JournalAttendanceRow_": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/JournalAttendanceRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[JournalAttendanceRow]",
         "type": "object"
       },
       "Page_JournalLesson_": {
@@ -12182,6 +12283,177 @@
           }
         ],
         "summary": "List Journal Lessons",
+        "tags": [
+          "teaching"
+        ]
+      }
+    },
+    "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/lessons/{lesson_id}/attendance": {
+      "get": {
+        "operationId": "list_lesson_attendance_api_v1_teaching_courses__course_offering_id__groups__group_id__lessons__lesson_id__attendance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "student_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Student Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_JournalAttendanceRow_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Lesson Attendance",
         "tags": [
           "teaching"
         ]

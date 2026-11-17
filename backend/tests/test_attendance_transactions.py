@@ -15,6 +15,7 @@ from app.attendance.service import update_attendance
 from app.dependencies.database import get_db_session
 from app.models import Attendance, AuditEvent, Lesson, User
 from app.student_service import update_student_group
+from app.teaching.router import router as teaching_router
 
 pytestmark = pytest.mark.integration
 
@@ -154,6 +155,7 @@ def test_real_production_acl_supports_attendance_and_append_only_audit(runtime_e
     engine, runtime = runtime_engine
     with Session(engine, expire_on_commit=False, autoflush=False) as admin:
         s = attendance_fixture.__wrapped__(admin)
+        s.app.include_router(teaching_router)
         admin.commit()
 
         def session():
@@ -164,6 +166,13 @@ def test_real_production_acl_supports_attendance_and_append_only_audit(runtime_e
         assert s.write().status_code == 200
         assert s.write("absent").status_code == 200
         assert s.read(lesson=s.lesson.id).json()["status"] == "absent"
+        response = s.client.get(
+            f"/api/v1/teaching/courses/{s.courses[0].id}/groups/{s.groups[0].id}"
+            f"/lessons/{s.lesson.id}/attendance",
+            headers={"Authorization": f"Bearer {s.teacher_tokens[0]}"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["items"][0]["status"] == "absent"
         assert s.write(method="delete").status_code == 200
         with runtime.connect() as db:
             assert db.scalar(text("SELECT count(*) FROM attendance")) == 0

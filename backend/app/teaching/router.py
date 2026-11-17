@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -15,6 +15,8 @@ from app.teaching.schemas import (
     AssessmentParams,
     AssignmentParams,
     JournalAssessment,
+    JournalAttendanceParams,
+    JournalAttendanceRow,
     JournalLesson,
     JournalResult,
     JournalStudent,
@@ -114,6 +116,26 @@ def list_lesson_students(
 ):
     service.require_journal_lesson(db, *scope, int(lesson_id))
     return service.list_journal_students(db, scope[1], params, int(lesson_id))
+
+
+@router.get(
+    JOURNAL + "/lessons/{lesson_id}/attendance",
+    response_model=Page[JournalAttendanceRow],
+)
+def list_lesson_attendance(
+    lesson_id: TeachingId,
+    db: Db,
+    scope: Scope,
+    params: Annotated[JournalAttendanceParams, Query()],
+    request: Request,
+    response: Response,
+):
+    names = [name for name, _ in request.query_params.multi_items()]
+    if len(names) != len(set(names)):
+        raise HTTPException(422, "validation_error")
+    service.require_journal_lesson(db, *scope, int(lesson_id))
+    response.headers["Cache-Control"] = "no-store"
+    return service.list_journal_attendance(db, *scope, int(lesson_id), params)
 
 
 @router.patch(

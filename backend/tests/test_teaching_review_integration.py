@@ -29,7 +29,14 @@ pytestmark = pytest.mark.integration
 def test_invalid_ids_on_all_teaching_routes_are_422_before_sql(journal, invalid):  # noqa: F811
     s = journal
     base = f"/api/v1/teaching/courses/{s.courses[0].id}/groups/{s.groups[0].id}"
-    suffixes = ["students", "assessments", "assessments/1/results", "lessons", "lessons/1/students"]
+    suffixes = [
+        "students",
+        "assessments",
+        "assessments/1/results",
+        "lessons",
+        "lessons/1/students",
+        "lessons/1/attendance",
+    ]
     requests = []
     for suffix in suffixes:
         for component in [f"courses/{s.courses[0].id}", f"groups/{s.groups[0].id}"]:
@@ -39,6 +46,7 @@ def test_invalid_ids_on_all_teaching_routes_are_422_before_sql(journal, invalid)
         [
             (base + f"/assessments/{invalid}/results", {}),
             (base + f"/lessons/{invalid}/students", {}),
+            (base + f"/lessons/{invalid}/attendance", {}),
         ]
     )
     for route, fields in [
@@ -48,6 +56,7 @@ def test_invalid_ids_on_all_teaching_routes_are_422_before_sql(journal, invalid)
         (base + "/assessments/1/results", ["student_id"]),
         (base + "/lessons", ["lesson_id"]),
         (base + "/lessons/1/students", ["student_id"]),
+        (base + "/lessons/1/attendance", ["student_id"]),
     ]:
         requests.extend((route, {field: invalid}) for field in fields)
     calls = []
