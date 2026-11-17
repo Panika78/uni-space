@@ -136,24 +136,39 @@ def attachment_metadata(db: Session, application_id: int) -> list[AttachmentMeta
 
 
 def issued_document_metadata(db: Session, application_id: int) -> IssuedDocumentMetadata | None:
-    document = db.scalar(
-        select(IssuedDocument).where(IssuedDocument.application_id == application_id)
-    )
-    if document is None:
-        status = db.scalar(
-            select(Application.document_status).where(Application.id == application_id)
-        )
-        if status == "ready":
-            logger.error("ready application %s has no issued document", application_id)
-            raise HTTPException(503, "document_unavailable")
-        return None
-    status = db.scalar(select(Application.document_status).where(Application.id == application_id))
-    if status != "ready":
+    row = db.execute(
+        select(Application, IssuedDocument)
+        .outerjoin(IssuedDocument, IssuedDocument.application_id == Application.id)
+        .where(Application.id == application_id)
+        .execution_options(populate_existing=True)
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(404, "not_found")
+    application, document = row
+    if application.document_status == "ready" and document is None:
+        logger.error("ready application %s has no issued document", application_id)
+        raise HTTPException(503, "document_unavailable")
+    if application.document_status != "ready" and document is not None:
         logger.error("application %s has an unready issued document", application_id)
         raise HTTPException(503, "document_unavailable")
+    if document is None:
+        return None
     return IssuedDocumentMetadata(
         id=str(document.id), filename=document.filename, issued_at=document.issued_at
     )
+
+
+def _issue_after_business_commit(application_id: int, *, actor_kind: str, actor_id: int) -> None:
+    """Document availability must not change the result of a committed business action."""
+    try:
+        issuer.issue_document(application_id, actor_kind=actor_kind, actor_id=actor_id)
+    except HTTPException as exc:
+        if exc.status_code != 503 or exc.detail not in {
+            "document_unavailable",
+            "temporarily_unavailable",
+        }:
+            raise
+        logger.warning("document issuance deferred for committed application %s", application_id)
 
 
 def resolve_published_after_commit_error(
@@ -462,7 +477,9 @@ async def submit_application(
             coordination.__exit__(None, None, None)
     response.headers["Location"] = f"/api/v1/applications/{application.id}"
     if automatic_document:
-        issuer.issue_document(application.id, actor_kind="owner", actor_id=student.user_id)
+        _issue_after_business_commit(
+            application.id, actor_kind="owner", actor_id=student.user_id
+        )
         with SessionLocal() as response_db:
             row = response_db.execute(
                 select(Application, ServiceType)
@@ -482,7 +499,25 @@ def serialize_application(
     service: ServiceType,
     *,
     attachments: list[AttachmentMetadata] | None = None,
+    document: IssuedDocument | None | object = ...,
 ) -> ApplicationResponse:
+    if document is ...:
+        row = db.execute(
+            select(Application, ServiceType, IssuedDocument)
+            .join(ServiceType, Application.service_type_id == ServiceType.id)
+            .outerjoin(IssuedDocument, IssuedDocument.application_id == Application.id)
+            .where(Application.id == application.id)
+            .execution_options(populate_existing=True)
+        ).one_or_none()
+        if row is None:
+            raise HTTPException(404, "not_found")
+        application, service, document = row
+    if application.document_status == "ready" and document is None:
+        logger.error("ready application %s has no issued document", application.id)
+        raise HTTPException(503, "document_unavailable")
+    if application.document_status != "ready" and document is not None:
+        logger.error("application %s has an unready issued document", application.id)
+        raise HTTPException(503, "document_unavailable")
     description, requirements = workflow.SERVICE_DETAILS.get(service.code, ("", []))
     return ApplicationResponse(
         id=str(application.id),
@@ -507,7 +542,13 @@ def serialize_application(
         attachments=(
             attachment_metadata(db, application.id) if attachments is None else attachments
         ),
-        document=issued_document_metadata(db, application.id),
+        document=(
+            IssuedDocumentMetadata(
+                id=str(document.id), filename=document.filename, issued_at=document.issued_at
+            )
+            if document is not None
+            else None
+        ),
     )
 
 
@@ -528,8 +569,9 @@ def list_student_applications(
     _query: Annotated[None, Depends(validate_application_query)],
 ) -> ApplicationPage:
     statement = (
-        select(Application, ServiceType)
+        select(Application, ServiceType, IssuedDocument)
         .join(ServiceType, Application.service_type_id == ServiceType.id)
+        .outerjoin(IssuedDocument, IssuedDocument.application_id == Application.id)
         .where(Application.student_id == student.id)
     )
     return list_application_page(db, statement, pagination)
@@ -537,7 +579,7 @@ def list_student_applications(
 
 def list_application_page(
     db: Session,
-    statement: Select[tuple[Application, ServiceType]],
+    statement: Select[tuple[Application, ServiceType, IssuedDocument | None]],
     pagination: PaginationParams,
     *,
     staff: bool = False,
@@ -560,20 +602,28 @@ def list_application_page(
     rows = db.execute(
         statement.order_by(Application.created_at.desc(), Application.id.desc()).limit(
             pagination.limit + 1
-        )
+        ).execution_options(populate_existing=True)
     ).all()
     page_rows = rows[: pagination.limit]
-    metadata = attachment_metadata_batch(db, [application.id for application, _ in page_rows])
+    metadata = attachment_metadata_batch(db, [application.id for application, _, _ in page_rows])
     page = paginate_results(
         [
             serialize_staff_application(
-                db, application, service, attachments=metadata.get(application.id, [])
+                db,
+                application,
+                service,
+                attachments=metadata.get(application.id, []),
+                document=document,
             )
             if staff
             else serialize_application(
-                db, application, service, attachments=metadata.get(application.id, [])
+                db,
+                application,
+                service,
+                attachments=metadata.get(application.id, []),
+                document=document,
             )
-            for application, service in rows
+            for application, service, document in rows
         ],
         key=lambda item: (item.created_at.isoformat(), int(item.id)),
         key_types=(str, int),
@@ -603,13 +653,15 @@ def get_student_application(
     if len(id) > 19 or int(id) > 9_223_372_036_854_775_807:
         raise HTTPException(422, "validation_error")
     row = db.execute(
-        select(Application, ServiceType)
+        select(Application, ServiceType, IssuedDocument)
         .join(ServiceType, Application.service_type_id == ServiceType.id)
+        .outerjoin(IssuedDocument, IssuedDocument.application_id == Application.id)
         .where(Application.student_id == student.id, Application.id == int(id))
+        .execution_options(populate_existing=True)
     ).one_or_none()
     if row is None:
         raise HTTPException(404, "not_found")
-    return serialize_application(db, *row)
+    return serialize_application(db, *row[:2], document=row[2])
 
 
 def attachment_download(
@@ -750,9 +802,12 @@ def serialize_staff_application(
     service: ServiceType,
     *,
     attachments: list[AttachmentMetadata] | None = None,
+    document: IssuedDocument | None | object = ...,
 ) -> StaffApplicationResponse:
     return StaffApplicationResponse(
-        **serialize_application(db, application, service, attachments=attachments).model_dump(),
+        **serialize_application(
+            db, application, service, attachments=attachments, document=document
+        ).model_dump(),
         student_id=str(application.student_id),
         reviewer_user_id=str(application.reviewer_user_id)
         if application.reviewer_user_id
@@ -777,8 +832,9 @@ def list_staff_applications(
     if not scopes:
         raise HTTPException(403, "forbidden")
     statement = (
-        select(Application, ServiceType)
+        select(Application, ServiceType, IssuedDocument)
         .join(ServiceType)
+        .outerjoin(IssuedDocument, IssuedDocument.application_id == Application.id)
         .where(get_application_scope().in_(scopes))
     )
     return list_application_page(db, statement, pagination, staff=True)
@@ -855,7 +911,7 @@ def review_application(
         else:
             raise
     if should_issue:
-        issuer.issue_document(application_id, actor_kind="staff", actor_id=user.id)
+        _issue_after_business_commit(application_id, actor_kind="staff", actor_id=user.id)
     with SessionLocal() as response_db:
         application = require_application_review(response_db, user, application_id)
         return serialize_staff_application(
@@ -1055,7 +1111,7 @@ def process_legacy_automatic_document(
     except Exception:
         db.rollback()
         raise
-    issuer.issue_document(application_id, actor_kind="owner", actor_id=student.user_id)
+    _issue_after_business_commit(application_id, actor_kind="owner", actor_id=student.user_id)
     db.expire_all()
     row = db.execute(
         select(Application, ServiceType)

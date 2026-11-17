@@ -146,16 +146,6 @@ def validate_and_store_form(
     form_type = APPLICATION_FORMS.get(service.code)
     if form_type is None:
         raise HTTPException(422, "validation_error")
-    try:
-        parsed = form_type.model_validate(data)
-    except Exception as exc:
-        raise HTTPException(422, "validation_error") from exc
-    assigned_org_unit_id = None
-    if service.code == "academic_leave":
-        unit = resolve_dean_office(db, student)
-        if unit is None:
-            raise HTTPException(409, "responsible_unit_unavailable")
-        assigned_org_unit_id = unit.id
     if service.code == "academic_transcript":
         try:
             term = get_current_academic_term(db, student) if existing is None else None
@@ -181,6 +171,16 @@ def validate_and_store_form(
             starts_on=term.starts_on,
             ends_on=term.ends_on,
         ).model_dump(mode="json"), None
+    try:
+        parsed = form_type.model_validate(data)
+    except Exception as exc:
+        raise HTTPException(422, "validation_error") from exc
+    assigned_org_unit_id = None
+    if service.code == "academic_leave":
+        unit = resolve_dean_office(db, student)
+        if unit is None:
+            raise HTTPException(409, "responsible_unit_unavailable")
+        assigned_org_unit_id = unit.id
     if service.code == "accounting_certificate":
         units = db.scalars(select(OrgUnit).where(OrgUnit.type == "accounting")).all()
         if len(units) != 1 or service.responsible_org_unit_id != units[0].id:

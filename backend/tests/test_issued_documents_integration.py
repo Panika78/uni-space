@@ -73,6 +73,38 @@ def _render_failure(_snapshot):
     raise RuntimeError("injected render failure")
 
 
+def _issue_then_pause_before_commit(database_url, application_id, owner_id, root, marker):
+    """Subprocess target: pause the API process after file publication, before COMMIT."""
+    from types import SimpleNamespace
+
+    from sqlalchemy import create_engine
+
+    from app.documents import issuer as issuer_module
+    from app.models import IssuedDocument as IssuedDocumentModel
+
+    engine = create_engine(database_url)
+    issuer_module.get_settings = lambda: SimpleNamespace(attachment_storage_path=root)
+    issuer_module.SessionLocal = lambda: Session(engine, expire_on_commit=False)
+    original_commit = Session.commit
+
+    def paused_commit(session):
+        if any(
+            isinstance(instance, IssuedDocumentModel)
+            for instance in [*session.new, *session.identity_map.values()]
+        ):
+            Path(marker).write_text("published", encoding="utf-8")
+            while True:
+                time.sleep(60)
+        return original_commit(session)
+
+    Session.commit = paused_commit
+    try:
+        issuer_module.issue_document(application_id, actor_kind="owner", actor_id=owner_id)
+    except BaseException as exc:
+        Path(marker + ".error").write_text(repr(exc), encoding="utf-8")
+        raise
+
+
 @pytest.mark.parametrize(
     "renderer", [_render_empty, _render_bad_header, _render_bad_xref, _render_truncated]
 )
@@ -158,6 +190,126 @@ def test_hung_render_is_killed_and_retry_can_complete(issue_context, monkeypatch
     )
     assert retry.status_code == 200, retry.text
     assert retry.json()["document_status"] == "ready"
+    _cleanup_application(context, identifier)
+
+
+@pytest.mark.parametrize("failure", ["prepare_root", "coordination_lock"])
+@pytest.mark.parametrize("service_code", ["study_certificate", "accounting_certificate"])
+def test_storage_preflight_failure_preserves_committed_business_response(
+    issue_context, monkeypatch, failure, service_code
+):
+    from app.applications import storage as attachment_storage
+    from app.documents import issuer as issuer_module
+
+    context = issue_context
+    student_token = _login(context)
+    staff_token = None
+    if service_code == "accounting_certificate":
+        suffix = uuid4().hex
+        with Session(context["engine"]) as db, db.begin():
+            accounting = db.scalar(
+                select(OrgUnit).where(OrgUnit.type == "accounting").order_by(OrgUnit.id).limit(1)
+            )
+            if accounting is None:
+                accounting = OrgUnit(name=f"Fictional Accounting {suffix}", type="accounting")
+                db.add(accounting)
+                db.flush()
+            service = db.scalar(
+                select(ServiceType).where(ServiceType.code == service_code)
+            )
+            service.responsible_org_unit_id = accounting.id
+            staff = User(
+                login=f"preflight-staff-{suffix}", password_hash="fixture",
+                full_name="Fictional Reviewer", role="staff", is_active=True,
+            )
+            db.add(staff)
+            db.flush()
+            profile = StaffProfile(user_id=staff.id, org_unit_id=accounting.id)
+            db.add(profile)
+            db.flush()
+            db.add(StaffPermission(
+                staff_profile_id=profile.id,
+                permission_code="applications.review",
+                scope_org_unit_id=accounting.id,
+            ))
+            session = AuthSession(
+                user_id=staff.id, created_at=datetime.now(UTC),
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+            db.add(session)
+            db.flush()
+            staff_token = create_access_token(session, get_settings())["access_token"]
+
+    original_operation = issuer_module._run_issued_filesystem_operation
+    original_lock = attachment_storage.coordination_lock
+
+    def fail_operation(operation, *args, renderer=None):
+        if failure == "prepare_root" and operation == "prepare_root":
+            raise OSError("injected storage unavailable")
+        return original_operation(operation, *args, renderer=renderer)
+
+    def fail_lock(*_args, **_kwargs):
+        raise TimeoutError("injected lock timeout")
+
+    monkeypatch.setattr(issuer_module, "_run_issued_filesystem_operation", fail_operation)
+    if failure == "coordination_lock":
+        monkeypatch.setattr(attachment_storage, "coordination_lock", fail_lock)
+
+    created = context["client"].request(
+        "POST", "/api/v1/applications", access=student_token,
+        json={"service_code": service_code, "form_data": (
+            {"place_of_submission": "Демонстрация"} if service_code == "study_certificate"
+            else {"purpose": "Демонстрация"}
+        )},
+    )
+    assert created.status_code == 201, created.text
+    identifier = int(created.json()["id"])
+    assert created.headers["location"].endswith(f"/applications/{identifier}")
+    if service_code == "accounting_certificate":
+        assert created.json()["review_status"] == "submitted"
+        assert context["client"].request(
+            "POST", f"/api/v1/staff/applications/{identifier}/review", access=staff_token,
+            json={"expected_version": 1, "action": "start_review"},
+        ).status_code == 200
+        response = context["client"].request(
+            "POST", f"/api/v1/staff/applications/{identifier}/review", access=staff_token,
+            json={"expected_version": 2, "action": "approve"},
+        )
+    else:
+        response = created
+    assert response.status_code == (200 if service_code == "accounting_certificate" else 201)
+    assert (response.json()["review_status"], response.json()["document_status"]) == (
+        "approved", "pending"
+    )
+    with Session(context["engine"]) as db:
+        app_row = db.get(Application, identifier)
+        version = app_row.version
+        history_count = len(db.scalars(select(ApplicationHistory).where(
+            ApplicationHistory.application_id == identifier
+        )).all())
+        assert app_row.review_status == "approved" and app_row.document_status == "pending"
+        assert db.scalar(select(IssuedDocument.id).where(
+            IssuedDocument.application_id == identifier
+        )) is None
+
+    monkeypatch.setattr(issuer_module, "_run_issued_filesystem_operation", original_operation)
+    monkeypatch.setattr(attachment_storage, "coordination_lock", original_lock)
+    retry_path = (f"/api/v1/staff/applications/{identifier}/document/retry"
+                  if service_code == "accounting_certificate"
+                  else f"/api/v1/applications/{identifier}/document/retry")
+    retry = context["client"].request(
+        "POST", retry_path,
+        access=staff_token if service_code == "accounting_certificate" else student_token,
+    )
+    assert retry.status_code == 200 and retry.json()["document_status"] == "ready"
+    with Session(context["engine"]) as db:
+        assert db.get(Application, identifier).version == version + 1
+        assert len(db.scalars(select(ApplicationHistory).where(
+            ApplicationHistory.application_id == identifier
+        )).all()) == history_count
+        assert db.scalar(select(IssuedDocument.id).where(
+            IssuedDocument.application_id == identifier
+        )) is not None
     _cleanup_application(context, identifier)
 
 
@@ -545,6 +697,206 @@ def test_render_failure_keeps_approval_and_concurrent_retries_issue_once(
             )
             == 2
         )
+    _cleanup_application(context, identifier)
+
+
+def test_concurrent_retries_from_pending_issue_once(issue_context):
+    context = issue_context
+    token = _login(context)
+    with Session(context["engine"]) as db, db.begin():
+        service = db.scalar(select(ServiceType).where(ServiceType.code == "study_certificate"))
+        application = Application(
+            student_id=context["student_ids"][0], service_type_id=service.id,
+            review_status="approved", document_status="pending",
+            form_data={"place_of_submission": "Демонстрационная справка"}, version=3,
+        )
+        db.add(application)
+        db.flush()
+        identifier = application.id
+
+    def retry():
+        return context["client"].request(
+            "POST", f"/api/v1/applications/{identifier}/document/retry", access=token
+        )
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        responses = list(pool.map(lambda _: retry(), range(3)))
+    assert [response.status_code for response in responses] == [200, 200, 200]
+    assert len({response.json()["document"]["id"] for response in responses}) == 1
+    assert all(response.json()["document_status"] == "ready" for response in responses)
+    with Session(context["engine"]) as db:
+        row = db.get(Application, identifier)
+        docs = db.scalars(select(IssuedDocument).where(
+            IssuedDocument.application_id == identifier
+        )).all()
+        events = db.scalars(select(ApplicationHistory).where(
+            ApplicationHistory.application_id == identifier
+        )).all()
+        assert (row.review_status, row.document_status, row.version) == ("approved", "ready", 4)
+        assert len(docs) == 1 and len(events) == 0
+        assert (context["root"] / "issued_documents" / docs[0].storage_key).is_file()
+    _cleanup_application(context, identifier)
+
+
+def test_api_process_crash_after_publish_recovers_orphan_and_retry(issue_context, tmp_path):
+    import multiprocessing
+
+    from app.documents.storage import cleanup_orphans, issued_root
+
+    context = issue_context
+    token = _login(context)
+    existing_response = context["client"].request(
+        "POST", "/api/v1/applications", access=token,
+        json={"service_code": "study_certificate", "form_data": {
+            "place_of_submission": "Документ, который должен сохраниться"
+        }},
+    )
+    assert existing_response.status_code == 201
+    existing_id = int(existing_response.json()["id"])
+    with Session(context["engine"]) as db:
+        existing_document = db.scalar(select(IssuedDocument).where(
+            IssuedDocument.application_id == existing_id
+        ))
+        existing_key = existing_document.storage_key
+        existing_bytes = (context["root"] / "issued_documents" / existing_key).read_bytes()
+
+    with Session(context["engine"]) as db, db.begin():
+        service = db.scalar(select(ServiceType).where(ServiceType.code == "study_certificate"))
+        application = Application(
+            student_id=context["student_ids"][0], service_type_id=service.id,
+            review_status="approved", document_status="pending",
+            form_data={"place_of_submission": "Crash recovery demonstration"}, version=2,
+        )
+        db.add(application)
+        db.flush()
+        identifier = application.id
+        db.add(ApplicationHistory(
+            application_id=identifier, actor_user_id=None,
+            from_status="submitted", to_status="approved", comment=None,
+        ))
+
+    marker = tmp_path / "published-before-commit"
+    database_url = context["engine"].url.render_as_string(hide_password=False)
+    process = multiprocessing.get_context("fork").Process(
+        target=_issue_then_pause_before_commit,
+        args=(
+            database_url, identifier, context["student_users"][0],
+            str(context["root"]), str(marker),
+        ),
+    )
+    process.start()
+    deadline = time.monotonic() + 20
+    while not marker.exists() and process.is_alive() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    error_path = Path(str(marker) + ".error")
+    error_detail = error_path.read_text() if error_path.exists() else None
+    assert marker.exists(), (
+        "API process did not reach post-publication/pre-commit barrier; "
+        f"exit={process.exitcode}, error={error_detail}"
+    )
+    process.kill()
+    process.join(timeout=10)
+    assert process.exitcode is not None and process.exitcode != 0
+
+    pdf_root = issued_root(context["root"])
+    crash_orphans = [path for path in pdf_root.glob("*.pdf") if path.name != existing_key]
+    assert len(crash_orphans) == 1
+    with Session(context["engine"]) as db:
+        crashed = db.get(Application, identifier)
+        assert (crashed.review_status, crashed.document_status) == ("approved", "pending")
+        assert db.scalar(select(IssuedDocument.id).where(
+            IssuedDocument.application_id == identifier
+        )) is None
+        history_count = len(db.scalars(select(ApplicationHistory.id).where(
+            ApplicationHistory.application_id == identifier
+        )).all())
+    references = {existing_key}
+    assert cleanup_orphans(context["root"], references, older_than_seconds=0) == 1
+    assert not crash_orphans[0].exists()
+    assert (pdf_root / existing_key).read_bytes() == existing_bytes
+
+    recovered = context["client"].request(
+        "POST", f"/api/v1/applications/{identifier}/document/retry", access=token
+    )
+    assert recovered.status_code == 200 and recovered.json()["document_status"] == "ready"
+    with Session(context["engine"]) as db:
+        assert (
+            db.scalar(select(Application.document_status).where(Application.id == identifier))
+            == "ready"
+        )
+        assert len(db.scalars(select(IssuedDocument.id).where(
+            IssuedDocument.application_id == identifier
+        )).all()) == 1
+        assert len(db.scalars(select(ApplicationHistory.id).where(
+            ApplicationHistory.application_id == identifier
+        )).all()) == history_count
+    assert (pdf_root / existing_key).read_bytes() == existing_bytes
+    _cleanup_application(context, identifier)
+    _cleanup_application(context, existing_id)
+
+
+@pytest.mark.parametrize("read_path", ["list", "detail"])
+def test_application_reads_remain_consistent_during_document_issuance(
+    issue_context, read_path
+):
+    from app.documents import issuer as issuer_module
+
+    context = issue_context
+    token = _login(context)
+    with Session(context["engine"]) as db, db.begin():
+        service = db.scalar(select(ServiceType).where(ServiceType.code == "study_certificate"))
+        application = Application(
+            student_id=context["student_ids"][0], service_type_id=service.id,
+            review_status="approved", document_status="pending",
+            form_data={"place_of_submission": "Согласованный снимок"}, version=5,
+        )
+        db.add(application)
+        db.flush()
+        identifier = application.id
+
+    query_reached = threading.Event()
+    release_query = threading.Event()
+    claimed = threading.Event()
+
+    def pause_after_snapshot(_connection, _cursor, statement, _parameters, _context, _many):
+        if (
+            "LEFT OUTER JOIN issued_documents" in statement
+            and not claimed.is_set()
+            and threading.current_thread() is not threading.main_thread()
+        ):
+            claimed.set()
+            query_reached.set()
+            assert release_query.wait(timeout=10)
+
+    event.listen(context["engine"], "after_cursor_execute", pause_after_snapshot)
+    path = "/api/v1/applications" if read_path == "list" else f"/api/v1/applications/{identifier}"
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            read = pool.submit(context["client"].request, "GET", path, access=token)
+            assert query_reached.wait(timeout=10), read.result(timeout=1).text
+            issued = issuer_module.issue_document(
+                identifier, actor_kind="owner", actor_id=context["student_users"][0]
+            )
+            assert issued.document_status == "ready"
+            release_query.set()
+            response = read.result(timeout=10)
+    finally:
+        release_query.set()
+        event.remove(context["engine"], "after_cursor_execute", pause_after_snapshot)
+    assert response.status_code == 200, response.text
+    if read_path == "list":
+        item = next(item for item in response.json()["items"] if item["id"] == str(identifier))
+    else:
+        item = response.json()
+    assert (item["review_status"], item["document_status"], item["version"], item["document"]) == (
+        "approved", "pending", 5, None
+    )
+    subsequent = context["client"].request("GET", path, access=token)
+    if read_path == "list":
+        item = next(item for item in subsequent.json()["items"] if item["id"] == str(identifier))
+    else:
+        item = subsequent.json()
+    assert item["document_status"] == "ready" and item["document"] is not None
     _cleanup_application(context, identifier)
 
 
@@ -1159,3 +1511,191 @@ def test_cleanup_waits_for_pdf_commit_and_keeps_new_reference(issue_context, mon
 def _issued_keys(engine):
     with Session(engine) as db:
         return set(db.scalars(select(IssuedDocument.storage_key)))
+
+
+def test_legacy_automatic_application_survives_real_schema_upgrade(
+    postgresql_engine, tmp_path, monkeypatch
+):
+    import os
+    import subprocess
+    import sys
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from sqlalchemy import create_engine
+
+    from app.applications import router as application_router
+    from app.auth.security import create_access_token
+    from app.core.config import get_settings
+    from app.dependencies.database import get_db_session
+    from app.documents import issuer as issuer_module
+    from app.models import AcademicTerm, OrgUnit, Program, StudyGroup
+
+    database_name = f"uni_space_legacy_{uuid4().hex[:12]}"
+    admin_url = postgresql_engine.url
+    admin_engine = create_engine(admin_url)
+    with admin_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        connection.exec_driver_sql(f'CREATE DATABASE "{database_name}"')
+    legacy_url = admin_url.set(database=database_name)
+    legacy_engine = create_engine(legacy_url)
+    backend_directory = Path(__file__).resolve().parents[1]
+    child_env = os.environ.copy()
+    child_env.update(
+        APP_ENV="test",
+        DATABASE_URL=legacy_url.render_as_string(hide_password=False),
+        JWT_SIGNING_KEY="test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    )
+
+    def migrate(revision):
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", revision],
+            cwd=backend_directory,
+            env=child_env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    try:
+        migrate("20261116_09")
+        suffix = uuid4().hex
+        with Session(legacy_engine) as db, db.begin():
+            faculty = OrgUnit(name=f"Legacy faculty {suffix}", type="faculty")
+            db.add(faculty)
+            db.flush()
+            program = Program(
+                code=suffix, name=f"Legacy program {suffix}", direction_code="00.00.00",
+                direction_name="Fictional direction", faculty_id=faculty.id,
+            )
+            db.add(program)
+            db.flush()
+            group = StudyGroup(
+                name=f"Legacy group {suffix}", program_id=program.id, course_number=1
+            )
+            term = AcademicTerm(
+                name=f"Legacy term {suffix}", starts_on=datetime(2026, 9, 1).date(),
+                ends_on=datetime(2027, 1, 31).date(),
+            )
+            owner = User(
+                login=f"legacy-{suffix}", password_hash="fixture",
+                full_name="Legacy Fictional Student",
+                role="student", is_active=True,
+            )
+            db.add_all([group, term, owner])
+            db.flush()
+            student = Student(user_id=owner.id, group_id=group.id, academic_status="enrolled")
+            db.add(student)
+            db.flush()
+            service = db.scalar(
+                select(ServiceType).where(ServiceType.code == "academic_transcript")
+            )
+            application = Application(
+                student_id=student.id, service_type_id=service.id,
+                review_status="submitted", document_status="pending",
+                form_data={
+                    "academic_term_id": str(term.id),
+                    "academic_term_name": term.name,
+                    "starts_on": term.starts_on.isoformat(),
+                    "ends_on": term.ends_on.isoformat(),
+                },
+                version=1,
+            )
+            db.add(application)
+            db.flush()
+            db.add(ApplicationHistory(
+                application_id=application.id, actor_user_id=owner.id,
+                from_status=None, to_status="submitted", comment=None,
+            ))
+            auth_session = AuthSession(
+                user_id=owner.id, created_at=datetime.now(UTC),
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+            db.add(auth_session)
+            db.flush()
+            owner_token = create_access_token(auth_session, get_settings())["access_token"]
+            application_id, owner_id, student_id = application.id, owner.id, student.id
+            original_form = application.form_data.copy()
+            original_term_id = application.form_data["academic_term_id"]
+
+        # Upgrade the existing database, including its pre-#83 application row.
+        migrate("head")
+        with legacy_engine.connect() as connection:
+            assert connection.exec_driver_sql(
+                "SELECT to_regclass('public.issued_documents')"
+            ).scalar_one() == "issued_documents"
+
+        class TestSettings:
+            attachment_storage_path = str(tmp_path / "legacy-private-volume")
+
+        monkeypatch.setattr(application_router, "get_settings", lambda: TestSettings())
+        monkeypatch.setattr(issuer_module, "get_settings", lambda: TestSettings())
+        monkeypatch.setattr(
+            issuer_module, "SessionLocal",
+            lambda: Session(legacy_engine, expire_on_commit=False),
+        )
+        app = FastAPI()
+        app.include_router(application_router.router)
+        def get_legacy_session():
+            with Session(legacy_engine, expire_on_commit=False) as db:
+                yield db
+
+        app.dependency_overrides[get_db_session] = get_legacy_session
+        try:
+            from app.applications import service as workflow
+            with Session(legacy_engine) as diagnostic_db:
+                diagnostic_app = diagnostic_db.get(Application, application_id)
+                diagnostic_student = diagnostic_db.get(Student, student_id)
+                diagnostic_service = diagnostic_db.get(ServiceType, diagnostic_app.service_type_id)
+                assert workflow.validate_and_store_form(
+                    diagnostic_db, diagnostic_service, diagnostic_app.form_data,
+                    student=diagnostic_student, existing=diagnostic_app.form_data,
+                )[0] == original_form
+            client = TestClient(app)
+            headers = {"Authorization": f"Bearer {owner_token}"}
+            processed = client.post(
+                f"/api/v1/applications/{application_id}/document/process", headers=headers
+            )
+            assert processed.status_code == 200, processed.text
+            assert (processed.json()["id"], processed.json()["review_status"],
+                    processed.json()["document_status"]) == (
+                str(application_id), "approved", "ready"
+            )
+            document_id = processed.json()["document"]["id"]
+            repeated = client.post(
+                f"/api/v1/applications/{application_id}/document/process", headers=headers
+            )
+            assert repeated.status_code == 200
+            assert repeated.json()["document"]["id"] == document_id
+            with Session(legacy_engine) as db:
+                migrated = db.get(Application, application_id)
+                history = db.scalars(select(ApplicationHistory).where(
+                    ApplicationHistory.application_id == application_id
+                ).order_by(ApplicationHistory.id)).all()
+                docs = db.scalars(select(IssuedDocument).where(
+                    IssuedDocument.application_id == application_id
+                )).all()
+                assert migrated.form_data == original_form
+                assert migrated.form_data["academic_term_id"] == original_term_id
+                assert migrated.review_status == "approved" and migrated.document_status == "ready"
+                assert len(history) == 2
+                assert history[0].to_status == "submitted" and history[0].actor_user_id == owner_id
+                assert history[1].from_status == "submitted" and history[1].to_status == "approved"
+                assert history[1].actor_user_id is None
+                assert len(docs) == 1
+                assert (Path(TestSettings.attachment_storage_path) / "issued_documents"
+                        / docs[0].storage_key).is_file()
+        finally:
+            app.dependency_overrides.clear()
+    finally:
+        legacy_engine.dispose()
+        with admin_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            connection.exec_driver_sql(
+                f'ALTER DATABASE "{database_name}" WITH ALLOW_CONNECTIONS false'
+            )
+            connection.exec_driver_sql(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = %s",
+                (database_name,),
+            )
+            connection.exec_driver_sql(f'DROP DATABASE "{database_name}"')
+        admin_engine.dispose()
