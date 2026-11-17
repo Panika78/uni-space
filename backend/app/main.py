@@ -6,6 +6,7 @@ from app.admin.router import router as admin_router
 from app.applications.router import router as applications_router
 from app.attendance.router import router as attendance_router
 from app.auth.router import router as auth_router
+from app.core.body_limit import RequestTooLarge
 from app.core.config import get_settings
 from app.core.errors import install_exception_handlers
 from app.core.middleware import ApiHeadersMiddleware
@@ -41,6 +42,71 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
     redoc_url=None,
 )
+
+
+class RequestBodyLimitMiddleware:
+    """Bound all API request bodies even when Content-Length is absent."""
+
+    limit_bytes = 54 * 1024 * 1024
+
+    def __init__(self, application):
+        self.application = application
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope.get("path", "").startswith("/api/"):
+            await self.application(scope, receive, send)
+            return
+        headers = dict(scope.get("headers", []))
+        raw_length = headers.get(b"content-length")
+        if raw_length is not None and raw_length.isdigit() and int(raw_length) > self.limit_bytes:
+            await self._too_large(send)
+            return
+        received = 0
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.limit_bytes:
+                    raise RequestTooLarge
+            return message
+
+        try:
+            await self.application(scope, limited_receive, send)
+        except RequestTooLarge:
+            await self._too_large(send)
+
+    @staticmethod
+    async def _too_large(send):
+        import json
+
+        body = json.dumps(
+            {
+                "error": {
+                    "code": "request_too_large",
+                    "message": "Размер запроса превышает допустимый предел",
+                    "details": [],
+                }
+            },
+            ensure_ascii=False,
+        ).encode()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 413,
+                "headers": [
+                    (b"content-type", b"application/json; charset=utf-8"),
+                    (b"content-length", str(len(body)).encode()),
+                    (b"cache-control", b"no-store"),
+                    (b"x-content-type-options", b"nosniff"),
+                ],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
+
+
+app.add_middleware(RequestBodyLimitMiddleware)
 app.add_middleware(ApiHeadersMiddleware)
 install_exception_handlers(app)
 app.include_router(admin_router)

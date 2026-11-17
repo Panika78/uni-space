@@ -175,6 +175,70 @@ export async function apiFetch<T>(input: RequestInfo | URL, init: ApiRequestInit
   }
 }
 
+/** Authenticated private download path; JSON apiFetch intentionally remains JSON-only. */
+export async function apiFetchBlob(
+  input: RequestInfo | URL,
+  init: ApiRequestInit = {},
+): Promise<Blob> {
+  if (!init.authenticated) throw new ApiClientError('Требуется авторизация', 'invalid_access', 401)
+  const target = requireApiDestination(input)
+  if (!beginAuthRequest) throw new Error('Auth provider is unavailable')
+  const auth = beginAuthRequest()
+  const callerSignal = init.signal ?? (input instanceof Request ? input.signal : undefined)
+  const signal = AbortSignal.any([auth.signal, ...(callerSignal ? [callerSignal] : [])])
+  const headers = new Headers(init.headers)
+  headers.set('Accept', 'application/octet-stream')
+  const fetchBinary = (token: string) => {
+    const requestHeaders = new Headers(headers)
+    requestHeaders.set('Authorization', `Bearer ${token}`)
+    return fetch(target, {
+      method: 'GET',
+      headers: requestHeaders,
+      credentials: 'same-origin',
+      cache: 'no-store',
+      redirect: 'error',
+      signal,
+    })
+  }
+  let response: Response
+  try {
+    response = await fetchBinary(auth.token)
+    if (response.status === 401) {
+      const error = await response
+        .clone()
+        .json()
+        .catch(() => null)
+      if (isApiError(error) && error.error.code === 'access_expired') {
+        const token = await auth.refresh()
+        auth.assertCurrent()
+        response = await fetchBinary(token)
+      }
+    }
+    auth.signal.throwIfAborted()
+    callerSignal?.throwIfAborted()
+    auth.assertCurrent()
+  } catch (error) {
+    auth.signal.throwIfAborted()
+    callerSignal?.throwIfAborted()
+    if (error instanceof ApiClientError) throw error
+    throw new ApiClientError('Не удалось скачать файл', 'network_error')
+  }
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null)
+    if (isApiError(payload)) {
+      if (response.status === 401) auth.invalidate()
+      throw new ApiClientError(
+        payload.error.message,
+        payload.error.code,
+        response.status,
+        payload.error.details,
+      )
+    }
+    throw new ApiClientError('Не удалось скачать файл', 'http_error', response.status)
+  }
+  return response.blob()
+}
+
 function createRequestTimeoutError() {
   return new ApiClientError(
     'Не удалось загрузить данные за отведённое время. Проверьте соединение и попробуйте ещё раз.',

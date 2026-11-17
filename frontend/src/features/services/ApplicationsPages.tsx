@@ -1,8 +1,8 @@
 import { useAccessSuspended } from '../../shared/ui/AccessRecovery'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { apiFetch, ApiClientError } from '../../shared/api/client'
+import { apiFetch, apiFetchBlob, ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { Icon } from '../../shared/ui/Icon'
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
@@ -277,6 +277,8 @@ export function ApplicationDetailPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const title = useRef<HTMLHeadingElement>(null)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const [downloadError, setDownloadError] = useState('')
   const query = useQuery({
     queryKey: [...applicationsKey, 'detail', id],
     queryFn: ({ signal }) =>
@@ -289,6 +291,26 @@ export function ApplicationDetailPage() {
     if (query.isSuccess && !isSuspended) title.current?.focus({ preventScroll: true })
   }, [query.data, query.isSuccess, isSuspended])
   const item = query.isSuccess ? query.data : undefined
+  async function downloadAttachment(id: string, filename: string) {
+    setDownloadingId(id)
+    setDownloadError('')
+    try {
+      const blob = await apiFetchBlob(
+        `/api/v1/applications/attachments/${encodeURIComponent(id)}/download`,
+        { authenticated: true },
+      )
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      setDownloadError('Не удалось скачать вложение. Обновите заявление и повторите попытку.')
+    } finally {
+      setDownloadingId(null)
+    }
+  }
   return (
     <section className="section-page service-page application-detail" aria-busy={query.isFetching}>
       <Link
@@ -344,6 +366,29 @@ export function ApplicationDetailPage() {
             Заявление № {item.id}
           </h1>
           <p className="service-subtitle">{item.service.title}</p>
+          {(item.attachments ?? []).length > 0 && (
+            <section className="application-detail-card" aria-labelledby="attachments-title">
+              <h2 id="attachments-title">Текущие подтверждающие файлы</h2>
+              <ul>
+                {(item.attachments ?? []).map((attachment) => (
+                  <li key={attachment.id}>
+                    {attachment.original_filename} —{' '}
+                    {(attachment.size_bytes / (1024 * 1024)).toFixed(2)} МБ{' '}
+                    <button
+                      type="button"
+                      disabled={downloadingId !== null}
+                      onClick={() =>
+                        void downloadAttachment(attachment.id, attachment.original_filename)
+                      }
+                    >
+                      {downloadingId === attachment.id ? 'Скачиваем…' : 'Скачать'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {downloadError && <p role="alert">{downloadError}</p>}
+            </section>
+          )}
           <article className="application-detail-card">
             <div className="service-card-heading">
               <span className="service-icon-small" aria-hidden="true">

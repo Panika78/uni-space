@@ -12,13 +12,11 @@ import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStat
 
 type Application = components['schemas']['ApplicationResponse']
 type CreateApplicationRequest =
-  | components['schemas']['CreateStudyCertificateRequest']
-  | components['schemas']['CreateAcademicTranscriptRequest']
-  | components['schemas']['CreateAcademicLeaveRequest']
-  | components['schemas']['CreateAccountingCertificateRequest']
+  import('../../shared/api/schema').operations['submit_application_api_v1_applications_post']['requestBody']['content']['application/json']
 
 type AdditionalFormField = 'basis' | 'starts_on' | 'ends_on' | 'explanation' | 'purpose'
 type AdditionalFormErrors = Partial<Record<AdditionalFormField, string>>
+const LEAVE_UPLOAD_TIMEOUT_MS = 180_000
 
 const isPythonWhitespace = (character: string) => {
   const codePoint = character.codePointAt(0) ?? 0
@@ -362,6 +360,8 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
   const endsOn = parseRussianDate(endsText) ?? ''
   const [explanation, setExplanation] = useState('')
   const [purpose, setPurpose] = useState('')
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [attachmentError, setAttachmentError] = useState('')
   const [touched, setTouched] = useState(false)
   const [touchedFields, setTouchedFields] = useState({
     startsOn: false,
@@ -387,7 +387,8 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
     JSON.stringify({ basis, startsText, endsText, explanation, purpose }),
   )
   const hasChanges =
-    JSON.stringify({ basis, startsText, endsText, explanation, purpose }) !== initialValues
+    JSON.stringify({ basis, startsText, endsText, explanation, purpose }) !== initialValues ||
+    selectedFiles.length > 0
   const draft = !applicationId && !uncertain && hasChanges
   const blocker = useBlocker(draft || pending || uncertain)
   useEffect(() => {
@@ -465,6 +466,19 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
       return
     }
     if (service?.action_available !== true || pending || uncertain) return
+    if (isLeave && selectedFiles.length === 0) {
+      setAttachmentError('Прикрепите минимум один подтверждающий файл.')
+      document.getElementById('leave-files')?.focus()
+      return
+    }
+    if (
+      selectedFiles.length > 5 ||
+      selectedFiles.some((file) => file.size === 0 || file.size > 10 * 1024 * 1024) ||
+      selectedFiles.reduce((total, file) => total + file.size, 0) > 50 * 1024 * 1024
+    ) {
+      setAttachmentError('Допустимо до 5 файлов, не более 10 МБ каждый и 50 МБ суммарно.')
+      return
+    }
     setPending(true)
     try {
       const formData = isTranscript
@@ -477,11 +491,19 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
               ends_on: endsOn,
               explanation: basis === 'other' ? normalizedExplanation : null,
             }
+      const body = isLeave
+        ? (() => {
+            const multipart = new FormData()
+            multipart.set('form_data', JSON.stringify(formData))
+            selectedFiles.forEach((file) => multipart.append('files', file, file.name))
+            return multipart
+          })()
+        : JSON.stringify({ service_code: serviceCode, form_data: formData })
       const result = await apiFetch<unknown>('/api/v1/applications', {
         method: 'POST',
         authenticated: true,
-        signal: AbortSignal.timeout(30_000),
-        body: JSON.stringify({ service_code: serviceCode, form_data: formData }),
+        signal: AbortSignal.timeout(isLeave ? LEAVE_UPLOAD_TIMEOUT_MS : 30_000),
+        body,
       })
       const expectedForm = isTranscript
         ? {}
@@ -521,12 +543,31 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
       } else {
         setServerFieldErrors({})
         setFirstServerErrorField(null)
+        const isAttachmentError =
+          cause instanceof ApiClientError &&
+          ['attachment_required', 'invalid_attachment', 'attachment_limit_exceeded'].includes(
+            cause.code,
+          )
+        if (cause instanceof ApiClientError && cause.code === 'attachment_required') {
+          setAttachmentError('Прикрепите минимум один подтверждающий файл.')
+        } else if (
+          cause instanceof ApiClientError &&
+          ['invalid_attachment', 'attachment_limit_exceeded'].includes(cause.code)
+        ) {
+          setAttachmentError(
+            cause.code === 'invalid_attachment'
+              ? 'Файл пустой, повреждён или не относится к PDF, JPG или PNG.'
+              : 'Допустимо до 5 файлов, не более 10 МБ каждый и 50 МБ суммарно.',
+          )
+        }
         setError(
-          isUncertain && cause instanceof ApiClientError && cause.status === 503
-            ? 'Сервис временно недоступен. Заявление могло сохраниться; проверьте список заявлений перед повтором.'
-            : isUncertain
-              ? 'Ответ не получен. Заявление могло сохраниться; проверьте список заявлений перед повтором.'
-              : getApplicationErrorMessage(cause),
+          isAttachmentError
+            ? ''
+            : isUncertain && cause instanceof ApiClientError && cause.status === 503
+              ? 'Сервис временно недоступен. Заявление могло сохраниться; проверьте список заявлений перед повтором.'
+              : isUncertain
+                ? 'Ответ не получен. Заявление могло сохраниться; проверьте список заявлений перед повтором.'
+                : getApplicationErrorMessage(cause),
         )
       }
     } finally {
@@ -760,10 +801,49 @@ function AdditionalApplicationFormPage({ serviceCode }: { serviceCode: string })
                       ? 'Документ, подтверждающий семейные обстоятельства.'
                       : 'Документ, подтверждающий указанное обстоятельство.'}
                 </p>
-                <p>
-                  Функция прикрепления файлов будет доступна после подключения защищённого
-                  хранилища.
-                </p>
+                <label htmlFor="leave-files">Подтверждающие файлы (PDF, JPG, PNG) *</label>
+                <input
+                  id="leave-files"
+                  type="file"
+                  accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
+                  multiple
+                  disabled={pending}
+                  onChange={(event) => {
+                    const incoming = Array.from(event.target.files ?? [])
+                    setSelectedFiles((current) => [...current, ...incoming].slice(0, 6))
+                    setAttachmentError('')
+                    event.currentTarget.value = ''
+                  }}
+                  aria-invalid={Boolean(attachmentError)}
+                  aria-describedby={attachmentError ? 'leave-files-error' : 'leave-files-help'}
+                />
+                <small id="leave-files-help">До 5 файлов, 10 МБ каждый и 50 МБ суммарно.</small>
+                {selectedFiles.length > 0 && (
+                  <ul aria-label="Выбранные файлы">
+                    {selectedFiles.map((file, index) => (
+                      <li key={`${file.name}-${file.size}-${index}`}>
+                        {file.name} — {(file.size / (1024 * 1024)).toFixed(2)} МБ{' '}
+                        <button
+                          type="button"
+                          disabled={pending}
+                          aria-label={`Удалить ${file.name}`}
+                          onClick={() =>
+                            setSelectedFiles((current) =>
+                              current.filter((_, itemIndex) => itemIndex !== index),
+                            )
+                          }
+                        >
+                          Удалить
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {attachmentError && (
+                  <small id="leave-files-error" role="alert">
+                    {attachmentError}
+                  </small>
+                )}
               </div>
             </>
           )}

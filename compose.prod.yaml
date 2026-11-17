@@ -45,7 +45,10 @@ services:
       DATABASE_USER: uni_space_api
       DATABASE_PASSWORD_FILE: /run/secrets/api_db_password
       DATABASE_NAME: ${POSTGRES_DB:?Set POSTGRES_DB}
+      ATTACHMENT_STORAGE_PATH: /var/lib/uni-space/attachments
     secrets: [jwt_signing_key, api_db_password]
+    volumes:
+      - application_attachments:/var/lib/uni-space/attachments
     networks: [proxy, database]
     depends_on:
       db:
@@ -125,6 +128,7 @@ secrets:
     file: ${MIGRATION_DB_PASSWORD_FILE:?Set MIGRATION_DB_PASSWORD_FILE}
 volumes:
   postgres_data:
+  application_attachments:
 networks:
   edge:
   proxy:

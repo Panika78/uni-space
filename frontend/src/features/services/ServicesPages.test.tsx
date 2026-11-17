@@ -51,7 +51,10 @@ function render(ui: ReactNode) {
 beforeEach(() => {
   apiFetch.mockReset()
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 const catalogService = (id: string, title: string) => ({
   id,
@@ -98,6 +101,16 @@ function mountAdditionalForm(serviceCode: string) {
   )
   render(<RouterProvider router={router} />)
   return router
+}
+
+function addTestProofFile() {
+  const file = new File(['%PDF-1.4\nfictional\n%%EOF'], 'proof.pdf', {
+    type: 'application/pdf',
+  })
+  fireEvent.change(screen.getByLabelText(/Подтверждающие файлы/), {
+    target: { files: [file] },
+  })
+  return file
 }
 
 it('loads the real service catalog and offers the separate application form', async () => {
@@ -580,9 +593,9 @@ it('isolates the next student catalog when a cleared query receives an old respo
   expect(first.client.getQueryData(['services'])).toEqual(next)
 })
 
-it('uses the future academic leave response contract in a controlled fixture only', async () => {
+it('submits the academic leave form and selected file as multipart data', async () => {
+  vi.spyOn(AbortSignal, 'timeout').mockReturnValue(new AbortController().signal)
   const leaveService = additionalService('academic_leave', 'Академический отпуск')
-  // Controlled 201 fixture only: this test does not call a live API or exercise file uploads.
   apiFetch.mockResolvedValueOnce({ items: [leaveService] }).mockResolvedValueOnce(
     additionalApplication(
       leaveService,
@@ -605,17 +618,18 @@ it('uses the future academic leave response contract in a controlled fixture onl
   ).toBeInTheDocument()
   fireEvent.change(starts, { target: { value: '29.02.2028' } })
   fireEvent.change(ends, { target: { value: '01.03.2028' } })
+  const file = addTestProofFile()
   fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
   expect(await screen.findByText(/Заявление № 81/)).toBeInTheDocument()
   expect(screen.queryByText(/заявление могло сохраниться/i)).not.toBeInTheDocument()
-  expect(JSON.parse(apiFetch.mock.calls[1][1].body)).toEqual({
-    service_code: 'academic_leave',
-    form_data: {
-      basis: 'medical',
-      starts_on: '2028-02-29',
-      ends_on: '2028-03-01',
-      explanation: null,
-    },
+  const body = apiFetch.mock.calls[1][1].body as FormData
+  expect(body.get('files')).toMatchObject({ name: file.name, type: file.type, size: file.size })
+  expect(AbortSignal.timeout).toHaveBeenCalledWith(180_000)
+  expect(JSON.parse(body.get('form_data') as string)).toEqual({
+    basis: 'medical',
+    starts_on: '2028-02-29',
+    ends_on: '2028-03-01',
+    explanation: null,
   })
 })
 
@@ -636,6 +650,7 @@ it('does not accept pending document status for academic leave', async () => {
   fireEvent.change(screen.getByLabelText(/Дата окончания/), {
     target: { value: '01.03.2028' },
   })
+  addTestProofFile()
   fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
   expect(await screen.findByRole('alert')).toHaveTextContent(/ответ не получен/i)
   expect(screen.queryByText(/Заявление № 81/)).not.toBeInTheDocument()
@@ -702,16 +717,16 @@ it('normalizes other-basis explanation and validates the controlled future respo
   fireEvent.change(screen.getByLabelText(/Пояснение/), {
     target: { value: ' \u001c\u00a0Обстоятельство\u2003\u001c ' },
   })
+  const file = addTestProofFile()
   fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
   expect(await screen.findByText(/Заявление № 81/)).toBeInTheDocument()
-  expect(JSON.parse(apiFetch.mock.calls[1][1].body)).toEqual({
-    service_code: 'academic_leave',
-    form_data: {
-      basis: 'other',
-      starts_on: '2028-02-29',
-      ends_on: '2028-03-01',
-      explanation: 'Обстоятельство',
-    },
+  const body = apiFetch.mock.calls[1][1].body as FormData
+  expect(body.get('files')).toMatchObject({ name: file.name, type: file.type, size: file.size })
+  expect(JSON.parse(body.get('form_data') as string)).toEqual({
+    basis: 'other',
+    starts_on: '2028-02-29',
+    ends_on: '2028-03-01',
+    explanation: 'Обстоятельство',
   })
 })
 
@@ -787,6 +802,8 @@ it.each([
           : /Пояснение/,
     )
   }
+
+  if (scenario.serviceCode === 'academic_leave') addTestProofFile()
 
   fireEvent.click(screen.getByRole('button', { name: 'Отправить заявление' }))
   expect(await screen.findByText(scenario.message)).toBeInTheDocument()

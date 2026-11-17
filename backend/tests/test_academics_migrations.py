@@ -191,7 +191,7 @@ def test_alembic_graph_preserves_notifications_and_has_one_academic_head():
     from alembic.script import ScriptDirectory
 
     graph = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert graph.get_heads() == ["20261116_08"]
+    assert graph.get_heads() == ["20261116_09"]
     assert graph.get_revision("20261116_01").down_revision == "20261115_04"
     assert graph.get_revision("20261115_03").down_revision == "20261115_02"
     assert graph.get_revision("20261115_02").down_revision == "20261115_01"
@@ -242,7 +242,7 @@ def test_upgrade_main_notifications_preserves_rows_and_creates_academics(migrati
     run_migration(engine, "check")
     with engine.connect() as db:
         assert db.scalar(notification_snapshot) == before
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261116_08"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261116_09"
         for table in ("assessments", "assessment_groups", "assessment_results", "final_results"):
             assert (
                 db.scalar(text("SELECT to_regclass(:table)"), {"table": f"public.{table}"})

@@ -43,7 +43,15 @@ HTTP_ERROR_CODES = {
         "assignment_conflict",
     },
     413: {"request_too_large"},
-    422: {"validation_error", "invalid_cursor", "invalid_profile", "invalid_permission_scope"},
+    422: {
+        "validation_error",
+        "invalid_cursor",
+        "invalid_profile",
+        "invalid_permission_scope",
+        "attachment_required",
+        "attachment_limit_exceeded",
+        "invalid_attachment",
+    },
     429: {"rate_limited"},
     503: {"temporarily_unavailable"},
 }

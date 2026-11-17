@@ -40,6 +40,20 @@
 | POST | `/applications` | `CreateApplicationRequest` | `201 Application` |
 | GET | `/applications` | `limit`, `cursor` | `200 Page<Application>` |
 | GET | `/applications/{id}` | ID | `200 Application` |
+
+Для `academic_leave` `POST /applications` принимает только `multipart/form-data` с
+полем `form_data` (JSON-строка) и одним или несколькими полями `files`.
+Старый JSON-контракт остальных услуг сохранён; JSON-подача академического отпуска
+отклоняется как `422 attachment_required`. Поддерживаются PDF/JPG/PNG: до 5 текущих
+файлов, до 10 МиБ каждый и 50 МиБ суммарно. Минимум один технически корректный файл
+обязателен при любом основании; смысловое соответствие документа сервер не оценивает.
+Метаданные вложений не содержат `storage_key`. В списке и detail доступны только
+текущие вложения.
+
+| GET | `/applications/{id}/attachments` | ID заявки | `200 AttachmentMetadata[]` |
+| GET | `/applications/attachments/{attachment_id}/download` | ID вложения | бинарный файл |
+| GET | `/staff/applications/{id}/attachments` | ID заявки + scope | `200 AttachmentMetadata[]` |
+| GET | `/staff/applications/attachments/{attachment_id}/download` | ID вложения + scope | бинарный файл |
 | GET | `/news` | `limit`, `cursor` | `200 Page<NewsPreview>` |
 | GET | `/news/{id}` | ID | `200 News` |
 | GET | `/notifications` | `limit`, `cursor` | `200 Page<Notification>` |
@@ -217,6 +231,12 @@ type AcademicLeaveFormData = {
   basis: "medical" | "family" | "other"; starts_on: Date; ends_on: Date; explanation: string | null;
 };
 type AccountingCertificateFormData = { purpose: string | null };
+type AttachmentMetadata = {
+  id: Id;
+  original_filename: string;
+  mime_type: "application/pdf" | "image/jpeg" | "image/png";
+  size_bytes: number;
+};
 
 type Application = {
   id: Id;
@@ -229,6 +249,7 @@ type Application = {
     | "resubmitted" | "approved" | "rejected";
   document_status: "not_required" | "pending" | "ready" | "failed";
   feedback: string | null;
+  attachments: AttachmentMetadata[]; // только текущие вложения академического отпуска
   created_at: DateTime;
   updated_at: DateTime;
 };
@@ -236,7 +257,7 @@ type Application = {
 
 `study_certificate` сохраняет контракт MVP1: `place_of_submission` обязателен, 1–300 символов после trim. Для выписки входная форма пуста, сохранённый период определяется сервером из текущих периодов, связанных с группой студента через `course_groups` и `course_offerings`; при нуле или нескольких применимых периодах возвращается `409 academic_term_unavailable` или `409 academic_term_ambiguous`. При resubmit период сохраняется прежним.
 
-Академический отпуск принимает основание, даты и пояснение для `other`, но до интеграции защищённой загрузки файлов API отвечает `409 service_unavailable` (или `responsible_unit_unavailable`, если деканат не определён); `submitted` не создаётся. Бухгалтерская справка принимает необязательную цель, ответственное подразделение назначается сервером. Неизвестные поля и клиентские ID/статусы запрещены. Недоступность и требования возвращаются в полях `Service` и доступны для просмотра.
+Академический отпуск подаётся через `multipart/form-data`: поле `form_data` содержит JSON формы, а `files` — подтверждающие файлы PDF/JPG/PNG. Допускается не более 5 текущих файлов размером до 10 МиБ каждый и 50 МиБ суммарно; требуется минимум один технически открываемый файл. Содержимое не сверяется с основанием. Доступность и требования возвращаются в `Service`. Бухгалтерская справка принимает необязательную цель, ответственное подразделение назначается сервером. Неизвестные поля и клиентские ID/статусы запрещены.
 
 Создание доступных услуг возвращает `201 submitted/pending`, без автоматического одобрения или PDF. Ошибки конфигурации — `409 service_unavailable`, `academic_term_unavailable`, `academic_term_ambiguous`, `responsible_unit_unavailable`; ошибки формы — `422 validation_error`.
 
@@ -489,6 +510,21 @@ MVP1 сохранены, в ответы создания/списка/дета�
 | POST | `/applications/{id}/resubmit` | `ResubmitApplicationRequest` | `Application` |
 | GET | `/applications/{id}/history` | `limit`, `cursor` | `Page<ApplicationHistoryEvent>` |
 
+Для академического отпуска `POST /applications/{id}/resubmit` принимает JSON или
+`multipart/form-data`: `expected_version`, JSON-строку `form_data`, JSON-строку
+`keep_attachment_ids` с ID оставляемых **текущих** файлов и новые `files`.
+Сервер под блокировкой сверяет владельца, статус и версию, проверяет квоты итогового
+набора и наличие хотя бы одного файла, затем одной транзакцией обновляет форму,
+актуальный состав, версию, статус и `application_history`. Неизвестные или устаревшие
+ID приводят к `409`; прежний набор остаётся текущим при любой ошибке. Смена основания
+сама по себе не требует нового файла.
+
+Ошибки для загрузки: `401`, `403`, `404`, `409`, `413 request_too_large`,
+`422 attachment_required`, `422 invalid_attachment`, `422 attachment_limit_exceeded`,
+`503 temporarily_unavailable`. Скачивание авторизуется на каждом запросе, возвращает
+`Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` и
+`Cache-Control: no-store`. Неизвестный или чужой ID вложения возвращает одинаковый `404`.
+
 `StaffApplicationResponse` расширяет `Application` полями `student_id: Id` и
 `reviewer_user_id: Id | null`. Список заявлений сортируется по `(created_at, id)`
 убывающе, история — по `(created_at, id)` возрастающе; пагинация SQL/cursor,
@@ -500,6 +536,7 @@ type ReviewApplicationRequest = {
   action: "start_review" | "approve" | "reject" | "return_for_correction";
   comment?: string | null; // trim, 1..3000 символов; обязательна причина двух отказных действий
 };
+// Академический отпуск передаёт form_data и вложения как multipart/form-data.
 type ResubmitApplicationRequest = {
   expected_version: number;
   form_data: { place_of_submission: string } | Record<string, never> | AcademicLeaveFormData | AccountingCertificateFormData;
@@ -521,8 +558,9 @@ type ApplicationHistoryEvent = {
 Неизвестные поля формы запрещены; сервер проверяет форму по коду услуги и сохраняет
 ID заявления. Автоматические услуги (включая выписку) возвращают `409 invalid_transition`;
 их сохранённая форма и история остаются без изменений. Схема входа выписки не принимает
-период от клиента, а проверка сохранённой формы не вычисляет его заново. Для
-академического отпуска resubmit также остаётся недоступен, пока услуга закрыта до #75.
+период от клиента, а проверка сохранённой формы не вычисляет его заново. Академический
+отпуск поддерживает атомарную повторную подачу с сохранением выбранных текущих файлов
+и добавлением новых вложений.
 Тестовые ручные услуги не входят в seed.
 
 `reviewer_user_id` берётся из авторизации при рассмотрении/решении; сотрудники
@@ -551,8 +589,9 @@ ID заявления. Автоматические услуги (включая
 вложения и уведомления не запускает. Автоматическая `study_certificate` остаётся
 `submitted/pending` до отдельной реализации #67/#83; ручное одобрение для неё
 запрещено. Академический статус студента не меняется при одобрении заявления.
-#75 должен включать изменение вложений в ту же версию заявления; #83 сохраняет
-отдельную транзакцию генерации и её проверки; #84/#85 используют эти API, текущую
+Изменение набора вложений при повторной подаче академического отпуска фиксируется
+в той же транзакции и увеличивает версию заявления. #83 сохраняет отдельную
+транзакцию генерации и её проверки; #84/#85 используют эти API, текущую
 версию и обработку 409, без выбора серверного актора/подразделения клиентом.
 
 ## Публикация университетских новостей MVP2-23

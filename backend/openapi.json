@@ -237,12 +237,6 @@
         "title": "AcademicTranscriptFormData",
         "type": "object"
       },
-      "AcademicTranscriptInput": {
-        "additionalProperties": false,
-        "properties": {},
-        "title": "AcademicTranscriptInput",
-        "type": "object"
-      },
       "AcademicsResponse": {
         "additionalProperties": false,
         "properties": {
@@ -443,6 +437,13 @@
       "ApplicationResponse": {
         "additionalProperties": false,
         "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMetadata"
+            },
+            "title": "Attachments",
+            "type": "array"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -659,6 +660,41 @@
           "items"
         ],
         "title": "AssessmentDatesResponse",
+        "type": "object"
+      },
+      "AttachmentMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "mime_type": {
+            "enum": [
+              "application/pdf",
+              "image/jpeg",
+              "image/png"
+            ],
+            "title": "Mime Type",
+            "type": "string"
+          },
+          "original_filename": {
+            "title": "Original Filename",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "original_filename",
+          "mime_type",
+          "size_bytes"
+        ],
+        "title": "AttachmentMetadata",
         "type": "object"
       },
       "AttendanceInput": {
@@ -979,82 +1015,6 @@
           "discipline"
         ],
         "title": "CourseOfferingRef",
-        "type": "object"
-      },
-      "CreateAcademicLeaveRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "form_data": {
-            "$ref": "#/components/schemas/AcademicLeaveFormData"
-          },
-          "service_code": {
-            "const": "academic_leave",
-            "title": "Service Code",
-            "type": "string"
-          }
-        },
-        "required": [
-          "service_code",
-          "form_data"
-        ],
-        "title": "CreateAcademicLeaveRequest",
-        "type": "object"
-      },
-      "CreateAcademicTranscriptRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "form_data": {
-            "$ref": "#/components/schemas/AcademicTranscriptInput"
-          },
-          "service_code": {
-            "const": "academic_transcript",
-            "title": "Service Code",
-            "type": "string"
-          }
-        },
-        "required": [
-          "service_code",
-          "form_data"
-        ],
-        "title": "CreateAcademicTranscriptRequest",
-        "type": "object"
-      },
-      "CreateAccountingCertificateRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "form_data": {
-            "$ref": "#/components/schemas/AccountingCertificateFormData"
-          },
-          "service_code": {
-            "const": "accounting_certificate",
-            "title": "Service Code",
-            "type": "string"
-          }
-        },
-        "required": [
-          "service_code",
-          "form_data"
-        ],
-        "title": "CreateAccountingCertificateRequest",
-        "type": "object"
-      },
-      "CreateStudyCertificateRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "form_data": {
-            "$ref": "#/components/schemas/StudyCertificateFormData"
-          },
-          "service_code": {
-            "const": "study_certificate",
-            "title": "Service Code",
-            "type": "string"
-          }
-        },
-        "required": [
-          "service_code",
-          "form_data"
-        ],
-        "title": "CreateStudyCertificateRequest",
         "type": "object"
       },
       "CreateUser": {
@@ -3145,40 +3105,6 @@
         "title": "ResetUserPassword",
         "type": "object"
       },
-      "ResubmitApplicationRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "expected_version": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
-            "title": "Expected Version",
-            "type": "integer"
-          },
-          "form_data": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/StudyCertificateFormData"
-              },
-              {
-                "$ref": "#/components/schemas/AcademicTranscriptInput"
-              },
-              {
-                "$ref": "#/components/schemas/AcademicLeaveFormData"
-              },
-              {
-                "$ref": "#/components/schemas/AccountingCertificateFormData"
-              }
-            ],
-            "title": "Form Data"
-          }
-        },
-        "required": [
-          "expected_version",
-          "form_data"
-        ],
-        "title": "ResubmitApplicationRequest",
-        "type": "object"
-      },
       "ReviewApplicationRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3494,6 +3420,13 @@
       "StaffApplicationResponse": {
         "additionalProperties": false,
         "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMetadata"
+            },
+            "title": "Attachments",
+            "type": "array"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -5423,30 +5356,90 @@
           "content": {
             "application/json": {
               "schema": {
-                "discriminator": {
-                  "mapping": {
-                    "academic_leave": "#/components/schemas/CreateAcademicLeaveRequest",
-                    "academic_transcript": "#/components/schemas/CreateAcademicTranscriptRequest",
-                    "accounting_certificate": "#/components/schemas/CreateAccountingCertificateRequest",
-                    "study_certificate": "#/components/schemas/CreateStudyCertificateRequest"
-                  },
-                  "propertyName": "service_code"
-                },
                 "oneOf": [
                   {
-                    "$ref": "#/components/schemas/CreateStudyCertificateRequest"
+                    "properties": {
+                      "form_data": {
+                        "$ref": "#/components/schemas/StudyCertificateFormData"
+                      },
+                      "service_code": {
+                        "const": "study_certificate"
+                      }
+                    },
+                    "required": [
+                      "service_code",
+                      "form_data"
+                    ],
+                    "type": "object"
                   },
                   {
-                    "$ref": "#/components/schemas/CreateAcademicTranscriptRequest"
+                    "properties": {
+                      "form_data": {
+                        "type": "object"
+                      },
+                      "service_code": {
+                        "const": "academic_transcript"
+                      }
+                    },
+                    "required": [
+                      "service_code",
+                      "form_data"
+                    ],
+                    "type": "object"
                   },
                   {
-                    "$ref": "#/components/schemas/CreateAcademicLeaveRequest"
+                    "properties": {
+                      "form_data": {
+                        "$ref": "#/components/schemas/AcademicLeaveFormData"
+                      },
+                      "service_code": {
+                        "const": "academic_leave"
+                      }
+                    },
+                    "required": [
+                      "service_code",
+                      "form_data"
+                    ],
+                    "type": "object"
                   },
                   {
-                    "$ref": "#/components/schemas/CreateAccountingCertificateRequest"
+                    "properties": {
+                      "form_data": {
+                        "$ref": "#/components/schemas/AccountingCertificateFormData"
+                      },
+                      "service_code": {
+                        "const": "accounting_certificate"
+                      }
+                    },
+                    "required": [
+                      "service_code",
+                      "form_data"
+                    ],
+                    "type": "object"
                   }
+                ]
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "files": {
+                    "items": {
+                      "format": "binary",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "form_data": {
+                    "description": "JSON form_data академического отпуска",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "form_data",
+                  "files"
                 ],
-                "title": "Request"
+                "type": "object"
               }
             }
           },
@@ -5490,6 +5483,36 @@
             },
             "description": "Forbidden"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -5499,6 +5522,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -5507,6 +5540,119 @@
           }
         ],
         "summary": "Submit Application",
+        "tags": [
+          "services",
+          "applications"
+        ]
+      }
+    },
+    "/api/v1/applications/attachments/{attachment_id}/download": {
+      "get": {
+        "operationId": "download_student_attachment_api_v1_applications_attachments__attachment_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Attachment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Download Student Attachment",
         "tags": [
           "services",
           "applications"
@@ -5586,6 +5732,119 @@
           }
         ],
         "summary": "Get Student Application",
+        "tags": [
+          "services",
+          "applications"
+        ]
+      }
+    },
+    "/api/v1/applications/{id}/attachments": {
+      "get": {
+        "operationId": "list_student_attachments_api_v1_applications__id__attachments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AttachmentMetadata"
+                  },
+                  "title": "Response List Student Attachments Api V1 Applications  Id  Attachments Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Student Attachments",
         "tags": [
           "services",
           "applications"
@@ -5686,6 +5945,16 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -5695,6 +5964,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -5728,7 +6007,70 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ResubmitApplicationRequest"
+                "properties": {
+                  "expected_version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "form_data": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/components/schemas/StudyCertificateFormData"
+                      },
+                      {
+                        "type": "object"
+                      },
+                      {
+                        "$ref": "#/components/schemas/AcademicLeaveFormData"
+                      },
+                      {
+                        "$ref": "#/components/schemas/AccountingCertificateFormData"
+                      }
+                    ]
+                  },
+                  "keep_attachment_ids": {
+                    "items": {
+                      "$ref": "#/components/schemas/Id"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "expected_version",
+                  "form_data"
+                ],
+                "type": "object"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "expected_version": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "files": {
+                    "items": {
+                      "format": "binary",
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "form_data": {
+                    "description": "JSON form_data",
+                    "type": "string"
+                  },
+                  "keep_attachment_ids": {
+                    "description": "JSON array of current attachment IDs to keep",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "expected_version",
+                  "form_data",
+                  "keep_attachment_ids"
+                ],
+                "type": "object"
               }
             }
           },
@@ -5785,6 +6127,16 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -5794,6 +6146,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -7744,6 +8106,16 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -7753,6 +8125,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -7761,6 +8143,119 @@
           }
         ],
         "summary": "List Staff Applications",
+        "tags": [
+          "services",
+          "applications"
+        ]
+      }
+    },
+    "/api/v1/staff/applications/attachments/{attachment_id}/download": {
+      "get": {
+        "operationId": "download_staff_attachment_api_v1_staff_applications_attachments__attachment_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Attachment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Download Staff Attachment",
         "tags": [
           "services",
           "applications"
@@ -7833,6 +8328,16 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -7842,6 +8347,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -7850,6 +8365,119 @@
           }
         ],
         "summary": "Get Staff Application",
+        "tags": [
+          "services",
+          "applications"
+        ]
+      }
+    },
+    "/api/v1/staff/applications/{id}/attachments": {
+      "get": {
+        "operationId": "list_staff_attachments_api_v1_staff_applications__id__attachments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AttachmentMetadata"
+                  },
+                  "title": "Response List Staff Attachments Api V1 Staff Applications  Id  Attachments Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Staff Attachments",
         "tags": [
           "services",
           "applications"
@@ -7950,6 +8578,16 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -7959,6 +8597,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -8049,6 +8697,16 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -8058,6 +8716,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [

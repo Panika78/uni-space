@@ -1,6 +1,11 @@
 from app.models.academics import Assessment, AssessmentGroup, AssessmentResult, FinalResult
 from app.models.accounts import AuthSession, Notification, RefreshToken, User
-from app.models.applications import Application, ApplicationHistory, ServiceType
+from app.models.applications import (
+    Application,
+    ApplicationAttachment,
+    ApplicationHistory,
+    ServiceType,
+)
 from app.models.attendance import Attendance
 from app.models.audit import AuditEvent
 from app.models.base import Base
@@ -42,6 +47,7 @@ __all__ = [
     "LessonRoom",
     "AuthSession",
     "Application",
+    "ApplicationAttachment",
     "ApplicationHistory",
     "Base",
     "News",

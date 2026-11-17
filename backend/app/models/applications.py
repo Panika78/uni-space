@@ -117,3 +117,29 @@ class ApplicationHistory(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.statement_timestamp()
     )
+
+
+class ApplicationAttachment(Base):
+    __tablename__ = "application_attachments"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_application_attachments"),
+        Index("ix_application_attachments_application_current", "application_id", "is_current"),
+        UniqueConstraint("storage_key", name="uq_application_attachments_storage_key"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    application_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "applications.id",
+            name="fk_application_attachments_application_id_applications",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    storage_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(200), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.statement_timestamp()
+    )

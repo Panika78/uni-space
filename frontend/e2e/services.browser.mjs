@@ -128,7 +128,14 @@ try {
   ]) {
     await page.getByRole('heading', { name: title }).waitFor()
   }
-  assert.equal(await page.getByRole('link', { name: /Требования и форма/ }).isVisible(), true)
+  assert.equal(
+    await page
+      .getByRole('article', { name: 'Академический отпуск' })
+      .getByRole('link', { name: 'Подать заявление' })
+      .isVisible(),
+    true,
+    'Academic leave submission is available with the attachment API',
+  )
   for (const width of [360, 1440]) {
     await page.setViewportSize({ width, height: 900 })
     await page.waitForTimeout(150)
