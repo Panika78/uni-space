@@ -273,6 +273,71 @@ def test_teacher_roster_respects_subgroups_and_current_membership(teaching_atten
     ) == stored_state
 
 
+def test_teacher_attendance_hides_historical_mark_after_group_transfer_and_return(
+    teaching_attendance,
+):
+    s = teaching_attendance
+    s.add(LessonGroup, lesson_id=s.lesson.id, group_id=s.groups[1].id)
+    s.lesson.ends_at = s.lesson.starts_at + timedelta(hours=1)
+    s.db.flush()
+
+    student = s.students[0]
+    assert student.group_id == s.groups[0].id
+    membership_version_before = student.membership_version
+    assert s.write("attended", student=0).status_code == 200
+    attendance = s.db.get(Attendance, (s.lesson.id, student.id))
+    original_mark = (
+        attendance.status,
+        attendance.updated_at,
+        attendance.origin_group_id,
+        attendance.origin_subgroup_id,
+        attendance.membership_version,
+    )
+
+    update_student_group(s.db, student.id, s.groups[1].id)
+    s.db.refresh(student)
+    assert student.group_id == s.groups[1].id
+    assert student.membership_version > membership_version_before
+    teacher_a_rows = s.read(teacher=0, group=0).json()["items"]
+    assert str(student.id) not in {row["student_id"] for row in teacher_a_rows}
+
+    teacher_b_response = s.read(teacher=1, group=1)
+    assert teacher_b_response.status_code == 200, teacher_b_response.text
+    teacher_b_rows = {row["student_id"]: row for row in teacher_b_response.json()["items"]}
+    transferred = teacher_b_rows[str(student.id)]
+    assert transferred["status"] == "unmarked"
+    assert transferred["updated_at"] is None
+    assert transferred["can_edit"] is False
+
+    filtered = s.read(teacher=1, group=1, student_id=str(student.id))
+    assert filtered.status_code == 200, filtered.text
+    assert len(filtered.json()["items"]) == 1
+    assert filtered.json()["items"][0]["student_id"] == str(student.id)
+    assert filtered.json()["items"][0]["status"] == "unmarked"
+    assert filtered.json()["items"][0]["updated_at"] is None
+    assert filtered.json()["items"][0]["can_edit"] is False
+
+    update_student_group(s.db, student.id, s.groups[0].id)
+    s.db.refresh(student)
+    assert student.group_id == s.groups[0].id
+    assert student.membership_version > membership_version_before
+    returned_rows = {row["student_id"]: row for row in s.read(teacher=0, group=0).json()["items"]}
+    returned = returned_rows[str(student.id)]
+    assert returned["status"] == "unmarked"
+    assert returned["updated_at"] is None
+    assert returned["can_edit"] is False
+
+    s.db.expire_all()
+    preserved = s.db.get(Attendance, (s.lesson.id, student.id))
+    assert (
+        preserved.status,
+        preserved.updated_at,
+        preserved.origin_group_id,
+        preserved.origin_subgroup_id,
+        preserved.membership_version,
+    ) == original_mark
+
+
 def test_current_role_and_session_are_checked_with_old_jwt(teaching_attendance):
     s = teaching_attendance
     with s.db.begin_nested():
