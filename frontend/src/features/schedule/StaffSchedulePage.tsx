@@ -300,7 +300,7 @@ async function listLessonsForCreateReconciliation(body: LessonWrite): Promise<Le
           afterId !== null &&
           error instanceof ApiClientError &&
           error.status === 422 &&
-          error.code === 'invalid_cursor'
+          error.code === 'validation_error'
         ) {
           recoveredCursor = true
           continue
@@ -871,10 +871,8 @@ function ScheduleForm({
     } catch (caught) {
       setUncertain(true)
       setReconcileMessage(
-        caught instanceof ApiClientError &&
-          caught.status === 422 &&
-          caught.code === 'invalid_cursor'
-          ? 'Не удалось обновить страницы расписания для сверки. Результат создания остаётся неопределённым; POST не повторялся.'
+        caught instanceof ApiClientError && caught.status === 422
+          ? 'Сервер отклонил запрос при сверке расписания. Результат создания остаётся неопределённым; POST не повторялся.'
           : getErrorMessage(caught),
       )
       if (caught instanceof ApiClientError && caught.status === 403) onForbidden()

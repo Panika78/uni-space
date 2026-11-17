@@ -553,10 +553,12 @@ it('reconciles a lost create response by group and submitted range without claim
       if (url.searchParams.has('after_id')) {
         cursorReads += 1
         if (cursorReads === 1 || cursorReads >= 3)
-          throw new ApiClientError('Cursor expired', 'invalid_cursor', 422)
+          throw new ApiClientError('Cursor expired', 'validation_error', 422)
         return { items: [candidate], next_after_id: null } as never
       }
       firstPageReads += 1
+      if (firstPageReads === 5)
+        throw new ApiClientError('Invalid schedule range', 'validation_error', 422)
       return {
         items:
           firstPageReads === 1
@@ -618,9 +620,15 @@ it('reconciles a lost create response by group and submitted range without claim
   expect(query.get('date_to')).toBe('2026-11-17')
   await user.click(within(dialog).getByRole('button', { name: 'Перечитать данные' }))
   expect(
-    await within(dialog).findByText(/Не удалось обновить страницы расписания/),
+    await within(dialog).findByText(/Сервер отклонил запрос при сверке расписания/),
   ).toBeInTheDocument()
   expect(firstPageReads).toBe(4)
+  expect(cursorReads).toBe(4)
+  await user.click(within(dialog).getByRole('button', { name: 'Перечитать данные' }))
+  expect(
+    await within(dialog).findByText(/Сервер отклонил запрос при сверке расписания/),
+  ).toBeInTheDocument()
+  expect(firstPageReads).toBe(5)
   expect(cursorReads).toBe(4)
   expect(postCount).toBe(1)
 })
