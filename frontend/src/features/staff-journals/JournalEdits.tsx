@@ -46,6 +46,7 @@ export function JournalEdits({ access, children }: { access: JournalAccess; chil
       ]),
     )
   })
+  const [canRestore, setCanRestore] = useState(true)
   const current = useRef(entries)
   const [active] = useState(() => new Map<string, AbortController>())
   const mounted = useRef(false)
@@ -78,8 +79,10 @@ export function JournalEdits({ access, children }: { access: JournalAccess; chil
           }),
         )
       } else clearJournalStorage()
+      setCanRestore(true)
     } catch {
       clearJournalStorage()
+      setCanRestore(false)
     }
   }
 
@@ -88,8 +91,10 @@ export function JournalEdits({ access, children }: { access: JournalAccess; chil
     <Edits.Provider value={{ entries, update, active }}>
       {hasPending && (
         <p role="status">
-          Есть несохранённые или неподтверждённые изменения. Перезагрузка сохраняет их в этой
-          вкладке на срок до 30 минут.
+          Есть несохранённые или неподтверждённые изменения.{' '}
+          {canRestore
+            ? 'Перезагрузка сохраняет их в этой вкладке на срок до 30 минут.'
+            : 'Перезагрузка может удалить их. Браузер не сохранил черновик.'}
         </p>
       )}
       {children}

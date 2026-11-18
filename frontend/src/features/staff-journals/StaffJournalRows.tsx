@@ -187,6 +187,7 @@ function useRowSave(access: JournalAccess, readPath: string, studentId: string, 
         baseline: old.baseline ?? baseline,
       }))
     },
+    discardDraft: () => update(() => ({})),
     acceptBaseline: (baseline: string) => update((old) => ({ draft: old.draft, baseline })),
   }
 }
@@ -219,7 +220,10 @@ export function ScoreRow({
       setValidation(`Введите целое число от 0 до ${assessment.max_score}.`)
       return
     }
-    if (value === row.score) return
+    if (value === row.score) {
+      save.discardDraft()
+      return
+    }
     void save.save({ method: 'PUT', body: { score: value }, expected: { score: value } })
   }
   return (

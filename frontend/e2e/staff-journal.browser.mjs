@@ -164,6 +164,7 @@ try {
   const currentFinal = gradePage
     .locator('article.journal-student--final')
     .filter({ hasText: studentName })
+    .first()
   await currentFinal.getByLabel('Итог').selectOption('2')
   await currentFinal.getByLabel('Дата пересдачи').fill('2027-01-12')
   await currentFinal.getByLabel('Место пересдачи').fill('Б-201')
@@ -181,6 +182,14 @@ try {
   await finalRetry.waitFor()
   await gradePage.goForward()
   await gradePage.goBack()
+  await finalRetry.waitFor()
+  await gradePage
+    .getByRole('region', { name: 'Дисциплины и группы' })
+    .getByRole('button', { name: /^История / })
+    .click()
+  await gradePage.waitForURL((url) => url.searchParams.get('group') === env.TEACHER_JOURNAL_GROUP_B)
+  await gradePage.goBack()
+  await finalRetry.waitFor()
   await gradePage.reload()
   await finalRetry.waitFor()
   assert.equal(await currentFinal.getByLabel('Итог').inputValue(), '2')
