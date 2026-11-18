@@ -33,6 +33,12 @@ export const documentLabels = {
   ready: 'Готов',
 } satisfies Record<StaffApplication['document_status'], string>
 
+export function getDocumentLabel(application: StaffApplication) {
+  if (application.review_status === 'rejected' && application.document_status === 'pending')
+    return 'Не выдан'
+  return documentLabels[application.document_status]
+}
+
 export const serviceLabels = {
   study_certificate: 'Справка об обучении',
   academic_transcript: 'Академическая выписка',

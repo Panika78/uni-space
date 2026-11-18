@@ -1,4 +1,4 @@
-import { createContext, useContext, useLayoutEffect, useRef, useState } from 'react'
+import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { Link, Outlet, useLocation, useNavigationType, useSearchParams } from 'react-router-dom'
 import { useRoleContext } from '../auth/RoleContext'
@@ -7,6 +7,7 @@ import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStat
 import {
   applicationsApi,
   describeApplicationError,
+  getDocumentLabel,
   formatApplicationDate,
   queuePath,
   reviewLabels,
@@ -16,36 +17,25 @@ import {
 import type { ApplicationPage, QueueQuery } from './staffApplications'
 import './staffApplications.css'
 
-type QueuePosition = { scroll: number; id: string; pages: number }
+type QueuePosition = { scroll: number; id?: string; pages: number }
 const QueueSession = createContext<{
   positions: Map<string, QueuePosition>
   searches: Map<string, string>
   scope: string
 } | null>(null)
 
-export function StaffApplicationsLayout() {
-  const { user_id, permissions } = useRoleContext()
-  const scopes = permissions
-    .filter((grant) => grant.permission_code === 'applications.review')
-    .map((grant) => grant.scope_org_unit_id)
-    .sort()
-    .join(',')
-  const scope = JSON.stringify([user_id, scopes])
-  return <ApplicationQueueSession key={scope} scope={scope} />
-}
-
-export function useApplicationQueueSession() {
-  const session = useContext(QueueSession)
-  if (!session) throw new Error('StaffApplicationsLayout is required')
-  return session
-}
-
-function ApplicationQueueSession({ scope }: { scope: string }) {
-  const [session] = useState(() => ({
-    positions: new Map<string, QueuePosition>(),
-    searches: new Map<string, string>(),
-    scope,
-  }))
+export function StaffApplicationSessionLayout() {
+  const { user_id, org_unit_id, permissions } = useRoleContext()
+  const grants = permissions.map((grant) => JSON.stringify(grant)).sort()
+  const signature = JSON.stringify([user_id, org_unit_id, grants])
+  const session = useMemo(
+    () => ({
+      positions: new Map<string, QueuePosition>(),
+      searches: new Map<string, string>(),
+      scope: `${signature}:${crypto.randomUUID()}`,
+    }),
+    [signature],
+  )
   return (
     <QueueSession.Provider value={session}>
       <Outlet />
@@ -53,9 +43,21 @@ function ApplicationQueueSession({ scope }: { scope: string }) {
   )
 }
 
+export function useApplicationQueueSession() {
+  const session = useContext(QueueSession)
+  if (!session) throw new Error('StaffApplicationSessionLayout is required')
+  return session
+}
+
 const filterNames = ['service_code', 'review_status', 'created_from', 'created_to'] as const
 
 export function StaffApplicationQueue() {
+  const { key } = useLocation()
+  const { scope } = useApplicationQueueSession()
+  return <ApplicationQueue key={`${scope}:${key}`} />
+}
+
+function ApplicationQueue() {
   const { positions, searches, scope } = useApplicationQueueSession()
   const location = useLocation()
   const navigationType = useNavigationType()
@@ -73,7 +75,9 @@ export function StaffApplicationQueue() {
   if (queryText) apiFilters.set('q', queryText)
   const search = filters.toString()
   const requestFilters = apiFilters.toString()
-  const restore = navigationType === 'POP' ? positions.get(location.key) : undefined
+  const [restore] = useState(() =>
+    navigationType === 'POP' ? positions.get(location.key) : undefined,
+  )
   const list = useInfiniteQuery({
     queryKey: ['staff-applications', scope, location.key],
     initialPageParam: '',
@@ -98,22 +102,45 @@ export function StaffApplicationQueue() {
     getNextPageParam: (page) => page.next_cursor ?? undefined,
     gcTime: 0,
     retry: false,
+    refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   })
   const table = useRef<HTMLTableElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
-  const restoredKey = useRef('')
+  const didRestore = useRef(false)
+  const pages = list.data?.pages.reduce((total, page) => total + page.pages, 0) ?? 0
   useLayoutEffect(() => {
-    if (!restore || !list.isSuccess || list.isFetching || restoredKey.current === location.key)
-      return
-    restoredKey.current = location.key
-    const rowLink = table.current?.querySelector<HTMLElement>(
-      `[data-application-id="${restore.id}"]`,
-    )
-    ;(rowLink ?? heading.current)?.focus({ preventScroll: true })
-    window.scrollTo({ top: restore.scroll, behavior: 'instant' })
-  }, [list.isSuccess, list.isFetching, location.key, restore])
+    if (!list.isSuccess || !list.isFetchedAfterMount || list.isFetching) return
+    const key = location.key
+    if (restore && !didRestore.current) {
+      didRestore.current = true
+      const rowLink = restore.id
+        ? table.current?.querySelector<HTMLElement>(`[data-application-id="${restore.id}"]`)
+        : null
+      ;(rowLink ?? heading.current)?.focus({ preventScroll: true })
+      window.scrollTo({ top: restore.scroll, behavior: 'instant' })
+    }
+    function saveScroll() {
+      const current = positions.get(key)
+      if (!current && positions.size >= 50) {
+        const oldest = positions.keys().next().value
+        if (oldest !== undefined) positions.delete(oldest)
+      }
+      positions.set(key, { id: current?.id, scroll: window.scrollY, pages })
+    }
+    saveScroll()
+    window.addEventListener('scroll', saveScroll, { passive: true })
+    return () => window.removeEventListener('scroll', saveScroll)
+  }, [
+    list.isSuccess,
+    list.isFetchedAfterMount,
+    list.isFetching,
+    location.key,
+    pages,
+    positions,
+    restore,
+  ])
   const items = list.data?.pages.flatMap((page) => page.items) ?? []
   const invalidCursor =
     list.error instanceof ApiClientError && list.error.status === 422 && !!list.data
@@ -205,7 +232,7 @@ export function StaffApplicationQueue() {
         </button>
         <Link to={`?tab=${tab}`}>Сбросить фильтры</Link>
       </form>
-      {list.isPending ? (
+      {list.isPending || (!list.isFetchedAfterMount && !list.isError) ? (
         <LoadingState title="Загружаем заявления…" />
       ) : list.isError ? (
         <ErrorState
@@ -230,7 +257,7 @@ export function StaffApplicationQueue() {
           <table ref={table} className="applications-table staff-applications__table" role="table">
             <thead role="rowgroup">
               <tr role="row">
-                {['№', 'Студент', 'Услуга', 'Дата', 'Статус'].map((label) => (
+                {['№', 'Студент', 'Услуга', 'Дата', 'Рассмотрение', 'Документ'].map((label) => (
                   <th key={label} scope="col" role="columnheader">
                     {label}
                   </th>
@@ -247,15 +274,7 @@ export function StaffApplicationQueue() {
                       data-application-id={item.id}
                       onClick={(event) => {
                         if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-                        if (positions.size >= 50) {
-                          const oldest = positions.keys().next().value
-                          if (oldest !== undefined) positions.delete(oldest)
-                        }
-                        positions.set(location.key, {
-                          id: item.id,
-                          scroll: window.scrollY,
-                          pages: list.data.pages.reduce((total, page) => total + page.pages, 0),
-                        })
+                        positions.set(location.key, { id: item.id, scroll: window.scrollY, pages })
                       }}
                     >
                       № {item.id}
@@ -267,10 +286,16 @@ export function StaffApplicationQueue() {
                     <time dateTime={item.created_at}>{formatApplicationDate(item.created_at)}</time>
                   </td>
                   <td role="cell">
+                    <span className="application-field-label" aria-hidden="true">
+                      Рассмотрение
+                    </span>
                     {reviewLabels[item.review_status]}
-                    {item.document_status === 'failed' && (
-                      <small className="staff-applications__pdf-error">Ошибка выдачи PDF</small>
-                    )}
+                  </td>
+                  <td role="cell">
+                    <span className="application-field-label" aria-hidden="true">
+                      Документ
+                    </span>
+                    <span>{getDocumentLabel(item)}</span>
                   </td>
                 </tr>
               ))}

@@ -28,7 +28,7 @@ import {
 } from '../features/students/StaffStudentsPage'
 import { StaffNewsPage } from '../features/news/StaffNewsPage'
 import {
-  StaffApplicationsLayout,
+  StaffApplicationSessionLayout,
   StaffApplicationQueue,
 } from '../features/staffApplications/StaffApplicationQueue'
 import { StaffApplicationDetail } from '../features/staffApplications/StaffApplicationDetail'
@@ -202,42 +202,49 @@ export const appRoutes: RouteObject[] = [
                   {
                     element: <RoleGuard role="staff" />,
                     children: [
-                      { path: '/staff', element: <StaffHome /> },
                       {
-                        element: <RoleGuard role="staff" permission="schedule.edit" />,
-                        children: [{ path: '/staff/schedule', element: <StaffSchedulePage /> }],
-                      },
-                      {
-                        element: <RoleGuard role="staff" permission="news.publish" />,
+                        element: <StaffApplicationSessionLayout />,
                         children: [
-                          { path: '/staff/news', element: <StaffNewsPage /> },
-                          { path: '/staff/news/:id', element: <StaffNewsPage /> },
-                        ],
-                      },
-                      {
-                        element: <RoleGuard role="staff" permission="applications.review" />,
-                        children: [
+                          { path: '/staff', element: <StaffHome /> },
                           {
-                            path: '/staff/applications',
-                            element: <StaffApplicationsLayout />,
+                            element: <RoleGuard role="staff" permission="schedule.edit" />,
+                            children: [{ path: '/staff/schedule', element: <StaffSchedulePage /> }],
+                          },
+                          {
+                            element: <RoleGuard role="staff" permission="news.publish" />,
                             children: [
-                              { index: true, element: <StaffApplicationQueue /> },
-                              { path: ':id', element: <StaffApplicationDetail /> },
+                              { path: '/staff/news', element: <StaffNewsPage /> },
+                              { path: '/staff/news/:id', element: <StaffNewsPage /> },
                             ],
                           },
-                        ],
-                      },
-                      {
-                        element: <RoleGuard role="staff" permission="students.read" />,
-                        children: [
-                          { path: '/staff/students', element: <StaffStudentsPage /> },
-                          { path: '/staff/students/:id', element: <StaffStudentDetailPage /> },
-                        ],
-                      },
-                      {
-                        element: <RoleGuard role="staff" permission="students.status.edit" />,
-                        children: [
-                          { path: '/staff/students/status', element: <StaffStudentStatusPage /> },
+                          {
+                            element: <RoleGuard role="staff" permission="applications.review" />,
+                            children: [
+                              {
+                                path: '/staff/applications',
+                                children: [
+                                  { index: true, element: <StaffApplicationQueue /> },
+                                  { path: ':id', element: <StaffApplicationDetail /> },
+                                ],
+                              },
+                            ],
+                          },
+                          {
+                            element: <RoleGuard role="staff" permission="students.read" />,
+                            children: [
+                              { path: '/staff/students', element: <StaffStudentsPage /> },
+                              { path: '/staff/students/:id', element: <StaffStudentDetailPage /> },
+                            ],
+                          },
+                          {
+                            element: <RoleGuard role="staff" permission="students.status.edit" />,
+                            children: [
+                              {
+                                path: '/staff/students/status',
+                                element: <StaffStudentStatusPage />,
+                              },
+                            ],
+                          },
                         ],
                       },
                     ],

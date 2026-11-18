@@ -46,9 +46,6 @@
 .staff-applications__table th:nth-child(4) {
   width: 16%;
 }
-.staff-applications__pdf-error {
-  display: block;
-}
 .staff-applications__dialog {
   margin: auto;
   max-width: min(32rem, calc(100% - 2rem));

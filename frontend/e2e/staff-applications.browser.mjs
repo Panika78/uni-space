@@ -52,8 +52,8 @@ async function openStaff(letter, width) {
   return { context, page, headers: await loginStaff(page, letter) }
 }
 
-async function loginStaff(page, letter) {
-  await page.goto(`${base}/login`)
+async function loginStaff(page, letter, navigate = true) {
+  if (navigate) await page.goto(`${base}/login`)
   for (;;) {
     await page.getByLabel('Логин').fill(env[`STAFF_APPLICATIONS_LOGIN_${letter}`])
     await page.getByLabel('Пароль').fill(env.STAFF_APPLICATIONS_PASSWORD)
@@ -107,6 +107,61 @@ async function expectNoOverflow(page) {
     ),
     true,
   )
+}
+
+async function checkDocumentStatus(page, id, label) {
+  const row = page.getByRole('row').filter({
+    has: page.getByRole('link', { name: `№ ${id}`, exact: true }),
+  })
+  for (const width of [360, 1440]) {
+    await page.setViewportSize({ width, height: 800 })
+    await page.getByRole('columnheader', { name: 'Рассмотрение', exact: true }).waitFor()
+    await page.getByRole('columnheader', { name: 'Документ', exact: true }).waitFor()
+    await row.waitFor()
+    const cells = await row.getByRole('cell').all()
+    assert.equal((await cells[4].innerText()).trim().split('\n').at(-1), 'Одобрено')
+    assert.equal((await cells[5].innerText()).trim().split('\n').at(-1), label)
+    await expectNoOverflow(page)
+  }
+}
+
+function changeReviewerGrant(operation) {
+  execFileSync(env.STAFF_APPLICATIONS_PYTHON || 'backend/.venv/bin/python', [
+    'backend/scripts/seed_staff_applications_browser.py',
+    operation,
+  ])
+}
+
+async function holdPdf(page, documentPath) {
+  let release
+  const gate = new Promise((resolve) => {
+    release = resolve
+  })
+  let finish
+  const finished = new Promise((resolve) => {
+    finish = resolve
+  })
+  const pattern = `**${documentPath}`
+  await page.route(
+    pattern,
+    async (route) => {
+      try {
+        await gate
+        await route.continue()
+      } finally {
+        finish()
+      }
+    },
+    { times: 1 },
+  )
+  const started = page.waitForRequest((request) => request.url().endsWith(documentPath))
+  const cancelled = page.waitForEvent('requestfailed', {
+    predicate: (request) => request.url().endsWith(documentPath),
+  })
+  await activate(page, 'Скачать PDF')
+  await started
+  await page.getByText('Загружаем файл…', { exact: true }).waitFor()
+  return { cancelled, release, finished }
 }
 
 async function activate(page, name) {
@@ -200,6 +255,51 @@ try {
   await expectNoOverflow(a.page)
   await a.page.goForward()
   await a.page.getByRole('heading', { name: `Заявление № ${legacy}`, exact: true }).waitFor()
+  await a.page.goBack()
+  await oldLink.waitFor()
+  await a.page.evaluate(() => window.scrollBy(0, -80))
+  await a.page.waitForFunction(
+    (previous) => Math.abs(window.scrollY - previous) <= 5,
+    savedScroll - 80,
+  )
+  const crossSectionScroll = await a.page.evaluate(() => window.scrollY)
+  await a.page.getByRole('button', { name: 'Открыть меню' }).click()
+  await a.page.getByRole('link', { name: 'Публикация новостей', exact: true }).click()
+  await a.page.waitForURL('**/staff/news')
+  for (let round = 0; round < 2; round++) {
+    if (round) {
+      await a.page.goForward()
+      await a.page.waitForURL('**/staff/news')
+    }
+    const refreshed = a.page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return (
+        url.pathname === root &&
+        url.searchParams.has('cursor') &&
+        url.searchParams.get('q') === 'e2e student a'
+      )
+    })
+    await a.page.goBack()
+    assert.equal((await refreshed).status(), 200)
+    await oldLink.waitFor()
+    assert.equal(await a.page.locator('tbody tr').count(), 24)
+    assert.equal(await a.page.getByLabel('Номер или заявитель').inputValue(), 'e2e student a')
+    assert.equal(await a.page.getByLabel('Дата создания с').inputValue(), '2026-10-01')
+    assert.equal(await a.page.getByLabel('Услуга').inputValue(), 'academic_leave')
+    assert.equal(
+      await a.page.getByRole('link', { name: 'Новые', exact: true }).getAttribute('aria-current'),
+      'page',
+    )
+    await a.page.waitForFunction(
+      (scroll) => Math.abs(window.scrollY - scroll) < 5,
+      crossSectionScroll,
+    )
+  }
+  changeReviewerGrant('revoke-news')
+  await a.page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await a.page.waitForFunction(() => document.querySelector('input[name="q"]')?.value === '')
+  assert.equal(new URL(a.page.url()).searchParams.has('q'), false)
+
   await a.page.goto(`${base}${queue}`)
   await a.page.getByLabel('Дата создания с').fill('2026-10-02')
   await a.page.getByLabel('Дата создания по').fill('2026-10-01')
@@ -324,8 +424,19 @@ try {
     (await getEvents()).map((event) => event.to_status),
     ['submitted', 'in_review', 'needs_correction', 'resubmitted', 'in_review', 'approved'],
   )
+  await b.page.getByRole('link', { name: 'К заявлениям' }).click()
+  await b.page.getByRole('link', { name: 'Все', exact: true }).click()
+  await b.page.waitForURL('**/staff/applications?tab=all')
+  await b.page.getByRole('link', { name: `№ ${leave.id}`, exact: true }).waitFor()
+  await search(b.page, 'e2e student a')
+  await b.page.getByRole('link', { name: `№ ${leave.id}`, exact: true }).waitFor()
+  await b.page.getByRole('link', { name: 'Завершённые', exact: true }).click()
+  await b.page.getByRole('link', { name: `№ ${leave.id}`, exact: true }).waitFor()
   await logout(b.page)
-  b.headers = await loginStaff(b.page, 'B')
+  b.headers = await loginStaff(b.page, 'B', false)
+  await b.page.goBack()
+  await b.page.waitForURL('**/staff/applications?tab=all')
+  assert.equal(await b.page.getByLabel('Номер или заявитель').inputValue(), '')
   await openDetail(b.page, leave.id)
   await b.page.getByText(reason, { exact: true }).waitFor()
   assert.equal(await b.page.locator('.staff-applications__history li').count(), 6)
@@ -362,6 +473,9 @@ try {
   await c.page.getByText('Не выдан', { exact: true }).waitFor()
   assert.equal(await c.page.getByRole('button', { name: /PDF/ }).count(), 0)
 
+  await b.page.getByRole('link', { name: 'К заявлениям' }).click()
+  await b.page.getByRole('link', { name: 'Завершённые', exact: true }).click()
+  await checkDocumentStatus(b.page, leave.id, 'Не требуется')
   await openDetail(c.page, accounting.id)
   await activate(c.page, 'Принять в работу')
   await c.page.getByText('PDF формируется после одобрения заявления.').waitFor()
@@ -370,14 +484,18 @@ try {
     await c.page.getByText('Ошибка выдачи PDF', { exact: true }).waitFor()
     await c.page.getByRole('link', { name: 'К заявлениям' }).click()
     await c.page.getByRole('link', { name: 'Завершённые', exact: true }).click()
-    await c.page.getByText('Ошибка выдачи PDF', { exact: true }).waitFor()
-    await expectNoOverflow(c.page)
+    await checkDocumentStatus(c.page, accounting.id, 'Ошибка выдачи PDF')
+    await checkDocumentStatus(c.page, env.STAFF_APPLICATIONS_PENDING_ID, 'Ожидает выдачи')
     await c.page.getByRole('link', { name: `№ ${accounting.id}`, exact: true }).click()
     await c.page.getByRole('button', { name: 'Повторить выдачу PDF' }).waitFor()
   })
   const retry = c.page.waitForRequest((r) => r.url().endsWith('/document/retry'))
   await activate(c.page, 'Повторить выдачу PDF')
   assert.equal((await retry).postData(), null)
+  await c.page.getByText('Выданный PDF', { exact: true }).waitFor()
+  await c.page.getByRole('link', { name: 'К заявлениям' }).click()
+  await checkDocumentStatus(c.page, accounting.id, 'Готов')
+  await c.page.getByRole('link', { name: `№ ${accounting.id}`, exact: true }).click()
   await c.page.getByText('Выданный PDF', { exact: true }).waitFor()
   const path = `${root}/${accounting.id}`
   const original = await (await api(c.context.request, `${path}/document`, c.headers)).body()
@@ -395,9 +513,47 @@ try {
   assert.equal(await c.page.getByRole('button', { name: 'Повторить выдачу PDF' }).count(), 0)
   await api(a.context.request, `${path}/document`, a.headers, { expected: 404 })
   await api(denied.context.request, `${path}/document`, denied.headers, { expected: 403 })
+  const contextRoute = '**/api/v1/auth/context'
+  const detailBeforeRecovery = c.page.url()
+  await c.page.evaluate(() => {
+    window.staffPdfUrls = new Set()
+    const create = URL.createObjectURL.bind(URL)
+    const revoke = URL.revokeObjectURL.bind(URL)
+    URL.createObjectURL = (blob) => {
+      const url = create(blob)
+      window.staffPdfUrls.add(url)
+      return url
+    }
+    URL.revokeObjectURL = (url) => {
+      window.staffPdfUrls.delete(url)
+      revoke(url)
+    }
+  })
+  const suspendedDownload = await holdPdf(c.page, `${path}/document`)
+  await c.page.route(contextRoute, (route) =>
+    route.fulfill({
+      status: 503,
+      json: { error: { code: 'temporarily_unavailable', message: 'Unavailable', details: [] } },
+    }),
+  )
+  await c.page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  const recovery = c.page.getByRole('region', { name: 'Восстановление доступа' })
+  await recovery.waitFor()
+  await suspendedDownload.cancelled
+  await c.page.unroute(contextRoute)
+  await recovery.getByRole('button', { name: 'Повторить' }).click()
+  await recovery.waitFor({ state: 'hidden' })
+  assert.equal(c.page.url(), detailBeforeRecovery)
+  assert.equal(await c.page.evaluate(() => window.staffPdfUrls.size), 0)
+
   const download = c.page.waitForEvent('download')
   await activate(c.page, 'Скачать PDF')
-  assert.equal((await download).suggestedFilename(), ready.document.filename)
+  const downloaded = await download
+  assert.equal(downloaded.suggestedFilename(), ready.document.filename)
+  assert.deepEqual(await readFile(await downloaded.path()), original)
+  suspendedDownload.release()
+  await suspendedDownload.finished
+  await c.page.waitForFunction(() => window.staffPdfUrls.size === 0)
   const detailUrl = c.page.url()
   const popup = c.context.waitForEvent('page')
   const getPdf = c.page.waitForResponse((response) => response.url().endsWith(`${path}/document`))
@@ -407,6 +563,7 @@ try {
   await preview.waitForURL((url) => url.protocol === 'blob:')
   assert.equal(c.page.url(), detailUrl)
   await preview.close()
+  await c.page.waitForFunction(() => window.staffPdfUrls.size === 0)
   await temporarilyBlockDocuments(async () => {
     const response = c.page.waitForResponse((r) => r.url().endsWith(`${path}/document`))
     await activate(c.page, 'Скачать PDF')
@@ -417,10 +574,7 @@ try {
   })
 
   await openDetail(a.page, leave.id)
-  execFileSync(env.STAFF_APPLICATIONS_PYTHON || 'backend/.venv/bin/python', [
-    'backend/scripts/seed_staff_applications_browser.py',
-    'revoke',
-  ])
+  changeReviewerGrant('revoke')
   for (const path of [root, `${root}/${leave.id}`, historyUrl, attachmentPath]) {
     await api(a.context.request, path, a.headers, {
       expected: path === attachmentPath ? 404 : 403,
@@ -429,6 +583,15 @@ try {
   await a.page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await a.page.getByText('Доступ запрещён', { exact: true }).waitFor()
   assert.equal(await a.page.getByText(reason, { exact: true }).count(), 0)
+  const navigationDownload = await holdPdf(c.page, `${path}/document`)
+  await c.page.getByRole('link', { name: 'К заявлениям' }).click()
+  await navigationDownload.cancelled
+  navigationDownload.release()
+  await navigationDownload.finished
+  await c.page.getByRole('link', { name: `№ ${accounting.id}`, exact: true }).click()
+  const afterNavigation = c.page.waitForEvent('download')
+  await activate(c.page, 'Скачать PDF')
+  assert.deepEqual(await readFile(await (await afterNavigation).path()), original)
   await logout(c.page)
   await c.page.goBack({ waitUntil: 'domcontentloaded' })
   assert.equal(await c.page.getByText('Выданный PDF', { exact: true }).count(), 0)

@@ -29,14 +29,18 @@ def main() -> None:
         raise SystemExit("Staff application fixtures require the isolated uni_space_test database")
 
     with SessionLocal.begin() as db:
-        if sys.argv[1:] == ["revoke"]:
+        if sys.argv[1:] in (["revoke"], ["revoke-news"]):
             profile = db.scalar(
                 select(StaffProfile)
                 .join(User, StaffProfile.user_id == User.id)
                 .where(User.login == os.environ["STAFF_APPLICATIONS_LOGIN_A"])
             )
             db.execute(
-                delete(StaffPermission).where(StaffPermission.staff_profile_id == profile.id)
+                delete(StaffPermission).where(
+                    StaffPermission.staff_profile_id == profile.id,
+                    StaffPermission.permission_code
+                    == ("news.publish" if sys.argv[1] == "revoke-news" else "applications.review"),
+                )
             )
             return
 
@@ -78,6 +82,14 @@ def main() -> None:
                     scope_org_unit_id=unit.id if permission == "applications.review" else None,
                 )
             )
+            if letter == "A":
+                db.add(
+                    StaffPermission(
+                        staff_profile_id=profile.id,
+                        permission_code="news.publish",
+                        scope_org_unit_id=unit.id,
+                    )
+                )
             print(f"STAFF_APPLICATIONS_LOGIN_{letter}={login}")
 
         leave = db.scalar(select(ServiceType).where(ServiceType.code == "academic_leave"))
@@ -105,9 +117,23 @@ def main() -> None:
             version=1,
             form_data={"place_of_submission": "Вымышленный архив"},
         )
+        accounting_service = db.scalar(
+            select(ServiceType).where(ServiceType.code == "accounting_certificate")
+        )
+        pending = Application(
+            student_id=student.id,
+            assigned_org_unit_id=accounting.id,
+            service_type_id=accounting_service.id,
+            review_status="approved",
+            document_status="pending",
+            version=3,
+            form_data={"purpose": "Вымышленная заявка после одобрения"},
+        )
+        db.add(pending)
         db.add(automatic)
         db.flush()
         print(f"STAFF_APPLICATIONS_LEGACY_ID={seed[0].id}")
+        print(f"STAFF_APPLICATIONS_PENDING_ID={pending.id}")
         print(f"STAFF_APPLICATIONS_AUTOMATIC_ID={automatic.id}")
         print(f"STAFF_APPLICATIONS_PASSWORD={password}")
 

@@ -12,7 +12,7 @@ import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStat
 import {
   applicationsApi,
   describeApplicationError,
-  documentLabels,
+  getDocumentLabel,
   formatApplicationDate,
   queuePath,
   reviewLabels,
@@ -68,13 +68,14 @@ function isAccessError(error: unknown) {
 
 export function StaffApplicationDetail() {
   const { id } = useParams()
+  const { scope } = useApplicationQueueSession()
   if (!id || !/^[1-9][0-9]{0,18}$/.test(id))
     return (
       <ErrorState title="Заявление недоступно" description="Проверьте номер заявления.">
         <Link to={queuePath}>К заявлениям</Link>
       </ErrorState>
     )
-  return <ApplicationDetail key={id} id={id} />
+  return <ApplicationDetail key={`${scope}:${id}`} id={id} />
 }
 
 function ApplicationDetail({ id }: { id: string }) {
@@ -121,7 +122,9 @@ function ApplicationDetail({ id }: { id: string }) {
   useEffect(
     () => () => {
       activeMutation.current?.abort()
-      activeFile.current?.abort()
+      const file = activeFile.current
+      activeFile.current = null
+      file?.abort()
     },
     [],
   )
@@ -211,6 +214,13 @@ function ApplicationDetail({ id }: { id: string }) {
     const request = new AbortController()
     activeFile.current = request
     setFileLoading(true)
+    function finishDownload() {
+      if (activeFile.current === request) {
+        activeFile.current = null
+        setFileLoading(false)
+      }
+    }
+    request.signal.addEventListener('abort', finishDownload, { once: true })
     try {
       const blob = await apiFetchBlob(path, {
         authenticated: true,
@@ -228,7 +238,12 @@ function ApplicationDetail({ id }: { id: string }) {
       const url = URL.createObjectURL(blob)
       if (previewTab) {
         // Chromium hands a blob navigation to its PDF viewer asynchronously.
-        previewTab.location.replace(url)
+        try {
+          previewTab.location.replace(url)
+        } catch (error) {
+          URL.revokeObjectURL(url)
+          throw error
+        }
         const timer = window.setInterval(() => {
           if (previewTab.closed) release()
         }, 1000)
@@ -253,8 +268,8 @@ function ApplicationDetail({ id }: { id: string }) {
       setFileError(describeApplicationError(error))
       if (isAccessError(error)) void refreshApplication()
     } finally {
-      activeFile.current = null
-      if (!request.signal.aborted) setFileLoading(false)
+      request.signal.removeEventListener('abort', finishDownload)
+      finishDownload()
     }
   }
 
@@ -316,12 +331,7 @@ function ApplicationDetail({ id }: { id: string }) {
               <dt>Рассмотрение</dt>
               <dd>{reviewLabels[application.review_status]}</dd>
               <dt>Документ</dt>
-              <dd>
-                {application.review_status === 'rejected' &&
-                application.document_status === 'pending'
-                  ? 'Не выдан'
-                  : documentLabels[application.document_status]}
-              </dd>
+              <dd>{getDocumentLabel(application)}</dd>
               {application.feedback && (
                 <>
                   <dt>
