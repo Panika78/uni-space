@@ -1,3 +1,4 @@
+import { MemoryRouter } from 'react-router-dom'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -18,7 +19,9 @@ afterEach(() => {
 function show() {
   render(
     <QueryClientProvider client={createQueryClient()}>
-      <AcademicsPage />
+      <MemoryRouter>
+        <AcademicsPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -47,7 +50,11 @@ it('shows loading then exact numeric scores and a separate session below discipl
     ).toBeInTheDocument()
   }
   expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
-  expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  const link = screen.getByRole('link', { name: 'Вымышленная дисциплина' })
+  expect(link).toHaveAttribute(
+    'href',
+    `/academics/courses/${createAcademics().items[0].course_offering_id}`,
+  )
   expect(apiFetch).toHaveBeenCalledWith(
     '/api/v1/academics',
     expect.objectContaining({ authenticated: true, signal: expect.any(AbortSignal) }),

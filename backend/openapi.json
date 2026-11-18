@@ -2580,6 +2580,22 @@
       "LessonResponse": {
         "additionalProperties": false,
         "properties": {
+          "attendance_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "attended",
+                  "absent",
+                  "unmarked"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attendance Status"
+          },
           "course_offering": {
             "$ref": "#/components/schemas/CourseOfferingRef"
           },
@@ -2619,6 +2635,20 @@
                 "type": "null"
               }
             ]
+          },
+          "linked_assessments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LinkedAssessmentResult"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linked Assessments"
           },
           "previous_lesson": {
             "anyOf": [
@@ -2667,13 +2697,13 @@
           "starts_at",
           "ends_at",
           "status",
-          "course_offering",
           "kind",
           "teacher",
-          "groups",
           "rooms",
           "previous_lesson",
-          "latest_lesson"
+          "latest_lesson",
+          "course_offering",
+          "groups"
         ],
         "title": "LessonResponse",
         "type": "object"
@@ -2746,6 +2776,38 @@
           "room_ids"
         ],
         "title": "LessonWrite",
+        "type": "object"
+      },
+      "LinkedAssessmentResult": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_group_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Assessment Group Id",
+            "type": "string"
+          },
+          "max_score": {
+            "title": "Max Score",
+            "type": "integer"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "required": [
+          "assessment_group_id",
+          "score",
+          "max_score"
+        ],
+        "title": "LinkedAssessmentResult",
         "type": "object"
       },
       "LoginRequest": {
@@ -3650,6 +3712,64 @@
           "next_cursor"
         ],
         "title": "Page[StaffScoreRow]",
+        "type": "object"
+      },
+      "Page_StudentCourseAssessment_": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StudentCourseAssessment"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[StudentCourseAssessment]",
+        "type": "object"
+      },
+      "Page_StudentCourseLesson_": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StudentCourseLesson"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[StudentCourseLesson]",
         "type": "object"
       },
       "Page_TeachingAssignmentResponse_": {
@@ -4990,6 +5110,288 @@
         "title": "StudentAcademicStatus",
         "type": "object"
       },
+      "StudentCourse": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_count": {
+            "title": "Assessment Count",
+            "type": "integer"
+          },
+          "attestation_type": {
+            "enum": [
+              "exam",
+              "pass_fail",
+              "graded_pass"
+            ],
+            "title": "Attestation Type",
+            "type": "string"
+          },
+          "course_offering_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Course Offering Id",
+            "type": "string"
+          },
+          "discipline": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "final_result": {
+            "$ref": "#/components/schemas/FinalResultResponse"
+          },
+          "graded_assessment_count": {
+            "title": "Graded Assessment Count",
+            "type": "integer"
+          },
+          "group": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "max_score": {
+            "title": "Max Score",
+            "type": "integer"
+          },
+          "teachers": {
+            "items": {
+              "$ref": "#/components/schemas/Ref"
+            },
+            "title": "Teachers",
+            "type": "array"
+          },
+          "term": {
+            "$ref": "#/components/schemas/AcademicTermResponse"
+          },
+          "total_score": {
+            "title": "Total Score",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "course_offering_id",
+          "discipline",
+          "total_score",
+          "max_score",
+          "graded_assessment_count",
+          "assessment_count",
+          "attestation_type",
+          "final_result",
+          "term",
+          "group",
+          "teachers"
+        ],
+        "title": "StudentCourse",
+        "type": "object"
+      },
+      "StudentCourseAssessment": {
+        "additionalProperties": false,
+        "properties": {
+          "assessment_group_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Assessment Group Id",
+            "type": "string"
+          },
+          "assessment_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Assessment Id",
+            "type": "string"
+          },
+          "date_needs_confirmation": {
+            "title": "Date Needs Confirmation",
+            "type": "boolean"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "graded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graded At"
+          },
+          "lesson_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lesson Id"
+          },
+          "max_score": {
+            "title": "Max Score",
+            "type": "integer"
+          },
+          "planned_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planned Date"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "test",
+              "laboratory",
+              "practical",
+              "seminar",
+              "independent",
+              "extended_homework",
+              "exam",
+              "other"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assessment_group_id",
+          "assessment_id",
+          "title",
+          "type",
+          "description",
+          "max_score",
+          "planned_date",
+          "date_needs_confirmation",
+          "lesson_id",
+          "score",
+          "graded_at"
+        ],
+        "title": "StudentCourseAssessment",
+        "type": "object"
+      },
+      "StudentCourseLesson": {
+        "additionalProperties": false,
+        "properties": {
+          "attendance_status": {
+            "enum": [
+              "attended",
+              "absent",
+              "unmarked"
+            ],
+            "title": "Attendance Status",
+            "type": "string"
+          },
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "lecture",
+              "seminar",
+              "lab",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "latest_lesson": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LessonPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "previous_lesson": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LessonPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rooms": {
+            "items": {
+              "$ref": "#/components/schemas/RoomRef"
+            },
+            "title": "Rooms",
+            "type": "array"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "scheduled",
+              "cancelled",
+              "moved"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "teacher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Ref"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "starts_at",
+          "ends_at",
+          "status",
+          "kind",
+          "teacher",
+          "rooms",
+          "previous_lesson",
+          "latest_lesson",
+          "attendance_status"
+        ],
+        "title": "StudentCourseLesson",
+        "type": "object"
+      },
       "StudentProfile": {
         "additionalProperties": false,
         "properties": {
@@ -5396,7 +5798,19 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Student-Scope": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "401": {
             "content": {
@@ -5445,6 +5859,113 @@
           }
         ],
         "summary": "Get Academics",
+        "tags": [
+          "academics"
+        ]
+      }
+    },
+    "/api/v1/academics/courses/{course_offering_id}": {
+      "get": {
+        "operationId": "read_student_course_api_v1_academics_courses__course_offering_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentCourse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Academic-Term-Id": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Student-Scope": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Student Course",
         "tags": [
           "academics"
         ]
@@ -5570,6 +6091,276 @@
           }
         ],
         "summary": "Get Student Announcements",
+        "tags": [
+          "academics"
+        ]
+      }
+    },
+    "/api/v1/academics/courses/{course_offering_id}/assessments": {
+      "get": {
+        "operationId": "read_student_course_assessments_api_v1_academics_courses__course_offering_id__assessments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_StudentCourseAssessment_"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Academic-Term-Id": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Student-Scope": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Student Course Assessments",
+        "tags": [
+          "academics"
+        ]
+      }
+    },
+    "/api/v1/academics/courses/{course_offering_id}/lessons": {
+      "get": {
+        "operationId": "read_student_course_lessons_api_v1_academics_courses__course_offering_id__lessons_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_StudentCourseLesson_"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Academic-Term-Id": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Student-Scope": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Student Course Lessons",
         "tags": [
           "academics"
         ]
@@ -9583,7 +10374,19 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Student-Scope": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "401": {
             "content": {
@@ -9614,6 +10417,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "security": [
@@ -16738,7 +17551,19 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Student-Scope": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "401": {
             "content": {

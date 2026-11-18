@@ -2,10 +2,11 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import DateTime, cast, func, literal, select
+from sqlalchemy import DateTime, and_, cast, func, literal, select
 from sqlalchemy.orm import Session, aliased
 
 from app.models import (
+    Attendance,
     Building,
     CourseOffering,
     Discipline,
@@ -17,8 +18,16 @@ from app.models import (
     Teacher,
     User,
 )
+from app.models.academics import Assessment, AssessmentGroup, AssessmentResult
 from app.schedule.participants import get_student_lesson_condition
-from app.schedule.schemas import LessonPosition, LessonResponse, ScheduleParams, ScheduleResponse
+from app.schedule.schemas import (
+    LessonDetails,
+    LessonPosition,
+    LessonResponse,
+    LinkedAssessmentResult,
+    ScheduleParams,
+    ScheduleResponse,
+)
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 
@@ -30,7 +39,12 @@ def get_lesson_position(lesson) -> LessonPosition:
 
 
 def list_student_schedule(
-    db: Session, group_id: int, params: ScheduleParams, subgroup_id: int | None = None
+    db: Session,
+    group_id: int,
+    params: ScheduleParams,
+    subgroup_id: int | None = None,
+    *,
+    student_id: int | None = None,
 ) -> ScheduleResponse:
     range_start = datetime.combine(params.date_from, time.min, MOSCOW)
     range_end = (
@@ -73,6 +87,83 @@ def list_student_schedule(
         .order_by(StudyGroup.name, StudyGroup.id)
     ):
         groups[lesson_id].append({"id": str(group.id), "name": group.name})
+    details = list_lesson_details(
+        db, [(row[0], row[4], row[5]) for row in rows], group_id, subgroup_id
+    )
+    now = datetime.now(MOSCOW)
+    past_ids = [row[0].id for row in rows if row[0].status == "scheduled" and row[0].ends_at <= now]
+    marks = get_attendance_marks(db, student_id, past_ids)
+    linked = defaultdict(list)
+    if student_id is not None and past_ids:
+        for lesson_id, assignment_id, maximum, score in db.execute(
+            select(
+                AssessmentGroup.lesson_id,
+                AssessmentGroup.id,
+                Assessment.max_score,
+                AssessmentResult.score,
+            )
+            .join(Assessment, Assessment.id == AssessmentGroup.assessment_id)
+            .join(Lesson, Lesson.id == AssessmentGroup.lesson_id)
+            .outerjoin(
+                AssessmentResult,
+                and_(
+                    AssessmentResult.assessment_group_id == AssessmentGroup.id,
+                    AssessmentResult.student_id == student_id,
+                ),
+            )
+            .where(
+                AssessmentGroup.group_id == group_id,
+                AssessmentGroup.lesson_id.in_(past_ids),
+                Assessment.course_offering_id == Lesson.course_offering_id,
+            )
+            .order_by(AssessmentGroup.id)
+        ):
+            linked[lesson_id].append(
+                LinkedAssessmentResult(
+                    assessment_group_id=str(assignment_id), score=score, max_score=maximum
+                )
+            )
+    past = set(past_ids) if student_id is not None else set()
+    items = []
+    for lesson, offering_id, discipline_id, discipline_name, _, _ in rows:
+        items.append(
+            LessonResponse(
+                **details[lesson.id].model_dump(),
+                course_offering={
+                    "id": str(offering_id),
+                    "discipline": {"id": str(discipline_id), "name": discipline_name},
+                },
+                groups=groups[lesson.id],
+                attendance_status=marks.get(lesson.id, "unmarked") if lesson.id in past else None,
+                linked_assessments=linked[lesson.id] if lesson.id in past else None,
+            )
+        )
+    return ScheduleResponse(
+        date_from=params.date_from, date_to=params.date_to, timezone="Europe/Moscow", items=items
+    )
+
+
+def get_attendance_marks(db: Session, student_id: int | None, lesson_ids: list[int]):
+    if student_id is None or not lesson_ids:
+        return {}
+    return dict(
+        db.execute(
+            select(Attendance.lesson_id, Attendance.status).where(
+                Attendance.student_id == student_id, Attendance.lesson_id.in_(lesson_ids)
+            )
+        ).all()
+    )
+
+
+def list_lesson_details(
+    db: Session,
+    rows: list[tuple[Lesson, int | None, str | None]],
+    group_id: int,
+    subgroup_id: int | None,
+) -> dict[int, LessonDetails]:
+    if not rows:
+        return {}
+    ids = [lesson.id for lesson, _, _ in rows]
     rooms = defaultdict(list)
     for lesson_id, room, building in db.execute(
         select(LessonRoom.lesson_id, Room, Building)
@@ -88,7 +179,7 @@ def list_student_schedule(
                 "building": {"id": str(building.id), "name": building.name},
             }
         )
-    previous_ids = [row[0].previous_lesson_id for row in rows if row[0].previous_lesson_id]
+    previous_ids = [lesson.previous_lesson_id for lesson, _, _ in rows if lesson.previous_lesson_id]
     previous = (
         {
             lesson.id: get_lesson_position(lesson)
@@ -102,7 +193,7 @@ def list_student_schedule(
         if previous_ids
         else {}
     )
-    moved_ids = [row[0].id for row in rows if row[0].status == "moved"]
+    moved_ids = [lesson.id for lesson, _, _ in rows if lesson.status == "moved"]
     latest = {}
     if moved_ids:
         # UNION deduplicates even malformed cyclic imports. No per-lesson/chain SQL.
@@ -132,23 +223,14 @@ def list_student_schedule(
             )
         ):
             latest[position.root_id] = get_lesson_position(position)
-    items = []
-    for lesson, offering_id, discipline_id, discipline_name, teacher_id, teacher_name in rows:
-        items.append(
-            LessonResponse(
-                **get_lesson_position(lesson).model_dump(),
-                course_offering={
-                    "id": str(offering_id),
-                    "discipline": {"id": str(discipline_id), "name": discipline_name},
-                },
-                kind=lesson.kind,
-                teacher={"id": str(teacher_id), "name": teacher_name} if teacher_id else None,
-                groups=groups[lesson.id],
-                rooms=rooms[lesson.id],
-                previous_lesson=previous.get(lesson.previous_lesson_id),
-                latest_lesson=latest.get(lesson.id),
-            )
+    return {
+        lesson.id: LessonDetails(
+            **get_lesson_position(lesson).model_dump(),
+            kind=lesson.kind,
+            teacher={"id": str(teacher_id), "name": teacher_name} if teacher_id else None,
+            rooms=rooms[lesson.id],
+            previous_lesson=previous.get(lesson.previous_lesson_id),
+            latest_lesson=latest.get(lesson.id),
         )
-    return ScheduleResponse(
-        date_from=params.date_from, date_to=params.date_to, timezone="Europe/Moscow", items=items
-    )
+        for lesson, teacher_id, teacher_name in rows
+    }

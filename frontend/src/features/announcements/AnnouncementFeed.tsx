@@ -56,6 +56,8 @@ export function useAnnouncements(scope: AnnouncementScope) {
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next_cursor,
     gcTime: 0,
+    refetchOnWindowFocus: scope.role === 'student',
+    refetchOnReconnect: scope.role === 'student',
     retry: false,
   })
 }

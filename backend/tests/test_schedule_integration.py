@@ -215,10 +215,19 @@ def test_schedule_never_exposes_related_positions_assigned_only_to_another_group
     assert str(b.id) not in [i["id"] for i in s.request().json()["items"]]
 
 
-def test_schedule_query_count_does_not_grow_with_lessons_rooms_groups_or_move_depth(schedule):
+def test_schedule_query_count_does_not_grow_with_lessons_rooms_groups_or_move_depth(
+    schedule, monkeypatch
+):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.fromisoformat("2026-11-18T12:00:00+03:00").astimezone(tz)
+
+    monkeypatch.setattr("app.schedule.service.datetime", Clock)
     s = schedule
     a = s.lesson(status="moved")
     s.lesson("2026-11-20T09:00:00+03:00", previous_lesson_id=a.id)
+    s.lesson()  # Exercise the two batched personal reads at both sizes.
 
     def count_queries():
         statements = []
@@ -240,7 +249,7 @@ def test_schedule_query_count_does_not_grow_with_lessons_rooms_groups_or_move_de
         mid = s.lesson(previous_lesson_id=root.id, status="moved")
         s.lesson(previous_lesson_id=mid.id)
     assert count_queries() == small + 1  # one batched predecessors query now needed
-    assert small == 6  # 2 auth + list + groups + rooms + recursive chain
+    assert small == 9  # 2 auth, list, groups, rooms, chain, marks, works, membership
 
 
 def test_schedule_authentication_and_role_are_checked_on_every_request(schedule):

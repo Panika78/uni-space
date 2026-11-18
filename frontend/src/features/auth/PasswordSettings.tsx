@@ -11,7 +11,7 @@ import { AccessRecovery, isTemporaryAccessError } from '../../shared/ui/AccessRe
 import { getRoleNavigation, getStartRoute } from './roleNavigation'
 import { useRoleContext } from './RoleContext'
 import { useAuth } from './AuthProvider'
-import type { Profile } from '../profile/profileContext'
+import { getStudentProfile } from '../profile/studentReads'
 import './passwordSettings.css'
 
 export function PasswordSettingsPage() {
@@ -27,7 +27,7 @@ export function PasswordSettingsPage() {
 function StudentPasswordSettings() {
   const query = useQuery({
     queryKey: ['student-profile'],
-    queryFn: ({ signal }) => apiFetch<Profile>('/api/v1/users/me', { authenticated: true, signal }),
+    queryFn: getStudentProfile,
     retry: false,
     staleTime: 0,
     refetchOnWindowFocus: true,

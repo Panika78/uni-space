@@ -801,7 +801,13 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
         courses + "/students/{student_id}/final-result/history",
     }
     assert all(set(paths[path]) == {"get"} for path in staff_journal_paths)
-    assert set(paths) == staff_journal_paths | {
+    student_courses = "/api/v1/academics/courses/{course_offering_id}"
+    student_course_paths = {student_courses + suffix for suffix in ("", "/lessons", "/assessments")}
+    assert all(set(paths[path]) == {"get"} for path in student_course_paths)
+    assert all(
+        paths[path]["get"]["security"] == [{"HTTPBearer": []}] for path in student_course_paths
+    )
+    assert set(paths) == staff_journal_paths | student_course_paths | {
         "/api/v1/admin/users",
         "/api/v1/admin/users/{user_id}",
         "/api/v1/admin/users/{user_id}/active",

@@ -360,7 +360,15 @@ it('isolates profile and schedule together when both old student responses arriv
       groups: { id: string }[]
       course_offering: { discipline: { id: string; name: string } }
     }[]
-  }>(['schedule', '2026-11-09', '2026-11-15'])
+  }>([
+    'schedule',
+    'student',
+    profiles.B.id,
+    profiles.B.group.id,
+    profiles.B.group.id,
+    '2026-11-09',
+    '2026-11-15',
+  ])
   expect(scheduleCache?.items).toContainEqual(
     expect.objectContaining({
       id: 'B-2026-11-09',
@@ -411,7 +419,17 @@ it('keeps account B schedule isolated when a Sunday request resolves after Mosco
   }
   let refresh!: Promise<void>
   act(() => {
-    refresh = client.invalidateQueries({ queryKey: ['schedule', '2026-11-09', '2026-11-15'] })
+    refresh = client.invalidateQueries({
+      queryKey: [
+        'schedule',
+        'student',
+        profiles.A.id,
+        profiles.A.group.id,
+        profiles.A.group.id,
+        '2026-11-09',
+        '2026-11-15',
+      ],
+    })
   })
   await waitFor(() => expect(requestedRange).toEqual(['2026-11-09', '2026-11-15']))
 
@@ -433,7 +451,17 @@ it('keeps account B schedule isolated when a Sunday request resolves after Mosco
   })
   expect(screen.queryByText(/Альфа/)).not.toBeInTheDocument()
   expect(betaDay.getByRole('article', { name: 'Занятие Бета' })).toBeInTheDocument()
-  expect(client.getQueryData(['schedule', '2026-11-16', '2026-11-22'])).toEqual(
+  expect(
+    client.getQueryData([
+      'schedule',
+      'student',
+      profiles.B.id,
+      profiles.B.group.id,
+      profiles.B.group.id,
+      '2026-11-16',
+      '2026-11-22',
+    ]),
+  ).toEqual(
     expect.objectContaining({
       date_from: '2026-11-16',
       date_to: '2026-11-22',

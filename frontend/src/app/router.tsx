@@ -13,6 +13,7 @@ import { createBrowserRouter, Link, Navigate, Outlet, ScrollRestoration } from '
 import { LoginPage, ProtectedRoute } from '../features/auth/AuthPages'
 import { PasswordSettingsPage } from '../features/auth/PasswordSettings'
 import { AcademicsPage } from '../features/academics/AcademicsPage'
+import { StudentCoursePage } from '../features/academics/StudentCoursePage'
 import { SchedulePage } from '../features/schedule/SchedulePage'
 import { useAuth } from '../features/auth/AuthProvider'
 import { Icon } from '../shared/ui/Icon'
@@ -163,6 +164,10 @@ export const appRoutes: RouteObject[] = [
                         children: [
                           { path: '/schedule', element: <SchedulePage /> },
                           { path: '/academics', element: <AcademicsPage /> },
+                          {
+                            path: '/academics/courses/:courseOfferingId',
+                            element: <StudentCoursePage />,
+                          },
                           { path: '/applications/:id', element: <ApplicationDetailPage /> },
                           { path: '/services', element: <ServicesPage /> },
                           { path: '/services/:serviceCode', element: <ApplicationFormPage /> },

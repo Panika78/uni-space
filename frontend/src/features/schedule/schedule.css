@@ -707,3 +707,31 @@
   font-size: 0.875rem;
   overflow-wrap: anywhere;
 }
+
+.lesson-course-link--title {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+.lesson-card__academic {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  font-size: 0.875rem;
+  margin-top: 7px;
+}
+@media (max-width: 760px) {
+  .lesson-card__course {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 6px;
+    align-items: start;
+  }
+  .lesson-course-link--arrow {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    color: var(--accent);
+  }
+}

@@ -1,3 +1,4 @@
+import { MemoryRouter } from 'react-router-dom'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { focusManager, onlineManager, QueryClientProvider } from '@tanstack/react-query'
@@ -26,7 +27,9 @@ function renderSchedule() {
   const queryClient = createQueryClient()
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <SchedulePage />
+      <MemoryRouter useTransitions={false}>
+        <SchedulePage />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
   return { queryClient, ...view }
@@ -44,7 +47,7 @@ afterEach(() => {
   onlineManager.setOnline(true)
 })
 
-it('loads the Moscow week, renders known details once and provides no dead discipline links', async () => {
+it('loads the Moscow week, renders known details once and links the discipline to its offering', async () => {
   request.mockResolvedValue(
     response([
       createLesson({
@@ -62,10 +65,13 @@ it('loads the Moscow week, renders known details once and provides no dead disci
   expect(screen.getByRole('article')).toHaveTextContent('Корпус А · 101')
   expect(screen.getByRole('article')).toHaveTextContent('Корпус Б · 202')
   expect(screen.getByRole('article')).toHaveTextContent('Вымышленный преподаватель')
-  expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  expect(
+    within(card).getByRole('link', { name: createLesson().course_offering.discipline.name }),
+  ).toHaveAttribute('href', `/academics/courses/${createLesson().course_offering.id}`)
   expect(request).toHaveBeenCalledWith('/api/v1/schedule?date_from=2026-11-09&date_to=2026-11-15', {
     authenticated: true,
     signal: expect.any(AbortSignal),
+    onResponseHeaders: expect.any(Function),
   })
 })
 

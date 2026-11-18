@@ -1,12 +1,16 @@
-import { useQuery } from '@tanstack/react-query'
-import { apiFetch, ApiClientError } from '../../shared/api/client'
+import { useEffect } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
+import { useStudentReadScope } from '../profile/profileContext'
+import { getStudentRead } from '../profile/studentReads'
+import { CourseLink, useCourseReturnPosition } from './CourseLink'
 import './academics.css'
 
 type Academics = components['schemas']['AcademicsResponse']
 type Item = Academics['items'][number]
-const attestationLabels = {
+export const attestationLabels = {
   exam: 'Экзамен',
   pass_fail: 'Зачёт',
   graded_pass: 'Дифференцированный зачёт',
@@ -25,7 +29,7 @@ function getResultLabel(item: Item) {
   return 'Не выставлено'
 }
 
-function SessionResult({ item }: { item: Item }) {
+export function SessionResult({ item }: { item: Item }) {
   const result = item.final_result
   const hasResult = result.grade_value !== null || result.passed !== null
   return (
@@ -59,18 +63,33 @@ function SessionResult({ item }: { item: Item }) {
 }
 
 export function AcademicsPage() {
+  const access = useStudentReadScope()
+  const client = useQueryClient()
   const query = useQuery({
-    queryKey: ['academics'],
+    queryKey: ['academics', ...(access?.scope.key ?? [])],
+    gcTime: 0,
+    refetchOnMount: 'always',
+    refetchOnReconnect: 'always',
+    refetchOnWindowFocus: 'always',
     queryFn: ({ signal }) =>
-      apiFetch<Academics>('/api/v1/academics', { authenticated: true, signal }),
+      getStudentRead<Academics>('/api/v1/academics', signal, access?.scope ?? null),
   })
+  const scopeChanged =
+    query.error instanceof ApiClientError && query.error.code === 'student_scope_changed'
+  useEffect(() => {
+    if (scopeChanged) void client.invalidateQueries({ queryKey: ['student-profile'] })
+  }, [client, scopeChanged])
+  const isLoading = query.isPending || access?.isChecking
+  useCourseReturnPosition(query.isSuccess && !isLoading)
   const status = query.error instanceof ApiClientError ? query.error.status : null
   return (
     <section className="section-page academics-page" aria-labelledby="academics-title">
       <p className="section-eyebrow">Студенческий кабинет</p>
-      <h1 id="academics-title">Успеваемость</h1>
-      {query.isPending && <LoadingState title="Загружаем успеваемость…" />}
-      {query.isError && (
+      <h1 id="academics-title" tabIndex={-1}>
+        Успеваемость
+      </h1>
+      {isLoading && <LoadingState title="Загружаем успеваемость…" />}
+      {!isLoading && query.isError && (
         <ErrorState
           title={
             status === 403
@@ -89,7 +108,7 @@ export function AcademicsPage() {
           onRetry={status === 401 || status === 403 ? undefined : () => void query.refetch()}
         />
       )}
-      {!query.isError && query.data && (
+      {!isLoading && !query.isError && query.data && (
         <>
           {query.data.term && <p className="academics-term">{query.data.term.name}</p>}
           {!query.data.term ? (
@@ -124,7 +143,13 @@ export function AcademicsPage() {
                     {query.data.items.map((item) => (
                       <tr key={item.course_offering_id} role="row">
                         <th scope="row" role="rowheader">
-                          {item.discipline.name}
+                          <CourseLink
+                            courseId={item.course_offering_id}
+                            data-course-id={item.course_offering_id}
+                            returnSelector={`[data-course-id="${item.course_offering_id}"]`}
+                          >
+                            {item.discipline.name}
+                          </CourseLink>
                         </th>
                         <td role="cell">
                           <span className="academics-mobile-label" aria-hidden="true">

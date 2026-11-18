@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/academics/courses/{course_offering_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Student Course */
+        get: operations["read_student_course_api_v1_academics_courses__course_offering_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/academics/courses/{course_offering_id}/announcements": {
         parameters: {
             query?: never;
@@ -30,6 +47,40 @@ export interface paths {
         };
         /** Get Student Announcements */
         get: operations["get_student_announcements_api_v1_academics_courses__course_offering_id__announcements_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/academics/courses/{course_offering_id}/assessments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Student Course Assessments */
+        get: operations["read_student_course_assessments_api_v1_academics_courses__course_offering_id__assessments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/academics/courses/{course_offering_id}/lessons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Student Course Lessons */
+        get: operations["read_student_course_lessons_api_v1_academics_courses__course_offering_id__lessons_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2204,6 +2255,8 @@ export interface components {
         };
         /** LessonResponse */
         LessonResponse: {
+            /** Attendance Status */
+            attendance_status?: ("attended" | "absent" | "unmarked") | null;
             course_offering: components["schemas"]["CourseOfferingRef"];
             /**
              * Ends At
@@ -2220,6 +2273,8 @@ export interface components {
              */
             kind: "lecture" | "seminar" | "lab" | "other";
             latest_lesson: components["schemas"]["LessonPosition"] | null;
+            /** Linked Assessments */
+            linked_assessments?: components["schemas"]["LinkedAssessmentResult"][] | null;
             previous_lesson: components["schemas"]["LessonPosition"] | null;
             /** Rooms */
             rooms: components["schemas"]["RoomRef"][];
@@ -2260,6 +2315,15 @@ export interface components {
             starts_at: string;
             /** Teacher Id */
             teacher_id?: string | null;
+        };
+        /** LinkedAssessmentResult */
+        LinkedAssessmentResult: {
+            /** Assessment Group Id */
+            assessment_group_id: string;
+            /** Max Score */
+            max_score: number;
+            /** Score */
+            score: number | null;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -2504,6 +2568,20 @@ export interface components {
         Page_StaffScoreRow_: {
             /** Items */
             items: components["schemas"]["StaffScoreRow"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** Page[StudentCourseAssessment] */
+        Page_StudentCourseAssessment_: {
+            /** Items */
+            items: components["schemas"]["StudentCourseAssessment"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** Page[StudentCourseLesson] */
+        Page_StudentCourseLesson_: {
+            /** Items */
+            items: components["schemas"]["StudentCourseLesson"][];
             /** Next Cursor */
             next_cursor: string | null;
         };
@@ -2912,6 +2990,93 @@ export interface components {
             /** Id */
             id: string;
         };
+        /** StudentCourse */
+        StudentCourse: {
+            /** Assessment Count */
+            assessment_count: number;
+            /**
+             * Attestation Type
+             * @enum {string}
+             */
+            attestation_type: "exam" | "pass_fail" | "graded_pass";
+            /** Course Offering Id */
+            course_offering_id: string;
+            discipline: components["schemas"]["Ref"];
+            final_result: components["schemas"]["FinalResultResponse"];
+            /** Graded Assessment Count */
+            graded_assessment_count: number;
+            group: components["schemas"]["Ref"];
+            /** Max Score */
+            max_score: number;
+            /** Teachers */
+            teachers: components["schemas"]["Ref"][];
+            term: components["schemas"]["AcademicTermResponse"];
+            /** Total Score */
+            total_score: number;
+        };
+        /** StudentCourseAssessment */
+        StudentCourseAssessment: {
+            /** Assessment Group Id */
+            assessment_group_id: string;
+            /** Assessment Id */
+            assessment_id: string;
+            /** Date Needs Confirmation */
+            date_needs_confirmation: boolean;
+            /** Description */
+            description: string | null;
+            /** Graded At */
+            graded_at: string | null;
+            /** Lesson Id */
+            lesson_id: string | null;
+            /** Max Score */
+            max_score: number;
+            /** Planned Date */
+            planned_date: string | null;
+            /** Score */
+            score: number | null;
+            /** Title */
+            title: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "test" | "laboratory" | "practical" | "seminar" | "independent" | "extended_homework" | "exam" | "other";
+        };
+        /** StudentCourseLesson */
+        StudentCourseLesson: {
+            /**
+             * Attendance Status
+             * @enum {string}
+             */
+            attendance_status: "attended" | "absent" | "unmarked";
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "lecture" | "seminar" | "lab" | "other";
+            latest_lesson: components["schemas"]["LessonPosition"] | null;
+            previous_lesson: components["schemas"]["LessonPosition"] | null;
+            /** Rooms */
+            rooms: components["schemas"]["RoomRef"][];
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "scheduled" | "cancelled" | "moved";
+            teacher: components["schemas"]["Ref"] | null;
+        };
         /** StudentProfile */
         StudentProfile: {
             /**
@@ -3054,6 +3219,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control"?: string;
+                    "X-Student-Scope"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -3071,6 +3238,76 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    read_student_course_api_v1_academics_courses__course_offering_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_offering_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    "X-Academic-Term-Id"?: string;
+                    "X-Student-Scope"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StudentCourse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3120,6 +3357,152 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Page_Announcement_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    read_student_course_assessments_api_v1_academics_courses__course_offering_id__assessments_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                course_offering_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    "X-Academic-Term-Id"?: string;
+                    "X-Student-Scope"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_StudentCourseAssessment_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    read_student_course_lessons_api_v1_academics_courses__course_offering_id__lessons_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                course_offering_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    "X-Academic-Term-Id"?: string;
+                    "X-Student-Scope"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_StudentCourseLesson_"];
                 };
             };
             /** @description Unauthorized */
@@ -5888,6 +6271,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control"?: string;
+                    "X-Student-Scope"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -5914,6 +6299,15 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10056,6 +10450,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "Cache-Control"?: string;
+                    "X-Student-Scope"?: string;
                     [name: string]: unknown;
                 };
                 content: {

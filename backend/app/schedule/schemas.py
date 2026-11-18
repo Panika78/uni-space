@@ -34,14 +34,28 @@ class RoomRef(Ref):
     building: Ref
 
 
-class LessonResponse(LessonPosition):
-    course_offering: CourseOfferingRef
+AttendanceStatus = Literal["attended", "absent", "unmarked"]
+
+
+class LinkedAssessmentResult(RequestModel):
+    assessment_group_id: Id
+    score: int | None
+    max_score: int
+
+
+class LessonDetails(LessonPosition):
     kind: Literal["lecture", "seminar", "lab", "other"]
     teacher: Ref | None
-    groups: list[Ref]
     rooms: list[RoomRef]
     previous_lesson: LessonPosition | None
     latest_lesson: LessonPosition | None
+
+
+class LessonResponse(LessonDetails):
+    course_offering: CourseOfferingRef
+    groups: list[Ref]
+    attendance_status: AttendanceStatus | None = None
+    linked_assessments: list[LinkedAssessmentResult] | None = None
 
 
 class ScheduleResponse(RequestModel):
