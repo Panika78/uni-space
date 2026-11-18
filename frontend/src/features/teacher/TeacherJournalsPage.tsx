@@ -5,6 +5,7 @@ import { apiFetch, ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 import { useRoleContext } from '../auth/RoleContext'
+import { formatDateTime, SaveLabel, statuses, type SaveState } from './journalControls'
 import './teacherJournals.css'
 
 type Assignment = components['schemas']['TeachingAssignmentResponse']
@@ -16,31 +17,8 @@ type FinalResult = components['schemas']['ManualFinalResultResponse']
 type ScoreWriteResponse = components['schemas']['ScoreWriteResponse']
 type Student = components['schemas']['JournalStudent']
 type Page<T> = { items: T[]; next_cursor: string | null }
-type SavePhase = 'saving' | 'saved' | 'error'
-type SaveState = {
-  phase: SavePhase
-  uncertain?: boolean
-  message?: string
-  value?: number | null
-  retry?: () => void
-}
-
 const base = '/api/v1/teaching'
 const limit = 100
-const statuses = [
-  { value: 'attended', label: '✓', title: 'Присутствовал' },
-  { value: 'absent', label: 'Н', title: 'Отсутствовал' },
-  { value: 'unmarked', label: '—', title: 'Нет отметки' },
-] as const
-
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat('ru-RU', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'Europe/Moscow',
-  }).format(new Date(value))
-}
-
 function formatDate(value: string | null) {
   if (!value) return 'Дата не назначена'
   return new Intl.DateTimeFormat('ru-RU', {
@@ -78,32 +56,6 @@ async function getAllPages<T>(path: string, signal?: AbortSignal): Promise<T[]> 
     if (cursor) seen.add(cursor)
   } while (cursor)
   return result
-}
-
-function SaveLabel({ state, onRetry }: { state?: SaveState; onRetry?: () => void }) {
-  if (!state) return null
-  if (state.phase === 'saving')
-    return (
-      <span className="journal-save" role="status">
-        Сохраняется
-      </span>
-    )
-  if (state.phase === 'saved')
-    return (
-      <span className="journal-save journal-save--saved" role="status">
-        Сохранено
-      </span>
-    )
-  return (
-    <span className="journal-save journal-save--error" role="status">
-      {state.message ?? 'Ошибка, повторить'}{' '}
-      {onRetry && (
-        <button type="button" className="journal-inline-action" onClick={onRetry}>
-          {state.uncertain ? 'Проверить сохранение' : 'Повторить'}
-        </button>
-      )}
-    </span>
-  )
 }
 
 function errorMessage(error: unknown) {

@@ -17,6 +17,12 @@ export const staffSections: { permission: PermissionCode; label: string }[] = [
   { permission: 'news.publish', label: 'Публикация новостей' },
 ]
 
+export function getStaffJournalRoute(permission: 'grades.edit' | 'attendance.edit') {
+  return permission === 'grades.edit'
+    ? '/staff/journals?tab=work'
+    : '/staff/journals?tab=attendance'
+}
+
 export function hasPermission(context: AuthorizationContext, code: PermissionCode) {
   return context.permissions.some((grant) => grant.permission_code === code)
 }
@@ -43,7 +49,9 @@ export function getRoleNavigation(context: AuthorizationContext): NavigationItem
                 ? '/staff/news'
                 : permission === 'schedule.edit'
                   ? '/staff/schedule'
-                  : `/staff#${permission}`,
+                  : permission === 'grades.edit' || permission === 'attendance.edit'
+                    ? getStaffJournalRoute(permission)
+                    : `/staff#${permission}`,
       label,
       icon: permission === 'schedule.edit' ? 'calendar' : 'file',
     }))

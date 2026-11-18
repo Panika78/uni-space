@@ -258,9 +258,17 @@ def require_teaching_assignment(db: Session, teacher_id: int, course_id: int, gr
         raise HTTPException(404, "not_found")
 
 
-def list_page(db, query, params, columns, key_types, convert, *, cursor_prefix=None):
+def list_page(
+    db, query, params, columns, key_types, convert, *, cursor_prefix=None, cursor_scope=None
+):
+    scope_key = (cursor_scope,) if cursor_scope is not None else ()
+    if scope_key:
+        key_types = (str, *key_types)
     boundary = decode_page_cursor(params.cursor, key_types=key_types, direction="asc")
     if boundary is not None:
+        if boundary[: len(scope_key)] != scope_key:
+            raise InvalidCursorError("Cursor does not match this selection")
+        boundary = boundary[len(scope_key) :]
         if cursor_prefix is not None and not boundary[0].startswith(cursor_prefix):
             raise InvalidCursorError("Cursor uses an obsolete student ordering")
         query = query.where(tuple_(*columns) > tuple_(*boundary))
@@ -269,7 +277,7 @@ def list_page(db, query, params, columns, key_types, convert, *, cursor_prefix=N
     entries = [(convert(row), tuple(row._mapping[c] for c in columns)) for row in rows]
     page = paginate_results(
         entries,
-        key=lambda entry: entry[1],
+        key=lambda entry: (*scope_key, *entry[1]),
         key_types=key_types,
         direction="asc",
         limit=params.limit,
@@ -434,7 +442,7 @@ def get_assessment_query(course_id, group_id):
     )
 
 
-def list_journal_assessments(db, course_id, group_id, params):
+def list_journal_assessments(db, course_id, group_id, params, *, cursor_scope=None):
     query = get_assessment_query(course_id, group_id)
     if params.assessment_group_id is not None:
         query = query.where(AssessmentGroup.id == int(params.assessment_group_id))
@@ -454,7 +462,9 @@ def list_journal_assessments(db, course_id, group_id, params):
             date_needs_confirmation=assignment.date_needs_confirmation,
         )
 
-    return list_page(db, query, params, (AssessmentGroup.id,), (int,), convert)
+    return list_page(
+        db, query, params, (AssessmentGroup.id,), (int,), convert, cursor_scope=cursor_scope
+    )
 
 
 def list_journal_results(db, course_id, group_id, assessment_group_id, params):
@@ -520,7 +530,7 @@ def require_journal_lesson(db, course_id, group_id, lesson_id):
         raise HTTPException(404, "not_found")
 
 
-def list_journal_lessons(db, course_id, group_id, params):
+def list_journal_lessons(db, course_id, group_id, params, *, cursor_scope=None):
     query = get_lesson_query(course_id, group_id)
     for value, condition in (
         (params.lesson_id, Lesson.id == int(params.lesson_id) if params.lesson_id else None),
@@ -556,4 +566,6 @@ def list_journal_lessons(db, course_id, group_id, params):
             version=lesson.version,
         )
 
-    return list_page(db, query, params, (time_key, Lesson.id), (str, int), convert)
+    return list_page(
+        db, query, params, (time_key, Lesson.id), (str, int), convert, cursor_scope=cursor_scope
+    )
