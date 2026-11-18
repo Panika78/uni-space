@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { ApiClientError } from '../../shared/api/client'
+import { JournalEdits } from './JournalEdits'
 import { useSearchParams } from 'react-router-dom'
 import type { components } from '../../shared/api/schema'
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
@@ -7,6 +10,7 @@ import { hasPermission } from '../auth/roleNavigation'
 import { formatDateTime } from '../teacher/journalControls'
 import { AttendanceRow, FinalRow, ScoreRow, type Final } from './StaffJournalRows'
 import {
+  isAccessError,
   journalError,
   pageUrl,
   staffJournal,
@@ -203,16 +207,34 @@ function HistoricalFinal({
   const [open, setOpen] = useState(false)
   const readPath = `/api/v1/final-results/courses/${course.course_offering_id}/students/${student.student_id}`
   const query = useJournalQuery<Final>(access, open && !student.history_only ? readPath : null)
-  if (open && query.isError && !student.history_only) {
-    return (
-      <ErrorState
-        title="Не удалось загрузить итог"
-        description={journalError(query.error)}
-        onRetry={() => void query.refetch()}
-      />
-    )
-  }
-  if (open && !student.history_only && query.data?.result_id && course.attestation_type) {
+  const client = useQueryClient()
+  const missing =
+    open &&
+    ((query.isSuccess && !query.data.result_id) ||
+      (query.error instanceof ApiClientError && query.error.status === 404))
+  const coursePath = `${staffJournal}/courses/${course.course_offering_id}`
+  const historyList = `${coursePath}/historical-final-students`
+  useEffect(() => {
+    if (!missing || student.history_only) return
+    void client.invalidateQueries({
+      queryKey: ['staff-journal', ...access],
+      predicate: ({ queryKey }) => {
+        const path = String(queryKey.at(-1))
+        return (
+          path.startsWith(`${historyList}?`) ||
+          (path.startsWith(`${coursePath}/groups/`) && path.includes('/final-results?'))
+        )
+      },
+    })
+  }, [client, access, coursePath, historyList, missing, student.history_only])
+  const denied = !student.history_only && isAccessError(query.error)
+  if (
+    open &&
+    !student.history_only &&
+    query.isSuccess &&
+    query.data.result_id &&
+    course.attestation_type
+  ) {
     return (
       <FinalRow
         row={query.data}
@@ -229,17 +251,27 @@ function HistoricalFinal({
       <div className="journal-student__identity">
         <strong>{student.full_name}</strong>
         {student.history_only && <small>Итог удалён</small>}
+        {!student.history_only && missing && <small>Итог больше недоступен</small>}
       </div>
-      <div className="staff-journal-actions">
-        <button type="button" onClick={onHistory}>
-          История изменений
-        </button>
-        {!student.history_only && (
-          <button type="button" disabled={open} onClick={() => setOpen(true)}>
-            {open ? 'Загружаем итог…' : 'Открыть итог'}
+      {open && !student.history_only && query.isError && (
+        <ErrorState
+          title="Не удалось загрузить итог"
+          description={journalError(query.error)}
+          onRetry={denied || missing ? undefined : () => void query.refetch()}
+        />
+      )}
+      {!denied && (
+        <div className="staff-journal-actions">
+          <button type="button" onClick={onHistory}>
+            История изменений
           </button>
-        )}
-      </div>
+          {!student.history_only && !missing && !query.isError && (
+            <button type="button" disabled={open && query.isPending} onClick={() => setOpen(true)}>
+              {open && query.isPending ? 'Загружаем итог…' : 'Открыть итог'}
+            </button>
+          )}
+        </div>
+      )}
     </article>
   )
 }
@@ -479,7 +511,11 @@ export function StaffJournalsPage() {
   const grades = hasPermission(context, 'grades.edit')
   const attendance = hasPermission(context, 'attendance.edit')
   const access: JournalAccess = [context.user_id, 'staff', grades, attendance]
-  return <StaffJournal key={JSON.stringify(access)} access={access} />
+  return (
+    <JournalEdits key={JSON.stringify(access)} access={access}>
+      <StaffJournal access={access} />
+    </JournalEdits>
+  )
 }
 
 function StaffJournal({ access }: { access: JournalAccess }) {

@@ -61,12 +61,17 @@ def main() -> None:
             student = db.get(Student, int(os.environ["TEACHER_JOURNAL_STUDENT_C"]))
             student.group_id = int(os.environ["TEACHER_JOURNAL_GROUP_B"])
         return
-    if mode == "staff-revoke":
+    if mode in {"staff-revoke", "staff-revoke-attendance"}:
+        login_key = (
+            "JOURNAL_GRADES_LOGIN"
+            if mode == "staff-revoke"
+            else "JOURNAL_ATTENDANCE_LOGIN"
+        )
         with SessionLocal.begin() as db:
             profile = db.scalar(
                 select(StaffProfile)
                 .join(User, User.id == StaffProfile.user_id)
-                .where(User.login == os.environ["JOURNAL_GRADES_LOGIN"])
+                .where(User.login == os.environ[login_key])
             )
             db.execute(
                 delete(StaffPermission).where(

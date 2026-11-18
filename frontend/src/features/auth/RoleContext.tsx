@@ -1,3 +1,5 @@
+import { clearJournalStorage, readJournalStorage } from '../staff-journals/journalStorage'
+import { authEpochStorageKey } from './authSession'
 import { AccessRecovery, isTemporaryAccessError } from '../../shared/ui/AccessRecovery'
 import { createContext, useContext, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -54,6 +56,22 @@ export function RoleAccess() {
       window.removeEventListener('pageshow', refreshContext)
     }
   }, [refetch])
+  useEffect(() => {
+    const context = query.data
+    if (query.isError && !isTemporaryAccessError(query.error)) {
+      clearJournalStorage()
+    } else if (context) {
+      const saved = readJournalStorage()
+      const scope = JSON.stringify([
+        localStorage.getItem(authEpochStorageKey) ?? 'initial',
+        context.user_id,
+        context.role,
+        hasPermission(context, 'grades.edit'),
+        hasPermission(context, 'attendance.edit'),
+      ])
+      if (saved && saved.scope !== scope) clearJournalStorage()
+    }
+  }, [query.data, query.error, query.isError])
   if (query.isPending) return <LoadingState title="Проверяем доступ…" />
   let failure = null
   if (query.isError) {

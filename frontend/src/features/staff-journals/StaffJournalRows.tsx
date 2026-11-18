@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiClientError, isDefinitiveApiRejection } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
@@ -14,47 +14,55 @@ import {
 } from './journalQueries'
 
 type Schema = components['schemas']
-type StudentRow = { student_id: string }
-type Compare<T> = (row: T | undefined) => boolean
+import { useJournalEdit, type Operation, type Values } from './JournalEdits'
 
-function useRowSave<T extends StudentRow>(
-  access: JournalAccess,
-  readPath: string,
-  studentId: string,
-) {
+function finalBaseline(row: Values | undefined) {
+  return JSON.stringify([
+    row?.result_id ?? null,
+    row?.grade_value ?? null,
+    row?.passed ?? null,
+    row?.retake_date ?? null,
+    row?.retake_location ?? null,
+  ])
+}
+
+function useRowSave(access: JournalAccess, readPath: string, studentId: string, path: string) {
   const client = useQueryClient()
-  const [state, setState] = useState<SaveState>()
-  const active = useRef<AbortController | null>(null)
-  useEffect(() => () => active.current?.abort(), [])
+  const { entry, update, active } = useJournalEdit(path)
+  const busy = entry.phase === 'saving' || entry.phase === 'uncertain'
 
-  async function save(
-    path: string,
-    init: RequestInit,
-    matches: Compare<T>,
-    onConfirmed?: () => void,
-    checkOnly = false,
-  ) {
-    if (active.current && !active.current.signal.aborted) return
+  async function save(operation: Operation, mode: 'write' | 'retry' | 'verify' = 'write') {
+    if (active.has(path)) return
     const controller = new AbortController()
-    active.current = controller
+    active.set(path, controller)
     const signal = controller.signal
-    setState({ phase: 'saving' })
+    const target = operation.readPath ?? readPath
+    update((old) => ({
+      ...old,
+      operation: { ...operation, readPath: target },
+      phase: 'saving',
+      message: undefined,
+    }))
     const refresh = () => client.invalidateQueries({ queryKey: ['staff-journal', ...access] })
-    async function readCurrent() {
-      if (!readPath.startsWith('/api/v1/final-results/')) {
-        const page = await journalRequest<Page<T>>(
-          pageUrl(readPath, null, { student_id: studentId }),
+
+    async function readCurrent(): Promise<Values | undefined> {
+      if (!target.startsWith('/api/v1/final-results/')) {
+        const page = await journalRequest<Page<Values>>(
+          pageUrl(target, null, { student_id: studentId }),
           { signal },
         )
         return page.items[0]
       }
       try {
-        return await journalRequest<T>(readPath, { signal })
+        return await journalRequest<Values>(target, { signal })
       } catch (error) {
-        if (init.method !== 'DELETE' || !(error instanceof ApiClientError) || error.status !== 404)
+        if (
+          operation.method !== 'DELETE' ||
+          !(error instanceof ApiClientError) ||
+          error.status !== 404
+        )
           throw error
-        // A transferred student without a saved final is outside the write API's read scope.
-        const coursePath = readPath
+        const coursePath = target
           .split('/students/')[0]
           .replace('/api/v1/final-results', staffJournal)
         const page = await journalRequest<Page<Schema['HistoricalFinalStudent']>>(
@@ -65,78 +73,122 @@ function useRowSave<T extends StudentRow>(
         throw error
       }
     }
-    async function verify() {
-      const actual = await readCurrent()
+
+    async function finish(confirmed: boolean) {
       if (signal.aborted) return
-      const verified = matches(actual)
       await refresh()
       if (signal.aborted) return
-      if (verified) onConfirmed?.()
-      setState(
-        verified
+      active.delete(path)
+      update((old) =>
+        confirmed
           ? { phase: 'saved' }
           : {
+              ...old,
               phase: 'error',
               message: 'Сервер вернул другое значение. Повторите сохранение при необходимости.',
-              retry: () => void save(path, init, matches, onConfirmed),
             },
       )
     }
+
+    const matches = (actual: Values | undefined) =>
+      Object.entries(operation.expected).every(
+        ([key, value]) => (actual?.[key] ?? (key === 'status' ? 'unmarked' : null)) === value,
+      )
+    async function verify() {
+      await finish(matches(await readCurrent()))
+    }
+
+    function deny() {
+      active.delete(path)
+      update(() => ({ phase: 'error', message: 'Доступ к сохранению изменился.' }))
+      void client.invalidateQueries({ queryKey: ['authorization-context'] })
+      void refresh()
+    }
+
     try {
-      if (checkOnly) {
+      if (mode === 'verify') {
         await verify()
-      } else {
-        await journalRequest(path, { ...init, signal, replayAfterRefresh: false })
-        if (signal.aborted) return
-        await refresh()
-        if (signal.aborted) return
-        onConfirmed?.()
-        setState({ phase: 'saved' })
+        return
       }
+      if (mode === 'retry' || entry.baseline !== undefined) {
+        const actual = await readCurrent()
+        if (signal.aborted) return
+        if (mode === 'retry' && matches(actual)) {
+          await finish(true)
+          return
+        }
+        if (entry.baseline !== undefined && finalBaseline(actual) !== entry.baseline) {
+          await finish(false)
+          return
+        }
+      }
+      await journalRequest(path, {
+        signal,
+        replayAfterRefresh: false,
+        method: operation.method,
+        ...(operation.body && {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(operation.body),
+        }),
+      })
+      await finish(true)
     } catch (error) {
       if (signal.aborted) return
       if (isAccessError(error)) {
-        void client.invalidateQueries({ queryKey: ['authorization-context'] })
-        void refresh()
-        setState({ phase: 'error', message: journalError(error) })
+        deny()
         return
       }
-      const uncertain = checkOnly || !isDefinitiveApiRejection(error)
-      if (uncertain && !checkOnly) {
+      const uncertain = mode === 'verify' || !isDefinitiveApiRejection(error)
+      if (uncertain && mode !== 'verify') {
         try {
           await verify()
           return
         } catch (readError) {
           if (signal.aborted) return
           if (isAccessError(readError)) {
-            void client.invalidateQueries({ queryKey: ['authorization-context'] })
-            void refresh()
+            deny()
+            return
           }
         }
       }
-      setState({
-        phase: 'error',
-        uncertain,
+      active.delete(path)
+      update((old) => ({
+        ...old,
+        phase: uncertain ? 'uncertain' : 'error',
         message: uncertain
           ? `${journalError(error)} Сохранение не подтверждено.`
           : journalError(error),
-        retry: () => void save(path, init, matches, onConfirmed, uncertain),
-      })
+      }))
       if (error instanceof ApiClientError && [404, 409].includes(error.status ?? 0)) void refresh()
     } finally {
-      if (active.current === controller) active.current = null
+      if (active.get(path) === controller) active.delete(path)
     }
+  }
+
+  const state: SaveState | undefined = entry.phase && {
+    phase: entry.phase === 'uncertain' ? 'error' : entry.phase,
+    uncertain: entry.phase === 'uncertain',
+    message:
+      entry.message ?? (entry.phase === 'uncertain' ? 'Сохранение не подтверждено.' : undefined),
+    retry:
+      entry.operation && entry.phase !== 'saving'
+        ? () => void save(entry.operation!, entry.phase === 'uncertain' ? 'verify' : 'retry')
+        : undefined,
   }
   return {
     save,
+    entry,
     state,
-    reset: () => setState(undefined),
-    busy: state?.phase === 'saving' || state?.uncertain === true,
+    busy,
+    change: (field: string, value: string, baseline?: string, initial?: Record<string, string>) => {
+      if (active.has(path) || entry.phase === 'uncertain') return
+      update((old) => ({
+        draft: { ...(old.draft ?? initial), [field]: value },
+        baseline: old.baseline ?? baseline,
+      }))
+    },
+    acceptBaseline: (baseline: string) => update((old) => ({ draft: old.draft, baseline })),
   }
-}
-
-function json(method: string, value: unknown): RequestInit {
-  return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }
 }
 
 export function ScoreRow({
@@ -154,12 +206,13 @@ export function ScoreRow({
   readPath: string
   onHistory: () => void
 }) {
-  const [draft, setDraft] = useState<string | null>(null)
   const [validation, setValidation] = useState('')
-  const save = useRowSave<Schema['StaffScoreRow']>(access, readPath, row.student_id)
   const path = `/api/v1/teaching/courses/${group}/assessments/${assessment.id}/results/${row.student_id}`
+  const save = useRowSave(access, readPath, row.student_id, path)
+  const draft = save.entry.draft?.score
   function submit() {
-    if (!row.can_edit || save.busy || draft === null) return
+    if (!row.can_edit || save.busy || draft === undefined || save.entry.operation !== undefined)
+      return
     const input = draft.trim()
     const value = input === '' ? null : Number(input)
     if (value !== null && (!/^\d+$/.test(input) || value > assessment.max_score)) {
@@ -167,12 +220,7 @@ export function ScoreRow({
       return
     }
     if (value === row.score) return
-    void save.save(
-      path,
-      json('PUT', { score: value }),
-      (actual) => actual?.score === value,
-      () => setDraft(null),
-    )
+    void save.save({ method: 'PUT', body: { score: value }, expected: { score: value } })
   }
   return (
     <article className="journal-student">
@@ -197,9 +245,8 @@ export function ScoreRow({
           disabled={!row.can_edit}
           readOnly={save.busy}
           onChange={(event) => {
-            setDraft(event.target.value)
+            save.change('score', event.target.value)
             setValidation('')
-            save.reset()
           }}
           onBlur={submit}
           onKeyDown={(event) => {
@@ -224,8 +271,8 @@ export function AttendanceRow({
   access: JournalAccess
   readPath: string
 }) {
-  const save = useRowSave<Schema['StaffAttendanceRow']>(access, readPath, row.student_id)
   const path = `/api/v1/attendance/lessons/${lessonId}/students/${row.student_id}`
+  const save = useRowSave(access, readPath, row.student_id, path)
   return (
     <article className="journal-student">
       <div className="journal-student__identity">
@@ -247,11 +294,11 @@ export function AttendanceRow({
             disabled={!row.can_edit || save.busy}
             onClick={() => {
               if (row.status === value) return
-              void save.save(
-                path,
-                value === 'unmarked' ? { method: 'DELETE' } : json('PUT', { status: value }),
-                (actual) => actual?.status === value || (value === 'unmarked' && !actual),
-              )
+              void save.save({
+                method: value === 'unmarked' ? 'DELETE' : 'PUT',
+                body: value === 'unmarked' ? undefined : { status: value },
+                expected: { status: value },
+              })
             }}
           >
             {label}
@@ -281,14 +328,21 @@ export function FinalRow({
   readPath: string
   onHistory: () => void
 }) {
-  const [grade, setGrade] = useState<string>()
-  const [date, setDate] = useState<string>()
-  const [location, setLocation] = useState<string>()
-  const save = useRowSave<Final>(access, readPath, row.student_id)
   const isPass = attestation === 'pass_fail'
   const path = `/api/v1/final-results/courses/${row.course_offering_id}/students/${row.student_id}`
+  const save = useRowSave(access, readPath, row.student_id, path)
+  const { grade, date, location } = save.entry.draft ?? {}
+  const baseline = finalBaseline(row)
+  const conflict =
+    !save.busy && save.entry.baseline !== undefined && save.entry.baseline !== baseline
   const gradeValue = grade ?? String((isPass ? row.passed : row.grade_value) ?? '')
+  const initial = {
+    grade: String((isPass ? row.passed : row.grade_value) ?? ''),
+    date: row.retake_date ?? '',
+    location: row.retake_location ?? '',
+  }
   function submit(remove = false) {
+    if (save.busy || conflict) return
     const patch = {
       grade_value: isPass || gradeValue === '' ? null : Number(gradeValue),
       passed: isPass && gradeValue !== '' ? gradeValue === 'true' : null,
@@ -296,20 +350,19 @@ export function FinalRow({
       retake_location: (location ?? row.retake_location)?.trim() || null,
     }
     const clearsRetake = remove || patch.passed || (patch.grade_value ?? 0) >= 3
-    const matches: Compare<Final> = (actual) => {
-      if (remove) return !actual?.result_id
-      return (
-        actual?.grade_value === patch.grade_value &&
-        actual?.passed === patch.passed &&
-        actual?.retake_date === (clearsRetake ? null : patch.retake_date) &&
-        actual?.retake_location === (clearsRetake ? null : patch.retake_location)
-      )
-    }
-    void save.save(path, remove ? { method: 'DELETE' } : json('PATCH', patch), matches, () => {
-      setDate(undefined)
-      setLocation(undefined)
-      setGrade(undefined)
-    })
+    void save.save(
+      remove
+        ? { method: 'DELETE', expected: { result_id: null } }
+        : {
+            method: 'PATCH',
+            body: patch,
+            expected: {
+              ...patch,
+              retake_date: clearsRetake ? null : patch.retake_date,
+              retake_location: clearsRetake ? null : patch.retake_location,
+            },
+          },
+    )
   }
   return (
     <article className="journal-student journal-student--final">
@@ -331,8 +384,7 @@ export function FinalRow({
           <select
             value={gradeValue}
             onChange={(event) => {
-              setGrade(event.target.value)
-              save.reset()
+              save.change('grade', event.target.value, baseline, initial)
             }}
             disabled={save.busy}
           >
@@ -358,8 +410,7 @@ export function FinalRow({
             value={date ?? row.retake_date ?? ''}
             readOnly={save.busy}
             onChange={(event) => {
-              setDate(event.target.value)
-              save.reset()
+              save.change('date', event.target.value, baseline, initial)
             }}
           />
         </label>
@@ -370,21 +421,40 @@ export function FinalRow({
             maxLength={200}
             readOnly={save.busy}
             onChange={(event) => {
-              setLocation(event.target.value)
-              save.reset()
+              save.change('location', event.target.value, baseline, initial)
             }}
           />
         </label>
         <div className="staff-journal-actions">
-          <button type="submit" disabled={save.busy}>
+          <button type="submit" disabled={save.busy || conflict}>
             Сохранить итог
           </button>
-          <button type="button" disabled={save.busy || !row.result_id} onClick={() => submit(true)}>
+          <button
+            type="button"
+            disabled={save.busy || conflict || !row.result_id}
+            onClick={() => submit(true)}
+          >
             Удалить итог
           </button>
         </div>
       </form>
-      <SaveLabel state={save.state} onRetry={save.state?.retry} />
+      {conflict && (
+        <div role="status">
+          Итог изменился на сервере. Проверьте новую запись перед применением черновика.
+          <p>
+            На сервере:{' '}
+            {String(
+              row.grade_value ??
+                (row.passed === null ? 'Не выставлен' : row.passed ? 'Зачтено' : 'Не зачтено'),
+            )}{' '}
+            · {row.retake_date ?? 'Без даты'} · {row.retake_location ?? 'Без места'}
+          </p>
+          <button type="button" onClick={() => save.acceptBaseline(baseline)}>
+            Оставить мой черновик
+          </button>
+        </div>
+      )}
+      <SaveLabel state={save.state} onRetry={conflict ? undefined : save.state?.retry} />
     </article>
   )
 }

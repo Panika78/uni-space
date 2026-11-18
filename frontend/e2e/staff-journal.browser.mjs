@@ -1,4 +1,4 @@
-/* global process, document, console, window, Event, URLSearchParams */
+/* global process, document, console, window, Event, URL, URLSearchParams */
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -97,19 +97,51 @@ try {
   })
   await row(gradePage).getByText('Сохранено').waitFor()
 
-  let attempts = 0
-  await gradePage.route(`**${writeScore}`, async (route) => {
-    attempts += 1
-    const committed = await route.fetch()
-    assert.equal(committed.status(), 200)
-    await route.abort()
-  })
-  await score(gradePage).fill('3')
-  await score(gradePage).press('Enter')
-  await row(gradePage).getByText('Сохранено').waitFor()
-  assert.equal(attempts, 1)
-  await gradePage.unrouteAll()
-  assert.equal(await score(gradePage).inputValue(), '3')
+  // Hold a real, committed response until the score row has unmounted.
+  for (const [value, lost] of [
+    ['1', false],
+    ['3', true],
+  ]) {
+    const committed = Promise.withResolvers()
+    const release = Promise.withResolvers()
+    const delivered = Promise.withResolvers()
+    let attempts = 0
+    await gradePage.route(`**${writeScore}`, async (route) => {
+      attempts += 1
+      const response = await route.fetch()
+      committed.resolve(response.status())
+      await release.promise
+      if (lost) await route.abort()
+      else await route.fulfill({ response })
+      delivered.resolve()
+    })
+    await score(gradePage).fill(value)
+    await sectionButton(gradePage, 'Итоги аттестации').click()
+    assert.equal(await committed.promise, 200)
+    await gradePage.goBack()
+    await row(gradePage).getByText('Сохраняется').waitFor()
+    assert.equal(await score(gradePage).inputValue(), value)
+    const verification =
+      lost &&
+      gradePage.waitForResponse((response) => {
+        const url = new URL(response.url())
+        return (
+          url.pathname.endsWith(`/assessments/${assessment}/results`) &&
+          url.searchParams.get('student_id') === student
+        )
+      })
+    release.resolve()
+    await delivered.promise
+    if (verification) {
+      const result = await verification
+      assert.equal(result.status(), 200)
+      assert.equal((await result.json()).items[0].score, Number(value))
+    }
+    await row(gradePage).getByText('Сохранено').waitFor()
+    assert.equal(attempts, 1)
+    await gradePage.unrouteAll()
+    assert.equal(await score(gradePage).inputValue(), value)
+  }
 
   let rejected = 0
   await gradePage.route(`**${writeScore}`, async (route) => {
@@ -135,14 +167,74 @@ try {
   await currentFinal.getByLabel('Итог').selectOption('2')
   await currentFinal.getByLabel('Дата пересдачи').fill('2027-01-12')
   await currentFinal.getByLabel('Место пересдачи').fill('Б-201')
+  let finalAttempts = 0
+  await gradePage.route(`**${writeFinal}`, async (route) => {
+    if (route.request().method() === 'GET') return route.continue()
+    finalAttempts += 1
+    await route.fulfill({ status: 503, contentType: 'application/json', body: '{}' })
+  })
+  const finalRetry = currentFinal.getByRole('button', { name: 'Повторить', exact: true })
+  await currentFinal.getByRole('button', { name: 'Сохранить итог' }).click()
+  await finalRetry.waitFor()
+  await sectionButton(gradePage, 'Работы и баллы').click()
+  await gradePage.goBack()
+  await finalRetry.waitFor()
+  await gradePage.goForward()
+  await gradePage.goBack()
+  await gradePage.reload()
+  await finalRetry.waitFor()
+  assert.equal(await currentFinal.getByLabel('Итог').inputValue(), '2')
+  assert.equal(await currentFinal.getByLabel('Дата пересдачи').inputValue(), '2027-01-12')
+  assert.equal(await currentFinal.getByLabel('Место пересдачи').inputValue(), 'Б-201')
+  assert.equal(finalAttempts, 1)
+  await gradePage.unrouteAll()
+  await saved(gradePage, writeFinal, 'PATCH', () => finalRetry.click())
+  await currentFinal.getByText('Сохранено').waitFor()
+
+  const peerContext = await browser.newContext()
+  const peer = await peerContext.newPage()
+  const peerCatalog = peer.waitForResponse((response) =>
+    response.url().includes('/staff/journals/catalog'),
+  )
+  await login(peer, env.JOURNAL_BOTH_LOGIN, journalUrl('finals'))
+  const peerAuth = await (await peerCatalog).request().headerValue('authorization')
+  assert(peerAuth)
+  const historicalRow = (page) =>
+    row(page).filter({ has: page.getByRole('button', { name: 'Открыть итог' }) })
+  async function deleteFromPeer(expectedStatus) {
+    await historicalRow(gradePage).waitFor()
+    const removed = await peer.request.delete(`${baseURL}${writeFinal}`, {
+      headers: { authorization: peerAuth },
+    })
+    assert.equal(removed.status(), 200)
+    const read = gradePage.waitForResponse(
+      (response) => response.url().endsWith(writeFinal) && response.request().method() === 'GET',
+    )
+    await historicalRow(gradePage).getByRole('button', { name: 'Открыть итог' }).click()
+    const response = await read
+    assert.equal(response.status(), expectedStatus)
+    if (expectedStatus === 200) assert.equal((await response.json()).result_id, null)
+    const deleted = row(gradePage).filter({ hasText: 'Итог удалён' })
+    await deleted.getByRole('button', { name: 'История изменений' }).click()
+    const history = gradePage.getByRole('dialog', { name: 'История изменений' })
+    await history
+      .getByText(/Удаление/)
+      .first()
+      .waitFor()
+    assert.equal(await row(gradePage).getByText('Загружаем итог…').count(), 0)
+    await gradePage.keyboard.press('Escape')
+    await history.waitFor({ state: 'hidden' })
+  }
+
+  await deleteFromPeer(200)
+  await currentFinal.getByLabel('Итог').locator('option[value=""]:checked').waitFor({ state: 'attached' })
+  await currentFinal.getByLabel('Итог').selectOption('2')
+  await currentFinal.getByLabel('Дата пересдачи').fill('2027-01-12')
+  await currentFinal.getByLabel('Место пересдачи').fill('Б-201')
   await saved(gradePage, writeFinal, 'PATCH', () =>
     currentFinal.getByRole('button', { name: 'Сохранить итог' }).click(),
   )
-  await gradePage.goBack()
-  await score(gradePage).waitFor()
-  assert.equal(await score(gradePage).inputValue(), '3')
-  await gradePage.goForward()
-  await currentFinal.getByLabel('Итог').waitFor()
+  await currentFinal.getByText('Сохранено').waitFor()
 
   const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const attendancePage = await desktop.newPage()
@@ -208,38 +300,101 @@ try {
   assert(await score(gradePage).isDisabled())
 
   await sectionButton(gradePage, 'Итоги аттестации').click()
-  await row(gradePage).getByRole('button', { name: 'Открыть итог' }).click()
-  await saved(gradePage, writeFinal, 'DELETE', () =>
-    row(gradePage).getByRole('button', { name: 'Удалить итог' }).click(),
-  )
+  await deleteFromPeer(404)
+  await peerContext.close()
   await gradePage.getByRole('searchbox', { name: 'Поиск по истории итогов' }).fill(studentName)
   await gradePage.getByRole('searchbox', { name: 'Поиск по истории итогов' }).press('Enter')
   await row(gradePage).getByText('Итог удалён').waitFor()
   await row(gradePage).getByRole('button', { name: 'История изменений' }).click()
-  await dialog.getByText(/Удаление/).waitFor()
+  await dialog
+    .getByText(/Удаление/)
+    .first()
+    .waitFor()
   await dialog.getByText(/Б-201/).first().waitFor()
   await gradePage.keyboard.press('Escape')
 
-  updateFixture('staff-revoke')
-  const forbidden = gradePage.waitForResponse((response) =>
-    response.url().includes('/auth/context'),
-  )
-  await gradePage.evaluate(() => window.dispatchEvent(new Event('focus')))
-  assert.equal((await forbidden).status(), 200)
-  await gradePage.getByRole('alert').getByText('Доступ запрещён', { exact: true }).waitFor()
-  assert.equal(await row(gradePage).count(), 0)
+  const other = env.TEACHER_JOURNAL_STUDENT_A
+  const otherName = 'Анна Иванова'
+  async function revokeDuringSave(page, write, action, mode) {
+    const committed = Promise.withResolvers()
+    const release = Promise.withResolvers()
+    const finished = Promise.withResolvers()
+    await page.route(`**${write}`, async (route) => {
+      const response = await route.fetch()
+      committed.resolve(response.status())
+      await release.promise
+      try {
+        await route.fulfill({ response })
+      } catch {
+        // Revoking access may close the browser's side of this committed request.
+      } finally {
+        finished.resolve()
+      }
+    })
+    await action()
+    assert.equal(await committed.promise, 200)
+    updateFixture(mode)
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await page.getByRole('alert').getByText('Доступ запрещён', { exact: true }).waitFor()
+    release.resolve()
+    await finished.promise
+    assert.equal(await page.locator('article.journal-student').count(), 0)
+    assert.equal(
+      await page.evaluate(() => window.sessionStorage.getItem('uni-space.staff-journal')),
+      null,
+    )
+    await page.unrouteAll()
+  }
 
-  await gradePage.getByRole('button', { name: 'Выйти', exact: true }).last().click()
-  await gradePage.getByRole('dialog').getByRole('button', { name: 'Выйти', exact: true }).click()
-  await gradePage.waitForURL('**/login')
-  await login(gradePage, env.JOURNAL_BOTH_LOGIN, journalUrl('attendance', lesson))
-  await sectionButton(gradePage, 'Работы и баллы').waitFor()
+  await gradePage.goto(journalUrl('work', assessment))
+  const otherScore = gradePage.getByLabel(`Балл · ${otherName}`)
+  await revokeDuringSave(
+    gradePage,
+    writeScore.replace(`/results/${student}`, `/results/${other}`),
+    async () => {
+      await otherScore.fill((await otherScore.inputValue()) === '7' ? '8' : '7')
+      await otherScore.press('Enter')
+    },
+    'staff-revoke',
+  )
+  const otherAttendance = attendancePage.getByRole('group', { name: `Посещаемость · ${otherName}` })
+  const attended = otherAttendance.getByRole('button', { name: 'Присутствовал' })
+  const changeMark =
+    (await attended.getAttribute('aria-pressed')) === 'true'
+      ? otherAttendance.getByRole('button', { name: 'Отсутствовал' })
+      : attended
+  await revokeDuringSave(
+    attendancePage,
+    writeAttendance.replace(`/students/${student}`, `/students/${other}`),
+    () => changeMark.click(),
+    'staff-revoke-attendance',
+  )
+
+  async function logout(page, openMenu = false) {
+    if (openMenu) await page.getByRole('button', { name: 'Меню пользователя' }).click()
+    await page.getByRole('button', { name: 'Выйти', exact: true }).last().click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Выйти', exact: true }).click()
+    await page.waitForURL('**/login')
+  }
+  await logout(gradePage)
+  await login(gradePage, env.JOURNAL_BOTH_LOGIN, journalUrl('finals'))
   await sectionButton(gradePage, 'Посещаемость').waitFor()
-  assert.equal(await row(gradePage).count(), 0)
+  assert.equal(await row(gradePage).filter({ hasText: 'Загружаем итог…' }).count(), 0)
+  const bothFinal = gradePage
+    .locator('article.journal-student--final')
+    .filter({ hasText: otherName })
+  await bothFinal.getByLabel('Место пересдачи').fill('Черновик другого аккаунта')
+  await logout(gradePage, true)
+  await login(gradePage, env.JOURNAL_STUDENTS_READ_LOGIN, journalUrl('finals'))
+  await gradePage.getByRole('alert').getByText('Доступ запрещён', { exact: true }).waitFor()
+  assert.equal(await gradePage.getByText('Черновик другого аккаунта').count(), 0)
+  assert.equal(
+    await gradePage.evaluate(() => window.sessionStorage.getItem('uni-space.staff-journal')),
+    null,
+  )
 
   for (const account of [
     env.JOURNAL_ADMIN_LOGIN,
-    env.JOURNAL_STUDENTS_READ_LOGIN,
     env.TEACHER_JOURNAL_LOGIN_B,
     env.JOURNAL_STUDENT_LOGIN,
   ]) {
