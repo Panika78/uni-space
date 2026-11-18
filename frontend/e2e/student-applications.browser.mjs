@@ -159,6 +159,113 @@ async function waitForCorrection(id, version) {
   await page.getByText(`Заявление № ${id} подано повторно. Версия ${version}.`).waitFor()
 }
 
+async function recoverMultipart(
+  returned,
+  explanationValue,
+  filenames,
+  { startReview = false, concurrentFile } = {},
+) {
+  const path = `${base}/${returned.id}/resubmit`
+  const routePath = `**${path}`
+  const historyPath = `${base}/${returned.id}/history`
+  const previousHistory = (await (await get(historyPath)).json()).items
+  let posts = 0
+  await page.route(routePath, async (route) => {
+    posts++
+    assert.equal(posts, 1, 'Recovery must not send a second POST')
+    assert.match(route.request().headers()['content-type'], /^multipart\/form-data;/)
+    let saved
+    if (concurrentFile) {
+      saved = await post(path, student, {
+        multipart: {
+          expected_version: String(returned.version),
+          form_data: JSON.stringify({ ...leave, explanation: explanationValue }),
+          keep_attachment_ids: JSON.stringify(returned.attachments.map(({ id }) => id)),
+          files: concurrentFile,
+        },
+      })
+    } else {
+      const response = await route.fetch({ maxRetries: 0 })
+      assert.equal(response.status(), 200)
+      saved = await response.json()
+    }
+    assert.equal(saved.id, returned.id)
+    assert.equal(saved.version, returned.version + 1)
+    assert.equal(saved.review_status, 'resubmitted')
+    if (startReview) await review(saved, 'start_review')
+    await route.abort('failed')
+  })
+  try {
+    await send.click()
+    const notice = page
+      .getByRole('status')
+      .filter({ hasText: /История подтверждает повторную подачу/ })
+    await notice.waitFor()
+    assert.match(await notice.innerText(), /содержимое файлов из прерванной отправки не проверено/)
+    assert.match(
+      await notice.innerText(),
+      new RegExp(`Версия подачи ${returned.version + 1}(?:[.]|$)`),
+    )
+    assert.equal(await page.getByText(/Исход отправки пока не подтверждён/).count(), 0)
+    assert.equal(
+      await page
+        .getByText(`Заявление № ${returned.id} подано повторно. Версия ${returned.version + 1}.`, {
+          exact: true,
+        })
+        .count(),
+      0,
+    )
+    assert.equal(await send.count(), 0)
+    assert.equal(await edit.count(), 0)
+    const saved = await getItem(returned.id)
+    const expectedStatus = startReview ? 'in_review' : 'resubmitted'
+    assert.equal(saved.id, returned.id)
+    assert.equal(saved.version, returned.version + (startReview ? 2 : 1))
+    assert.equal(saved.review_status, expectedStatus)
+    assert.deepEqual(saved.form_data, { ...leave, explanation: explanationValue })
+    assert.deepEqual(
+      saved.attachments.map(({ original_filename }) => original_filename).sort(),
+      [...filenames].sort(),
+    )
+    const section = page.getByRole('region', { name: 'Текущие подтверждающие файлы' })
+    assert.equal(await section.getByRole('listitem').count(), filenames.length)
+    for (const name of filenames) await section.getByText(name, { exact: false }).waitFor()
+    const details = page.locator('.application-detail article')
+    assert.equal(await details.getByText(String(saved.version), { exact: true }).count(), 1)
+    assert.equal(await details.getByText(explanationValue, { exact: true }).count(), 1)
+    await history
+      .getByText(
+        startReview ? 'Подано повторно → На рассмотрении' : 'Требуется доработка → Подано повторно',
+        { exact: true },
+      )
+      .last()
+      .waitFor()
+    await history
+      .getByText(
+        startReview ? 'Текущий этап — На рассмотрении' : 'Текущий этап — Подано повторно',
+        { exact: true },
+      )
+      .waitFor()
+    const events = (await (await get(historyPath)).json()).items
+    assert.deepEqual(events.slice(0, previousHistory.length), previousHistory)
+    assert.deepEqual(
+      events
+        .slice(previousHistory.length)
+        .map(({ from_status, to_status }) => [from_status, to_status]),
+      startReview
+        ? [
+            ['needs_correction', 'resubmitted'],
+            ['resubmitted', 'in_review'],
+          ]
+        : [['needs_correction', 'resubmitted']],
+    )
+    assert.equal(posts, 1)
+    return saved
+  } finally {
+    await page.unroute(routePath)
+  }
+}
+
 async function fit(width) {
   await page.setViewportSize({ width, height: 850 })
   await page.evaluate(
@@ -215,9 +322,15 @@ try {
   await edit.click()
   const input = page.locator('#leave-files')
   await input.setInputFiles(file('keep.pdf'))
-  await send.click()
-  await waitForCorrection(created.id, returned.version + 1)
-  corrected = await getItem(created.id)
+  await explanation.fill('Пояснение с новым файлом')
+  corrected = await recoverMultipart(returned, 'Пояснение с новым файлом', [
+    'keep.pdf',
+    'original.pdf',
+  ])
+  assert.deepEqual(
+    corrected.attachments.find(({ id }) => id === created.attachments[0].id),
+    created.attachments[0],
+  )
   returned = await returnApplication(corrected, 'Замените первый файл')
   await open(created.id)
   await edit.click()
@@ -255,9 +368,10 @@ try {
   assert.equal(await page.getByRole('button', { name: 'Удалить replacement.pdf' }).count(), 1)
   assert.equal(await page.getByRole('button', { name: 'Оставить original.pdf' }).count(), 1)
   assert.deepEqual(await getItem(created.id), beforeInvalid)
-  await send.click()
-  await waitForCorrection(created.id, returned.version + 1)
-  corrected = await getItem(created.id)
+  corrected = await recoverMultipart(returned, 'Исправлено после проверки', [
+    'keep.pdf',
+    'replacement.pdf',
+  ])
   assert.equal(
     corrected.attachments.find((attachment) => attachment.original_filename === 'keep.pdf').id,
     returned.attachments.find((attachment) => attachment.original_filename === 'keep.pdf').id,
@@ -267,10 +381,56 @@ try {
     'replacement.pdf',
   ])
   await get(`/api/v1/applications/attachments/${created.attachments[0].id}/download`, student, 404)
-  const approvedLeave = await review(await review(corrected, 'start_review'), 'approve')
+  returned = await returnApplication(corrected, 'Следующее уточнение')
+  await open(created.id)
+  await edit.click()
+  await explanation.fill('Пояснение уже на рассмотрении')
+  await input.setInputFiles(file('review.pdf'))
+  corrected = await recoverMultipart(
+    returned,
+    'Пояснение уже на рассмотрении',
+    ['keep.pdf', 'replacement.pdf', 'review.pdf'],
+    { startReview: true },
+  )
+  const approvedLeave = await review(corrected, 'approve')
   await open(approvedLeave.id)
   assert.equal(await edit.count(), 0)
   assert.equal(await page.getByRole('button', { name: /PDF/ }).count(), 0)
+
+  // Another request can commit the same attachment metadata with other bytes.
+  // The UI can confirm the transition but cannot attribute the content.
+  const ambiguous = await returnApplication(
+    await post(
+      base,
+      student,
+      {
+        multipart: { form_data: JSON.stringify(leave), files: file('original.pdf') },
+      },
+      201,
+    ),
+  )
+  await open(ambiguous.id)
+  await edit.click()
+  await explanation.fill('Одинаковые метаданные')
+  const attemptedFile = { ...file('same.pdf'), buffer: Buffer.concat([pdf, Buffer.from('A')]) }
+  const competingFile = { ...file('same.pdf'), buffer: Buffer.concat([pdf, Buffer.from('B')]) }
+  await input.setInputFiles(attemptedFile)
+  const ambiguousSaved = await recoverMultipart(
+    ambiguous,
+    'Одинаковые метаданные',
+    ['original.pdf', 'same.pdf'],
+    { concurrentFile: competingFile },
+  )
+  const same = ambiguousSaved.attachments.find(
+    ({ original_filename }) => original_filename === 'same.pdf',
+  )
+  assert.equal(same.size_bytes, attemptedFile.buffer.length)
+  const savedBytes = await (
+    await get(`/api/v1/applications/attachments/${same.id}/download`)
+  ).body()
+  assert.deepEqual(savedBytes, competingFile.buffer)
+  assert.notDeepEqual(savedBytes, attemptedFile.buffer)
+  console.log('PASS: lost multipart responses, replacement, subsequent review and ambiguous bytes')
 
   // Intercept only the delivery of a successful HTTP response. The POST itself
   // runs on the real API, and must be followed by GET detail/history, never POST.

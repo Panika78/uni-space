@@ -345,7 +345,11 @@ function ApplicationDetail({ id }: { id: string }) {
   const editButton = useRef<HTMLButtonElement>(null)
   const confirmationMessage = useRef<HTMLParagraphElement>(null)
   const [editing, setEditing] = useState(false)
-  const [confirmation, setConfirmation] = useState<{ id: string; version: number } | null>(null)
+  const [confirmation, setConfirmation] = useState<{
+    id: string
+    version: number
+    filesUnverified?: boolean
+  } | null>(null)
   const [actionAccessError, setActionAccessError] = useState<ApiClientError | null>(null)
   const [fileError, setFileError] = useState('')
   const [needsDocumentRefresh, setNeedsDocumentRefresh] = useState(false)
@@ -718,12 +722,16 @@ function ApplicationDetail({ id }: { id: string }) {
           </article>
           {confirmation && (
             <p
-              className="application-success"
+              className={
+                confirmation.filesUnverified ? 'application-detail-card' : 'application-success'
+              }
               ref={confirmationMessage}
               tabIndex={-1}
               role="status"
             >
-              Заявление № {confirmation.id} подано повторно. Версия {confirmation.version}.
+              {confirmation.filesUnverified
+                ? `История подтверждает повторную подачу заявления № ${confirmation.id}. Версия подачи ${confirmation.version}. Проверьте текущие вложения: содержимое файлов из прерванной отправки не проверено.`
+                : `Заявление № ${confirmation.id} подано повторно. Версия ${confirmation.version}.`}
             </p>
           )}
           {canEdit && !editing && (
@@ -744,9 +752,9 @@ function ApplicationDetail({ id }: { id: string }) {
                 isCurrent: query.isSuccess,
                 historyIsCurrent: history.isSuccess && !history.isFetching,
                 refresh: refreshCorrection,
-                onSuccess: (result, submittedVersion) => {
+                onSuccess: (result, submittedVersion, filesUnverified) => {
                   syncApplication(result)
-                  setConfirmation({ id: result.id, version: submittedVersion })
+                  setConfirmation({ id: result.id, version: submittedVersion, filesUnverified })
                   setEditing(false)
                 },
                 onAccessError: setActionAccessError,

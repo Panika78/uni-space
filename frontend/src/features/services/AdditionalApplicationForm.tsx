@@ -260,7 +260,7 @@ type Correction = {
     item: Application
     events: components['schemas']['ApplicationHistoryEvent'][]
   }>
-  onSuccess: (item: Application, submittedVersion: number) => void
+  onSuccess: (item: Application, submittedVersion: number, filesUnverified?: boolean) => void
   onAccessError: (error: ApiClientError) => void
   onCancel: () => void
 }
@@ -271,6 +271,7 @@ type SubmissionAttempt = {
   documentStatus?: Application['document_status']
   form: Record<string, unknown>
   retainedIds: string[]
+  removedIds: string[]
   files: File[]
 }
 
@@ -451,15 +452,20 @@ export function AdditionalApplicationForm({
         sent ? AbortSignal.timeout(30_000) : undefined,
       )
       if (!active.current) return
-      if (sent && hasSavedCorrection(latest, correction.item, sent, events)) {
-        correction.onSuccess(latest, sent.version + 1)
-      } else if (sent) {
+      if (sent) {
+        const result = getCorrectionRecovery(latest, correction.item, sent, events)
+        if (result === 'matched' || result === 'files_unverified') {
+          correction.onSuccess(latest, sent.version + 1, result === 'files_unverified')
+          return
+        }
         const editable = latest.review_status === 'needs_correction'
         setCanResume(editable)
         setError(
-          editable
-            ? 'Исход отправки пока не подтверждён. Первоначальный запрос ещё может завершиться. При продолжении возможен конфликт версий.'
-            : 'Исход отправки пока не подтверждён. Проверьте состояние заявления ещё раз.',
+          result === 'different'
+            ? 'История подтверждает повторную подачу. Сохранённые поля или состав вложений отличаются от отправленных. Сверьте текущую версию заявления.'
+            : editable
+              ? 'Исход отправки пока не подтверждён. Первоначальный запрос ещё может завершиться. При продолжении возможен конфликт версий.'
+              : 'Исход отправки пока не подтверждён. Проверьте состояние заявления ещё раз.',
         )
       } else if (latest.review_status !== 'needs_correction') {
         setTransitionRejected(true)
@@ -517,6 +523,7 @@ export function AdditionalApplicationForm({
       documentStatus: correction?.item.document_status,
       form: formData,
       retainedIds: retained.map(({ id }) => id),
+      removedIds,
       files: selectedFiles,
     }
     const controller = new AbortController()
@@ -1150,22 +1157,15 @@ function isResubmissionResponse(
   )
 }
 
-function hasSavedCorrection(
+function getCorrectionRecovery(
   item: Application,
   previous: Application,
   attempt: SubmissionAttempt,
   events: components['schemas']['ApplicationHistoryEvent'][],
-): boolean {
-  // The history has no request ID or historical payload. A later resubmission
-  // or new file with unverified content is insufficient evidence.
-  if (
-    attempt.files.length ||
-    item.id !== previous.id ||
-    item.service.code !== previous.service.code
-  )
-    return false
+): 'matched' | 'files_unverified' | 'different' | null {
+  if (item.id !== previous.id || item.service.code !== previous.service.code) return null
   const steps = item.version - attempt.version
-  if (steps < 1 || steps > 3 || item.document_status !== attempt.documentStatus) return false
+  if (steps < 1 || steps > 3 || item.document_status !== attempt.documentStatus) return null
   const [returned, resubmitted, started, decided] = events.slice(-(steps + 1))
   if (
     !returned ||
@@ -1183,13 +1183,30 @@ function hasSavedCorrection(
         !['approved', 'rejected', 'needs_correction'].includes(decided.to_status))) ||
     events.at(-1)?.to_status !== item.review_status
   )
-    return false
+    return null
   const attachments = item.attachments ?? []
-  return (
-    attachments.length === attempt.retainedIds.length &&
-    attempt.retainedIds.every((id) => attachments.some((file) => file.id === id)) &&
-    Object.entries(attempt.form).every(
+  if (
+    attachments.length !== attempt.retainedIds.length + attempt.files.length ||
+    !attempt.retainedIds.every((id) => attachments.some((file) => file.id === id)) ||
+    attachments.some(({ id }) => attempt.removedIds.includes(id)) ||
+    !Object.entries(attempt.form).every(
       ([key, expected]) => Reflect.get(item.form_data, key) === expected,
     )
   )
+    return 'different'
+
+  const added = attachments.filter(({ id }) => !attempt.retainedIds.includes(id))
+  for (const file of attempt.files) {
+    const index = added.findIndex(
+      (attachment) =>
+        attachment.original_filename === file.name &&
+        attachment.size_bytes === file.size &&
+        (!file.type || attachment.mime_type === file.type),
+    )
+    if (index === -1) return 'different'
+    added.splice(index, 1)
+  }
+  // The committed transition and current metadata are visible. The history
+  // cannot tie the bytes of a new attachment to the interrupted HTTP request.
+  return attempt.files.length ? 'files_unverified' : 'matched'
 }
