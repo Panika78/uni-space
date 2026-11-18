@@ -426,8 +426,14 @@ try {
   await a.page.getByText('Доступ запрещён', { exact: true }).waitFor()
   assert.equal(await a.page.getByText(reason, { exact: true }).count(), 0)
   await logout(c.page)
-  await c.page.goBack()
-  await c.page.waitForURL('**/login')
+  await c.page.goBack({ waitUntil: 'domcontentloaded' })
+  assert.equal(await c.page.getByText('Выданный PDF', { exact: true }).count(), 0)
+  await c.page.goto(detailUrl)
+  await c.page.waitForURL((url) => url.pathname === '/login')
+
+  await loginStaff(c.page, 'D')
+  await c.page.goto(detailUrl)
+  await c.page.getByText('Доступ запрещён', { exact: true }).waitFor()
   assert.equal(await c.page.getByText('Выданный PDF', { exact: true }).count(), 0)
   console.log('Staff applications Chromium E2E passed at 360 and 1440 px against PostgreSQL.')
 } finally {
