@@ -256,14 +256,19 @@ type Correction = {
   item: Application
   isCurrent: boolean
   historyIsCurrent: boolean
-  refresh: () => Promise<Application>
-  onSuccess: (item: Application) => void
+  refresh: (signal?: AbortSignal) => Promise<{
+    item: Application
+    events: components['schemas']['ApplicationHistoryEvent'][]
+  }>
+  onSuccess: (item: Application, submittedVersion: number) => void
   onAccessError: (error: ApiClientError) => void
   onCancel: () => void
 }
 
 type SubmissionAttempt = {
   version: number
+  updatedAt?: string
+  documentStatus?: Application['document_status']
   form: Record<string, unknown>
   retainedIds: string[]
   files: File[]
@@ -296,6 +301,12 @@ export function AdditionalApplicationForm({
   const retained = (correction?.item.attachments ?? []).filter(({ id }) => !removedIds.includes(id))
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [attempt, setAttempt] = useState<SubmissionAttempt | null>(null)
+  const [canResume, setCanResume] = useState(false)
+  const [resumed, setResumed] = useState(false)
+  const [closeRequested, setCloseRequested] = useState(false)
+  const leaveDialog = useRef<HTMLDialogElement>(null)
+  const continueButton = useRef<HTMLButtonElement>(null)
+  const exitButton = useRef<HTMLButtonElement>(null)
   const [conflict, setConflict] = useState(false)
   const [transitionRejected, setTransitionRejected] = useState(false)
   const busy = useRef(false)
@@ -345,31 +356,48 @@ export function AdditionalApplicationForm({
     selectedFiles.length > 0 ||
     removedIds.length > 0
   const draft = !applicationId && !uncertain && hasChanges
-  const blocker = useBlocker(draft || pending || uncertain)
+  const blocker = useBlocker(draft || pending || uncertain || resumed)
+  const showLeaveDialog = (blocker.state === 'blocked' || closeRequested) && !isSuspended
+  useLayoutEffect(() => {
+    const dialog = leaveDialog.current
+    if (!showLeaveDialog || !dialog) return
+    const previous = document.activeElement
+    if (!dialog.open) dialog.showModal()
+    continueButton.current?.focus()
+    return () => {
+      if (dialog.open) dialog.close()
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
+    }
+  }, [showLeaveDialog])
+
+  function cancelLeave() {
+    if (blocker.state === 'blocked') blocker.reset()
+    setCloseRequested(false)
+  }
   useEffect(() => {
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (draft || pending || uncertain) {
+      if (draft || pending || uncertain || resumed) {
         event.preventDefault()
         event.returnValue = ''
       }
     }
     window.addEventListener('beforeunload', warnBeforeUnload)
     return () => window.removeEventListener('beforeunload', warnBeforeUnload)
-  }, [draft, pending, uncertain])
+  }, [draft, pending, uncertain, resumed])
   useEffect(() => {
     setExitStatus(
       applicationId
         ? 'none'
         : pending
           ? 'submitting'
-          : uncertain
+          : uncertain || resumed
             ? 'uncertain'
             : draft
               ? 'draft'
               : 'none',
     )
     return () => setExitStatus('none')
-  }, [applicationId, draft, pending, setExitStatus, uncertain])
+  }, [applicationId, draft, pending, resumed, setExitStatus, uncertain])
   useLayoutEffect(() => {
     if (pending || isSuspended) return
     if (attachmentError && !firstServerErrorField) filesInput.current?.focus()
@@ -417,13 +445,22 @@ export function AdditionalApplicationForm({
   const invalid = invalidDates || invalidExplanation
   async function verifyCorrection(sent: SubmissionAttempt | null) {
     if (!correction) return
+    setCanResume(false)
     try {
-      const latest = await correction.refresh()
+      const { item: latest, events } = await correction.refresh(
+        sent ? AbortSignal.timeout(30_000) : undefined,
+      )
       if (!active.current) return
-      if (sent && isResubmissionResponse(latest, correction.item, sent)) {
-        correction.onSuccess(latest)
+      if (sent && hasSavedCorrection(latest, correction.item, sent, events)) {
+        correction.onSuccess(latest, sent.version + 1)
       } else if (sent) {
-        setError('Исход отправки пока не подтверждён. Проверьте состояние заявления ещё раз.')
+        const editable = latest.review_status === 'needs_correction'
+        setCanResume(editable)
+        setError(
+          editable
+            ? 'Исход отправки пока не подтверждён. Первоначальный запрос ещё может завершиться. При продолжении возможен конфликт версий.'
+            : 'Исход отправки пока не подтверждён. Проверьте состояние заявления ещё раз.',
+        )
       } else if (latest.review_status !== 'needs_correction') {
         setTransitionRejected(true)
         setError('Повторная отправка больше недоступна. Статус заявления изменился.')
@@ -476,13 +513,26 @@ export function AdditionalApplicationForm({
           }
     const sent = {
       version,
+      updatedAt: correction?.item.updated_at,
+      documentStatus: correction?.item.document_status,
       form: formData,
       retainedIds: retained.map(({ id }) => id),
       files: selectedFiles,
     }
     const controller = new AbortController()
     submission.current = controller
+    let dispatched = false
     try {
+      if (correction && resumed) {
+        const { item: latest } = await correction.refresh()
+        if (!active.current || controller.signal.aborted) return
+        if (latest.review_status !== 'needs_correction' || latest.version !== version) {
+          setTransitionRejected(latest.review_status !== 'needs_correction')
+          setConflict(latest.version !== version)
+          setError('Заявление изменилось после проверки. Сверьте текущий статус и версию.')
+          return
+        }
+      }
       const body = isLeave
         ? (() => {
             const multipart = new FormData()
@@ -498,6 +548,7 @@ export function AdditionalApplicationForm({
             ...(correction ? { expected_version: version } : { service_code: serviceCode }),
             form_data: formData,
           })
+      dispatched = true
       const result = await apiFetch<unknown>(
         correction ? `${applicationPath(correction.item.id)}/resubmit` : '/api/v1/applications',
         {
@@ -515,7 +566,7 @@ export function AdditionalApplicationForm({
         if (!isResubmissionResponse(result, correction.item, sent)) {
           throw new ApiClientError('Некорректное подтверждение', 'invalid_response')
         }
-        correction.onSuccess(result)
+        correction.onSuccess(result, sent.version + 1)
       } else {
         if (!isAdditionalApplicationResponse(result, serviceCode, formData)) {
           throw new ApiClientError('Некорректное подтверждение', 'invalid_response', 201)
@@ -532,6 +583,10 @@ export function AdditionalApplicationForm({
         cause.code === 'invalid_response'
       if (correction && isApplicationAccessError(cause)) {
         correction.onAccessError(cause)
+        return
+      }
+      if (!dispatched) {
+        setError('Не удалось проверить актуальное состояние. Повторите проверку перед отправкой.')
         return
       }
       if (correction && cause instanceof ApiClientError && cause.status === 409) {
@@ -938,6 +993,19 @@ export function AdditionalApplicationForm({
               Проверить состояние заявления
             </button>
           )}
+          {correction && uncertain && canResume && canCorrect && (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                setUncertain(false)
+                setAttempt(null)
+                setResumed(true)
+              }}
+            >
+              Продолжить редактирование
+            </button>
+          )}
           {correction &&
             canCorrect &&
             needsVersionReview &&
@@ -988,12 +1056,8 @@ export function AdditionalApplicationForm({
                 type="button"
                 disabled={pending}
                 onClick={() => {
-                  if (
-                    (!hasChanges && !uncertain) ||
-                    window.confirm('Закрыть форму? Введённые исправления будут потеряны.')
-                  ) {
-                    correction.onCancel()
-                  }
+                  if (hasChanges || uncertain || resumed) setCloseRequested(true)
+                  else correction.onCancel()
                 }}
               >
                 Закрыть форму
@@ -1006,35 +1070,55 @@ export function AdditionalApplicationForm({
           </div>
         </form>
       )}
-      {blocker.state === 'blocked' && (
-        <div className="unsaved-dialog-backdrop" role="presentation">
-          <section
-            className="unsaved-dialog"
-            role="alertdialog"
-            aria-labelledby="additional-unsaved-title"
-            aria-modal="true"
+      <dialog
+        ref={leaveDialog}
+        className="unsaved-dialog"
+        role="alertdialog"
+        aria-labelledby="additional-unsaved-title"
+        aria-describedby="additional-unsaved-description"
+        onCancel={(event) => {
+          event.preventDefault()
+          cancelLeave()
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'Tab') return
+          const first = continueButton.current
+          const last = exitButton.current
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault()
+            last?.focus()
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault()
+            first?.focus()
+          }
+        }}
+      >
+        <h2 id="additional-unsaved-title">
+          {pending || uncertain || resumed
+            ? 'Результат отправки не подтверждён. Покинуть форму?'
+            : 'Выйти без сохранения?'}
+        </h2>
+        <p id="additional-unsaved-description">
+          {pending || uncertain || resumed
+            ? 'Заявление может сохраниться. Проверьте его состояние после выхода.'
+            : 'Введённые данные ещё не отправлены и будут потеряны.'}
+        </p>
+        <div className="unsaved-dialog__actions">
+          <button ref={continueButton} type="button" onClick={cancelLeave}>
+            Продолжить заполнение
+          </button>
+          <button
+            ref={exitButton}
+            type="button"
+            onClick={() => {
+              if (blocker.state === 'blocked') blocker.proceed()
+              else correction?.onCancel()
+            }}
           >
-            <h2 id="additional-unsaved-title">
-              {pending || uncertain
-                ? 'Результат отправки не подтверждён. Покинуть форму?'
-                : 'Выйти без сохранения?'}
-            </h2>
-            <p>
-              {pending || uncertain
-                ? 'Заявление может сохраниться; проверьте его в списке заявлений.'
-                : 'Введённые данные ещё не отправлены и будут потеряны.'}
-            </p>
-            <div className="unsaved-dialog__actions">
-              <button type="button" onClick={() => blocker.reset()}>
-                Продолжить заполнение
-              </button>
-              <button type="button" onClick={() => blocker.proceed()}>
-                {pending || uncertain ? 'Покинуть форму' : 'Выйти'}
-              </button>
-            </div>
-          </section>
+            {pending || uncertain || resumed ? 'Покинуть форму' : 'Выйти'}
+          </button>
         </div>
-      )}
+      </dialog>
     </section>
   )
 }
@@ -1063,5 +1147,49 @@ function isResubmissionResponse(
     item.attachments.length === attempt.retainedIds.length + attempt.files.length &&
     attempt.retainedIds.every((id) => item.attachments?.some((file) => file.id === id)) &&
     Object.entries(attempt.form).every(([key, expected]) => Reflect.get(form, key) === expected)
+  )
+}
+
+function hasSavedCorrection(
+  item: Application,
+  previous: Application,
+  attempt: SubmissionAttempt,
+  events: components['schemas']['ApplicationHistoryEvent'][],
+): boolean {
+  // The history has no request ID or historical payload. A later resubmission
+  // or new file with unverified content is insufficient evidence.
+  if (
+    attempt.files.length ||
+    item.id !== previous.id ||
+    item.service.code !== previous.service.code
+  )
+    return false
+  const steps = item.version - attempt.version
+  if (steps < 1 || steps > 3 || item.document_status !== attempt.documentStatus) return false
+  const [returned, resubmitted, started, decided] = events.slice(-(steps + 1))
+  if (
+    !returned ||
+    returned.from_status !== 'in_review' ||
+    returned.to_status !== 'needs_correction' ||
+    !attempt.updatedAt ||
+    !(Date.parse(returned.created_at) >= Date.parse(attempt.updatedAt)) ||
+    !(Date.parse(events.at(-1)?.created_at ?? '') >= Date.parse(item.updated_at)) ||
+    !resubmitted ||
+    resubmitted.from_status !== 'needs_correction' ||
+    resubmitted.to_status !== 'resubmitted' ||
+    (steps >= 2 && (started?.from_status !== 'resubmitted' || started.to_status !== 'in_review')) ||
+    (steps === 3 &&
+      (decided?.from_status !== 'in_review' ||
+        !['approved', 'rejected', 'needs_correction'].includes(decided.to_status))) ||
+    events.at(-1)?.to_status !== item.review_status
+  )
+    return false
+  const attachments = item.attachments ?? []
+  return (
+    attachments.length === attempt.retainedIds.length &&
+    attempt.retainedIds.every((id) => attachments.some((file) => file.id === id)) &&
+    Object.entries(attempt.form).every(
+      ([key, expected]) => Reflect.get(item.form_data, key) === expected,
+    )
   )
 }

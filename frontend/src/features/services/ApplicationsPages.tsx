@@ -345,7 +345,7 @@ function ApplicationDetail({ id }: { id: string }) {
   const editButton = useRef<HTMLButtonElement>(null)
   const confirmationMessage = useRef<HTMLParagraphElement>(null)
   const [editing, setEditing] = useState(false)
-  const [confirmation, setConfirmation] = useState<Application | null>(null)
+  const [confirmation, setConfirmation] = useState<{ id: string; version: number } | null>(null)
   const [actionAccessError, setActionAccessError] = useState<ApiClientError | null>(null)
   const [fileError, setFileError] = useState('')
   const [needsDocumentRefresh, setNeedsDocumentRefresh] = useState(false)
@@ -410,18 +410,27 @@ function ApplicationDetail({ id }: { id: string }) {
     }
   }, [accessError, client, id])
 
-  async function refresh() {
+  async function refreshCorrection(signal?: AbortSignal) {
     // Refetch through the current observers so an unmounted/auth-cancelled
     // request cannot populate a new session's private cache.
-    const [latest] = await Promise.all([
+    const [latest, refreshedHistory] = await Promise.all([
       query.refetch({ throwOnError: true }),
       history.refetch({ throwOnError: true }),
     ])
-    if (!latest.data || latest.data.id !== id) {
+    if (!latest.data || latest.data.id !== id || !refreshedHistory.data) {
       throw new ApiClientError('Некорректный ответ', 'invalid_response')
     }
     void client.invalidateQueries({ queryKey: applicationsKey, exact: true })
-    return latest.data
+    const item = latest.data
+    const data = refreshedHistory.data
+    const events = data.pages.flatMap((page) => page.items)
+    let cursor = data.pages.at(-1)?.next_cursor
+    while (signal && cursor) {
+      const page = await getApplicationHistory(id, cursor, signal)
+      events.push(...page.items)
+      cursor = page.next_cursor
+    }
+    return { item, events: cursor == null ? events : [] }
   }
 
   async function retryDetail() {
@@ -455,7 +464,7 @@ function ApplicationDetail({ id }: { id: string }) {
 
   async function verifyDocument() {
     try {
-      const latest = await refresh()
+      const { item: latest } = await refreshCorrection()
       setNeedsDocumentRefresh(false)
       return latest
     } catch (cause) {
@@ -734,10 +743,10 @@ function ApplicationDetail({ id }: { id: string }) {
                 item,
                 isCurrent: query.isSuccess,
                 historyIsCurrent: history.isSuccess && !history.isFetching,
-                refresh,
-                onSuccess: (result) => {
+                refresh: refreshCorrection,
+                onSuccess: (result, submittedVersion) => {
                   syncApplication(result)
-                  setConfirmation(result)
+                  setConfirmation({ id: result.id, version: submittedVersion })
                   setEditing(false)
                 },
                 onAccessError: setActionAccessError,

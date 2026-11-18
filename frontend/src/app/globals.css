@@ -2374,15 +2374,6 @@ textarea {
 .attachment-requirement p {
   margin-bottom: 0;
 }
-.unsaved-dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1100;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  background: #241a1c88;
-}
 .application-form select,
 .application-form input {
   width: 100%;

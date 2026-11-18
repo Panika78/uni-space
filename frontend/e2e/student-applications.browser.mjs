@@ -246,6 +246,15 @@ try {
   assert.equal(await explanation.evaluate((field) => field === document.activeElement), true)
   assert.deepEqual(await getItem(created.id), beforeInvalid)
   await explanation.fill('Исправлено после проверки')
+  await page.route(`**${base}/${created.id}/resubmit`, (route) => route.abort('failed'), {
+    times: 1,
+  })
+  await send.click()
+  await page.getByRole('button', { name: 'Продолжить редактирование' }).click()
+  assert.equal(await explanation.inputValue(), 'Исправлено после проверки')
+  assert.equal(await page.getByRole('button', { name: 'Удалить replacement.pdf' }).count(), 1)
+  assert.equal(await page.getByRole('button', { name: 'Оставить original.pdf' }).count(), 1)
+  assert.deepEqual(await getItem(created.id), beforeInvalid)
   await send.click()
   await waitForCorrection(created.id, returned.version + 1)
   corrected = await getItem(created.id)
@@ -280,6 +289,8 @@ try {
     })
     const response = await route.fetch({ maxRetries: 0 })
     assert.equal(response.status(), 200)
+    const reviewing = await review(await response.json(), 'start_review')
+    assert.equal(reviewing.review_status, 'in_review')
     await route.abort('failed')
   })
   await send.click()
@@ -288,9 +299,11 @@ try {
   await page.unroute(resubmit)
   accounting = await getItem(accounting.id)
   assert.equal(accounting.form_data.purpose, 'Новая цель')
+  assert.equal(accounting.review_status, 'in_review')
+  await history.getByText('Подано повторно → На рассмотрении', { exact: true }).waitFor()
 
   // Keep the status needs_correction while making the open editor's version stale.
-  accounting = await returnApplication(accounting)
+  accounting = await review(accounting, 'return_for_correction', 'Ещё нужны исправления')
   await open(accounting.id)
   await edit.click()
   await purpose.fill('Локальное исправление')
@@ -340,6 +353,106 @@ try {
   assert.equal(await edit.count(), 0)
   assert.equal(await page.getByRole('button', { name: /формирование|PDF/ }).count(), 0)
   assert.equal((await getItem(rejected.id)).review_status, 'rejected')
+
+  const interrupted = await returnApplication(await createAccounting('Прежняя цель'))
+  await open(interrupted.id)
+  await edit.click()
+  await purpose.fill('Сохранённый черновик')
+  const interruptedPath = `**${base}/${interrupted.id}/resubmit`
+  const historyPath = `${base}/${interrupted.id}/history`
+  const initialHistory = await (await get(historyPath)).json()
+  let attempts = 0
+  await page.route(interruptedPath, async (route) => {
+    attempts++
+    if (attempts === 1) {
+      await route.abort('failed')
+      return
+    }
+    assert.deepEqual(route.request().postDataJSON(), {
+      expected_version: interrupted.version,
+      form_data: { purpose: 'Сохранённый черновик' },
+    })
+    // Deliver the original payload just after the fresh GET and before the
+    // manually initiated second POST reaches the real server.
+    await sendAccounting(interrupted, 'Сохранённый черновик')
+    const response = await route.fetch({ maxRetries: 0 })
+    assert.equal(response.status(), 409)
+    assert.equal((await response.json()).error.code, 'version_conflict')
+    await route.fulfill({ response })
+  })
+  await send.click()
+  const resume = page.getByRole('button', { name: 'Продолжить редактирование' })
+  await resume.waitFor()
+  assert.equal(await purpose.isDisabled(), true)
+  assert.equal(await purpose.inputValue(), 'Сохранённый черновик')
+  const [unchanged, unchangedHistory] = await Promise.all([
+    getItem(interrupted.id),
+    (await get(historyPath)).json(),
+  ])
+  assert.equal(unchanged.version, interrupted.version)
+  assert.equal(unchanged.review_status, 'needs_correction')
+  assert.deepEqual(unchanged.form_data, interrupted.form_data)
+  assert.deepEqual(unchangedHistory, initialHistory)
+  const refresh = page.waitForResponse((response) => response.url().includes(`${historyPath}?`))
+  await page.getByRole('button', { name: 'Проверить состояние заявления' }).click()
+  assert.equal((await refresh).status(), 200)
+  await resume.click()
+  assert.equal(await purpose.isDisabled(), false)
+  assert.equal(await purpose.inputValue(), 'Сохранённый черновик')
+  assert.equal(attempts, 1)
+  await send.click()
+  await page
+    .getByText('Повторная отправка больше недоступна. Статус заявления изменился.')
+    .waitFor()
+  assert.equal(attempts, 2)
+  assert.equal((await getItem(interrupted.id)).version, interrupted.version + 1)
+  const resultingHistory = await (await get(historyPath)).json()
+  assert.equal(resultingHistory.items.length, initialHistory.items.length + 1)
+  await page.unroute(interruptedPath)
+  page.once('dialog', (dialog) => void dialog.accept())
+
+  const keyboardDraft = await returnApplication(await createAccounting('Для проверки клавиатуры'))
+  await open(keyboardDraft.id)
+  const moveFocus = async (target, key) => {
+    for (let i = 0; i < 30; i++) {
+      if (await target.evaluate((node) => node === document.activeElement)) return
+      await page.keyboard.press(key)
+    }
+    assert.ok(await target.evaluate((node) => node === document.activeElement))
+  }
+  await moveFocus(edit, 'Tab')
+  await page.keyboard.press('Enter')
+  await purpose.waitFor()
+  assert.ok(await purpose.evaluate((node) => node === document.activeElement))
+  await page.keyboard.type(' / keyboard draft')
+  const draftValue = await purpose.inputValue()
+  assert.match(draftValue, /keyboard draft/)
+  const back = page.getByRole('link', { name: /К моим заявлениям/ })
+  await moveFocus(back, 'Shift+Tab')
+  const dialog = page.getByRole('alertdialog')
+  const keepEditing = dialog.getByRole('button', { name: 'Продолжить заполнение' })
+  const exitDialog = dialog.getByRole('button', { name: 'Выйти', exact: true })
+  await page.keyboard.press('Enter')
+  await dialog.waitFor()
+  assert.ok(await keepEditing.evaluate((node) => node === document.activeElement))
+  await page.keyboard.press('Shift+Tab')
+  assert.ok(await exitDialog.evaluate((node) => node === document.activeElement))
+  await page.keyboard.press('Tab')
+  assert.ok(await keepEditing.evaluate((node) => node === document.activeElement))
+  await page.keyboard.press('Tab')
+  assert.ok(await exitDialog.evaluate((node) => node === document.activeElement))
+  await page.keyboard.press('Tab')
+  assert.ok(await keepEditing.evaluate((node) => node === document.activeElement))
+  await page.keyboard.press('Escape')
+  await dialog.waitFor({ state: 'hidden' })
+  assert.ok(await back.evaluate((node) => node === document.activeElement))
+  assert.equal(await purpose.inputValue(), draftValue)
+  await page.keyboard.press('Enter')
+  await dialog.waitFor()
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Enter')
+  await page.waitForURL('**/services?tab=applications')
+  assert.equal((await getItem(keyboardDraft.id)).version, keyboardDraft.version)
 
   console.log('PASS: correction, attachment replacement, 422, conflicts and lost response')
 
