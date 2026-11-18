@@ -146,8 +146,13 @@ async function holdPdf(page, documentPath) {
     pattern,
     async (route) => {
       try {
+        const response = await route.fetch()
+        assert.equal(response.status(), 200)
         await gate
-        await route.continue()
+        // Chromium can dispose the intercepted request before its delayed response is released.
+        await route.fulfill({ response }).catch((error) => {
+          if (!/Route is already handled|Invalid InterceptionId/i.test(error.message)) throw error
+        })
       } finally {
         finish()
       }
@@ -265,11 +270,11 @@ try {
   const crossSectionScroll = await a.page.evaluate(() => window.scrollY)
   await a.page.getByRole('button', { name: 'Открыть меню' }).click()
   await a.page.getByRole('link', { name: 'Публикация новостей', exact: true }).click()
-  await a.page.waitForURL('**/staff/news')
+  await a.page.getByRole('heading', { name: 'Публикация новостей', exact: true }).waitFor()
   for (let round = 0; round < 2; round++) {
     if (round) {
       await a.page.goForward()
-      await a.page.waitForURL('**/staff/news')
+      await a.page.getByRole('heading', { name: 'Публикация новостей', exact: true }).waitFor()
     }
     const refreshed = a.page.waitForResponse((response) => {
       const url = new URL(response.url())
