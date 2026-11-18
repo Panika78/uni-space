@@ -1,0 +1,339 @@
+.teacher-journal {
+  width: min(1180px, 100%);
+  margin-inline: auto;
+}
+
+.teacher-journal__intro {
+  max-width: 680px;
+  margin: 8px 0 24px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.teacher-journal__selectors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 20px 0 24px;
+}
+
+.teacher-journal__selectors details {
+  min-width: 0;
+}
+
+.teacher-journal__selectors summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.teacher-journal__selectors ul {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0 0 0 18px;
+  list-style: none;
+}
+
+.teacher-journal__selectors button[data-course-id][data-group-id] {
+  max-width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+  background: var(--surface);
+  color: inherit;
+  text-align: start;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.teacher-journal__selectors summary:focus-visible,
+.teacher-journal__selectors button[data-course-id][data-group-id]:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.teacher-journal label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: #514448;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.teacher-journal select,
+.teacher-journal input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid #d8c7bf;
+  border-radius: 12px;
+  background: #fffdfa;
+  color: #292326;
+  font-weight: 450;
+}
+
+.teacher-journal select:disabled,
+.teacher-journal input:disabled {
+  opacity: 0.58;
+}
+
+.teacher-journal__tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 18px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.teacher-journal__tabs button {
+  min-height: 42px;
+  padding: 9px 16px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.teacher-journal__tabs button[aria-selected='true'] {
+  border-color: #ead8cf;
+  background: #fff9f4;
+  color: var(--accent);
+}
+
+.teacher-journal__panel {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.teacher-journal__selection,
+.teacher-journal__count {
+  margin: 0;
+  color: var(--muted);
+}
+
+.teacher-journal__selection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: baseline;
+}
+
+.journal-student-list {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+}
+
+.journal-student {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--surface);
+}
+
+.journal-student__identity {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.journal-student__identity strong {
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.journal-student__identity span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.journal-attendance-controls {
+  display: flex;
+  gap: 5px;
+}
+
+.journal-attendance-controls button {
+  width: 42px;
+  height: 42px;
+  border: 1px solid #dfd0c9;
+  border-radius: 12px;
+  background: #fffdfb;
+  color: #4e4144;
+  font-size: 17px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.journal-attendance-controls button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: #f6e8e8;
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.journal-attendance-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.journal-save {
+  min-width: 106px;
+  color: #766a6c;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.journal-save--saved {
+  color: #276746;
+}
+
+.journal-save--error {
+  color: #9f2839;
+}
+
+.journal-inline-action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.journal-work-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 0.65fr);
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 17px;
+  background: #fffaf6;
+}
+
+.journal-work-card h2,
+.journal-finals h2 {
+  margin: 0 0 8px;
+  font-size: 19px;
+}
+
+.journal-work-card p,
+.journal-finals > p {
+  margin: 5px 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.journal-work-card__date {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.journal-date-save {
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.journal-score {
+  display: flex !important;
+  grid-template-columns: none !important;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px !important;
+  color: #504448;
+  white-space: nowrap;
+}
+
+.journal-score input,
+.journal-score select {
+  width: 92px;
+  min-height: 42px;
+}
+
+.journal-score span {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.journal-finals {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.journal-student--final {
+  grid-template-columns: minmax(150px, 1fr) auto auto;
+}
+
+.journal-retake-fields {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+@media (max-width: 700px) {
+  .teacher-journal__selectors,
+  .journal-work-card,
+  .journal-retake-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .journal-student {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 8px;
+    padding: 12px;
+  }
+
+  .journal-student__identity {
+    grid-column: 1 / -1;
+  }
+
+  .journal-save {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  .journal-score {
+    justify-self: start;
+    flex-wrap: wrap;
+  }
+
+  .journal-student--final {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .journal-work-card__date {
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+  }
+}

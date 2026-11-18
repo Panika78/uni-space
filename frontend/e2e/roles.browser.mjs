@@ -358,7 +358,8 @@ try {
       requests.every(
         (url) =>
           /\/auth\//.test(url) ||
-          (name === 'admin' && new URL(url).pathname === '/api/v1/admin/users'),
+          (name === 'admin' && new URL(url).pathname === '/api/v1/admin/users') ||
+          (name === 'teacher' && new URL(url).pathname === '/api/v1/teaching/assignments'),
       ),
     )
     for (const width of [360, 1440]) {
@@ -421,7 +422,8 @@ try {
       requests.every(
         (url) =>
           /\/auth\//.test(url) ||
-          (name === 'admin' && new URL(url).pathname === '/api/v1/admin/users'),
+          (name === 'admin' && new URL(url).pathname === '/api/v1/admin/users') ||
+          (name === 'teacher' && new URL(url).pathname === '/api/v1/teaching/assignments'),
       ),
     )
     if (name === 'reviewer') {
