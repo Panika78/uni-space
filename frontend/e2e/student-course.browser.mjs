@@ -41,6 +41,7 @@ async function logout() {
 }
 async function openTab(name) {
   await tab(name).click()
+  await page.getByRole('tab', { name, exact: true, selected: true }).waitFor()
   await panel().waitFor()
 }
 async function writeTeacherData() {
@@ -107,8 +108,7 @@ try {
   await page.getByText('Анна Тестовая, Борис Тестовый', { exact: true }).waitFor()
   await tab('Обзор').focus()
   await page.keyboard.press('ArrowRight')
-  await tab('Занятия').waitFor()
-  assert.equal(await tab('Занятия').getAttribute('aria-selected'), 'true')
+  await page.getByRole('tab', { name: 'Занятия', exact: true, selected: true }).waitFor()
   assert.ok(await tab('Занятия').evaluate((element) => element === document.activeElement))
   await panel().locator('li').first().waitFor()
   const firstPage = await panel().locator('li').count()
@@ -141,8 +141,7 @@ try {
   await page.getByRole('button', { name: 'К расписанию' }).click()
   await original.waitFor()
   await card('multiple').getByRole('link').click()
-  await tab('Работы и баллы').waitFor()
-  assert.equal(await tab('Работы и баллы').getAttribute('aria-selected'), 'true')
+  await page.getByRole('tab', { name: 'Работы и баллы', exact: true, selected: true }).waitFor()
   await panel().getByText('0 / 10', { exact: true }).waitFor()
   await panel().getByText('Максимум 0', { exact: true }).waitFor()
   assert.equal(await panel().getByText('Дата требует подтверждения', { exact: true }).count(), 2)
