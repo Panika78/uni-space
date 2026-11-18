@@ -23,7 +23,8 @@ beforeEach(() => {
   vi.mocked(apiFetch).mockImplementation(async (url) =>
     String(url).startsWith('/api/v1/admin/users')
       ? { items: [], next_after_id: null }
-      : String(url).startsWith('/api/v1/teaching/assignments')
+      : String(url).startsWith('/api/v1/teaching/assignments') ||
+          String(url).startsWith('/api/v1/staff/applications?')
         ? { items: [], next_cursor: null }
         : context,
   )

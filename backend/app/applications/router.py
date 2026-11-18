@@ -2,10 +2,12 @@ import json
 import logging
 import os
 from contextlib import suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
+from hashlib import sha256
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -29,7 +31,9 @@ from app.applications.schemas import (
     ReviewApplicationRequest,
     Service,
     ServiceList,
+    StaffApplicationFilters,
     StaffApplicationPage,
+    StaffApplicationReadResponse,
     StaffApplicationResponse,
 )
 from app.core.body_limit import RequestTooLarge
@@ -59,6 +63,12 @@ from app.permissions import (
 
 router = APIRouter(prefix="/api/v1", tags=["services", "applications"])
 logger = logging.getLogger(__name__)
+STAFF_TAB_STATUSES = {
+    "new": ("submitted", "resubmitted"),
+    "in_review": ("in_review",),
+    "completed": ("approved", "rejected"),
+}
+APPLICATION_DATE_ZONE = ZoneInfo("Europe/Moscow")
 WORKFLOW_ERRORS = {code: {"model": ApiError} for code in (401, 403, 404, 409, 422, 413, 503)}
 
 
@@ -580,11 +590,14 @@ def list_application_page(
     statement: Select[tuple[Application, ServiceType, IssuedDocument | None]],
     pagination: PaginationParams,
     *,
-    staff: bool = False,
+    staff_filters_key: str | None = None,
 ) -> ApplicationPage | StaffApplicationPage:
-    boundary = decode_page_cursor(pagination.cursor, key_types=(str, int), direction="desc")
+    key_types = (str, int, str) if staff_filters_key is not None else (str, int)
+    boundary = decode_page_cursor(pagination.cursor, key_types=key_types, direction="desc")
     if boundary is not None:
-        created_at, application_id = boundary
+        if staff_filters_key is not None and boundary[2] != staff_filters_key:
+            raise InvalidCursorError("Cursor does not match these application filters")
+        created_at, application_id = boundary[:2]
         try:
             timestamp = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
             if (
@@ -604,16 +617,35 @@ def list_application_page(
     ).all()
     page_rows = rows[: pagination.limit]
     metadata = attachment_metadata_batch(db, [application.id for application, _, _ in page_rows])
+    applicant_names = (
+        dict(
+            db.execute(
+                select(Student.id, User.full_name)
+                .join(User, User.id == Student.user_id)
+                .where(Student.id.in_({application.student_id for application, _, _ in rows}))
+            )
+            .tuples()
+            .all()
+        )
+        if staff_filters_key is not None and rows
+        else {}
+    )
+
+    def page_key(item: ApplicationResponse):
+        key = (item.created_at.isoformat(), int(item.id))
+        return (*key, staff_filters_key) if staff_filters_key is not None else key
+
     page = paginate_results(
         [
-            serialize_staff_application(
+            serialize_staff_application_read(
                 db,
                 application,
                 service,
                 attachments=metadata.get(application.id, []),
                 document=document,
+                applicant_display_name=applicant_names[application.student_id],
             )
-            if staff
+            if staff_filters_key is not None
             else serialize_application(
                 db,
                 application,
@@ -623,12 +655,12 @@ def list_application_page(
             )
             for application, service, document in rows
         ],
-        key=lambda item: (item.created_at.isoformat(), int(item.id)),
-        key_types=(str, int),
+        key=page_key,
+        key_types=key_types,
         direction="desc",
         limit=pagination.limit,
     )
-    page_type = StaffApplicationPage if staff else ApplicationPage
+    page_type = StaffApplicationPage if staff_filters_key is not None else ApplicationPage
     return page_type(items=page.items, next_cursor=page.next_cursor)
 
 
@@ -813,11 +845,28 @@ def serialize_staff_application(
     )
 
 
+def serialize_staff_application_read(
+    db: Session,
+    application: Application,
+    service: ServiceType,
+    *,
+    applicant_display_name: str,
+    attachments: list[AttachmentMetadata] | None = None,
+    document: IssuedDocument | None | object = ...,
+) -> StaffApplicationReadResponse:
+    item = serialize_staff_application(
+        db, application, service, attachments=attachments, document=document
+    )
+    return StaffApplicationReadResponse(
+        **item.model_dump(), applicant_display_name=applicant_display_name
+    )
+
+
 @router.get("/staff/applications", response_model=StaffApplicationPage, responses=WORKFLOW_ERRORS)
 def list_staff_applications(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db_session)],
-    pagination: Annotated[PaginationParams, Query()],
+    filters: Annotated[StaffApplicationFilters, Query()],
     _query: Annotated[None, Depends(validate_application_query)],
 ) -> StaffApplicationPage:
     context = get_authorization_context(db, user)
@@ -835,21 +884,67 @@ def list_staff_applications(
         .outerjoin(IssuedDocument, IssuedDocument.application_id == Application.id)
         .where(get_application_scope().in_(scopes))
     )
-    return list_application_page(db, statement, pagination, staff=True)
+    if statuses := STAFF_TAB_STATUSES.get(filters.tab):
+        statement = statement.where(Application.review_status.in_(statuses))
+    if filters.review_status:
+        statement = statement.where(Application.review_status == filters.review_status)
+    if filters.service_code:
+        statement = statement.where(ServiceType.code == filters.service_code)
+    if filters.created_from:
+        statement = statement.where(
+            Application.created_at
+            >= datetime.combine(filters.created_from, time.min, APPLICATION_DATE_ZONE)
+        )
+    if filters.created_to:
+        statement = statement.where(
+            Application.created_at
+            <= datetime.combine(filters.created_to, time.max, APPLICATION_DATE_ZONE)
+        )
+    if filters.q:
+        number = filters.q.removeprefix("№").strip()
+        if number.isascii() and number.isdecimal():
+            number = number.lstrip("0")
+            if not number or len(number) > 19 or int(number) > 2**63 - 1:
+                statement = statement.where(False)
+            else:
+                statement = statement.where(Application.id == int(number))
+        else:
+            statement = statement.where(
+                select(Student.id)
+                .join(User, User.id == Student.user_id)
+                .where(
+                    Student.id == Application.student_id,
+                    User.full_name.icontains(filters.q, autoescape=True),
+                )
+                .exists()
+            )
+    selection = [sorted(set(scopes)), filters.model_dump(mode="json", exclude={"cursor", "limit"})]
+    cursor_key = sha256(json.dumps(selection).encode()).hexdigest()
+    return list_application_page(db, statement, filters, staff_filters_key=cursor_key)
 
 
 @router.get(
-    "/staff/applications/{id}", response_model=StaffApplicationResponse, responses=WORKFLOW_ERRORS
+    "/staff/applications/{id}",
+    response_model=StaffApplicationReadResponse,
+    responses=WORKFLOW_ERRORS,
 )
 def get_staff_application(
     id: Id,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db_session)],
     _query: Annotated[RequestModel, Query()],
-) -> StaffApplicationResponse:
+) -> StaffApplicationReadResponse:
     application = require_application_review(db, user, parse_application_id(id))
-    return serialize_staff_application(
-        db, application, db.get(ServiceType, application.service_type_id)
+    applicant_display_name = db.execute(
+        select(User.full_name)
+        .join(Student, Student.user_id == User.id)
+        .where(Student.id == application.student_id)
+    ).scalar_one()
+    return serialize_staff_application_read(
+        db,
+        application,
+        db.get(ServiceType, application.service_type_id),
+        applicant_display_name=applicant_display_name,
     )
 
 

@@ -821,3 +821,103 @@ def test_concurrent_reassignment_denies_workflow_without_business_changes(
             )
             == 0
         )
+
+
+def test_staff_queue_filters_before_keyset_pagination_without_student_grant(context):
+    request = context["request"]
+    review_token, _, other_token, denied_token = context["tokens"]
+    path = "/api/v1/staff/applications"
+    old = datetime(2026, 10, 10, 21, 0, tzinfo=UTC)  # Oct 11 midnight in Moscow.
+    with Session(context["engine"]) as db, db.begin():
+        user = db.get(User, context["student_users"][0])
+        user.full_name = "Вымышленная Алёна_100%"
+        service_code = db.get(ServiceType, context["service_id"]).code
+
+    create = context["application"]
+    first = create(created_at=old)
+    second = create(created_at=old, review_status="resubmitted")
+    third = create(created_at=old + timedelta(hours=1))
+    correction = create(created_at=old, review_status="needs_correction")
+    complete = create(created_at=old, review_status="approved", document_status="failed")
+    create(created_at=old, review_status="in_review")
+    create(created_at=old - timedelta(microseconds=1))
+    create(created_at=old + timedelta(days=1))
+    foreign = create(created_at=old, assigned_org_unit_id=context["unit_ids"][1])
+
+    params = dict(
+        q="АЛЁНА_100%",
+        tab="new",
+        service_code=service_code,
+        created_from="2026-10-11",
+        created_to="2026-10-11",
+        limit=1,
+    )
+    ids = []
+    cursor = None
+    for _ in range(3):
+        response = request(
+            "GET",
+            path,
+            review_token,
+            params={
+                **params,
+                **({"cursor": cursor} if cursor else {}),
+            },
+        )
+        assert response.status_code == 200, response.text
+        (item,) = response.json()["items"]
+        assert item["applicant_display_name"] == "Вымышленная Алёна_100%"
+        cursor = response.json()["next_cursor"]
+        if not ids:
+            assert cursor
+            assert (
+                request(
+                    "GET",
+                    path,
+                    review_token,
+                    params={
+                        **params,
+                        "cursor": cursor,
+                        "tab": "all",
+                    },
+                ).status_code
+                == 422
+            )
+        ids.append(int(item["id"]))
+    assert ids == [third, second, first]
+    assert cursor is None
+
+    def find(token, **filters):
+        response = request("GET", path, token, params=filters)
+        assert response.status_code == 200, response.text
+        return [int(item["id"]) for item in response.json()["items"]]
+
+    assert find(review_token, q=f"№ {first}") == [first]
+    assert find(review_token, q="Алёна_100") and foreign not in find(review_token, q="Алёна_100")
+    assert find(review_token, q=f"{first}0") == []
+    assert find(review_token, q=str(foreign)) == []
+    assert find(other_token, q="Алёна") == [foreign]
+    assert find(review_token, tab="new", review_status="needs_correction") == []
+    assert find(review_token, tab="all", review_status="needs_correction") == [correction]
+    assert find(review_token, tab="completed") == [complete]
+    assert request("GET", path, denied_token).status_code == 403
+    assert request("GET", f"{path}/{foreign}", review_token).status_code == 404
+    detail = request("GET", f"{path}/{first}", review_token)
+    assert detail.json()["applicant_display_name"] == "Вымышленная Алёна_100%"
+    for query in (
+        "tab=wat",
+        "q=x&q=y",
+        "unknown=1",
+        "created_from=2026-11-01&created_to=2026-10-01",
+        "created_from=2026-02-30",
+    ):
+        assert request("GET", f"{path}?{query}", review_token).status_code == 422
+
+    with Session(context["engine"]) as db, db.begin():
+        db.execute(
+            delete(StaffPermission).where(
+                StaffPermission.staff_profile_id == context["profiles"][0]
+            )
+        )
+    assert request("GET", path, review_token).status_code == 403
+    assert request("GET", f"{path}/{first}", review_token).status_code == 403

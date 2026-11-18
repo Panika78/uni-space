@@ -27,6 +27,11 @@ import {
   StaffStudentDetailPage,
 } from '../features/students/StaffStudentsPage'
 import { StaffNewsPage } from '../features/news/StaffNewsPage'
+import {
+  StaffApplicationsLayout,
+  StaffApplicationQueue,
+} from '../features/staffApplications/StaffApplicationQueue'
+import { StaffApplicationDetail } from '../features/staffApplications/StaffApplicationDetail'
 import { StaffSchedulePage } from '../features/schedule/StaffSchedulePage'
 import { TeacherJournalsPage } from '../features/teacher/TeacherJournalsPage'
 import type { ReactNode } from 'react'
@@ -214,7 +219,11 @@ export const appRoutes: RouteObject[] = [
                         children: [
                           {
                             path: '/staff/applications',
-                            element: <ModuleUnavailable title="Заявления" />,
+                            element: <StaffApplicationsLayout />,
+                            children: [
+                              { index: true, element: <StaffApplicationQueue /> },
+                              { path: ':id', element: <StaffApplicationDetail /> },
+                            ],
                           },
                         ],
                       },

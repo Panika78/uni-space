@@ -154,6 +154,10 @@ export function StaffHome() {
             <p>
               <Link to="/staff/news">Открыть редактор новостей</Link>
             </p>
+          ) : permission === 'applications.review' ? (
+            <p>
+              <Link to="/staff/applications">Открыть очередь заявлений</Link>
+            </p>
           ) : permission === 'schedule.edit' ? (
             <p>
               <Link to="/staff/schedule">Открыть редактор расписания</Link>

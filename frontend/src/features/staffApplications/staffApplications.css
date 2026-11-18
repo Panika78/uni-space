@@ -1,0 +1,70 @@
+.staff-applications {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.staff-applications__actions,
+.staff-applications__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem;
+  margin-block: 1rem;
+}
+.staff-applications__tab {
+  color: var(--muted);
+  padding: 0.5rem;
+}
+.staff-applications__tab[aria-current] {
+  color: var(--accent);
+  font-weight: 700;
+  border-bottom: 2px solid currentColor;
+}
+.staff-applications__filters label {
+  display: grid;
+  min-width: 0;
+  max-width: 100%;
+  gap: 0.3rem;
+}
+.staff-applications__filters :is(input, select),
+.staff-applications__dialog textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  background: var(--surface);
+}
+.staff-applications__table :is(th, td) {
+  padding: 0.65rem;
+}
+.staff-applications__table th:nth-child(n) {
+  width: auto;
+}
+.staff-applications__table th:first-child {
+  width: 13%;
+}
+.staff-applications__table th:nth-child(4) {
+  width: 16%;
+}
+.staff-applications__pdf-error {
+  display: block;
+}
+.staff-applications__dialog {
+  margin: auto;
+  max-width: min(32rem, calc(100% - 2rem));
+  max-height: calc(100% - 2rem);
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+}
+.staff-applications__dialog::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+.staff-applications__history li {
+  margin-block: 0.75rem;
+}
+.staff-applications__reason {
+  white-space: pre-wrap;
+}

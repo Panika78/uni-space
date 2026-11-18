@@ -426,7 +426,7 @@ jobs:
           uv python install 3.12.16
           mkdir -p work/browser-tooling
           npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
-          node work/browser-tooling/node_modules/playwright/cli.js install chromium --only-shell
+          node work/browser-tooling/node_modules/playwright/cli.js install chromium
           echo "PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
       - name: Apply migrations and create two fictional students
         run: |
@@ -512,6 +512,14 @@ jobs:
           node frontend/e2e/applications-pagination.browser.mjs
       - name: Show server logs on failure
         if: failure()
+        run: tail -n 80 work/services-api.log work/services-frontend.log 2>/dev/null || true
+      - name: Seed scoped staff accounts and queue pages
+        run: uv run --locked --python 3.12.16 --project backend python backend/scripts/seed_staff_applications_browser.py >> "$GITHUB_ENV"
+      - name: Run real staff applications Chromium E2E
+        id: staff-applications
+        run: node frontend/e2e/staff-applications.browser.mjs
+      - name: Show staff applications server logs on failure
+        if: failure() && steps.staff-applications.outcome == 'failure'
         run: tail -n 80 work/services-api.log work/services-frontend.log 2>/dev/null || true
       - name: Upload application geometry evidence without auth logs
         if: always()

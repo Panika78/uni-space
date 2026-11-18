@@ -1641,7 +1641,12 @@ def test_accounting_pdf_starts_only_after_scoped_staff_approval(issue_context):
         "POST", f"/api/v1/staff/applications/{identifier}/document/retry", access=staff_token
     )
     assert staff_retry.status_code == 200
-    assert staff_retry.json()["document"]["id"] == approved.json()["document"]["id"]
+    assert staff_retry.json()["document"] == approved.json()["document"]
+    assert staff_retry.json()["version"] == approved.json()["version"]
+    assert (
+        context["client"].request("GET", document_path, access=staff_token).content
+        == staff_download.content
+    )
     assert context["client"].request("GET", document_path, access=outside_token).status_code == 404
     assert (
         context["client"]
