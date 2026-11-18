@@ -33,9 +33,11 @@ async function login(page, username) {
   await page.getByLabel('Пароль').fill(env.TEACHER_JOURNAL_PASSWORD)
   const response = page.waitForResponse((item) => item.url().endsWith('/auth/login'))
   await page.getByRole('button', { name: 'Войти' }).click()
-  assert.equal((await response).status(), 200)
+  const loginResponse = await response
+  assert.equal(loginResponse.status(), 200)
   await page.waitForURL('**/teacher/journals')
   await page.getByRole('heading', { name: 'Мои журналы' }).waitFor()
+  return (await loginResponse.json()).access_token
 }
 
 async function selectJournal(page, course, group) {
@@ -111,7 +113,7 @@ async function waitForAttendance(page, status, name) {
 try {
   const context = await browser.newContext({ viewport: { width: 360, height: 800 } })
   const page = await context.newPage()
-  await login(page, env.TEACHER_JOURNAL_LOGIN_A)
+  const teacherToken = await login(page, env.TEACHER_JOURNAL_LOGIN_A)
   await selectJournal(page, env.TEACHER_JOURNAL_COURSE_A, env.TEACHER_JOURNAL_GROUP_A)
   const courseSummary = page.locator(
     `details[data-course-id="${env.TEACHER_JOURNAL_COURSE_A}"] > summary`,
@@ -624,6 +626,114 @@ try {
   await page.unrouteAll()
   check('lost write response reconciled by authoritative GET without duplicate mutation')
 
+  const announcementPanel = page.locator('.journal-announcements')
+  const announcementSummary = announcementPanel.locator(':scope > summary')
+  const publishButton = announcementPanel.getByRole('button', { name: 'Опубликовать' })
+  const titleField = announcementPanel.getByLabel('Заголовок')
+  const bodyField = announcementPanel.getByLabel('Текст объявления')
+  await announcementSummary.focus()
+  await page.keyboard.press('Enter')
+  await announcementPanel.getByText('Объявлений пока нет').waitFor()
+  assert.equal(
+    await announcementPanel.getByRole('option', { name: 'Все группы проведения' }).isEnabled(),
+    true,
+  )
+  const title = 'Практическая работа 🦉'
+  const body = 'Первая строка\n<img src=x onerror=alert(1)> **текст**'
+  await announcementPanel.getByLabel('Аудитория').selectOption('all')
+  await titleField.fill(title)
+  await bodyField.fill(body)
+  await announcementPanel.getByLabel('Важное').check()
+  const announcementResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/announcements') && response.request().method() === 'POST',
+  )
+  await publishButton.click()
+  const savedAnnouncement = await announcementResponse
+  assert.equal(savedAnnouncement.status(), 201)
+  assert.equal((await savedAnnouncement.json()).group_id, null)
+  await announcementPanel.getByText('Объявление опубликовано.').waitFor()
+  const announcementEntry = announcementPanel
+    .locator('.announcement-feed summary')
+    .filter({ hasText: title })
+  await announcementEntry.focus()
+  await page.keyboard.press('Enter')
+  await announcementPanel.locator('.announcement-body').waitFor()
+  assert.equal(await announcementPanel.locator('.announcement-body').textContent(), body)
+  assert.equal(await announcementPanel.locator('.announcement-feed img').count(), 0)
+  assert.equal(await announcementEntry.getByText('Важное').count(), 1)
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.reload()
+  await announcementSummary.click()
+  await announcementEntry.waitFor()
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+
+  const lostResponseTitle = 'Ответ потерян после сохранения'
+  await titleField.fill(lostResponseTitle)
+  await bodyField.fill('Введённый текст сохраняется при сбое')
+  let announcementPosts = 0
+  const announcementPost = '**/teaching/courses/*/announcements'
+  await page.route(announcementPost, async (route) => {
+    announcementPosts += 1
+    const response = await route.fetch()
+    assert.equal(response.status(), 201)
+    await route.abort('failed')
+  })
+  await publishButton.click()
+  await announcementPanel.getByText('Результат публикации неизвестен. Проверьте ленту.').waitFor()
+  assert.equal(await titleField.inputValue(), lostResponseTitle)
+  assert.equal(await bodyField.inputValue(), 'Введённый текст сохраняется при сбое')
+  assert.equal(await publishButton.isDisabled(), true)
+  await announcementPanel.getByRole('button', { name: 'Проверить публикацию' }).click()
+  await announcementPanel.getByText('Объявление опубликовано.').waitFor()
+  await announcementPanel
+    .locator('.announcement-feed summary')
+    .filter({ hasText: lostResponseTitle })
+    .waitFor()
+  assert.equal(announcementPosts, 1)
+  await page.unroute(announcementPost)
+  check(
+    'announcement publication, plain text, keyboard expansion, reload at 360/1440 px and lost response recovery',
+  )
+
+  await page.route('**/groups/*/announcements', (route) => route.abort('failed'))
+  await page.reload()
+  await announcementSummary.click()
+  await announcementPanel.getByText('Не удалось загрузить объявления').waitFor()
+  await page.unroute('**/groups/*/announcements')
+  await announcementPanel.getByRole('button', { name: 'Повторить' }).click()
+  await announcementEntry.waitFor()
+  await page.setViewportSize({ width: 360, height: 800 })
+  check('announcement list retries after a transport failure')
+
+  const courseAnnouncementUrl = `${baseURL}/api/v1/teaching/courses/${env.TEACHER_JOURNAL_COURSE_A}/announcements`
+  const groupAnnouncementUrl = courseAnnouncementUrl.replace(
+    /\/announcements$/,
+    `/groups/${env.TEACHER_JOURNAL_GROUP_A}/announcements`,
+  )
+  const teacherHeaders = { Authorization: `Bearer ${teacherToken}` }
+  for (let index = 0; index < 19; index += 1) {
+    const response = await page.request.post(courseAnnouncementUrl, {
+      headers: teacherHeaders,
+      data: {
+        group_id: env.TEACHER_JOURNAL_GROUP_A,
+        title: `Объявление ${index + 1}`,
+        body: 'ДлинныйТекст'.repeat(40),
+      },
+    })
+    assert.equal(response.status(), 201)
+  }
+  await page.reload()
+  await announcementSummary.click()
+  await announcementPanel.getByRole('button', { name: 'Показать ещё' }).click()
+  await announcementEntry.waitFor()
+  assert.equal(await announcementPanel.locator('.announcement-feed li').count(), 21)
+  assert.equal(await announcementPanel.getByRole('button', { name: 'Показать ещё' }).count(), 0)
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+  check('announcement list loads a second real page without duplicates')
+
   // A teacher cannot use a copied URL to load another teacher's group.
   await page.goto(
     `${baseURL}/teacher/journals?course=${env.TEACHER_JOURNAL_COURSE_B}&group=${env.TEACHER_JOURNAL_GROUP_B}&tab=attendance&lesson=${env.TEACHER_JOURNAL_LESSON_B}`,
@@ -638,11 +748,16 @@ try {
   check('teacher A cannot use direct URL to read teacher B group')
 
   fixture('revoke')
+  assert.equal(
+    (await page.request.get(groupAnnouncementUrl, { headers: teacherHeaders })).status(),
+    404,
+  )
   await page.goto(
     `${baseURL}/teacher/journals?course=${env.TEACHER_JOURNAL_COURSE_A}&group=${env.TEACHER_JOURNAL_GROUP_A}&tab=attendance&lesson=${env.TEACHER_JOURNAL_LESSON_A}`,
   )
   await page.getByText('Назначение отозвано или ссылка устарела.').waitFor()
   assert.equal(await page.getByText('Анна Иванова').count(), 0)
+  assert.equal(await page.locator('.journal-announcements').count(), 0)
   check('assignment revocation removes access after reload')
 
   const secondContext = await browser.newContext({ viewport: { width: 360, height: 800 } })

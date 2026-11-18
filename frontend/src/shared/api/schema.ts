@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/academics/courses/{course_offering_id}/announcements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Student Announcements */
+        get: operations["get_student_announcements_api_v1_academics_courses__course_offering_id__announcements_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/lookups": {
         parameters: {
             query?: never;
@@ -963,6 +980,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/teaching/courses/{course_offering_id}/announcements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Teacher Announcement */
+        post: operations["publish_teacher_announcement_api_v1_teaching_courses__course_offering_id__announcements_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/teaching/courses/{course_offering_id}/assessments/{assessment_id}/dates": {
         parameters: {
             query?: never;
@@ -978,6 +1012,23 @@ export interface paths {
         head?: never;
         /** Update Assessment Dates */
         patch: operations["update_assessment_dates_api_v1_teaching_courses__course_offering_id__assessments__assessment_id__dates_patch"];
+        trace?: never;
+    };
+    "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/announcements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Teacher Announcements */
+        get: operations["get_teacher_announcements_api_v1_teaching_courses__course_offering_id__groups__group_id__announcements_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/assessments": {
@@ -1274,6 +1325,45 @@ export interface components {
         AccountingCertificateFormData: {
             /** Purpose */
             purpose?: string | null;
+        };
+        /** Announcement */
+        Announcement: {
+            /** Body */
+            body: string;
+            /**
+             * Course Offering Id
+             * @description Positive PostgreSQL BIGINT ID: 1..9223372036854775807
+             */
+            course_offering_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Excerpt */
+            excerpt: string;
+            /** Group Id */
+            group_id: string | null;
+            /**
+             * Id
+             * @description Positive PostgreSQL BIGINT ID: 1..9223372036854775807
+             */
+            id: string;
+            /** Is Important */
+            is_important: boolean;
+            teacher: components["schemas"]["AnnouncementTeacher"];
+            /** Title */
+            title: string;
+        };
+        /** AnnouncementTeacher */
+        AnnouncementTeacher: {
+            /** Full Name */
+            full_name: string;
+            /**
+             * Id
+             * @description Positive PostgreSQL BIGINT ID: 1..9223372036854775807
+             */
+            id: string;
         };
         /** ApiError */
         ApiError: {
@@ -2066,6 +2156,13 @@ export interface components {
             /** Next Cursor */
             next_cursor: string | null;
         };
+        /** Page[Announcement] */
+        Page_Announcement_: {
+            /** Items */
+            items: components["schemas"]["Announcement"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
         /** Page[AttendanceResponse] */
         Page_AttendanceResponse_: {
             /** Items */
@@ -2433,6 +2530,20 @@ export interface components {
             /** Place Of Submission */
             place_of_submission: string;
         };
+        /** TeacherAnnouncementCreate */
+        TeacherAnnouncementCreate: {
+            /** Body */
+            body: string;
+            /** Group Id */
+            group_id: string | null;
+            /**
+             * Is Important
+             * @default false
+             */
+            is_important: boolean;
+            /** Title */
+            title: string;
+        };
         /** TeachingAssignmentResponse */
         TeachingAssignmentResponse: {
             /**
@@ -2551,6 +2662,76 @@ export interface operations {
             };
             /** @description Forbidden */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    get_student_announcements_api_v1_academics_courses__course_offering_id__announcements_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                course_offering_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_Announcement_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7718,6 +7899,86 @@ export interface operations {
             };
         };
     };
+    publish_teacher_announcement_api_v1_teaching_courses__course_offering_id__announcements_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                course_offering_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TeacherAnnouncementCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Announcement"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     update_assessment_dates_api_v1_teaching_courses__course_offering_id__assessments__assessment_id__dates_patch: {
         parameters: {
             query?: never;
@@ -7772,6 +8033,88 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    get_teacher_announcements_api_v1_teaching_courses__course_offering_id__groups__group_id__announcements_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                course_offering_id: string;
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    "X-Announcement-Teacher-Id"?: string;
+                    "X-Can-Publish-To-All-Groups"?: boolean;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_Announcement_"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

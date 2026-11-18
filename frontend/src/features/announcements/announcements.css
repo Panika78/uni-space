@@ -1,0 +1,86 @@
+.journal-announcements {
+  margin-block: 1rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.journal-announcements summary,
+.announcement-feed summary {
+  cursor: pointer;
+}
+
+.journal-announcements fieldset {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+  min-width: 0;
+}
+
+.journal-announcements form label {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.journal-announcements form :is(input:not([type='checkbox']), textarea, select) {
+  width: 100%;
+  min-width: 0;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+}
+
+.journal-announcements form .announcement-check {
+  display: flex;
+  align-items: center;
+}
+
+.journal-announcements button {
+  justify-self: start;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+}
+
+.journal-announcements :focus-visible,
+.announcement-feed :focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+
+.announcement-feed {
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.announcement-feed li {
+  padding: 0.75rem 0;
+  border-block-end: 1px solid var(--border);
+}
+
+.announcement-byline,
+.announcement-excerpt {
+  display: block;
+  font-size: 0.9em;
+}
+
+.announcement-important {
+  display: inline-block;
+  margin-inline-start: 0.5em;
+  padding-inline: 0.25em;
+  border: 1px solid currentColor;
+  border-radius: 0.25em;
+  font-size: 0.85em;
+}
+
+.announcement-body {
+  margin-block: 0.5rem 0;
+  white-space: pre-wrap;
+}
+
+.announcement-feed details[open] .announcement-excerpt {
+  display: none;
+}

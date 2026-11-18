@@ -184,4 +184,7 @@ SELECT 'GRANT INSERT, SELECT (id, created_at) ON public.audit_events TO uni_spac
 WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
 SELECT 'GRANT UPDATE (academic_status) ON public.students TO uni_space_api'
 WHERE to_regclass('public.students') IS NOT NULL \gexec
+-- Immutable announcements use generated identity and INSERT ... RETURNING.
+SELECT 'GRANT SELECT, INSERT ON public.teacher_announcements TO uni_space_api'
+WHERE to_regclass('public.teacher_announcements') IS NOT NULL \gexec
 COMMIT;

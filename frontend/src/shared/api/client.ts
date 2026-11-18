@@ -67,6 +67,7 @@ export function configureApiAuth(begin: () => AuthRequest) {
 export type ApiRequestInit = RequestInit & {
   authenticated?: boolean
   replayAfterRefresh?: boolean
+  onResponseHeaders?: (headers: Headers) => void
 }
 
 // Bounded API pages still need room for slow mobile connections and an auth
@@ -74,8 +75,8 @@ export type ApiRequestInit = RequestInit & {
 export const AUTHENTICATED_GET_DEADLINE_MS = 90_000
 
 export async function apiFetch<T>(input: RequestInfo | URL, init: ApiRequestInit = {}): Promise<T> {
-  const { authenticated, replayAfterRefresh = true, ...requestInit } = init
-  if (!authenticated) return sendRequest<T>(input, requestInit)
+  const { authenticated, replayAfterRefresh = true, onResponseHeaders, ...requestInit } = init
+  if (!authenticated) return sendRequest<T>(input, requestInit, onResponseHeaders)
   const target = requireApiDestination(input)
   if (!beginAuthRequest) throw new Error('Auth provider is unavailable')
   const auth = beginAuthRequest()
@@ -97,7 +98,11 @@ export async function apiFetch<T>(input: RequestInfo | URL, init: ApiRequestInit
     const headers = new Headers(target instanceof Request ? target.headers : undefined)
     new Headers(init.headers).forEach((value, name) => headers.set(name, value))
     headers.set('Authorization', `Bearer ${token}`)
-    return sendRequest<T>(target, { ...requestInit, headers, signal, redirect: 'error' })
+    return sendRequest<T>(
+      target,
+      { ...requestInit, headers, signal, redirect: 'error' },
+      onResponseHeaders,
+    )
   }
   const assertBaseRequestCurrent = () => {
     auth.signal.throwIfAborted()
@@ -246,7 +251,11 @@ function createRequestTimeoutError() {
   )
 }
 
-async function sendRequest<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {
+async function sendRequest<T>(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  onResponseHeaders?: (headers: Headers) => void,
+): Promise<T> {
   const signal = init.signal ?? (input instanceof Request ? input.signal : undefined)
   signal?.throwIfAborted()
   const requestHeaders =
@@ -301,6 +310,7 @@ async function sendRequest<T>(input: RequestInfo | URL, init: RequestInit = {}):
     }
     throw new ApiClientError('Запрос не выполнен', 'http_error', response.status)
   }
+  onResponseHeaders?.(response.headers)
   return payload as T
 }
 
