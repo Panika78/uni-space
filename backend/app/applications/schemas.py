@@ -3,7 +3,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 
-from app.core.schemas import Date, DateTime, Id, Page, RequestModel
+from app.core.schemas import Date, DateTime, Id, Page, PaginationParams, RequestModel
 
 ServiceCode = Literal[
     "study_certificate", "academic_transcript", "academic_leave", "accounting_certificate"
@@ -222,10 +222,38 @@ class ApplicationHistoryPage(Page[ApplicationHistoryEvent]):
     pass
 
 
+class StaffApplicationFilters(PaginationParams):
+    tab: Literal["new", "in_review", "completed", "all"] = "all"
+    q: str | None = Field(default=None, max_length=200)
+    service_code: str | None = Field(default=None, min_length=1, max_length=100)
+    review_status: ReviewStatus | None = None
+    created_from: Date | None = None
+    created_to: Date | None = None
+
+    @field_validator("q", "service_code")
+    @classmethod
+    def validate_search_text(cls, value: str | None) -> str | None:
+        if value is not None:
+            if "\x00" in value or any(0xD800 <= ord(char) <= 0xDFFF for char in value):
+                raise ValueError("invalid filter text")
+            return value.strip() or None
+        return None
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> Self:
+        if self.created_from and self.created_to and self.created_from > self.created_to:
+            raise ValueError("invalid creation date range")
+        return self
+
+
 class StaffApplicationResponse(ApplicationResponse):
     student_id: Id
     reviewer_user_id: Id | None
 
 
-class StaffApplicationPage(Page[StaffApplicationResponse]):
+class StaffApplicationReadResponse(StaffApplicationResponse):
+    applicant_display_name: str
+
+
+class StaffApplicationPage(Page[StaffApplicationReadResponse]):
     pass

@@ -4136,7 +4136,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/StaffApplicationResponse"
+              "$ref": "#/components/schemas/StaffApplicationReadResponse"
             },
             "title": "Items",
             "type": "array"
@@ -4158,6 +4158,137 @@
           "next_cursor"
         ],
         "title": "StaffApplicationPage",
+        "type": "object"
+      },
+      "StaffApplicationReadResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "applicant_display_name": {
+            "title": "Applicant Display Name",
+            "type": "string"
+          },
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/AttachmentMetadata"
+            },
+            "title": "Attachments",
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "document": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IssuedDocumentMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "document_status": {
+            "enum": [
+              "not_required",
+              "pending",
+              "ready",
+              "failed"
+            ],
+            "title": "Document Status",
+            "type": "string"
+          },
+          "feedback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback"
+          },
+          "form_data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StudyCertificateFormData"
+              },
+              {
+                "$ref": "#/components/schemas/AcademicTranscriptFormData"
+              },
+              {
+                "$ref": "#/components/schemas/AcademicLeaveFormData"
+              },
+              {
+                "$ref": "#/components/schemas/AccountingCertificateFormData"
+              }
+            ],
+            "title": "Form Data"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "review_status": {
+            "enum": [
+              "submitted",
+              "in_review",
+              "needs_correction",
+              "resubmitted",
+              "approved",
+              "rejected"
+            ],
+            "title": "Review Status",
+            "type": "string"
+          },
+          "reviewer_user_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer User Id"
+          },
+          "service": {
+            "$ref": "#/components/schemas/Service"
+          },
+          "student_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Student Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "service",
+          "form_data",
+          "review_status",
+          "document_status",
+          "feedback",
+          "created_at",
+          "updated_at",
+          "version",
+          "student_id",
+          "reviewer_user_id",
+          "applicant_display_name"
+        ],
+        "title": "StaffApplicationReadResponse",
         "type": "object"
       },
       "StaffApplicationResponse": {
@@ -9584,6 +9715,115 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "in": "query",
+            "name": "tab",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "new",
+                "in_review",
+                "completed",
+                "all"
+              ],
+              "title": "Tab",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "service_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Service Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "review_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "submitted",
+                    "in_review",
+                    "needs_correction",
+                    "resubmitted",
+                    "approved",
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Review Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "created_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Created To"
+            }
           }
         ],
         "responses": {
@@ -9813,7 +10053,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StaffApplicationResponse"
+                  "$ref": "#/components/schemas/StaffApplicationReadResponse"
                 }
               }
             },

@@ -2673,9 +2673,50 @@ export interface components {
         /** StaffApplicationPage */
         StaffApplicationPage: {
             /** Items */
-            items: components["schemas"]["StaffApplicationResponse"][];
+            items: components["schemas"]["StaffApplicationReadResponse"][];
             /** Next Cursor */
             next_cursor: string | null;
+        };
+        /** StaffApplicationReadResponse */
+        StaffApplicationReadResponse: {
+            /** Applicant Display Name */
+            applicant_display_name: string;
+            /** Attachments */
+            attachments?: components["schemas"]["AttachmentMetadata"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            document?: components["schemas"]["IssuedDocumentMetadata"] | null;
+            /**
+             * Document Status
+             * @enum {string}
+             */
+            document_status: "not_required" | "pending" | "ready" | "failed";
+            /** Feedback */
+            feedback: string | null;
+            /** Form Data */
+            form_data: components["schemas"]["StudyCertificateFormData"] | components["schemas"]["AcademicTranscriptFormData"] | components["schemas"]["AcademicLeaveFormData"] | components["schemas"]["AccountingCertificateFormData"];
+            /** Id */
+            id: string;
+            /**
+             * Review Status
+             * @enum {string}
+             */
+            review_status: "submitted" | "in_review" | "needs_correction" | "resubmitted" | "approved" | "rejected";
+            /** Reviewer User Id */
+            reviewer_user_id: string | null;
+            service: components["schemas"]["Service"];
+            /** Student Id */
+            student_id: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
         };
         /** StaffApplicationResponse */
         StaffApplicationResponse: {
@@ -5934,6 +5975,12 @@ export interface operations {
             query?: {
                 limit?: number;
                 cursor?: string | null;
+                tab?: "new" | "in_review" | "completed" | "all";
+                q?: string | null;
+                service_code?: string | null;
+                review_status?: ("submitted" | "in_review" | "needs_correction" | "resubmitted" | "approved" | "rejected") | null;
+                created_from?: string | null;
+                created_to?: string | null;
             };
             header?: never;
             path?: never;
@@ -6118,7 +6165,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StaffApplicationResponse"];
+                    "application/json": components["schemas"]["StaffApplicationReadResponse"];
                 };
             };
             /** @description Unauthorized */

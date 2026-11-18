@@ -27,6 +27,11 @@ import {
   StaffStudentDetailPage,
 } from '../features/students/StaffStudentsPage'
 import { StaffNewsPage } from '../features/news/StaffNewsPage'
+import {
+  StaffApplicationSessionLayout,
+  StaffApplicationQueue,
+} from '../features/staffApplications/StaffApplicationQueue'
+import { StaffApplicationDetail } from '../features/staffApplications/StaffApplicationDetail'
 import { StaffSchedulePage } from '../features/schedule/StaffSchedulePage'
 import { StaffJournalsPage } from '../features/staff-journals/StaffJournalsPage'
 import { TeacherJournalsPage } from '../features/teacher/TeacherJournalsPage'
@@ -198,47 +203,58 @@ export const appRoutes: RouteObject[] = [
                   {
                     element: <RoleGuard role="staff" />,
                     children: [
-                      { path: '/staff', element: <StaffHome /> },
                       {
-                        element: (
-                          <RoleGuard
-                            role="staff"
-                            anyOfPermissions={['grades.edit', 'attendance.edit']}
-                          />
-                        ),
-                        children: [{ path: '/staff/journals', element: <StaffJournalsPage /> }],
-                      },
-                      {
-                        element: <RoleGuard role="staff" permission="schedule.edit" />,
-                        children: [{ path: '/staff/schedule', element: <StaffSchedulePage /> }],
-                      },
-                      {
-                        element: <RoleGuard role="staff" permission="news.publish" />,
+                        element: <StaffApplicationSessionLayout />,
                         children: [
-                          { path: '/staff/news', element: <StaffNewsPage /> },
-                          { path: '/staff/news/:id', element: <StaffNewsPage /> },
-                        ],
-                      },
-                      {
-                        element: <RoleGuard role="staff" permission="applications.review" />,
-                        children: [
+                          { path: '/staff', element: <StaffHome /> },
                           {
-                            path: '/staff/applications',
-                            element: <ModuleUnavailable title="Заявления" />,
+                            element: (
+                              <RoleGuard
+                                role="staff"
+                                anyOfPermissions={['grades.edit', 'attendance.edit']}
+                              />
+                            ),
+                            children: [{ path: '/staff/journals', element: <StaffJournalsPage /> }],
                           },
-                        ],
-                      },
-                      {
-                        element: <RoleGuard role="staff" permission="students.read" />,
-                        children: [
-                          { path: '/staff/students', element: <StaffStudentsPage /> },
-                          { path: '/staff/students/:id', element: <StaffStudentDetailPage /> },
-                        ],
-                      },
-                      {
-                        element: <RoleGuard role="staff" permission="students.status.edit" />,
-                        children: [
-                          { path: '/staff/students/status', element: <StaffStudentStatusPage /> },
+                          {
+                            element: <RoleGuard role="staff" permission="schedule.edit" />,
+                            children: [{ path: '/staff/schedule', element: <StaffSchedulePage /> }],
+                          },
+                          {
+                            element: <RoleGuard role="staff" permission="news.publish" />,
+                            children: [
+                              { path: '/staff/news', element: <StaffNewsPage /> },
+                              { path: '/staff/news/:id', element: <StaffNewsPage /> },
+                            ],
+                          },
+                          {
+                            element: <RoleGuard role="staff" permission="applications.review" />,
+                            children: [
+                              {
+                                path: '/staff/applications',
+                                children: [
+                                  { index: true, element: <StaffApplicationQueue /> },
+                                  { path: ':id', element: <StaffApplicationDetail /> },
+                                ],
+                              },
+                            ],
+                          },
+                          {
+                            element: <RoleGuard role="staff" permission="students.read" />,
+                            children: [
+                              { path: '/staff/students', element: <StaffStudentsPage /> },
+                              { path: '/staff/students/:id', element: <StaffStudentDetailPage /> },
+                            ],
+                          },
+                          {
+                            element: <RoleGuard role="staff" permission="students.status.edit" />,
+                            children: [
+                              {
+                                path: '/staff/students/status',
+                                element: <StaffStudentStatusPage />,
+                              },
+                            ],
+                          },
                         ],
                       },
                     ],

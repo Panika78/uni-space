@@ -220,7 +220,18 @@ def test_production_acl_supports_authenticated_workflow_and_denies_extra_writes(
     assert created.json()["document_status"] == "ready"
     assert history(c, created.json()["id"], student).status_code == 200
     identifier = c["application"]()
-    assert c["request"]("GET", "/api/v1/staff/applications", c["tokens"][0]).status_code == 200
+    path = "/api/v1/staff/applications"
+    queue = c["request"](
+        "GET", path, c["tokens"][0], params={"q": "fictional student", "tab": "new"}
+    )
+    assert queue.status_code == 200, queue.text
+    (item,) = queue.json()["items"]
+    assert item["id"] == str(identifier)
+    assert item["applicant_display_name"] == "Fictional Student"
+    detail = c["request"]("GET", f"{path}/{identifier}", c["tokens"][0])
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["applicant_display_name"] == item["applicant_display_name"]
+    assert c["request"]("GET", f"{path}/{identifier}", c["tokens"][2]).status_code == 404
     assert c["review"](identifier, "start_review", 1).status_code == 200
     assert c["review"](identifier, "start_review", 1, index=1).status_code == 409
     assert (
