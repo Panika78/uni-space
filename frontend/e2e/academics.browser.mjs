@@ -70,6 +70,7 @@ try {
   await page.reload()
   const real = await read
   assert.equal(real.status(), 200)
+  const scopeHeaders = { 'x-student-scope': real.headers()['x-student-scope'] }
   const longCopy = await real.json()
   longCopy.items[0].discipline.name =
     'Современные методы математического моделирования и междисциплинарного анализа сложных систем с дополнительными практическими занятиями'
@@ -77,7 +78,7 @@ try {
     'Учебно-лабораторный корпус, аудитория для индивидуальных консультаций и повторной аттестации студентов'
   await page.route(endpoint, (route) =>
     route.fulfill({
-      headers: { 'x-student-scope': real.headers()['x-student-scope'] },
+      headers: scopeHeaders,
       json: longCopy,
     }),
   )
@@ -142,7 +143,7 @@ try {
       items: [],
     },
   ]) {
-    await page.route(endpoint, (route) => route.fulfill({ json: data }))
+    await page.route(endpoint, (route) => route.fulfill({ headers: scopeHeaders, json: data }))
     await page.reload()
     await page
       .getByText(data.term ? 'Нет дисциплин текущего семестра' : 'Нет текущего учебного периода', {
