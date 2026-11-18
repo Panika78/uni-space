@@ -316,7 +316,12 @@ function ApplicationDetail({ id }: { id: string }) {
               <dt>Рассмотрение</dt>
               <dd>{reviewLabels[application.review_status]}</dd>
               <dt>Документ</dt>
-              <dd>{documentLabels[application.document_status]}</dd>
+              <dd>
+                {application.review_status === 'rejected' &&
+                application.document_status === 'pending'
+                  ? 'Не выдан'
+                  : documentLabels[application.document_status]}
+              </dd>
               {application.feedback && (
                 <>
                   <dt>

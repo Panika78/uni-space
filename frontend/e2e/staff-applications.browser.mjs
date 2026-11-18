@@ -160,8 +160,8 @@ try {
   const leave = await submitLeave()
   const attachmentId = leave.attachments[0].id
   const attachmentPath = `${root}/attachments/${attachmentId}/download`
-  const accounting = await (
-    await api(student, '/api/v1/applications', studentHeaders, {
+  async function submitAccounting() {
+    const response = await api(student, '/api/v1/applications', studentHeaders, {
       method: 'POST',
       expected: 201,
       data: {
@@ -169,7 +169,9 @@ try {
         form_data: { purpose: 'Браузерная проверка' },
       },
     })
-  ).json()
+    return response.json()
+  }
+  const accounting = await submitAccounting()
 
   await a.page.goto(`${base}${queue}`)
   await a.page.getByRole('link', { name: `№ ${leave.id}`, exact: true }).waitFor()
@@ -328,10 +330,10 @@ try {
   await b.page.getByText(reason, { exact: true }).waitFor()
   assert.equal(await b.page.locator('.staff-applications__history li').count(), 6)
 
-  const rejection = await submitLeave()
-  await openDetail(a.page, rejection.id)
+  const rejection = await submitAccounting()
+  await openDetail(c.page, rejection.id)
   let committed = 0
-  await a.page.route(
+  await c.page.route(
     `**${root}/${rejection.id}/review`,
     async (route) => {
       const response = await route.fetch()
@@ -341,22 +343,24 @@ try {
     },
     { times: 1 },
   )
-  await activate(a.page, 'Принять в работу')
-  await a.page.getByText('Ответ на действие не получен.', { exact: false }).waitFor()
+  await activate(c.page, 'Принять в работу')
+  await c.page.getByText('Ответ на действие не получен.', { exact: false }).waitFor()
   assert.equal(committed, 1)
-  await activate(a.page, 'Отклонить')
-  const rejectionDialog = a.page.getByRole('dialog', { name: 'Отклонить' })
+  await activate(c.page, 'Отклонить')
+  const rejectionDialog = c.page.getByRole('dialog', { name: 'Отклонить' })
   await rejectionDialog.getByRole('button', { name: 'Отклонить', exact: true }).click()
   await rejectionDialog.getByText('Укажите причину.').waitFor()
   await rejectionDialog.getByLabel('Причина').fill(rejectReason)
   await rejectionDialog.getByRole('button', { name: 'Отклонить', exact: true }).click()
-  await a.page.getByText('Отклонено', { exact: true }).waitFor()
-  await a.page.reload()
-  await a.page.getByText('Причина отказа', { exact: true }).waitFor()
-  await a.page
+  await c.page.getByText('Отклонено', { exact: true }).waitFor()
+  await c.page.reload()
+  await c.page.getByText('Причина отказа', { exact: true }).waitFor()
+  await c.page
     .locator('.staff-applications__history')
     .getByText(rejectReason, { exact: true })
     .waitFor()
+  await c.page.getByText('Не выдан', { exact: true }).waitFor()
+  assert.equal(await c.page.getByRole('button', { name: /PDF/ }).count(), 0)
 
   await openDetail(c.page, accounting.id)
   await activate(c.page, 'Принять в работу')
