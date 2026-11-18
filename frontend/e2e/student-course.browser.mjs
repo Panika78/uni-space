@@ -23,7 +23,7 @@ const teacherApi = await request.newContext({ baseURL, extraHTTPHeaders: { Origi
 const tab = (name) => page.getByRole('tab', { name, exact: true })
 const panel = () => page.getByRole('tabpanel')
 const card = (name) => page.locator(`[data-lesson-id="${fixture[name]}"]:visible`)
-const heading = () => page.getByRole('heading', { name: fixture.discipline, exact: true })
+const heading = () => page.getByRole('heading', { name: fixture.discipline, exact: true, level: 1 })
 const check = (message) => console.log(`PASS ${message}`)
 
 async function login(name) {
