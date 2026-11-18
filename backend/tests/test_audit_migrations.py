@@ -98,7 +98,7 @@ def test_audit_upgrade_and_audit_only_downgrade_preserve_users_and_rbac(
     run_migration(engine, "upgrade", "head")
     run_migration(engine, "check")
     with engine.connect() as db:
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261118_01"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261118_02"
         assert db.scalar(RBAC_SNAPSHOT) == rbac_before
         assert db.scalar(text("SELECT count(*) FROM audit_events")) == 0
 
@@ -120,7 +120,8 @@ def test_audit_revision_extends_the_single_migration_chain_with_unique_ids():
                 revision_ids.append(ast.literal_eval(node.value))
     assert len(revision_ids) == len(set(revision_ids))
     graph = ScriptDirectory.from_config(Config(str(backend / "alembic.ini")))
-    assert graph.get_heads() == ["20261118_01"]
+    assert graph.get_heads() == ["20261118_02"]
+    assert graph.get_revision("20261118_02").down_revision == "20261118_01"
     assert graph.get_revision("20261118_01").down_revision == "20261117_01"
     assert graph.get_revision("20261117_01").down_revision == "20261116_09"
     assert graph.get_revision("20261116_01").down_revision == "20261115_04"
@@ -150,6 +151,7 @@ def test_wave_two_revisions_form_one_exact_chain():
         "20261116_09",
         "20261117_01",
         "20261118_01",
+        "20261118_02",
     ]
     assert graph.get_heads() == [chain[-1]]
     for parent, child in zip(chain, chain[1:], strict=False):

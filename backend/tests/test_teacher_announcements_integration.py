@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -40,11 +41,14 @@ def auth(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-def publish(s, group, *, teacher=0, course=0, headers=None, **values):
+def publish(s, group, *, teacher=0, course=0, headers=None, key=None, **values):
+    request_headers = auth(s.teacher_tokens[teacher]) if headers is None else headers
+    if key is not None:
+        request_headers = {**request_headers, "Idempotency-Key": str(key)}
     return s.client.post(
         f"/api/v1/teaching/courses/{s.courses[course].id}/announcements",
         json={"group_id": group, "title": "Тест", "body": "Текст", **values},
-        headers=auth(s.teacher_tokens[teacher]) if headers is None else headers,
+        headers=request_headers,
     )
 
 
@@ -73,7 +77,7 @@ def test_publish_and_read_current_audience(journal):
     assert publish(s, second, course=1).status_code == 422
     assert s.get("announcements", group=1).status_code == 404
     assert s.get("announcements").headers["X-Can-Publish-To-All-Groups"] == "false"
-    body = "  Первая строка\n\n<img src=x onerror=alert(1)> **текст** 🦉\r\n"
+    body = "  Первая строка\n\t\n<img src=x onerror=alert(1)> **текст** 🦉\r\n"
     result = publish(s, first, title="  Объявление 🦉  ", body=body, is_important=True)
     assert result.status_code == 201, result.text
     address = result.json()
@@ -127,7 +131,9 @@ def test_publish_and_read_current_audience(journal):
     assert publish(s, None).status_code == 403
     assert s.get("announcements").status_code == 404
     assert student_feed(s, student=2).json()["items"] == [other_author, common, address]
-    assert student_feed(s).json()["items"] == [common]
+    changed_feed = student_feed(s)
+    assert changed_feed.json()["items"] == [common]
+    assert changed_feed.headers["X-Announcement-Group-Id"] == str(new_group.id)
     assert s.db.scalar(select(func.count(Notification.id))) == 0
 
     event = s.db.scalar(
@@ -177,7 +183,20 @@ def test_validation_and_scoped_cursor(journal):
     assert publish(s, first, teacher=1).status_code == 401
     assert publish(s, None, course=1, teacher=2).status_code == 403
     s.courses.append(s.offering(assigned=[]))
-    assert publish(s, None, course=2).status_code == 422
+    assert publish(s, None, course=2).status_code == 403
+    s.courses.append(s.offering())
+    forbidden = publish(s, None, course=2)
+    for target in [None, first, "9223372036854775807"]:
+        for offering in [2, 3]:
+            response = publish(s, target, course=offering)
+            assert (response.status_code, response.json()) == (403, forbidden.json())
+    missing = s.client.post(
+        "/api/v1/teaching/courses/9223372036854775807/announcements",
+        json={"group_id": None, "title": "Тест", "body": "Текст"},
+        headers=auth(s.teacher_tokens[0]),
+    )
+    assert (missing.status_code, missing.json()) == (403, forbidden.json())
+    assert publish(s, "9223372036854775807").status_code == 403
     for fields in [
         {"group_id": 1},
         {"group_id": "9223372036854775808"},
@@ -277,14 +296,18 @@ def test_database_constraints_and_audit_rollback(journal, monkeypatch):
         raise RuntimeError("Forced error after audit flush")
 
     monkeypatch.setattr(announcements, "write_audit_event", fail_after_audit)
-    assert publish(s, str(group)).status_code == 500
+    key = uuid4()
+    assert publish(s, str(group), key=key).status_code == 500
     assert s.db.scalar(select(func.count(TeacherAnnouncement.id))) == 0
     assert s.db.scalar(select(func.count(AuditEvent.id))) == 0
+    monkeypatch.setattr(announcements, "write_audit_event", original)
+    assert publish(s, str(group), key=key).status_code == 201
+    assert s.db.scalar(select(func.count(AuditEvent.id))) == 1
 
 
 def test_production_role_can_publish_but_cannot_edit_or_read_audit(runtime_engine):  # noqa: F811
     admin, runtime = runtime_engine
-    with Session(admin) as setup:
+    with Session(admin, expire_on_commit=False) as setup:
         s = journal_fixture.__wrapped__(setup)
         group = str(s.groups[0].id)
         setup.commit()
@@ -307,3 +330,109 @@ def test_production_role_can_publish_but_cannot_edit_or_read_audit(runtime_engin
                        has_column_privilege('audit_events', 'after_data', 'SELECT')
             """)
             ).one() == ("uni_space_api", False, False, False, False)
+
+
+@pytest.mark.parametrize("control", ["\x00", "\x7f", "\x80", "\x85", "\x9f"])
+@pytest.mark.parametrize("field", ["title", "body"])
+def test_rejects_unicode_controls(journal, control, field):
+    assert (
+        publish(journal, str(journal.groups[0].id), **{field: f"Тест{control}🦉"}).status_code
+        == 422
+    )
+
+
+def test_publication_retry_and_conflict(journal):
+    s = journal
+    group = str(s.groups[0].id)
+    key = uuid4()
+    other = publish(s, group, key=uuid4()).json()
+    original = publish(s, group, key=key)
+    assert original.status_code == 201 and original.json()["id"] != other["id"]
+    assert publish(s, group, key=key).json() == original.json()
+    assert publish(s, group, key=key, body="Другой текст").status_code == 409
+    assert publish(s, group, key=key, course=1).status_code == 409
+    different_teacher = publish(s, group, key=key, teacher=1, course=1)
+    assert different_teacher.status_code == 201
+    assert different_teacher.json()["id"] != original.json()["id"]
+    assert s.db.scalar(select(func.count(TeacherAnnouncement.id))) == 3
+    assert s.db.scalar(select(func.count(AuditEvent.id))) == 3
+
+
+def test_concurrent_idempotency_and_assignment_revocation(runtime_engine, monkeypatch):  # noqa: F811
+    from threading import Event
+
+    admin, runtime = runtime_engine
+    with Session(admin, expire_on_commit=False) as setup:
+        s = journal_fixture.__wrapped__(setup)
+        group = str(s.groups[0].id)
+        grant_id = s.grants[0].id
+        second_grant_id = s.grants[2].id
+        setup.commit()
+
+    def runtime_session():
+        with Session(runtime) as db:
+            yield db
+
+    s.app.dependency_overrides[get_db_session] = runtime_session
+    key = uuid4()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        requests = [pool.submit(publish, s, group, key=key) for _ in range(2)]
+        responses = [request.result(timeout=10) for request in requests]
+        assert [response.status_code for response in responses] == [201, 201]
+        assert responses[0].json() == responses[1].json()
+
+        # Revocation holds the row lock first. Publication waits for the outcome.
+        started = Event()
+
+        def publish_after_revocation():
+            started.set()
+            return publish(s, group, key=uuid4())
+
+        with admin.begin() as connection:
+            connection.execute(
+                text("DELETE FROM teaching_assignments WHERE id = :id"), {"id": grant_id}
+            )
+            delayed = pool.submit(publish_after_revocation)
+            assert started.wait(5)
+            with pytest.raises(TimeoutError):
+                delayed.result(timeout=0.3)
+        assert delayed.result(timeout=10).status_code == 403
+
+        from app.teaching import announcements
+
+        original_writer = announcements.write_audit_event
+        ready_to_commit = Event()
+        release_publication = Event()
+        revoking = Event()
+
+        def pause_before_audit(*args, **kwargs):
+            ready_to_commit.set()
+            assert release_publication.wait(10)
+            return original_writer(*args, **kwargs)
+
+        def revoke_second_grant():
+            with admin.begin() as connection:
+                revoking.set()
+                connection.execute(
+                    text("DELETE FROM teaching_assignments WHERE id = :id"),
+                    {"id": second_grant_id},
+                )
+
+        monkeypatch.setattr(announcements, "write_audit_event", pause_before_audit)
+        first = pool.submit(publish, s, group, course=1, key=uuid4())
+        try:
+            assert ready_to_commit.wait(5)
+            second = pool.submit(revoke_second_grant)
+            assert revoking.wait(5)
+            with pytest.raises(TimeoutError):
+                second.result(timeout=0.3)
+        finally:
+            release_publication.set()
+        assert first.result(timeout=10).status_code == 201
+        second.result(timeout=10)
+        assert publish(s, group, course=1, key=uuid4()).status_code == 403
+
+    with Session(admin) as db:
+        assert db.scalar(select(func.count(TeacherAnnouncement.id))) == 2
+        assert db.scalar(select(func.count(AuditEvent.id))) == 2
+    assert student_feed(s).json()["items"] == [responses[0].json()]

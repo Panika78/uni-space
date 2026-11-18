@@ -35,7 +35,10 @@ def get_academics(
     "/academics/courses/{course_offering_id}/announcements",
     response_model=Page[Announcement],
     dependencies=[Depends(validate_teaching_ids), Depends(require_unique_query_params)],
-    responses={code: {"model": ApiError} for code in (401, 403, 404, 422, 500)},
+    responses={
+        **{code: {"model": ApiError} for code in (401, 403, 404, 422, 500)},
+        200: {"headers": {"X-Announcement-Group-Id": {"schema": {"type": "string"}}}},
+    },
 )
 def get_student_announcements(
     course_offering_id: TeachingId,
@@ -52,4 +55,5 @@ def get_student_announcements(
     ):
         raise HTTPException(404, "not_found")
     response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Announcement-Group-Id"] = str(student.group_id)
     return list_announcements(db, course_id, student.group_id, params, scope=-student.id)

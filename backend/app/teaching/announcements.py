@@ -1,10 +1,13 @@
 import json
+import unicodedata
 from datetime import UTC, datetime
 from typing import Annotated
+from uuid import NAMESPACE_OID, UUID, uuid5
 
 from fastapi import HTTPException, Request
-from pydantic import Field, StrictBool, StringConstraints, field_validator
-from sqlalchemy import BigInteger, exists, func, insert, literal, or_, select, tuple_
+from pydantic import Field, StrictBool, StringConstraints, ValidationInfo, field_validator
+from sqlalchemy import BigInteger, Uuid, exists, func, literal, or_, select, tuple_
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.audit import write_audit_event
@@ -20,12 +23,15 @@ class TeacherAnnouncementCreate(RequestModel):
     body: Annotated[str, Field(min_length=1, max_length=20_000)]
     is_important: StrictBool = False
 
-    @field_validator("title", "body")
+    @field_validator("title", "body", mode="before")
     @classmethod
-    def validate_text(cls, value: str) -> str:
-        if not value.strip() or any(
-            (ord(char) < 32 and char not in "\t\r\n") or 0xD800 <= ord(char) <= 0xDFFF
-            for char in value
+    def validate_text(cls, value: object, info: ValidationInfo) -> object:
+        allowed = "\t\r\n" if info.field_name == "body" else ""
+        if isinstance(value, str) and (
+            not value.strip()
+            or any(
+                unicodedata.category(char) in {"Cc", "Cs"} and char not in allowed for char in value
+            )
         ):
             raise ValueError("Expected non-blank text containing valid Unicode")
         return value
@@ -99,44 +105,96 @@ def serialize_announcement(record: TeacherAnnouncement, full_name: str) -> Annou
 
 
 def create_announcement(
-    db: Session, user: User, teacher_id: int, course_id: int, body: TeacherAnnouncementCreate
+    db: Session,
+    user: User,
+    teacher_id: int,
+    course_id: int,
+    body: TeacherAnnouncementCreate,
+    publication_key: UUID | None = None,
 ) -> Announcement:
+    if publication_key is not None:
+        publication_key = uuid5(NAMESPACE_OID, f"teacher-announcement:{user.id}:{publication_key}")
     group_id = int(body.group_id) if body.group_id is not None else None
-    groups = course_groups(course_id)
-    assigned = teacher_groups(course_id, teacher_id)
-    if group_id is None:
-        valid_target = groups.exists()
-        authorized = can_publish_to_all(course_id, teacher_id)
-    else:
-        valid_target = groups.where(CourseGroup.group_id == group_id).exists()
-        authorized = assigned.where(TeachingAssignment.group_id == group_id).exists()
-
-    # Eligibility and INSERT use the same PostgreSQL statement snapshot.
-    values = select(
-        literal(course_id),
-        literal(teacher_id),
-        literal(group_id, type_=BigInteger),
-        literal(body.title),
-        literal(body.body),
-        literal(body.is_important),
-    ).where(authorized, valid_target)
+    assignment = TeachingAssignment
+    record_model = TeacherAnnouncement
+    inserted = False
     try:
+        # Lock only this teacher's assignments for the offering. A concurrent
+        # revocation either completes first or waits for publication to commit.
+        locked_groups = list(
+            db.scalars(
+                teacher_groups(course_id, teacher_id)
+                .order_by(assignment.group_id)
+                .with_for_update(read=True)
+            )
+        )
+        if not locked_groups:
+            raise HTTPException(403, "forbidden")
+
+        groups = course_groups(course_id)
+        all_groups = (
+            groups.exists() & ~groups.where(CourseGroup.group_id.not_in(locked_groups)).exists()
+        )
+        if group_id is None:
+            authorized = all_groups
+        elif group_id in locked_groups:
+            authorized = groups.where(CourseGroup.group_id == group_id).exists()
+        else:
+            # A partial assignment grants no visibility into other pairs.
+            if db.scalar(select(all_groups)):
+                raise HTTPException(422, "validation_error")
+            raise HTTPException(403, "forbidden")
+
+        values = select(
+            literal(course_id, type_=BigInteger),
+            literal(teacher_id, type_=BigInteger),
+            literal(group_id, type_=BigInteger),
+            literal(body.title),
+            literal(body.body),
+            literal(body.is_important),
+            literal(publication_key, type_=Uuid),
+        ).where(authorized)
         record = db.scalar(
-            insert(TeacherAnnouncement)
+            insert(record_model)
             .from_select(
-                ["course_offering_id", "teacher_id", "group_id", "title", "body", "is_important"],
+                [
+                    "course_offering_id",
+                    "teacher_id",
+                    "group_id",
+                    "title",
+                    "body",
+                    "is_important",
+                    "publication_key",
+                ],
                 values,
             )
-            .returning(TeacherAnnouncement)
+            .on_conflict_do_nothing(constraint="uq_teacher_announcement_publication")
+            .returning(record_model)
         )
-    except Exception:
-        db.rollback()
-        raise
-    if record is None:
-        if not db.scalar(select(valid_target)):
-            raise HTTPException(422, "validation_error")
-        raise HTTPException(403, "forbidden")
-    try:
+        if record is None:
+            if publication_key is None or not db.scalar(select(authorized)):
+                raise HTTPException(403, "forbidden")
+            record = db.scalar(
+                select(record_model).where(
+                    record_model.teacher_id == teacher_id,
+                    record_model.publication_key == publication_key,
+                )
+            )
+            if record is None:
+                raise HTTPException(403, "forbidden")
+            if (
+                record.course_offering_id,
+                record.group_id,
+                record.title,
+                record.body,
+                record.is_important,
+            ) != (course_id, group_id, body.title, body.body, body.is_important):
+                raise HTTPException(409, "idempotency_conflict")
+            response = serialize_announcement(record, user.full_name)
+            db.commit()
+            return response
+
+        inserted = True
         write_audit_event(
             db,
             actor=user,
@@ -155,6 +213,10 @@ def create_announcement(
         response = serialize_announcement(record, user.full_name)
         db.commit()
         return response
+    except HTTPException:
+        if inserted:
+            db.rollback()
+        raise
     except Exception:
         db.rollback()
         raise

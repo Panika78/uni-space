@@ -6,14 +6,15 @@ import type { components } from '../../shared/api/schema'
 import {
   AnnouncementFeed,
   announcementKeys,
-  getAnnouncementPage,
   useAnnouncements,
   type Announcement,
   type AnnouncementScope,
 } from './AnnouncementFeed'
 
 type Draft = components['schemas']['TeacherAnnouncementCreate']
-type Attempt = { draft: Draft; previousId: string | undefined; teacherId: string | null }
+type Attempt = { draft: Draft; key: string }
+
+const publicationTimeoutMs = 15_000
 
 type JournalContext = { userId: string; courseId: string; groupId: string }
 
@@ -70,85 +71,46 @@ function TeacherAnnouncementPanel({ userId, courseId, groupId }: JournalContext)
       setStatus('Введите заголовок до 200 символов и текст до 20 000 символов.')
       return
     }
+    await publish({ draft, key: crypto.randomUUID() })
+  }
+
+  async function publish(operation: Attempt) {
+    if (locked.current) return
     locked.current = true
     setBusy(true)
     setStatus('')
     try {
-      const before = await getAnnouncementPage(scope, null)
-      if (allGroups && !before.canPublishToAll) {
-        setStatus('Публикация для всех групп недоступна. Выберите текущую группу.')
-        void feed.refetch()
-        return
+      const published = await apiFetch<Announcement>(
+        `/api/v1/teaching/courses/${courseId}/announcements`,
+        {
+          method: 'POST',
+          authenticated: true,
+          headers: { 'Idempotency-Key': operation.key },
+          signal: AbortSignal.timeout(publicationTimeoutMs),
+          body: JSON.stringify(operation.draft),
+        },
+      )
+      if (
+        !published?.id ||
+        published.course_offering_id !== courseId ||
+        published.group_id !== operation.draft.group_id
+      ) {
+        throw new Error('Unexpected publication response')
       }
-      try {
-        const published = await apiFetch<Announcement>(
-          `/api/v1/teaching/courses/${courseId}/announcements`,
-          {
-            method: 'POST',
-            authenticated: true,
-            body: JSON.stringify(draft),
-          },
+      confirmPublication()
+    } catch (error) {
+      if (isDefinitiveApiRejection(error)) {
+        setAttempt(undefined)
+        setStatus(
+          error.status === 422
+            ? 'Сервер отклонил данные. Проверьте форму.'
+            : 'Публикация недоступна. Проверьте назначение.',
         )
-        if (
-          !published?.id ||
-          published.course_offering_id !== courseId ||
-          published.group_id !== draft.group_id
-        ) {
-          throw new Error('Unexpected publication response')
-        }
-        confirmPublication()
-      } catch (error) {
-        if (isDefinitiveApiRejection(error)) {
-          setStatus(
-            error.status === 422
-              ? 'Сервер отклонил данные. Проверьте форму.'
-              : 'Публикация недоступна. Проверьте назначение.',
-          )
-          void feed.refetch()
-        } else {
-          setAttempt({ draft, previousId: before.items[0]?.id, teacherId: before.teacherId })
-          setStatus('Результат публикации неизвестен. Проверьте ленту.')
-        }
+        void feed.refetch()
+      } else {
+        setAttempt(operation)
+        setStatus('Результат публикации неизвестен. Повторите публикацию.')
       }
-    } catch {
-      setStatus('Не удалось проверить доступ к ленте. Повторите попытку.')
-    } finally {
-      locked.current = false
-      setBusy(false)
-    }
-  }
-
-  async function verifyPublication() {
-    if (!attempt || locked.current) return
-    locked.current = true
-    setBusy(true)
-    try {
-      let cursor: string | null = null
-      do {
-        const page = await getAnnouncementPage(scope, cursor)
-        for (const item of page.items) {
-          if (item.id === attempt.previousId) {
-            cursor = null
-            break
-          }
-          if (
-            item.teacher.id === attempt.teacherId &&
-            item.group_id === attempt.draft.group_id &&
-            item.title === attempt.draft.title &&
-            item.body === attempt.draft.body &&
-            item.is_important === attempt.draft.is_important
-          ) {
-            confirmPublication()
-            return
-          }
-        }
-        if (page.items.some((item) => item.id === attempt.previousId)) break
-        cursor = page.next_cursor
-      } while (cursor)
-      setStatus('Объявление пока не найдено. Результат отправки остаётся неизвестным.')
-      void feed.refetch()
-    } catch {
-      setStatus('Не удалось проверить публикацию. Повторите проверку.')
     } finally {
       locked.current = false
       setBusy(false)
@@ -199,8 +161,8 @@ function TeacherAnnouncementPanel({ userId, courseId, groupId }: JournalContext)
         </fieldset>
         <p role="status">{status}</p>
         {attempt && (
-          <button type="button" disabled={busy} onClick={() => void verifyPublication()}>
-            Проверить публикацию
+          <button type="button" disabled={busy} onClick={() => void publish(attempt)}>
+            Повторить публикацию
           </button>
         )}
       </form>

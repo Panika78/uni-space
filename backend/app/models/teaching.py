@@ -1,6 +1,7 @@
 """Teacher journal scope; independent of the scheduled lesson teacher."""
 
 from datetime import datetime
+from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     Index,
     Text,
     UniqueConstraint,
+    Uuid,
     false,
     func,
 )
@@ -46,6 +48,9 @@ class TeachingAssignment(Base):
 class TeacherAnnouncement(Base):
     __tablename__ = "teacher_announcements"
     __table_args__ = (
+        UniqueConstraint(
+            "teacher_id", "publication_key", name="uq_teacher_announcement_publication"
+        ),
         ForeignKeyConstraint(
             ["course_offering_id", "group_id"],
             ["course_groups.course_offering_id", "course_groups.group_id"],
@@ -67,6 +72,7 @@ class TeacherAnnouncement(Base):
     course_offering_id: Mapped[int] = mapped_column(ForeignKey("course_offerings.id"))
     teacher_id: Mapped[int] = mapped_column(ForeignKey("teachers.id"))
     group_id: Mapped[int | None] = mapped_column(ForeignKey("study_groups.id"))
+    publication_key: Mapped[UUID | None] = mapped_column(Uuid)
     title: Mapped[str] = mapped_column(Text)
     body: Mapped[str] = mapped_column(Text)
     is_important: Mapped[bool] = mapped_column(Boolean, server_default=false())

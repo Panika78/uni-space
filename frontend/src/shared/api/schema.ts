@@ -2706,6 +2706,7 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    "X-Announcement-Group-Id"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -7902,7 +7903,9 @@ export interface operations {
     publish_teacher_announcement_api_v1_teaching_courses__course_offering_id__announcements_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 course_offering_id: string;
             };
@@ -7943,6 +7946,15 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

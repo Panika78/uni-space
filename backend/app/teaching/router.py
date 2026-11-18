@@ -1,6 +1,7 @@
 from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
@@ -183,6 +184,7 @@ def update_assessment_dates(
     response_model=Announcement,
     status_code=201,
     dependencies=[Depends(require_unique_announcement_fields)],
+    responses={409: {"model": ApiError}},
 )
 def publish_teacher_announcement(
     course_offering_id: TeachingId,
@@ -191,10 +193,11 @@ def publish_teacher_announcement(
     db: Db,
     teacher: TeacherId,
     user: Annotated[User, Depends(get_current_user)],
+    publication_key: Annotated[UUID | None, Header(alias="Idempotency-Key")] = None,
 ):
-    if request.query_params:
+    if request.query_params or len(request.headers.getlist("Idempotency-Key")) > 1:
         raise HTTPException(422, "validation_error")
-    return create_announcement(db, user, teacher, int(course_offering_id), body)
+    return create_announcement(db, user, teacher, int(course_offering_id), body, publication_key)
 
 
 @router.get(

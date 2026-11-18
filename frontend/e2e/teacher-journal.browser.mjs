@@ -673,29 +673,96 @@ try {
   const lostResponseTitle = 'Ответ потерян после сохранения'
   await titleField.fill(lostResponseTitle)
   await bodyField.fill('Введённый текст сохраняется при сбое')
-  let announcementPosts = 0
   const announcementPost = '**/teaching/courses/*/announcements'
-  await page.route(announcementPost, async (route) => {
-    announcementPosts += 1
-    const response = await route.fetch()
-    assert.equal(response.status(), 201)
-    await route.abort('failed')
-  })
+  const retryPublication = announcementPanel.getByRole('button', { name: 'Повторить публикацию' })
+  const unknownResult = announcementPanel.getByText(
+    'Результат публикации неизвестен. Повторите публикацию.',
+  )
+  const keys = []
+  await page.route(
+    announcementPost,
+    async (route) => {
+      keys.push(route.request().headers()['idempotency-key'])
+      const response = await route.fetch()
+      assert.equal(response.status(), 201)
+      await route.abort('failed')
+    },
+    { times: 1 },
+  )
   await publishButton.click()
-  await announcementPanel.getByText('Результат публикации неизвестен. Проверьте ленту.').waitFor()
+  await unknownResult.waitFor()
   assert.equal(await titleField.inputValue(), lostResponseTitle)
   assert.equal(await bodyField.inputValue(), 'Введённый текст сохраняется при сбое')
   assert.equal(await publishButton.isDisabled(), true)
-  await announcementPanel.getByRole('button', { name: 'Проверить публикацию' }).click()
+  const replayRequest = page.waitForRequest(
+    (request) => request.url().endsWith('/announcements') && request.method() === 'POST',
+  )
+  await retryPublication.click()
+  assert.equal((await replayRequest).headers()['idempotency-key'], keys[0])
   await announcementPanel.getByText('Объявление опубликовано.').waitFor()
-  await announcementPanel
+  const lostEntries = announcementPanel
     .locator('.announcement-feed summary')
     .filter({ hasText: lostResponseTitle })
-    .waitFor()
-  assert.equal(announcementPosts, 1)
-  await page.unroute(announcementPost)
+  await lostEntries.waitFor()
+  assert.equal(await lostEntries.count(), 1)
+
+  const unreachableTitle = 'Первая отправка не дошла'
+  await titleField.fill(unreachableTitle)
+  await bodyField.fill('Не теряем черновик')
+  let blockedRoute
+  let blockedKey
+  await page.route(
+    announcementPost,
+    (route) => {
+      blockedRoute = route
+      blockedKey = route.request().headers()['idempotency-key']
+      // Leave the POST pending until its own request deadline releases the form.
+    },
+    { times: 1 },
+  )
+  await publishButton.click()
+  await unknownResult.waitFor({ timeout: 20_000 })
+  assert.ok(blockedKey)
+  await blockedRoute.abort().catch(() => {})
+  assert.equal(await titleField.inputValue(), unreachableTitle)
+  assert.equal(await bodyField.inputValue(), 'Не теряем черновик')
+  assert.equal(
+    await announcementPanel
+      .locator('.announcement-feed summary')
+      .filter({ hasText: unreachableTitle })
+      .count(),
+    0,
+  )
+
+  const otherTab = await page.context().newPage()
+  const identical = await otherTab.request.post(
+    `${baseURL}/api/v1/teaching/courses/${env.TEACHER_JOURNAL_COURSE_A}/announcements`,
+    {
+      headers: { Authorization: `Bearer ${teacherToken}` },
+      data: {
+        group_id: env.TEACHER_JOURNAL_GROUP_A,
+        title: unreachableTitle,
+        body: 'Не теряем черновик',
+      },
+    },
+  )
+  assert.equal(identical.status(), 201)
+  await otherTab.close()
+  await page.route(announcementPost, (route) => route.abort('failed'), { times: 1 })
+  await retryPublication.click()
+  await unknownResult.waitFor()
+  const recovered = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/announcements') && response.request().method() === 'POST',
+  )
+  await retryPublication.click()
+  const recovery = await recovered
+  assert.equal(recovery.request().headers()['idempotency-key'], blockedKey)
+  assert.equal(recovery.status(), 201)
+  assert.notEqual((await recovery.json()).id, (await identical.json()).id)
+  await announcementPanel.getByText('Объявление опубликовано.').waitFor()
   check(
-    'announcement publication, plain text, keyboard expansion, reload at 360/1440 px and lost response recovery',
+    'announcement retries recover committed, undelivered and timed-out requests by operation key',
   )
 
   await page.route('**/groups/*/announcements', (route) => route.abort('failed'))
@@ -714,7 +781,7 @@ try {
     `/groups/${env.TEACHER_JOURNAL_GROUP_A}/announcements`,
   )
   const teacherHeaders = { Authorization: `Bearer ${teacherToken}` }
-  for (let index = 0; index < 19; index += 1) {
+  for (let index = 0; index < 17; index += 1) {
     const response = await page.request.post(courseAnnouncementUrl, {
       headers: teacherHeaders,
       data: {
@@ -733,6 +800,34 @@ try {
   assert.equal(await announcementPanel.getByRole('button', { name: 'Показать ещё' }).count(), 0)
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
   check('announcement list loads a second real page without duplicates')
+
+  fixture('prepare-announcement-transfer')
+  const studentContext = await browser.newContext()
+  const studentPage = await studentContext.newPage()
+  const loginResponse = await studentPage.request.post(`${baseURL}/api/v1/auth/login`, {
+    headers: { Origin: baseURL },
+    data: { login: env.TEACHER_JOURNAL_STUDENT_LOGIN, password: env.TEACHER_JOURNAL_PASSWORD },
+  })
+  assert.equal(loginResponse.status(), 200)
+  const studentToken = (await loginResponse.json()).access_token
+  await studentPage.addInitScript((token) => {
+    if (window.location.pathname === '/e2e/announcement-feed.html') {
+      window.sessionStorage.setItem('announcement-fixture-bearer', token)
+    }
+  }, studentToken)
+  await studentPage.goto(
+    `${baseURL}/e2e/announcement-feed.html?course=${env.TEACHER_JOURNAL_COURSE_A}`,
+  )
+  await studentPage.getByText(lostResponseTitle, { exact: true }).waitFor()
+  await studentPage.getByRole('button', { name: 'Показать ещё' }).click()
+  await studentPage.getByText(title, { exact: true }).waitFor()
+  fixture('transfer-announcement-student')
+  await studentPage.getByRole('button', { name: 'Обновить ленту' }).click()
+  await studentPage.getByText(lostResponseTitle, { exact: true }).waitFor({ state: 'hidden' })
+  await studentPage.getByText(title, { exact: true }).waitFor()
+  assert.equal(await studentPage.locator('.announcement-feed li').count(), 1)
+  await studentContext.close()
+  check('student feed discards addresses from the old group after a real PostgreSQL transfer')
 
   // A teacher cannot use a copied URL to load another teacher's group.
   await page.goto(

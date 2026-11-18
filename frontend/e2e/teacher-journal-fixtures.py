@@ -54,6 +54,18 @@ def main() -> None:
     ):
         raise SystemExit("Refusing to seed browser fixtures outside uni_space_test")
 
+    if mode in {"prepare-announcement-transfer", "transfer-announcement-student"}:
+        course_id = int(os.environ["TEACHER_JOURNAL_COURSE_A"])
+        group_id = int(os.environ["TEACHER_JOURNAL_GROUP_B"])
+        with SessionLocal.begin() as db:
+            if mode == "prepare-announcement-transfer":
+                db.add(CourseGroup(course_offering_id=course_id, group_id=group_id))
+            else:
+                student = db.get(Student, int(os.environ["TEACHER_JOURNAL_STUDENT_A"]))
+                if student is None:
+                    raise SystemExit("Student fixture not found")
+                student.group_id = group_id
+        return
     if mode == "revoke":
         login = os.environ.get("TEACHER_JOURNAL_LOGIN_A")
         course_id = int(os.environ["TEACHER_JOURNAL_COURSE_A"])
@@ -357,6 +369,7 @@ def main() -> None:
             "TEACHER_JOURNAL_GROUP_B": str(groups[1].id),
             "TEACHER_JOURNAL_LESSON_B": str(lessons[1].id),
             "TEACHER_JOURNAL_ASSESSMENT_B": str(groups_of_assessments[2].id),
+            "TEACHER_JOURNAL_STUDENT_LOGIN": f"journal-student-0-{suffix}",
             "TEACHER_JOURNAL_STUDENT_A": str(students[0].id),
             "TEACHER_JOURNAL_STUDENT_B": str(students[1].id),
             "TEACHER_JOURNAL_STUDENT_C": str(students[2].id),

@@ -1,15 +1,22 @@
-import { useInfiniteQuery } from '@tanstack/react-query'
+import { useEffect } from 'react'
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 
 import { ApiClientError, apiFetch } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
+import { useStudentProfile } from '../profile/profileContext'
 import './announcements.css'
 
 export type Announcement = components['schemas']['Announcement']
 type Page = { items: Announcement[]; next_cursor: string | null }
-export type AnnouncementScope = { userId: string; courseId: string } & (
-  { role: 'teacher'; groupId: string } | { role: 'student' }
-)
+export type AnnouncementScope = {
+  userId: string
+  courseId: string
+  groupId: string
+  role: 'teacher' | 'student'
+}
+
+class AnnouncementGroupChanged extends Error {}
 
 export const announcementKeys = (scope: AnnouncementScope) =>
   ['course-announcements', scope.userId, scope.role, scope.courseId] as const
@@ -24,7 +31,7 @@ export async function getAnnouncementPage(
       ? `teaching/courses/${scope.courseId}/groups/${scope.groupId}/announcements`
       : `academics/courses/${scope.courseId}/announcements`
   let canPublishToAll = false
-  let teacherId: string | null = null
+  let serverGroup: string | null = null
   const page = await apiFetch<Page>(
     `/api/v1/${path}${cursor ? '?' + new URLSearchParams({ cursor }) : ''}`,
     {
@@ -32,16 +39,19 @@ export async function getAnnouncementPage(
       signal,
       onResponseHeaders(headers) {
         canPublishToAll = headers.get('X-Can-Publish-To-All-Groups') === 'true'
-        teacherId = headers.get('X-Announcement-Teacher-Id')
+        serverGroup = headers.get('X-Announcement-Group-Id')
       },
     },
   )
-  return { ...page, canPublishToAll, teacherId }
+  if (scope.role === 'student' && serverGroup !== scope.groupId) {
+    throw new AnnouncementGroupChanged()
+  }
+  return { ...page, canPublishToAll }
 }
 
 export function useAnnouncements(scope: AnnouncementScope) {
   return useInfiniteQuery({
-    queryKey: [...announcementKeys(scope), scope.role === 'teacher' ? scope.groupId : null],
+    queryKey: [...announcementKeys(scope), scope.groupId],
     queryFn: ({ pageParam, signal }) => getAnnouncementPage(scope, pageParam, signal),
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next_cursor,
@@ -56,12 +66,46 @@ const dateFormat = new Intl.DateTimeFormat('ru-RU', {
   timeZone: 'Europe/Moscow',
 })
 
+export function StudentAnnouncementFeed({ courseId }: { courseId: string }) {
+  const profile = useStudentProfile()
+  const userId = profile?.id
+  const groupId = profile?.group.id
+  const client = useQueryClient()
+  useEffect(() => {
+    const prefix = ['course-announcements', userId, 'student', courseId]
+    client.removeQueries({
+      queryKey: prefix,
+      predicate: (query) => query.queryKey[prefix.length] !== groupId,
+    })
+  }, [client, courseId, groupId, userId])
+  if (!groupId || !userId)
+    return <LoadingState title="Загружаем учебную группу…" variant="compact" />
+  return <AnnouncementFeed scope={{ role: 'student', groupId, courseId, userId }} />
+}
+
 export function AnnouncementFeed({ scope }: { scope: AnnouncementScope }) {
   const query = useAnnouncements(scope)
+  const client = useQueryClient()
+  const groupChanged = query.error instanceof AnnouncementGroupChanged
+  const rejectedStudentCursor =
+    scope.role === 'student' &&
+    query.isFetchNextPageError &&
+    query.error instanceof ApiClientError &&
+    query.error.status === 422
+  useEffect(() => {
+    if (groupChanged || rejectedStudentCursor) {
+      void client.invalidateQueries({ queryKey: ['student-profile'] })
+    }
+  }, [client, groupChanged, rejectedStudentCursor])
   if (query.isPending) return <LoadingState title="Загружаем объявления…" variant="compact" />
   const denied =
     query.error instanceof ApiClientError && [403, 404].includes(query.error.status ?? 0)
-  if (denied || (query.isError && !query.isFetchNextPageError)) {
+  if (
+    denied ||
+    groupChanged ||
+    rejectedStudentCursor ||
+    (query.isError && !query.isFetchNextPageError)
+  ) {
     return (
       <ErrorState
         title={denied ? 'Объявления недоступны' : 'Не удалось загрузить объявления'}
