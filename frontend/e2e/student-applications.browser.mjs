@@ -271,13 +271,29 @@ async function fit(width) {
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
   )
-  const dimensions = await page.evaluate(() => ({
-    viewport: window.innerWidth,
-    content: document.documentElement.scrollWidth,
-  }))
+  const dimensions = await page.evaluate(async () => {
+    // Resizing immediately after navigation can start a shell transition.
+    // Measure the final layout and report the overflowing elements on failure.
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => {})),
+    )
+    const viewport = window.innerWidth
+    const content = document.documentElement.scrollWidth
+    const overflowing =
+      content > viewport
+        ? Array.from(document.querySelectorAll('body *'))
+            .filter((element) => element.getBoundingClientRect().right > viewport + 1)
+            .slice(0, 8)
+            .map((element) => ({ tag: element.tagName, class: element.getAttribute('class') }))
+        : []
+    return { viewport, content, overflowing }
+  })
   assert.ok(
     dimensions.content <= dimensions.viewport,
-    `Content width ${dimensions.content}px at ${width}px`,
+    `Content width ${dimensions.content}px at ${width}px: ${JSON.stringify(dimensions.overflowing)}`,
   )
 }
 
