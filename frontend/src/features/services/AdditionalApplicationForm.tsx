@@ -1164,26 +1164,45 @@ function getCorrectionRecovery(
   events: components['schemas']['ApplicationHistoryEvent'][],
 ): 'matched' | 'files_unverified' | 'different' | null {
   if (item.id !== previous.id || item.service.code !== previous.service.code) return null
-  const steps = item.version - attempt.version
-  if (steps < 1 || steps > 3 || item.document_status !== attempt.documentStatus) return null
-  const [returned, resubmitted, started, decided] = events.slice(-(steps + 1))
+  const returnedAt = Date.parse(attempt.updatedAt ?? '')
+  const start = events.findIndex((event) => Date.parse(event.created_at) >= returnedAt)
+  if (start === -1) return null
+  const tail = events.slice(start)
+  const [returned, resubmitted, started, decided] = tail
+  const transitions = tail.length - 1
   if (
-    !returned ||
+    transitions < 1 ||
+    transitions > 3 ||
     returned.from_status !== 'in_review' ||
     returned.to_status !== 'needs_correction' ||
-    !attempt.updatedAt ||
-    !(Date.parse(returned.created_at) >= Date.parse(attempt.updatedAt)) ||
-    !(Date.parse(events.at(-1)?.created_at ?? '') >= Date.parse(item.updated_at)) ||
-    !resubmitted ||
-    resubmitted.from_status !== 'needs_correction' ||
+    resubmitted?.from_status !== 'needs_correction' ||
     resubmitted.to_status !== 'resubmitted' ||
-    (steps >= 2 && (started?.from_status !== 'resubmitted' || started.to_status !== 'in_review')) ||
-    (steps === 3 &&
+    (transitions >= 2 &&
+      (started?.from_status !== 'resubmitted' || started.to_status !== 'in_review')) ||
+    (transitions === 3 &&
       (decided?.from_status !== 'in_review' ||
         !['approved', 'rejected', 'needs_correction'].includes(decided.to_status))) ||
-    events.at(-1)?.to_status !== item.review_status
+    tail.at(-1)?.to_status !== item.review_status
   )
     return null
+
+  // Only the approved accounting workflow can add document versions after
+  // this review chain. Issuance does not append a review transition.
+  const extraVersions = item.version - attempt.version - transitions
+  const lastEventAt = Date.parse(tail.at(-1)?.created_at ?? '')
+  const updatedAt = Date.parse(item.updated_at)
+  const unchangedDocument =
+    extraVersions === 0 &&
+    item.document_status === attempt.documentStatus &&
+    lastEventAt >= updatedAt
+  const issuedAfterApproval =
+    extraVersions > 0 &&
+    item.service.code === 'accounting_certificate' &&
+    item.review_status === 'approved' &&
+    attempt.documentStatus === 'pending' &&
+    (item.document_status === 'failed' || item.document_status === 'ready') &&
+    updatedAt >= lastEventAt
+  if (!unchangedDocument && !issuedAfterApproval) return null
   const attachments = item.attachments ?? []
   if (
     attachments.length !== attempt.retainedIds.length + attempt.files.length ||

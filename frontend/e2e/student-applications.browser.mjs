@@ -478,6 +478,97 @@ try {
   assert.equal(accounting.review_status, 'in_review')
   await history.getByText('Подано повторно → На рассмотрении', { exact: true }).waitFor()
 
+  for (const outcome of ['ready', 'failed', 'different']) {
+    const returnedAccounting = await returnApplication(await createAccounting('Исходная цель'))
+    await open(returnedAccounting.id)
+    await edit.click()
+    await purpose.fill('Цель после доработки')
+    const path = `${base}/${returnedAccounting.id}`
+    const originalHistory = (await (await get(`${path}/history`)).json()).items
+    let postCount = 0
+    const routePath = `**${path}/resubmit`
+    await page.route(routePath, async (route) => {
+      postCount++
+      assert.equal(postCount, 1)
+      const response = await route.fetch({
+        maxRetries: 0,
+        ...(outcome === 'different'
+          ? {
+              postData: {
+                expected_version: returnedAccounting.version,
+                form_data: { purpose: 'Конкурентная цель' },
+              },
+            }
+          : {}),
+      })
+      assert.equal(response.status(), 200)
+      const submitted = await response.json()
+      assert.equal(submitted.id, returnedAccounting.id)
+      assert.equal(submitted.version, returnedAccounting.version + 1)
+      const reviewing = await review(submitted, 'start_review')
+      const root = join(process.env.ATTACHMENT_STORAGE_PATH, 'issued_documents')
+      if (outcome === 'failed') await rename(root, `${root}.r3-backup`)
+      try {
+        if (outcome === 'failed') await writeFile(root, '')
+        const approved = await review(reviewing, 'approve')
+        assert.equal(approved.document_status, outcome === 'failed' ? 'failed' : 'ready')
+        assert.equal(approved.version, returnedAccounting.version + 4)
+      } finally {
+        if (outcome === 'failed') {
+          await unlink(root)
+          await rename(`${root}.r3-backup`, root)
+        }
+      }
+      await route.abort('failed')
+    })
+    try {
+      await send.click()
+      if (outcome === 'different') {
+        await page.getByText(/Сохранённые поля или состав вложений отличаются/).waitFor()
+        assert.equal(
+          await page
+            .getByText(`Заявление № ${returnedAccounting.id} подано повторно.`, { exact: false })
+            .count(),
+          0,
+        )
+      } else {
+        await waitForCorrection(returnedAccounting.id, returnedAccounting.version + 1)
+      }
+      const saved = await getItem(returnedAccounting.id)
+      assert.equal(saved.id, returnedAccounting.id)
+      assert.equal(saved.version, returnedAccounting.version + 4)
+      assert.equal(saved.review_status, 'approved')
+      assert.equal(saved.document_status, outcome === 'failed' ? 'failed' : 'ready')
+      const expectedPurpose = outcome === 'different' ? 'Конкурентная цель' : 'Цель после доработки'
+      assert.equal(saved.form_data.purpose, expectedPurpose)
+      await page
+        .locator('.application-detail article')
+        .getByText(expectedPurpose, { exact: true })
+        .waitFor()
+      await history.getByText('Текущий этап — Одобрено', { exact: true }).waitFor()
+      const events = (await (await get(`${path}/history`)).json()).items
+      assert.deepEqual(events.slice(0, originalHistory.length), originalHistory)
+      assert.deepEqual(
+        events
+          .slice(originalHistory.length)
+          .map(({ from_status, to_status }) => [from_status, to_status]),
+        [
+          ['needs_correction', 'resubmitted'],
+          ['resubmitted', 'in_review'],
+          ['in_review', 'approved'],
+        ],
+      )
+      assert.equal(await send.count(), 0)
+      assert.equal(postCount, 1)
+      if (outcome === 'different') page.once('dialog', (dialog) => void dialog.accept())
+    } finally {
+      await page.unroute(routePath)
+    }
+  }
+  console.log(
+    'PASS: lost correction response followed by document issuance, failure and competing data',
+  )
+
   // Keep the status needs_correction while making the open editor's version stale.
   accounting = await review(accounting, 'return_for_correction', 'Ещё нужны исправления')
   await open(accounting.id)
