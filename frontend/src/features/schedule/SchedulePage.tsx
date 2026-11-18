@@ -210,7 +210,11 @@ export function SchedulePage() {
   const date = selectedDate && isValidCalendarDate(selectedDate) ? selectedDate : getMoscowDate()
   const mode = params.get('mode') === 'week' ? 'week' : 'day'
   function setView(nextDate: string, nextMode: 'day' | 'week') {
-    setParams({ date: nextDate, mode: nextMode }, { replace: true, preventScrollReset: true })
+    // Commit the URL before the next date/mode control reads it.
+    setParams(
+      { date: nextDate, mode: nextMode },
+      { replace: true, preventScrollReset: true, flushSync: true },
+    )
   }
   const [navigation, setNavigation] = useState<Lesson['latest_lesson']>(null)
   const pageRef = useRef<HTMLElement>(null)
