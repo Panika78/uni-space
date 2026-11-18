@@ -144,9 +144,10 @@ try {
   const b = await openStaff('B', 1440)
   const c = await openStaff('C', 1440)
   const denied = await openStaff('D', 360)
+  await api(student, root, {}, { expected: 401 })
   const data = { basis: 'family', starts_on: '2026-12-01', ends_on: '2027-01-01' }
-  const leave = await (
-    await api(student, '/api/v1/applications', studentHeaders, {
+  async function submitLeave() {
+    const response = await api(student, '/api/v1/applications', studentHeaders, {
       method: 'POST',
       expected: 201,
       multipart: {
@@ -154,7 +155,9 @@ try {
         files: { name: 'fictional.pdf', mimeType: 'application/pdf', buffer: pdf },
       },
     })
-  ).json()
+    return response.json()
+  }
+  const leave = await submitLeave()
   const attachmentId = leave.attachments[0].id
   const attachmentPath = `${root}/attachments/${attachmentId}/download`
   const accounting = await (
@@ -196,6 +199,16 @@ try {
   await a.page.goForward()
   await a.page.getByRole('heading', { name: `Заявление № ${legacy}`, exact: true }).waitFor()
   await a.page.goto(`${base}${queue}`)
+  await a.page.getByLabel('Дата создания с').fill('2026-10-02')
+  await a.page.getByLabel('Дата создания по').fill('2026-10-01')
+  const invalidDates = a.page.waitForResponse((response) =>
+    response.url().includes('created_from=2026-10-02'),
+  )
+  await a.page.getByRole('button', { name: 'Применить' }).click()
+  assert.equal((await invalidDates).status(), 422)
+  await a.page.getByText('Проверьте параметры запроса и заполненные поля.').waitFor()
+  await a.page.getByRole('link', { name: 'Сбросить фильтры' }).click()
+  await a.page.getByRole('link', { name: `№ ${leave.id}`, exact: true }).waitFor()
   await search(a.page, `№ ${legacy}`)
   await oldLink.waitFor()
   assert.equal(await a.page.locator('tbody tr').count(), 1)
@@ -219,6 +232,7 @@ try {
   )
 
   await openDetail(a.page, leave.id)
+  await expectNoOverflow(a.page)
   await openDetail(b.page, leave.id)
   await expectNoOverflow(b.page)
   await denied.page.goto(`${base}${queue}/${leave.id}`)
@@ -314,10 +328,11 @@ try {
   await b.page.getByText(reason, { exact: true }).waitFor()
   assert.equal(await b.page.locator('.staff-applications__history li').count(), 6)
 
-  await openDetail(a.page, legacy)
+  const rejection = await submitLeave()
+  await openDetail(a.page, rejection.id)
   let committed = 0
   await a.page.route(
-    `**${root}/${legacy}/review`,
+    `**${root}/${rejection.id}/review`,
     async (route) => {
       const response = await route.fetch()
       assert.equal(response.status(), 200, await response.text())
@@ -329,11 +344,19 @@ try {
   await activate(a.page, 'Принять в работу')
   await a.page.getByText('Ответ на действие не получен.', { exact: false }).waitFor()
   assert.equal(committed, 1)
-  await confirm(a.page, 'Отклонить', rejectReason)
+  await activate(a.page, 'Отклонить')
+  const rejectionDialog = a.page.getByRole('dialog', { name: 'Отклонить' })
+  await rejectionDialog.getByRole('button', { name: 'Отклонить', exact: true }).click()
+  await rejectionDialog.getByText('Укажите причину.').waitFor()
+  await rejectionDialog.getByLabel('Причина').fill(rejectReason)
+  await rejectionDialog.getByRole('button', { name: 'Отклонить', exact: true }).click()
   await a.page.getByText('Отклонено', { exact: true }).waitFor()
   await a.page.reload()
   await a.page.getByText('Причина отказа', { exact: true }).waitFor()
-  assert.equal(await a.page.getByText(rejectReason, { exact: true }).count(), 2)
+  await a.page
+    .locator('.staff-applications__history')
+    .getByText(rejectReason, { exact: true })
+    .waitFor()
 
   await openDetail(c.page, accounting.id)
   await activate(c.page, 'Принять в работу')
@@ -344,6 +367,7 @@ try {
     await c.page.getByRole('link', { name: 'К заявлениям' }).click()
     await c.page.getByRole('link', { name: 'Завершённые', exact: true }).click()
     await c.page.getByText('Ошибка выдачи PDF', { exact: true }).waitFor()
+    await expectNoOverflow(c.page)
     await c.page.getByRole('link', { name: `№ ${accounting.id}`, exact: true }).click()
     await c.page.getByRole('button', { name: 'Повторить выдачу PDF' }).waitFor()
   })
