@@ -64,8 +64,22 @@ export function useCourseReturnPosition(isReady: boolean) {
       restoredKey.current = key
       target?.focus({ preventScroll: true })
       window.scrollTo({ top: point.scroll, behavior: 'instant' })
+      frame = requestAnimationFrame(() => {
+        if (cancelled) return
+        const currentTarget = Array.from(
+          document.querySelectorAll<HTMLElement>(point.selector),
+        ).find((element) => element.getClientRects().length > 0)
+        if (currentTarget && document.activeElement !== currentTarget) {
+          currentTarget.focus({ preventScroll: true })
+          window.scrollTo({ top: point.scroll, behavior: 'instant' })
+        }
+      })
     }
-    frame = requestAnimationFrame(restore)
+    // Browser history restoration and app scroll restoration can complete
+    // after the first paint. Let them finish before restoring link focus.
+    frame = requestAnimationFrame(() => {
+      if (!cancelled) frame = requestAnimationFrame(restore)
+    })
     return () => {
       cancelled = true
       cancelAnimationFrame(frame)
