@@ -257,7 +257,9 @@ export function SchedulePage() {
     if (scopeChanged) void client.invalidateQueries({ queryKey: ['student-profile'] })
   }, [client, scopeChanged])
   const isLoading = query.isPending || !!access?.isChecking
-  useCourseReturnPosition(query.isSuccess && !isLoading)
+  // Restore focus only after the fresh personal schedule response has replaced
+  // any pre-navigation data; otherwise the next refetch can detach the link.
+  useCourseReturnPosition(query.isSuccess && !query.isFetching && !isLoading)
   useEffect(() => {
     if (isSuspended) return
     if (!navigation || getMoscowDate(new Date(navigation.starts_at)) !== date) return
