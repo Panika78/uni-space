@@ -1,3 +1,4 @@
+import { clearJournalStorage } from '../staff-journals/journalStorage'
 import type { QueryClient } from '@tanstack/react-query'
 import { ApiClientError, apiFetch } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
@@ -94,6 +95,7 @@ export class AuthSession {
   }
 
   private clearSession(message = '') {
+    clearJournalStorage()
     this.token = undefined
     this.generation.abort()
     this.generation = new AbortController()

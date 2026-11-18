@@ -5,7 +5,14 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ApiClientError } from '../../shared/api/client'
 import { ApplicationDetailPage, ApplicationsList } from './ApplicationsPages'
 
-const { apiFetch } = vi.hoisted(() => ({ apiFetch: vi.fn() }))
+const { apiFetch, getApplicationHistory } = vi.hoisted(() => ({
+  apiFetch: vi.fn(),
+  getApplicationHistory: vi.fn(),
+}))
+vi.mock('./applicationQueries', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  getApplicationHistory,
+}))
 vi.mock('../../shared/api/client', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   apiFetch,
@@ -13,6 +20,7 @@ vi.mock('../../shared/api/client', async (importOriginal) => ({
 afterEach(() => {
   cleanup()
   apiFetch.mockReset()
+  getApplicationHistory.mockReset().mockResolvedValue({ items: [], next_cursor: null })
 })
 const item = {
   id: '27',
@@ -154,7 +162,8 @@ it('appends pages and retains the list when returning from separate details', as
   expect(screen.getByText('Канцелярия')).toBeInTheDocument()
   expect(screen.getByText('Подано')).toBeInTheDocument()
   expect(screen.getByText('Ожидает подготовки')).toBeInTheDocument()
-  expect(screen.queryByText(/PDF|История/)).not.toBeInTheDocument()
+  await screen.findByText('Событий пока нет.')
+  expect(screen.queryByRole('button', { name: 'Скачать PDF' })).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('link', { name: /К моим заявлениям/ }))
   await screen.findByRole('link', { name: /№ 26/ })
   await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(5))
@@ -262,7 +271,9 @@ for (const failure of [
       await client.refetchQueries({ queryKey: ['applications', 'detail', '27'] })
     })
     await screen.findByRole('alert')
-    expect(client.getQueryData(['applications', 'detail', '27'])).toBeDefined()
+    const cachedDetail = client.getQueryData(['applications', 'detail', '27'])
+    if (failure.status === undefined) expect(cachedDetail).toBeDefined()
+    else expect(cachedDetail).toBeUndefined()
     expect(screen.queryByRole('article')).not.toBeInTheDocument()
     for (const text of [
       'Канцелярия',
@@ -546,4 +557,31 @@ it('retries only the failed next page once without losing the valid first page',
   await screen.findByRole('link', { name: /№ 1$/ })
   expect(getVisibleApplicationIds()).toEqual(rows.map((row) => row.id))
   expect(cursors).toEqual([null, 'cursor-6', 'cursor-6'])
+})
+
+it('clears private detail and history when a later history page denies access', async () => {
+  apiFetch.mockResolvedValue({ ...item, feedback: 'Private detail' })
+  getApplicationHistory
+    .mockResolvedValueOnce({
+      items: [
+        {
+          id: '11',
+          actor_user_id: '6',
+          from_status: 'in_review',
+          to_status: 'needs_correction',
+          comment: 'Private reason',
+          created_at: item.created_at,
+        },
+      ],
+      next_cursor: 'more',
+    })
+    .mockRejectedValueOnce(new ApiClientError('forbidden', 'forbidden', 403))
+  const { client } = mount('/applications/27')
+  await screen.findByText('Private reason')
+  fireEvent.click(screen.getByRole('button', { name: 'Показать ещё события' }))
+  await screen.findByText('Доступ к заявлению запрещён')
+  expect(screen.queryByText('Private detail')).not.toBeInTheDocument()
+  expect(screen.queryByText('Private reason')).not.toBeInTheDocument()
+  expect(client.getQueryData(['applications', 'detail', '27'])).toBeUndefined()
+  expect(client.getQueryData(['applications', 'history', '27'])).toBeUndefined()
 })

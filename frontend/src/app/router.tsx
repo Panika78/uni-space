@@ -33,6 +33,7 @@ import {
 } from '../features/staffApplications/StaffApplicationQueue'
 import { StaffApplicationDetail } from '../features/staffApplications/StaffApplicationDetail'
 import { StaffSchedulePage } from '../features/schedule/StaffSchedulePage'
+import { StaffJournalsPage } from '../features/staff-journals/StaffJournalsPage'
 import { TeacherJournalsPage } from '../features/teacher/TeacherJournalsPage'
 import type { ReactNode } from 'react'
 import type { RouteObject } from 'react-router-dom'
@@ -206,6 +207,15 @@ export const appRoutes: RouteObject[] = [
                         element: <StaffApplicationSessionLayout />,
                         children: [
                           { path: '/staff', element: <StaffHome /> },
+                          {
+                            element: (
+                              <RoleGuard
+                                role="staff"
+                                anyOfPermissions={['grades.edit', 'attendance.edit']}
+                              />
+                            ),
+                            children: [{ path: '/staff/journals', element: <StaffJournalsPage /> }],
+                          },
                           {
                             element: <RoleGuard role="staff" permission="schedule.edit" />,
                             children: [{ path: '/staff/schedule', element: <StaffSchedulePage /> }],

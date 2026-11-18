@@ -1,14 +1,25 @@
 from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from app.core.schemas import ApiError, Page
+from app.core.schemas import ApiError, Page, PaginationParams
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_db_session
 from app.models import User
 from app.teaching import dates, service
+from app.teaching.announcements import (
+    Announcement,
+    TeacherAnnouncementCreate,
+    can_publish_to_all,
+    create_announcement,
+    list_announcements,
+    require_unique_announcement_fields,
+    require_unique_query_params,
+)
 from app.teaching.schemas import (
     AssessmentDatesRequest,
     AssessmentDatesResponse,
@@ -166,3 +177,52 @@ def update_assessment_dates(
     except Exception:
         db.rollback()
         raise
+
+
+@router.post(
+    "/courses/{course_offering_id}/announcements",
+    response_model=Announcement,
+    status_code=201,
+    dependencies=[Depends(require_unique_announcement_fields)],
+    responses={409: {"model": ApiError}},
+)
+def publish_teacher_announcement(
+    course_offering_id: TeachingId,
+    body: TeacherAnnouncementCreate,
+    request: Request,
+    db: Db,
+    teacher: TeacherId,
+    user: Annotated[User, Depends(get_current_user)],
+    publication_key: Annotated[UUID | None, Header(alias="Idempotency-Key")] = None,
+):
+    if request.query_params or len(request.headers.getlist("Idempotency-Key")) > 1:
+        raise HTTPException(422, "validation_error")
+    return create_announcement(db, user, teacher, int(course_offering_id), body, publication_key)
+
+
+@router.get(
+    JOURNAL + "/announcements",
+    response_model=Page[Announcement],
+    dependencies=[Depends(require_unique_query_params)],
+    responses={
+        200: {
+            "headers": {
+                "X-Can-Publish-To-All-Groups": {"schema": {"type": "boolean"}},
+                "X-Announcement-Teacher-Id": {"schema": {"type": "string"}},
+            }
+        }
+    },
+)
+def get_teacher_announcements(
+    db: Db,
+    teacher: TeacherId,
+    scope: Scope,
+    params: Annotated[PaginationParams, Query()],
+    response: Response,
+):
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Can-Publish-To-All-Groups"] = str(
+        db.scalar(select(can_publish_to_all(scope[0], teacher)))
+    ).lower()
+    response.headers["X-Announcement-Teacher-Id"] = str(teacher)
+    return list_announcements(db, *scope, params, scope=teacher)

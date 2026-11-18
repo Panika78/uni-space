@@ -290,7 +290,7 @@ try {
           }
         }
         await page.locator('.applications-table a').first().click()
-        await page.locator('.application-detail dl').waitFor()
+        await page.locator('.application-detail article dl').waitFor()
         await inspect('application-detail', width)
         assert.equal(await page.locator('.application-detail > a').count(), 1)
       }

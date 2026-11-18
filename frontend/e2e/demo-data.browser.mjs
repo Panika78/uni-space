@@ -68,8 +68,8 @@ async function compareApplication(page, created) {
   const saved = await readApi(page, `applications/${created.id}`)
   assert.deepEqual(saved, created)
   for (const key of ['created_at', 'updated_at']) assert.ok(Number.isFinite(Date.parse(saved[key])))
-  const scope = page.locator('.application-detail')
-  assert.equal(await scope.locator('h2').innerText(), created.service.title)
+  const scope = page.locator('.application-detail article')
+  await scope.getByRole('heading', { name: created.service.title, exact: true }).waitFor()
   assert.equal(
     await field(scope, 'Место предоставления').innerText(),
     created.form_data.place_of_submission,

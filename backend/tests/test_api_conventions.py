@@ -784,7 +784,24 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
     assert openapi.status_code == 200
     assert openapi.json()["components"]["schemas"]["ApiError"]
     assert "servers" not in openapi.json()
-    assert set(openapi.json()["paths"]) == {
+    paths = openapi.json()["paths"]
+    courses = "/api/v1/staff/journals/courses/{course_offering_id}"
+    journal = courses + "/groups/{group_id}"
+    scores = journal + "/assessments/{assessment_group_id}/results"
+    staff_journal_paths = {
+        "/api/v1/staff/journals/catalog",
+        f"{journal}/students",
+        f"{journal}/assessments",
+        scores,
+        scores + "/{student_id}/history",
+        f"{journal}/final-results",
+        f"{journal}/lessons",
+        journal + "/lessons/{lesson_id}/attendance",
+        courses + "/historical-final-students",
+        courses + "/students/{student_id}/final-result/history",
+    }
+    assert all(set(paths[path]) == {"get"} for path in staff_journal_paths)
+    assert set(paths) == staff_journal_paths | {
         "/api/v1/admin/users",
         "/api/v1/admin/users/{user_id}",
         "/api/v1/admin/users/{user_id}/active",
@@ -795,6 +812,9 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
         "/api/v1/attendance/lessons/{lesson_id}",
         "/api/v1/attendance/lessons/{lesson_id}/students/{student_id}",
         "/api/v1/teaching/assignments",
+        "/api/v1/teaching/courses/{course_offering_id}/announcements",
+        "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/announcements",
+        "/api/v1/academics/courses/{course_offering_id}/announcements",
         "/api/v1/teaching/courses/{course_offering_id}/assessments/{assessment_id}/dates",
         "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/final-results",
         "/api/v1/final-results/courses/{course_offering_id}/students/{student_id}",

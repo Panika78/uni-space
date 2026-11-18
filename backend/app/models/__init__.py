@@ -25,12 +25,13 @@ from app.models.schedule import (
     Room,
 )
 from app.models.student_status_operation import StudentStatusOperation
-from app.models.teaching import TeachingAssignment
+from app.models.teaching import TeacherAnnouncement, TeachingAssignment
 from app.models.university import OrgUnit, Program, Student, StudyGroup, Subgroup, Teacher
 
 __all__ = [
     "Attendance",
     "TeachingAssignment",
+    "TeacherAnnouncement",
     "AuditEvent",
     "StudentStatusOperation",
     "Assessment",

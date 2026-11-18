@@ -510,6 +510,8 @@ jobs:
           node frontend/e2e/applications.browser.mjs
           node frontend/e2e/applications-review.browser.mjs
           node frontend/e2e/applications-pagination.browser.mjs
+      - name: Run student correction and PDF archive Chromium E2E
+        run: node frontend/e2e/student-applications.browser.mjs
       - name: Show server logs on failure
         if: failure()
         run: tail -n 80 work/services-api.log work/services-frontend.log 2>/dev/null || true
@@ -698,7 +700,7 @@ jobs:
             sleep 1
           done
           PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs SCHEDULE_TEST_PASSWORD=fictional-schedule-password node frontend/e2e/schedule.browser.mjs
-      - name: Run teacher journal against PostgreSQL and Chromium
+      - name: Run teacher and staff journals against PostgreSQL and Chromium
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@127.0.0.1:55432/uni_space_test
