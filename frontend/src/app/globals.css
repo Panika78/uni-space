@@ -2593,6 +2593,10 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-.application-detail .form-actions {
-  flex-wrap: wrap;
+.application-detail .form-actions > .service-action {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }

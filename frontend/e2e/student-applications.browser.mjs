@@ -1,4 +1,4 @@
-/* global process, console, URL, Buffer, document, window */
+/* global process, console, URL, Buffer, document, window, requestAnimationFrame */
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises'
@@ -161,7 +161,17 @@ async function waitForCorrection(id, version) {
 
 async function fit(width) {
   await page.setViewportSize({ width, height: 850 })
-  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  )
+  const dimensions = await page.evaluate(() => ({
+    viewport: window.innerWidth,
+    content: document.documentElement.scrollWidth,
+  }))
+  assert.ok(
+    dimensions.content <= dimensions.viewport,
+    `Content width ${dimensions.content}px at ${width}px`,
+  )
 }
 
 try {
