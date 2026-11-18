@@ -426,7 +426,7 @@ jobs:
           uv python install 3.12.16
           mkdir -p work/browser-tooling
           npm install --prefix work/browser-tooling --no-save --package-lock=false playwright@1.57.0
-          node work/browser-tooling/node_modules/playwright/cli.js install chromium --only-shell
+          node work/browser-tooling/node_modules/playwright/cli.js install chromium
           echo "PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs" >> "$GITHUB_ENV"
       - name: Apply migrations and create two fictional students
         run: |
@@ -510,6 +510,8 @@ jobs:
           node frontend/e2e/applications.browser.mjs
           node frontend/e2e/applications-review.browser.mjs
           node frontend/e2e/applications-pagination.browser.mjs
+      - name: Run student correction and PDF archive Chromium E2E
+        run: node frontend/e2e/student-applications.browser.mjs
       - name: Show server logs on failure
         if: failure()
         run: tail -n 80 work/services-api.log work/services-frontend.log 2>/dev/null || true

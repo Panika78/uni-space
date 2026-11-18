@@ -88,6 +88,7 @@ for (const detail of [false, true]) {
               { status: 401 },
             )
           if (path.endsWith('/auth/logout')) return Response.json({ session_revoked: true })
+          if (path.includes('/history?')) return Response.json({ items: [], next_cursor: null })
           if (new Headers(init?.headers).get('Authorization') === 'Bearer a') {
             requestedA = true
             return delayed

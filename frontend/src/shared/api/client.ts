@@ -230,8 +230,11 @@ export async function apiFetchBlob(
   }
   if (!response.ok) {
     const payload: unknown = await response.json().catch(() => null)
+    auth.signal.throwIfAborted()
+    callerSignal?.throwIfAborted()
+    auth.assertCurrent()
+    if (response.status === 401) auth.invalidate()
     if (isApiError(payload)) {
-      if (response.status === 401) auth.invalidate()
       throw new ApiClientError(
         payload.error.message,
         payload.error.code,
@@ -241,7 +244,11 @@ export async function apiFetchBlob(
     }
     throw new ApiClientError('Не удалось скачать файл', 'http_error', response.status)
   }
-  return response.blob()
+  const blob = await response.blob()
+  auth.signal.throwIfAborted()
+  callerSignal?.throwIfAborted()
+  auth.assertCurrent()
+  return blob
 }
 
 function createRequestTimeoutError() {

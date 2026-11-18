@@ -76,7 +76,13 @@ try {
         .evaluate((el) => document.activeElement === el),
       true,
     )
-    assert.equal(await page.getByText(/История обработки|Скачать PDF/).count(), 0)
+    await page
+      .getByRole('region', { name: 'История рассмотрения' })
+      .getByText('Подано', { exact: true })
+      .waitFor()
+    if (created.document_status === 'ready') {
+      await page.getByRole('button', { name: 'Скачать PDF' }).waitFor()
+    }
     await page.getByRole('link', { name: /К моим заявлениям/ }).click()
     await page.getByRole('link', { name: new RegExp(`№ ${created.id}$`) }).waitFor()
     await assertApplicationInteractions(page, context, String(created.id), width)
@@ -107,6 +113,9 @@ try {
     await page.route('**/api/v1/applications/90000', (r) =>
       r.fulfill({ json: { ...created, id: '90000', review_status: 'submitted' } }),
     )
+    await page.route('**/api/v1/applications/90000/history?*', (r) =>
+      r.fulfill({ json: { items: [], next_cursor: null } }),
+    )
     for (const factor of [1, 1.5, 2]) {
       await page.goto(`${base}/services?tab=applications`)
       await page.locator('.application-status--rejected').waitFor()
@@ -127,6 +136,7 @@ try {
     }
     await page.unroute('**/api/v1/applications?*')
     await page.unroute('**/api/v1/applications/90000')
+    await page.unroute('**/api/v1/applications/90000/history?*')
     console.log(
       `PASS ${width}px: explicit status-chip fixture at 100/150/200%, list and detail, all review statuses`,
     )

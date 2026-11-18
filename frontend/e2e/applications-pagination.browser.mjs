@@ -29,6 +29,8 @@ try {
     const requests = []
     await page.route('**/api/v1/applications**', async (route) => {
       const url = new URL(route.request().url())
+      if (url.pathname.endsWith('/history'))
+        return route.fulfill({ json: { items: [], next_cursor: null } })
       if (url.pathname !== '/api/v1/applications')
         return route.fulfill({
           json: rows.find((row) => row.id === url.pathname.split('/').at(-1)),
