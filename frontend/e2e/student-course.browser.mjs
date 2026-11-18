@@ -135,7 +135,12 @@ try {
     await page.getByRole('button', { name: 'Неделя', exact: true }).getAttribute('aria-pressed'),
     'true',
   )
-  assert.ok(await original.evaluate((element) => element === document.activeElement))
+  const originalSelector = `[data-lesson-id="${fixture.single}"] .lesson-course-link--title`
+  await page.waitForFunction(
+    (selector) => document.querySelector(selector) === document.activeElement,
+    originalSelector,
+    { timeout: 5000 },
+  )
   await page.goForward()
   await panel().getByText('Показать ещё', { exact: true }).waitFor()
   await page.getByRole('button', { name: 'К расписанию' }).click()
@@ -191,6 +196,12 @@ try {
   await page.goto(baseURL + scheduleUrl)
   const arrow = card('single').getByRole('link', { name: /Открыть дисциплину/ })
   await arrow.waitFor()
+  const arrowSelector = `[data-lesson-id="${fixture.single}"] .lesson-course-link--arrow`
+  await page.waitForFunction((selector) => {
+    const link = document.querySelector(selector)
+    const bounds = link?.getBoundingClientRect()
+    return bounds && bounds.width >= 44 && bounds.height >= 44
+  }, arrowSelector)
   const bounds = await arrow.boundingBox()
   assert.ok(bounds.width >= 44 && bounds.height >= 44)
   const nameBounds = await card('single').locator('h3').boundingBox()

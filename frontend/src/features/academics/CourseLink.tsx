@@ -61,8 +61,9 @@ export function useCourseReturnPosition(isReady: boolean) {
       }
       const targets = Array.from(document.querySelectorAll<HTMLElement>(point.selector))
       const target = targets.find((element) => element.getClientRects().length > 0) ?? heading
+      if (!target) return
       restoredKey.current = key
-      target?.focus({ preventScroll: true })
+      target.focus({ preventScroll: true })
       window.scrollTo({ top: point.scroll, behavior: 'instant' })
       frame = requestAnimationFrame(() => {
         if (cancelled) return
