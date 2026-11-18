@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
+import { TeacherAnnouncements } from '../announcements/TeacherAnnouncements'
 import { useRoleContext } from '../auth/RoleContext'
 import { formatDateTime, SaveLabel, statuses, type SaveState } from './journalControls'
 import './teacherJournals.css'
@@ -929,6 +930,12 @@ export function TeacherJournalsPage() {
           )}
           {chosen && (
             <>
+              <TeacherAnnouncements
+                key={identity}
+                userId={userId}
+                courseId={courseId}
+                groupId={groupId}
+              />
               {(lessonsQuery.isPending || assessmentsQuery.isPending || finalsQuery.isPending) && (
                 <LoadingState title="Загружаем журнал…" variant="compact" />
               )}

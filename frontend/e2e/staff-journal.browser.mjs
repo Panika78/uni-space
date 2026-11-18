@@ -185,7 +185,7 @@ try {
   await finalRetry.waitFor()
   await gradePage
     .getByRole('region', { name: 'Дисциплины и группы' })
-    .getByRole('button', { name: /^История / })
+    .getByRole('button', { name: new RegExp(`^История ${env.TEACHER_JOURNAL_SUFFIX} ·`) })
     .click()
   await gradePage.waitForURL((url) => url.searchParams.get('group') === env.TEACHER_JOURNAL_GROUP_B)
   await gradePage.goBack()

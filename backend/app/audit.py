@@ -137,6 +137,13 @@ _NEWS_FIELDS = {
     "author_user_id": _integer,
 }
 _EVENT_FIELDS = {
+    ("teacher_announcement", "create"): {
+        "course_offering_id": _positive_integer,
+        "teacher_id": _positive_integer,
+        "group_id": _positive_integer,
+        "is_important": _boolean,
+        "title": lambda value: _string(value, 200),
+    },
     ("assessment_group", "update"): {
         "planned_date": _date,
         "lesson_id": _integer,
