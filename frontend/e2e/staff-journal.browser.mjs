@@ -227,7 +227,10 @@ try {
   }
 
   await deleteFromPeer(200)
-  await currentFinal.getByLabel('Итог').locator('option[value=""]:checked').waitFor({ state: 'attached' })
+  await currentFinal
+    .getByLabel('Итог')
+    .locator('option[value=""]:checked')
+    .waitFor({ state: 'attached' })
   await currentFinal.getByLabel('Итог').selectOption('2')
   await currentFinal.getByLabel('Дата пересдачи').fill('2027-01-12')
   await currentFinal.getByLabel('Место пересдачи').fill('Б-201')
