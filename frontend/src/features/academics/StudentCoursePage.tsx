@@ -152,6 +152,43 @@ export function StudentCoursePage() {
   const previous = source === '/schedule' || source === '/academics' ? source : null
   const course = !access?.isChecking && passport.isSuccess ? passport.data : undefined
 
+  function renderPanelContent(panelTab: Tab) {
+    if (panelTab === 'overview') return <CourseOverview course={course!} />
+    if (panelTab === 'announcements') {
+      return <StudentAnnouncementFeed courseId={courseOfferingId} />
+    }
+    if (panelTab === 'assessments') {
+      return (
+        <CourseList<Assessment>
+          path={`${path}/assessments`}
+          queryKey={[...rootKey, 'lists', course!.term.id, 'assessments']}
+          scope={scope}
+          termId={course!.term.id}
+          empty="Работ нет"
+        >
+          {(items) => <CourseAssessments items={items} />}
+        </CourseList>
+      )
+    }
+    return (
+      <CourseList<Lesson>
+        path={`${path}/lessons`}
+        queryKey={[...rootKey, 'lists', course!.term.id, 'lessons']}
+        scope={scope}
+        termId={course!.term.id}
+        empty="Занятий нет"
+      >
+        {(items) =>
+          panelTab === 'lessons' ? (
+            <CourseLessons items={items} />
+          ) : (
+            <CourseAttendance items={items} />
+          )
+        }
+      </CourseList>
+    )
+  }
+
   return (
     <section className="section-page student-course" aria-labelledby="student-course-title">
       {previous ? (
@@ -212,45 +249,19 @@ export function StudentCoursePage() {
               </button>
             ))}
           </div>
-          <section
-            className="student-course__panel"
-            id={`course-panel-${tab}`}
-            role="tabpanel"
-            aria-labelledby={`course-tab-${tab}`}
-            tabIndex={0}
-          >
-            {tab === 'overview' ? (
-              <CourseOverview course={course} />
-            ) : tab === 'announcements' ? (
-              <StudentAnnouncementFeed courseId={courseOfferingId} />
-            ) : tab === 'assessments' ? (
-              <CourseList<Assessment>
-                path={`${path}/assessments`}
-                queryKey={[...rootKey, 'lists', course.term.id, 'assessments']}
-                scope={scope}
-                termId={course.term.id}
-                empty="Работ нет"
-              >
-                {(items) => <CourseAssessments items={items} />}
-              </CourseList>
-            ) : (
-              <CourseList<Lesson>
-                path={`${path}/lessons`}
-                queryKey={[...rootKey, 'lists', course.term.id, 'lessons']}
-                scope={scope}
-                termId={course.term.id}
-                empty="Занятий нет"
-              >
-                {(items) =>
-                  tab === 'lessons' ? (
-                    <CourseLessons items={items} />
-                  ) : (
-                    <CourseAttendance items={items} />
-                  )
-                }
-              </CourseList>
-            )}
-          </section>
+          {tabs.map(([panelTab]) => (
+            <section
+              key={panelTab}
+              className="student-course__panel"
+              id={`course-panel-${panelTab}`}
+              role="tabpanel"
+              aria-labelledby={`course-tab-${panelTab}`}
+              tabIndex={0}
+              hidden={panelTab !== tab}
+            >
+              {panelTab === tab ? renderPanelContent(panelTab) : null}
+            </section>
+          ))}
         </>
       )}
     </section>
