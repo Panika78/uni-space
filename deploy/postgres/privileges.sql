@@ -187,4 +187,10 @@ WHERE to_regclass('public.students') IS NOT NULL \gexec
 -- Immutable announcements use generated identity and INSERT ... RETURNING.
 SELECT 'GRANT SELECT, INSERT ON public.teacher_announcements TO uni_space_api'
 WHERE to_regclass('public.teacher_announcements') IS NOT NULL \gexec
+
+-- #133. Read only the subject-specific projection, preserving the audit table ACL.
+SELECT 'ALTER VIEW public.staff_journal_events OWNER TO uni_space_migrator'
+WHERE to_regclass('public.staff_journal_events') IS NOT NULL \gexec
+SELECT 'GRANT SELECT ON public.staff_journal_events TO uni_space_api'
+WHERE to_regclass('public.staff_journal_events') IS NOT NULL \gexec
 COMMIT;

@@ -39,7 +39,7 @@ cleanup() {
     docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down --volumes --remove-orphans
   fi
   if (( status != 0 )); then
-    echo 'Teacher journal browser E2E failed; recent API and Vite logs:'
+    echo 'Journal browser E2E failed; recent API and Vite logs:'
     tail -n 80 "$API_LOG" "$VITE_LOG" 2>/dev/null || true
   fi
   rm -rf "$TEMP_DIR"
@@ -62,11 +62,14 @@ COMPOSE_CLEANUP_REQUIRED=1
 docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down --volumes --remove-orphans
 docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" up -d --wait test-db
 uv run --locked --python "$PYTHON_TEST_VERSION" --project backend alembic -c backend/alembic.ini upgrade head
-PYTHONPATH=backend uv run --locked --python "$PYTHON_TEST_VERSION" --project backend \
-  python frontend/e2e/teacher-journal-fixtures.py > "$FIXTURE_ENV"
-set -a
-source "$FIXTURE_ENV"
-set +a
+seed_journal_fixtures() {
+  PYTHONPATH=backend uv run --locked --python "$PYTHON_TEST_VERSION" --project backend \
+    python frontend/e2e/teacher-journal-fixtures.py > "$FIXTURE_ENV"
+  set -a
+  source "$FIXTURE_ENV"
+  set +a
+}
+seed_journal_fixtures
 export PLAYWRIGHT_MODULE CHROMIUM_PATH
 export TEACHER_JOURNAL_TEST_URL=http://localhost:5173
 
@@ -90,6 +93,13 @@ if [[ "$ready" != true ]]; then
 fi
 
 node frontend/e2e/teacher-journal.browser.mjs &
+TEST_PID=$!
+wait "$TEST_PID"
+TEST_PID=""
+
+# The teacher suite transfers a student and revokes a grant. Give staff its own fixtures.
+seed_journal_fixtures
+node frontend/e2e/staff-journal.browser.mjs &
 TEST_PID=$!
 wait "$TEST_PID"
 TEST_PID=""

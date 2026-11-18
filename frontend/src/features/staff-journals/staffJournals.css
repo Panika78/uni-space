@@ -1,0 +1,82 @@
+.staff-journal {
+  display: grid;
+  min-width: 0;
+  gap: 1rem;
+}
+
+.staff-journal section {
+  min-width: 0;
+}
+
+.staff-journal-actions,
+.staff-journal-catalog {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+  margin-block: 0.75rem;
+}
+
+.staff-journal-catalog {
+  padding: 0;
+  list-style: none;
+}
+
+.staff-journal-actions label,
+.staff-journal .journal-retake-fields label {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.staff-journal input,
+.staff-journal select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.staff-journal button,
+.staff-journal-history button {
+  min-height: 2.5rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.staff-journal button[aria-pressed='true'] {
+  outline: 2px solid currentColor;
+  outline-offset: -2px;
+}
+
+.staff-journal .journal-student {
+  overflow-wrap: anywhere;
+}
+
+.staff-journal-history {
+  box-sizing: border-box;
+  max-width: min(40rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  width: 100%;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 1rem;
+  border-radius: 0.75rem;
+}
+
+.staff-journal-history::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.staff-journal-history-list {
+  padding-inline-start: 1.5rem;
+}
+
+.staff-journal-history-list li + li {
+  border-block-start: 1px solid currentColor;
+  padding-block-start: 0.75rem;
+}
+
+.staff-journal-history dd {
+  margin-inline-start: 0;
+}

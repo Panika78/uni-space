@@ -27,6 +27,8 @@ from app.models import (
     LessonGroup,
     OrgUnit,
     Program,
+    StaffPermission,
+    StaffProfile,
     Student,
     StudyGroup,
     Subgroup,
@@ -66,6 +68,31 @@ def main() -> None:
                     raise SystemExit("Student fixture not found")
                 student.group_id = group_id
         return
+
+    if mode == "staff-transfer":
+        with SessionLocal.begin() as db:
+            student = db.get(Student, int(os.environ["TEACHER_JOURNAL_STUDENT_C"]))
+            student.group_id = int(os.environ["TEACHER_JOURNAL_GROUP_B"])
+        return
+    if mode in {"staff-revoke", "staff-revoke-attendance"}:
+        login_key = (
+            "JOURNAL_GRADES_LOGIN"
+            if mode == "staff-revoke"
+            else "JOURNAL_ATTENDANCE_LOGIN"
+        )
+        with SessionLocal.begin() as db:
+            profile = db.scalar(
+                select(StaffProfile)
+                .join(User, User.id == StaffProfile.user_id)
+                .where(User.login == os.environ[login_key])
+            )
+            db.execute(
+                delete(StaffPermission).where(
+                    StaffPermission.staff_profile_id == profile.id
+                )
+            )
+        return
+
     if mode == "revoke":
         login = os.environ.get("TEACHER_JOURNAL_LOGIN_A")
         course_id = int(os.environ["TEACHER_JOURNAL_COURSE_A"])
@@ -103,7 +130,9 @@ def main() -> None:
                 or final.retake_date != date(2027, 1, 10)
                 or final.retake_location != "A-101"
             ):
-                raise SystemExit("Expected retake values were not persisted in PostgreSQL")
+                raise SystemExit(
+                    "Expected retake values were not persisted in PostgreSQL"
+                )
         return
     if mode != "seed":
         raise SystemExit("Supported modes are seed, revoke, and verify-retake")
@@ -355,7 +384,40 @@ def main() -> None:
             ]
         )
 
+        dean_office = OrgUnit(name=f"Вымышленный деканат {suffix}", type="dean_office")
+        db.add(dean_office)
+        db.flush()
+        staff_logins = {}
+        for label, grants in {
+            "GRADES": ("grades.edit",),
+            "ATTENDANCE": ("attendance.edit",),
+            "BOTH": ("grades.edit", "attendance.edit"),
+            "STUDENTS_READ": ("students.read",),
+            "ADMIN": (),
+        }.items():
+            login = f"staff-journal-{label.lower()}-{suffix}"
+            account = User(
+                login=login,
+                password_hash=users[0].password_hash,
+                full_name=f"Вымышленный сотрудник {label}",
+                role="staff" if grants else "admin",
+                is_active=True,
+            )
+            db.add(account)
+            db.flush()
+            if grants:
+                profile = StaffProfile(user_id=account.id, org_unit_id=dean_office.id)
+                db.add(profile)
+                db.flush()
+                db.add_all(
+                    StaffPermission(staff_profile_id=profile.id, permission_code=code)
+                    for code in grants
+                )
+            staff_logins[f"JOURNAL_{label}_LOGIN"] = login
+
         values = {
+            **staff_logins,
+            "JOURNAL_STUDENT_LOGIN": student_b_user.login,
             "TEACHER_JOURNAL_LOGIN_A": logins[0],
             "TEACHER_JOURNAL_LOGIN_B": logins[1],
             "TEACHER_JOURNAL_PASSWORD": password,

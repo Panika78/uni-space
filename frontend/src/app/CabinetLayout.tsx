@@ -31,11 +31,19 @@ const ShellContext = createContext<{
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   const { navigation } = useContext(ShellContext)
-  const { pathname, hash } = useLocation()
+  const { pathname, hash, search } = useLocation()
   return (
     <nav className="student-navigation" aria-label="Разделы кабинета">
       {navigation.map((item) => {
+        const [targetPath, targetSearch] = item.to.split('?')
+        const isQueryMatch =
+          targetSearch &&
+          pathname === targetPath &&
+          [...new URLSearchParams(targetSearch)].every(
+            ([key, value]) => new URLSearchParams(search).get(key) === value,
+          )
         const isActive =
+          isQueryMatch ||
           `${pathname}${hash}` === item.to ||
           pathname === item.to ||
           pathname.startsWith(`${item.to}/`) ||
