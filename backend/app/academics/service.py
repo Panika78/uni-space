@@ -1,29 +1,37 @@
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
-from app.academics.schemas import AcademicsResponse
+from app.academics.schemas import AcademicItem, AcademicsResponse, AcademicTermResponse
 from app.models import AcademicTerm, CourseGroup, CourseOffering, Discipline, Student
 from app.models.academics import Assessment, AssessmentGroup, AssessmentResult, FinalResult
+from app.schedule.service import MOSCOW
 
 
-def get_student_academics(db: Session, student: Student) -> AcademicsResponse:
-    today = datetime.now(ZoneInfo("Europe/Moscow")).date()
+def get_current_term(db: Session) -> AcademicTerm | None:
+    today = datetime.now(MOSCOW).date()
     # one_or_none deliberately rejects overlapping terms instead of picking one.
-    term = db.scalars(
+    return db.scalars(
         select(AcademicTerm).where(
             AcademicTerm.starts_on <= today,
             AcademicTerm.ends_on >= today,
         )
     ).one_or_none()
-    if term is None:
-        return AcademicsResponse(term=None, items=[])
 
+
+def serialize_term(term: AcademicTerm) -> AcademicTermResponse:
+    return AcademicTermResponse(
+        id=str(term.id), name=term.name, starts_on=term.starts_on, ends_on=term.ends_on
+    )
+
+
+def list_academic_items(
+    db: Session, student: Student, term_id: int, course_id: int | None = None
+) -> list[AcademicItem]:
     # Unique assignment/student makes this LEFT JOIN one-to-one. Filter the
     # student in ON, preserving ungraded assignments and their full maximum.
-    scores = (
+    scores_query = (
         select(
             Assessment.course_offering_id.label("offering_id"),
             func.coalesce(func.sum(AssessmentResult.score), 0).label("total_score"),
@@ -41,9 +49,11 @@ def get_student_academics(db: Session, student: Student) -> AcademicsResponse:
         )
         .where(AssessmentGroup.group_id == student.group_id)
         .group_by(Assessment.course_offering_id)
-        .subquery()
     )
-    rows = db.execute(
+    if course_id is not None:
+        scores_query = scores_query.where(Assessment.course_offering_id == course_id)
+    scores = scores_query.subquery()
+    query = (
         select(
             CourseOffering,
             Discipline,
@@ -63,15 +73,17 @@ def get_student_academics(db: Session, student: Student) -> AcademicsResponse:
                 FinalResult.student_id == student.id,
             ),
         )
-        .where(CourseGroup.group_id == student.group_id, CourseOffering.term_id == term.id)
+        .where(CourseGroup.group_id == student.group_id, CourseOffering.term_id == term_id)
         .order_by(Discipline.name, CourseOffering.id)
     )
+    if course_id is not None:
+        query = query.where(CourseOffering.id == course_id)
     items = []
-    for offering, discipline, total, maximum, graded, count, final in rows:
+    for offering, discipline, total, maximum, graded, count, final in db.execute(query):
         grade = final.grade_value if final else None
         passed = final.passed if final else None
         items.append(
-            dict(
+            AcademicItem(
                 course_offering_id=str(offering.id),
                 discipline=dict(id=str(discipline.id), name=discipline.name),
                 total_score=total or 0,
@@ -88,7 +100,13 @@ def get_student_academics(db: Session, student: Student) -> AcademicsResponse:
                 ),
             )
         )
+    return items
+
+
+def get_student_academics(db: Session, student: Student) -> AcademicsResponse:
+    term = get_current_term(db)
+    if term is None:
+        return AcademicsResponse(term=None, items=[])
     return AcademicsResponse(
-        term=dict(id=str(term.id), name=term.name, starts_on=term.starts_on, ends_on=term.ends_on),
-        items=items,
+        term=serialize_term(term), items=list_academic_items(db, student, term.id)
     )

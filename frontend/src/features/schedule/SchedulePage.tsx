@@ -1,7 +1,8 @@
 import { useAccessSuspended } from '../../shared/ui/AccessRecovery'
-import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { apiFetch, ApiClientError } from '../../shared/api/client'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
+import { ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 import { Icon } from '../../shared/ui/Icon'
@@ -14,19 +15,29 @@ import {
   getMoscowDate,
   getWeekStart,
   listDayLessons,
+  lessonKinds,
+  isValidCalendarDate,
   listDayGaps,
   formatGapDuration,
 } from './calendar'
 import type { Lesson } from './calendar'
 import { useSchedulePreferences } from './useSchedulePreferences'
 import './schedule.css'
+import { AttendanceMark } from '../academics/AttendanceMark'
+import { CourseLink, useCourseReturnPosition } from '../academics/CourseLink'
+import { useStudentReadScope } from '../profile/profileContext'
+import { getStudentRead } from '../profile/studentReads'
 
-const kinds = {
-  lecture: 'Лекция',
-  seminar: 'Семинар',
-  lab: 'Лабораторная работа',
-  other: 'Занятие',
+const mobileCourseLinkQuery = '(max-width: 760px)'
+function subscribeToMobileCourseLink(callback: () => void) {
+  const media = window.matchMedia?.(mobileCourseLinkQuery)
+  media?.addEventListener('change', callback)
+  return () => media?.removeEventListener('change', callback)
 }
+function isMobileCourseLink() {
+  return window.matchMedia?.(mobileCourseLinkQuery).matches ?? false
+}
+
 const weekdays = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС']
 function formatMonth(date: string): string {
   return formatDate(date)
@@ -55,9 +66,11 @@ function formatWeekRange(start: string, end: string): string {
 
 function LessonCard({
   lesson,
+  isMobile,
   onNavigate,
 }: {
   lesson: Lesson
+  isMobile: boolean
   onNavigate: (position: NonNullable<Lesson['latest_lesson']>) => void
 }) {
   const startsOn = getMoscowDate(new Date(lesson.starts_at))
@@ -65,6 +78,11 @@ function LessonCard({
   const crossesMidnight = startsOn !== endsOn
   const isCurrent = lesson.status === 'scheduled'
   const latest = lesson.latest_lesson
+  const courseId = lesson.course_offering.id
+  const name = lesson.course_offering.discipline.name
+  const returnSelector = `[data-lesson-id="${lesson.id}"] .lesson-course-link`
+  const linked = lesson.linked_assessments ?? []
+  const single = linked.length === 1 ? linked[0] : undefined
   return (
     <article
       className={`lesson-card lesson-card--${lesson.status}`}
@@ -86,7 +104,33 @@ function LessonCard({
         </span>
       </div>
       <div className="lesson-card__details">
-        <h3>{lesson.course_offering.discipline.name}</h3>
+        <div className="lesson-card__course">
+          <h3>
+            {isMobile ? (
+              name
+            ) : (
+              <CourseLink
+                className="lesson-course-link lesson-course-link--title"
+                courseId={courseId}
+                tab={linked.length > 1 ? 'assessments' : undefined}
+                returnSelector={returnSelector}
+              >
+                {name}
+              </CourseLink>
+            )}
+          </h3>
+          {isMobile && (
+            <CourseLink
+              className="lesson-course-link lesson-course-link--arrow"
+              courseId={courseId}
+              tab={linked.length > 1 ? 'assessments' : undefined}
+              returnSelector={returnSelector}
+              aria-label={`Открыть дисциплину «${name}»`}
+            >
+              <Icon name="right" />
+            </CourseLink>
+          )}
+        </div>
         {isCurrent && (
           <>
             <p className="lesson-card__teacher">
@@ -104,6 +148,22 @@ function LessonCard({
               <p>Аудитория не указана</p>
             )}
           </>
+        )}
+        {isCurrent && lesson.attendance_status && (
+          <div className="lesson-card__academic">
+            <AttendanceMark status={lesson.attendance_status} />
+            {single && (
+              <span>
+                {single.score === null ? 'Не выставлено' : `${single.score} / ${single.max_score}`}
+              </span>
+            )}
+            {linked.length > 1 && (
+              <span>
+                {linked.length}{' '}
+                {new Intl.PluralRules('ru').select(linked.length) === 'few' ? 'работы' : 'работ'}
+              </span>
+            )}
+          </div>
         )}
         {lesson.status === 'moved' &&
           (latest ? (
@@ -133,7 +193,7 @@ function LessonCard({
       )}
       {isCurrent && (
         <span className={`lesson-card__tag lesson-card__tag--${lesson.kind}`}>
-          {kinds[lesson.kind]}
+          {lessonKinds[lesson.kind]}
         </span>
       )}
     </article>
@@ -142,10 +202,20 @@ function LessonCard({
 
 export function SchedulePage() {
   const isSuspended = useAccessSuspended()
+  const isMobile = useSyncExternalStore(subscribeToMobileCourseLink, isMobileCourseLink)
   const { preferences, savePreferences, showCancelled, hasUncertainSave, hasExplicitSaveError } =
     useSchedulePreferences()
-  const [date, setDate] = useState(getMoscowDate)
-  const [mode, setMode] = useState<'day' | 'week'>('day')
+  const [params, setParams] = useSearchParams()
+  const selectedDate = params.get('date')
+  const date = selectedDate && isValidCalendarDate(selectedDate) ? selectedDate : getMoscowDate()
+  const mode = params.get('mode') === 'week' ? 'week' : 'day'
+  function setView(nextDate: string, nextMode: 'day' | 'week') {
+    // Commit the URL before the next date/mode control reads it.
+    setParams(
+      { date: nextDate, mode: nextMode },
+      { replace: true, preventScrollReset: true, flushSync: true },
+    )
+  }
   const [navigation, setNavigation] = useState<Lesson['latest_lesson']>(null)
   const pageRef = useRef<HTMLElement>(null)
   const [todayRequest, setTodayRequest] = useState(0)
@@ -154,33 +224,45 @@ export function SchedulePage() {
   function navigateToLesson(position: NonNullable<Lesson['latest_lesson']>) {
     pendingPosition.current = position.id
     setNavigation({ ...position })
-    setDate(getMoscowDate(new Date(position.starts_at)))
+    setView(getMoscowDate(new Date(position.starts_at)), mode)
   }
-  function selectDate(value: string) {
+  function selectDate(value: string, nextMode: 'day' | 'week' = mode) {
     setNavigation(null)
     pendingPosition.current = null
-    setDate(value)
+    pendingToday.current = false
+    setView(value, nextMode)
   }
   const weekStart = getWeekStart(date)
   // A whole week also supplies the mobile day selector, including Sunday.
   const dateTo = addDays(weekStart, 6)
   const weekLabel = formatWeekRange(weekStart, dateTo)
+  const access = useStudentReadScope()
+  const client = useQueryClient()
   const query = useQuery({
-    queryKey: ['schedule', weekStart, dateTo],
+    queryKey: ['schedule', ...(access?.scope.key ?? []), weekStart, dateTo],
+    gcTime: 0,
+    refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     queryFn: ({ signal }) =>
-      apiFetch<components['schemas']['ScheduleResponse']>(
+      getStudentRead<components['schemas']['ScheduleResponse']>(
         `/api/v1/schedule?date_from=${weekStart}&date_to=${dateTo}`,
-        { authenticated: true, signal },
+        signal,
+        access?.scope ?? null,
       ),
   })
+  const scopeChanged =
+    query.error instanceof ApiClientError && query.error.code === 'student_scope_changed'
+  useEffect(() => {
+    if (scopeChanged) void client.invalidateQueries({ queryKey: ['student-profile'] })
+  }, [client, scopeChanged])
+  const isLoading = query.isPending || !!access?.isChecking
+  // Restore focus only after the fresh personal schedule response has replaced
+  // any pre-navigation data; otherwise the next refetch can detach the link.
+  useCourseReturnPosition(query.isSuccess && !query.isFetching && !isLoading)
   useEffect(() => {
     if (isSuspended) return
-    if (!navigation || getMoscowDate(new Date(navigation.starts_at)) !== date) {
-      pendingPosition.current = null
-      return
-    }
+    if (!navigation || getMoscowDate(new Date(navigation.starts_at)) !== date) return
     // Keep the requested position across transient failures; wait for fresh week data.
     if (!pendingPosition.current || !query.isSuccess || query.isFetching) return
     const cards = pageRef.current?.querySelectorAll<HTMLElement>(
@@ -200,10 +282,7 @@ export function SchedulePage() {
     if (!pendingToday.current || mode !== 'week' || !query.isSuccess || query.isFetching) return
     const target = pageRef.current?.querySelector<HTMLElement>('.schedule-day.is-selected')
     if (!target) return
-    if (date !== getMoscowDate()) {
-      pendingToday.current = false
-      return
-    }
+    if (date !== getMoscowDate()) return
     let cancelled = false
     let frame = 0
     // ResizeObserver can start the height animation after this effect. Recheck
@@ -268,7 +347,9 @@ export function SchedulePage() {
       <div className="schedule-heading">
         <div>
           <p className="section-eyebrow">Учебный календарь</p>
-          <h1 id="schedule-title">Расписание</h1>
+          <h1 id="schedule-title" tabIndex={-1}>
+            Расписание
+          </h1>
           <p className="schedule-week-label">
             Неделя {getIsoWeekNumber(date)} · {weekLabel}
           </p>
@@ -276,18 +357,18 @@ export function SchedulePage() {
       </div>
       <div className="schedule-toolbar">
         <div className="schedule-modes" data-mode={mode} role="group" aria-label="Вид расписания">
-          <button aria-pressed={mode === 'day'} onClick={() => setMode('day')}>
+          <button aria-pressed={mode === 'day'} onClick={() => setView(date, 'day')}>
             День
           </button>
-          <button aria-pressed={mode === 'week'} onClick={() => setMode('week')}>
+          <button aria-pressed={mode === 'week'} onClick={() => setView(date, 'week')}>
             Неделя
           </button>
         </div>
         <button
           className="schedule-today"
           onClick={() => {
-            pendingToday.current = mode === 'week'
             selectDate(getMoscowDate())
+            pendingToday.current = mode === 'week'
             setTodayRequest((request) => request + 1)
           }}
         >
@@ -411,7 +492,7 @@ export function SchedulePage() {
         </p>
       )}
       <AnimatedRegion className="schedule-stage" contentKey={`${mode}-${date}-${query.status}`}>
-        {query.isPending ? (
+        {isLoading ? (
           <LoadingState title="Загружаем расписание…" />
         ) : query.isError ? (
           <ErrorState
@@ -440,7 +521,7 @@ export function SchedulePage() {
         ) : (
           <div className="schedule-list" aria-live="polite">
             {days.map((day) => {
-              const lessons = listDayLessons(query.data.items, day).filter(
+              const lessons = listDayLessons(query.data?.items ?? [], day).filter(
                 (lesson) =>
                   showCancelled ||
                   lesson.status !== 'cancelled' ||
@@ -453,7 +534,7 @@ export function SchedulePage() {
                   lesson,
                   gap: null,
                 })),
-                ...listDayGaps(query.data.items, day).map((gap) => ({
+                ...listDayGaps(query.data?.items ?? [], day).map((gap) => ({
                   time: gap.startsAt,
                   lesson: null,
                   gap,
@@ -471,13 +552,7 @@ export function SchedulePage() {
                       <path d="M6 3v4M14 3v4M3 9h14" />
                     </svg>
                     {mode === 'week' ? (
-                      <button
-                        className="schedule-open-day"
-                        onClick={() => {
-                          selectDate(day)
-                          setMode('day')
-                        }}
-                      >
+                      <button className="schedule-open-day" onClick={() => selectDate(day, 'day')}>
                         {formatDate(day)}
                         <Icon name="right" />
                       </button>
@@ -492,6 +567,7 @@ export function SchedulePage() {
                           <LessonCard
                             key={lesson.id}
                             lesson={lesson}
+                            isMobile={isMobile}
                             onNavigate={navigateToLesson}
                           />
                         ) : (

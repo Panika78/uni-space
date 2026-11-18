@@ -1,3 +1,4 @@
+import { MemoryRouter } from 'react-router-dom'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { focusManager, onlineManager, QueryClientProvider } from '@tanstack/react-query'
@@ -18,7 +19,9 @@ function AuthenticatedAcademics() {
       >
         Тестовый выход
       </button>
-      <AcademicsPage />
+      <MemoryRouter>
+        <AcademicsPage />
+      </MemoryRouter>
     </>
   ) : (
     <button

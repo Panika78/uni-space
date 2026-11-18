@@ -27,8 +27,8 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def journal(db_session):
-    s = academics_fixture.__wrapped__(db_session)
+def journal(db_session, membership_changed_at=None):
+    s = academics_fixture.__wrapped__(db_session, membership_changed_at)
     s.app.include_router(router)
     s.courses = [s.offering(), s.offering(assigned=s.groups[:1])]
     s.teachers, s.teacher_users, s.teacher_tokens = [], [], []

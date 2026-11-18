@@ -44,7 +44,8 @@ try {
   assert.deepEqual(sections, ['Текущие дисциплины', 'Сессия'])
   assert.equal(await page.getByRole('progressbar').count(), 0)
   assert.ok(!(await page.locator('.academics-page').innerText()).includes('%'))
-  assert.equal(await page.locator('.academics-page a').count(), 0)
+  const courseLink = page.locator('.academics-page a').first()
+  assert.match(await courseLink.getAttribute('href'), /^\/academics\/courses\/[1-9][0-9]*$/)
   await page.screenshot({ path: 'work/academics-desktop.png', fullPage: true })
   check('real API totals, zero/missing, semantic results and retake in its row; desktop')
   await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -69,12 +70,18 @@ try {
   await page.reload()
   const real = await read
   assert.equal(real.status(), 200)
+  const scopeHeaders = { 'x-student-scope': real.headers()['x-student-scope'] }
   const longCopy = await real.json()
   longCopy.items[0].discipline.name =
     'Современные методы математического моделирования и междисциплинарного анализа сложных систем с дополнительными практическими занятиями'
   longCopy.items[0].final_result.retake_location =
     'Учебно-лабораторный корпус, аудитория для индивидуальных консультаций и повторной аттестации студентов'
-  await page.route(endpoint, (request) => request.fulfill({ json: longCopy }))
+  await page.route(endpoint, (route) =>
+    route.fulfill({
+      headers: scopeHeaders,
+      json: longCopy,
+    }),
+  )
   for (const width of [360, 721, 768, 900, 1050, 1440, 2560]) {
     await page.setViewportSize({ width, height: 1000 })
     for (const factor of [1, 1.5, 2]) {
@@ -136,7 +143,7 @@ try {
       items: [],
     },
   ]) {
-    await page.route(endpoint, (route) => route.fulfill({ json: data }))
+    await page.route(endpoint, (route) => route.fulfill({ headers: scopeHeaders, json: data }))
     await page.reload()
     await page
       .getByText(data.term ? 'Нет дисциплин текущего семестра' : 'Нет текущего учебного периода', {

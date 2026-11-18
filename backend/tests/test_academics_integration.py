@@ -36,7 +36,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def academics(db_session):
+def academics(db_session, membership_changed_at=None):
     db = db_session
     created = []
 
@@ -71,7 +71,13 @@ def academics(db_session):
         for _ in range(3)
     ]
     students = [
-        add(Student, user_id=u.id, group_id=groups[i % 2].id, academic_status="enrolled")
+        add(
+            Student,
+            user_id=u.id,
+            group_id=groups[i % 2].id,
+            academic_status="enrolled",
+            **({"membership_changed_at": membership_changed_at} if membership_changed_at else {}),
+        )
         for i, u in enumerate(users)
     ]
     term = add(

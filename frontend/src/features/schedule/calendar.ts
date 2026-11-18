@@ -7,6 +7,12 @@ export type TimedLesson = {
   ends_at: string
   status: string
 }
+export const lessonKinds = {
+  lecture: 'Лекция',
+  seminar: 'Семинар',
+  lab: 'Лабораторная работа',
+  other: 'Занятие',
+}
 const timezone = 'Europe/Moscow'
 
 export function isValidCalendarDate(value: string): boolean {

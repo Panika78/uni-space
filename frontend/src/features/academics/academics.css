@@ -132,3 +132,8 @@
   margin: 0 0 18px;
   letter-spacing: -0.028em;
 }
+
+.academics-table a {
+  color: inherit;
+  text-underline-offset: 3px;
+}

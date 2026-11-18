@@ -72,7 +72,13 @@ def events(s):
     ).all()
 
 
-def test_group_dates_confirmation_audit_noop_and_student_regression(dates_context):
+def test_group_dates_confirmation_audit_noop_and_student_regression(dates_context, monkeypatch):
+    class ScheduleClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 9, 3, tzinfo=UTC).astimezone(tz)
+
+    monkeypatch.setattr("app.schedule.service.datetime", ScheduleClock)
     s = dates_context
     from app.schedule.router import router as schedule_router
 
@@ -110,7 +116,14 @@ def test_group_dates_confirmation_audit_noop_and_student_regression(dates_contex
     assert s.patch(request).status_code == 200
     assert len(events(s)) == 1
     assert s.get().json() == students_before
-    assert schedule().json() == schedule_before.json()
+    old_schedule = schedule_before.json()
+    current_schedule = schedule().json()
+    assert old_schedule["items"][0]["linked_assessments"] == []
+    assert current_schedule["items"][0].pop("linked_assessments") == [
+        {"assessment_group_id": str(s.work.id), "score": 7, "max_score": 10}
+    ]
+    old_schedule["items"][0].pop("linked_assessments")
+    assert current_schedule == old_schedule
     assert s.get(f"assessments/{s.work.id}/results").json()["items"][0]["score"] == 7
     assert s.db.get(Assessment, s.work.assessment_id).max_score == 10
     assert s.db.get(Lesson, s.lesson.id).version == version_before

@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -9,6 +9,7 @@ from app.core.schemas import ApiError, Id, Ref, RequestModel
 from app.dependencies.auth import get_current_student
 from app.dependencies.database import get_db_session
 from app.models import OrgUnit, Program, Student, StudyGroup, User
+from app.student_read_scope import STUDENT_SCOPE_HEADERS, set_student_scope
 
 router = APIRouter(
     prefix="/api/v1/users",
@@ -39,9 +40,12 @@ class StudentProfile(RequestModel):
     academic_status: Literal["enrolled", "academic_leave", "expelled", "graduated"]
 
 
-@router.get("/me", response_model=StudentProfile)
+@router.get(
+    "/me", response_model=StudentProfile, responses={200: {"headers": STUDENT_SCOPE_HEADERS}}
+)
 def get_student_profile(
     request: Request,
+    response: Response,
     student: Annotated[Student, Depends(get_current_student)],
     db: Annotated[Session, Depends(get_db_session)],
 ) -> StudentProfile:
@@ -61,6 +65,7 @@ def get_student_profile(
     if row is None:
         raise HTTPException(500, "internal_error")
     user, group, program, faculty = row
+    set_student_scope(db, response, student)
     return StudentProfile(
         id=str(user.id),
         student_id=str(student.id),

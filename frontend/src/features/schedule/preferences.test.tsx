@@ -1,3 +1,4 @@
+import { MemoryRouter } from 'react-router-dom'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -50,7 +51,9 @@ function mount(
   const queryClient = createQueryClient()
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <SchedulePage />
+      <MemoryRouter useTransitions={false}>
+        <SchedulePage />
+      </MemoryRouter>
     </QueryClientProvider>,
   )
   return { queryClient, ...view }
@@ -246,7 +249,9 @@ it('does not transfer a timed-out old-account mutation into the next account cac
   await act(async () => {
     render(
       <QueryClientProvider client={view.queryClient}>
-        <SchedulePage />
+        <MemoryRouter useTransitions={false}>
+          <SchedulePage />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
   })

@@ -4,18 +4,23 @@ import './profile.css'
 import { useQuery } from '@tanstack/react-query'
 import { Outlet } from 'react-router-dom'
 import { UserMenu } from '../../app/CabinetLayout'
-import { ApiClientError, apiFetch } from '../../shared/api/client'
+import { ApiClientError } from '../../shared/api/client'
 import { Icon } from '../../shared/ui/Icon'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 
-import { ProfileContext, useStudentProfile, getStudentInitials } from './profileContext'
-import type { Profile } from './profileContext'
+import {
+  ProfileContext,
+  StudentReadContext,
+  useStudentProfile,
+  getStudentInitials,
+} from './profileContext'
+import { getStudentProfile } from './studentReads'
 export { useStudentProfile, getStudentInitials } from './profileContext'
 
 export function StudentAccess() {
   const query = useQuery({
     queryKey: ['student-profile'],
-    queryFn: ({ signal }) => apiFetch<Profile>('/api/v1/users/me', { authenticated: true, signal }),
+    queryFn: getStudentProfile,
     retry: false,
     staleTime: 0,
     refetchOnWindowFocus: true,
@@ -47,11 +52,21 @@ export function StudentAccess() {
     if (!query.data || !isTemporaryAccessError(query.error)) return failure
   }
   if (!query.data) return null
+  const profile = query.data
+  const scope = profile.studentReadScope ?? null
+  const scopeKey = scope ?? profile.group.id
   return (
-    <ProfileContext.Provider value={query.data}>
-      <AccessRecovery blocked={query.isError} fallback={failure}>
-        <Outlet key={query.data.id} />
-      </AccessRecovery>
+    <ProfileContext.Provider value={profile}>
+      <StudentReadContext.Provider
+        value={{
+          scope: { key: ['student', profile.id, profile.group.id, scopeKey], header: scope },
+          isChecking: query.isFetching,
+        }}
+      >
+        <AccessRecovery blocked={query.isError} fallback={failure}>
+          <Outlet key={profile.id} />
+        </AccessRecovery>
+      </StudentReadContext.Provider>
     </ProfileContext.Provider>
   )
 }

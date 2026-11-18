@@ -1,6 +1,7 @@
 from typing import Literal
 
-from app.core.schemas import Date, Id, Ref, RequestModel
+from app.core.schemas import Date, DateTime, Id, Ref, RequestModel
+from app.schedule.schemas import AttendanceStatus, LessonDetails
 
 
 class AcademicTermResponse(Ref):
@@ -30,3 +31,36 @@ class AcademicItem(RequestModel):
 class AcademicsResponse(RequestModel):
     term: AcademicTermResponse | None
     items: list[AcademicItem]
+
+
+class StudentCourse(AcademicItem):
+    term: AcademicTermResponse
+    group: Ref
+    teachers: list[Ref]
+
+
+class StudentCourseLesson(LessonDetails):
+    attendance_status: AttendanceStatus
+
+
+class StudentCourseAssessment(RequestModel):
+    assessment_group_id: Id
+    assessment_id: Id
+    title: str
+    type: Literal[
+        "test",
+        "laboratory",
+        "practical",
+        "seminar",
+        "independent",
+        "extended_homework",
+        "exam",
+        "other",
+    ]
+    description: str | None
+    max_score: int
+    planned_date: Date | None
+    date_needs_confirmation: bool
+    lesson_id: Id | None
+    score: int | None
+    graded_at: DateTime | None
