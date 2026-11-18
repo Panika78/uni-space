@@ -394,13 +394,14 @@ try {
   const download = c.page.waitForEvent('download')
   await activate(c.page, 'Скачать PDF')
   assert.equal((await download).suggestedFilename(), ready.document.filename)
+  const detailUrl = c.page.url()
   const popup = c.context.waitForEvent('page')
   const getPdf = c.page.waitForResponse((response) => response.url().endsWith(`${path}/document`))
   await activate(c.page, 'Открыть PDF в новой вкладке')
   const preview = await popup
   assert.equal((await getPdf).status(), 200)
   await preview.waitForURL((url) => url.protocol === 'blob:')
-  assert.ok(c.page.url().endsWith(`${queue}/${accounting.id}`))
+  assert.equal(c.page.url(), detailUrl)
   await preview.close()
   await temporarilyBlockDocuments(async () => {
     const response = c.page.waitForResponse((r) => r.url().endsWith(`${path}/document`))
