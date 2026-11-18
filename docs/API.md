@@ -981,3 +981,44 @@ status-only сотрудник сверяет UUID квитанцией или �
 UI-карточка `/staff/students/:id` использует существующий GET и переживает обновление
 страницы. Параметры поиска и стек границ страниц сохранены в URL; Back/Forward
 и явная предыдущая страница не смешивают наборы разных фильтров.
+
+## Журнал деканата (MVP2, REQ-G13/G18)
+
+Префикс `/api/v1/staff/journals`. Доступ проверяется по действующим глобальным
+grants сотрудника деканата на каждом запросе. `grades.edit` даёт доступ к баллам,
+итогам и их истории. `attendance.edit` даёт доступ к посещаемости. Для каталога
+и минимального состава группы достаточно любого из двух разрешений.
+
+В таблице `C=/courses/{course_offering_id}`, `J=C/groups/{group_id}`. Все маршруты
+возвращают `Page(items,next_cursor)`. По умолчанию `limit=20`, диапазон 1–100.
+Студенты сортируются по русскому алфавиту с `student_id` для совпадающих имён.
+Курсор применим к исходному пользователю, маршруту и фильтрам.
+
+| GET | Grant | Выборка |
+| --- | --- | --- |
+| `/catalog` | любой учебный grant журнала | Пары проведения и группы, названия дисциплины, периода и группы. Фильтры `course_offering_id`, `group_id`, `term_id`, поиск `q`. Тип аттестации доступен при `grades.edit`. |
+| `J/students` | любой учебный grant журнала | Текущие `student_id`, `full_name`. |
+| `J/assessments` | `grades.edit` | Назначенные работы, фильтр `assessment_group_id`. |
+| `J/assessments/{assessment_group_id}/results` | `grades.edit` | Текущий состав, сохранённые результаты и подтверждённая история переведённых студентов. Для удалённой оценки бывшего участника `history_only=true`, `result_id=null`, `score=null`, `can_edit=false`. |
+| `J/final-results` | `grades.edit` | Текущие студенты выбранной группы, ручные итоги и сведения о пересдаче. |
+| `C/historical-final-students` | `grades.edit` | Студенты с подтверждёнными событиями итогов по проведению. `history_only` означает, что итог удалён. |
+| `J/lessons` | `attendance.edit` | Занятия выбранной группы, фильтры `lesson_id`, `starts_from`, `starts_before`, `status`. |
+| `J/lessons/{lesson_id}/attendance` | `attendance.edit` | Текущие участники и сохранённые отметки с исходной группой. Историческая отметка имеет `is_historical=true`. `can_edit` учитывает возможность исправить сохранённую отметку или создать текущую. |
+| `J/assessments/{assessment_group_id}/results/{student_id}/history` | `grades.edit` | История по паре `(assessment_group_id, student_id)`. |
+| `C/students/{student_id}/final-result/history` | `grades.edit` | История по паре `(course_offering_id, student_id)`. |
+
+Списки студентов, результатов, итогов и отметок принимают `student_id` и поиск
+`q` по имени. В историческом списке итогов принадлежность к группе не
+устанавливается. Сохранённый исторический итог читается через существующий
+`GET /api/v1/final-results/courses/{course_offering_id}/students/{student_id}`.
+
+События отсортированы от новых к старым по `(created_at,id)`. Каждый элемент
+содержит `event_id`, `action`, `created_at`, `actor_user_id`, доступное текущее
+имя автора `actor_name` и типизированные `before` и `after`. Для баллов снимок
+содержит `score`. Для итогов доступны `grade_value`, `passed`, `retake_date`
+и `retake_location`. У создания `before=null`, у удаления `after=null`.
+История сохраняется после удаления и повторного создания результата.
+
+Запись выполняется существующими индивидуальными операциями оценок,
+посещаемости и итогов. При невозможности подтвердить ответ на запись клиент
+перечитывает конкретную запись.

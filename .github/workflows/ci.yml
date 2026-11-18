@@ -690,7 +690,7 @@ jobs:
             sleep 1
           done
           PLAYWRIGHT_MODULE=$GITHUB_WORKSPACE/work/browser-tooling/node_modules/playwright/index.mjs SCHEDULE_TEST_PASSWORD=fictional-schedule-password node frontend/e2e/schedule.browser.mjs
-      - name: Run teacher journal against PostgreSQL and Chromium
+      - name: Run teacher and staff journals against PostgreSQL and Chromium
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@127.0.0.1:55432/uni_space_test

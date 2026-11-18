@@ -1759,6 +1759,89 @@
         "title": "FinalResultResponse",
         "type": "object"
       },
+      "FinalSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "grade_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grade Value"
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passed"
+          },
+          "retake_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retake Date"
+          },
+          "retake_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retake Location"
+          }
+        },
+        "required": [
+          "grade_value",
+          "passed",
+          "retake_date",
+          "retake_location"
+        ],
+        "title": "FinalSnapshot",
+        "type": "object"
+      },
+      "HistoricalFinalStudent": {
+        "additionalProperties": false,
+        "properties": {
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "history_only": {
+            "title": "History Only",
+            "type": "boolean"
+          },
+          "student_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Student Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "student_id",
+          "full_name",
+          "history_only"
+        ],
+        "title": "HistoricalFinalStudent",
+        "type": "object"
+      },
       "Id": {
         "pattern": "^[1-9][0-9]*$",
         "type": "string"
@@ -1939,6 +2022,162 @@
           "can_edit"
         ],
         "title": "JournalAttendanceRow",
+        "type": "object"
+      },
+      "JournalEvent_FinalSnapshot_": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update",
+              "delete"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "actor_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Name"
+          },
+          "actor_user_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor User Id"
+          },
+          "after": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FinalSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "before": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FinalSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Event Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "action",
+          "created_at",
+          "actor_user_id",
+          "actor_name",
+          "before",
+          "after"
+        ],
+        "title": "JournalEvent[FinalSnapshot]",
+        "type": "object"
+      },
+      "JournalEvent_ScoreSnapshot_": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "create",
+              "update",
+              "delete"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "actor_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Name"
+          },
+          "actor_user_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor User Id"
+          },
+          "after": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScoreSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "before": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScoreSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Event Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "action",
+          "created_at",
+          "actor_user_id",
+          "actor_name",
+          "before",
+          "after"
+        ],
+        "title": "JournalEvent[ScoreSnapshot]",
         "type": "object"
       },
       "JournalLesson": {
@@ -2857,6 +3096,35 @@
         "title": "Page[AttendanceResponse]",
         "type": "object"
       },
+      "Page_HistoricalFinalStudent_": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HistoricalFinalStudent"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[HistoricalFinalStudent]",
+        "type": "object"
+      },
       "Page_JournalAssessment_": {
         "additionalProperties": false,
         "properties": {
@@ -2913,6 +3181,64 @@
           "next_cursor"
         ],
         "title": "Page[JournalAttendanceRow]",
+        "type": "object"
+      },
+      "Page_JournalEvent_FinalSnapshot__": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/JournalEvent_FinalSnapshot_"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[JournalEvent[FinalSnapshot]]",
+        "type": "object"
+      },
+      "Page_JournalEvent_ScoreSnapshot__": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/JournalEvent_ScoreSnapshot_"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[JournalEvent[ScoreSnapshot]]",
         "type": "object"
       },
       "Page_JournalLesson_": {
@@ -3058,6 +3384,151 @@
           "next_cursor"
         ],
         "title": "Page[NewsPreview]",
+        "type": "object"
+      },
+      "Page_StaffAttendanceRow_": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StaffAttendanceRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[StaffAttendanceRow]",
+        "type": "object"
+      },
+      "Page_StaffCatalogItem_": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StaffCatalogItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[StaffCatalogItem]",
+        "type": "object"
+      },
+      "Page_StaffFinalRow_": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StaffFinalRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[StaffFinalRow]",
+        "type": "object"
+      },
+      "Page_StaffJournalStudent_": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StaffJournalStudent"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[StaffJournalStudent]",
+        "type": "object"
+      },
+      "Page_StaffScoreRow_": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StaffScoreRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[StaffScoreRow]",
         "type": "object"
       },
       "Page_TeachingAssignmentResponse_": {
@@ -3338,6 +3809,20 @@
           "items"
         ],
         "title": "ScheduleResponse",
+        "type": "object"
+      },
+      "ScoreSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "score"
+        ],
+        "title": "ScoreSnapshot",
         "type": "object"
       },
       "ScoreWriteRequest": {
@@ -3680,6 +4165,228 @@
         "title": "StaffApplicationResponse",
         "type": "object"
       },
+      "StaffAttendanceRow": {
+        "additionalProperties": false,
+        "properties": {
+          "can_edit": {
+            "title": "Can Edit",
+            "type": "boolean"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "is_historical": {
+            "title": "Is Historical",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "attended",
+              "absent",
+              "unmarked"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "student_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Student Id",
+            "type": "string"
+          },
+          "subgroup_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subgroup Id"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "student_id",
+          "full_name",
+          "subgroup_id",
+          "status",
+          "updated_at",
+          "is_historical",
+          "can_edit"
+        ],
+        "title": "StaffAttendanceRow",
+        "type": "object"
+      },
+      "StaffCatalogItem": {
+        "additionalProperties": false,
+        "properties": {
+          "attestation_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "exam",
+                  "graded_pass",
+                  "pass_fail"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attestation Type"
+          },
+          "course_offering_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Course Offering Id",
+            "type": "string"
+          },
+          "discipline": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "group": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "term": {
+            "$ref": "#/components/schemas/Ref"
+          }
+        },
+        "required": [
+          "course_offering_id",
+          "discipline",
+          "term",
+          "group"
+        ],
+        "title": "StaffCatalogItem",
+        "type": "object"
+      },
+      "StaffFinalRow": {
+        "additionalProperties": false,
+        "properties": {
+          "course_offering_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Course Offering Id",
+            "type": "string"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "grade_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grade Value"
+          },
+          "has_debt": {
+            "title": "Has Debt",
+            "type": "boolean"
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passed"
+          },
+          "result_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Id"
+          },
+          "retake_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retake Date"
+          },
+          "retake_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retake Location"
+          },
+          "student_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Student Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "result_id",
+          "course_offering_id",
+          "student_id",
+          "grade_value",
+          "passed",
+          "retake_date",
+          "retake_location",
+          "has_debt",
+          "full_name"
+        ],
+        "title": "StaffFinalRow",
+        "type": "object"
+      },
+      "StaffJournalStudent": {
+        "additionalProperties": false,
+        "properties": {
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "student_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Student Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "student_id",
+          "full_name"
+        ],
+        "title": "StaffJournalStudent",
+        "type": "object"
+      },
       "StaffNews": {
         "additionalProperties": false,
         "properties": {
@@ -3769,6 +4476,66 @@
           "next_cursor"
         ],
         "title": "StaffNewsPage",
+        "type": "object"
+      },
+      "StaffScoreRow": {
+        "additionalProperties": false,
+        "properties": {
+          "can_edit": {
+            "title": "Can Edit",
+            "type": "boolean"
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "history_only": {
+            "title": "History Only",
+            "type": "boolean"
+          },
+          "is_current_group_member": {
+            "title": "Is Current Group Member",
+            "type": "boolean"
+          },
+          "result_id": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Id"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "student_id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Student Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "student_id",
+          "full_name",
+          "result_id",
+          "score",
+          "is_current_group_member",
+          "history_only",
+          "can_edit"
+        ],
+        "title": "StaffScoreRow",
         "type": "object"
       },
       "StaffStudent": {
@@ -9431,6 +10198,1765 @@
         "tags": [
           "services",
           "applications"
+        ]
+      }
+    },
+    "/api/v1/staff/journals/catalog": {
+      "get": {
+        "operationId": "list_catalog_api_v1_staff_journals_catalog_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "course_offering_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Course Offering Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "group_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Group Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "term_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Term Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_StaffCatalogItem_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Catalog",
+        "tags": [
+          "staff-journals"
+        ]
+      }
+    },
+    "/api/v1/staff/journals/courses/{course_offering_id}/groups/{group_id}/assessments": {
+      "get": {
+        "operationId": "list_assessments_api_v1_staff_journals_courses__course_offering_id__groups__group_id__assessments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assessment_group_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Assessment Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_JournalAssessment_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Assessments",
+        "tags": [
+          "staff-journals"
+        ]
+      }
+    },
+    "/api/v1/staff/journals/courses/{course_offering_id}/groups/{group_id}/assessments/{assessment_group_id}/results": {
+      "get": {
+        "operationId": "list_scores_api_v1_staff_journals_courses__course_offering_id__groups__group_id__assessments__assessment_group_id__results_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assessment_group_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Assessment Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "student_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Student Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_StaffScoreRow_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Scores",
+        "tags": [
+          "staff-journals"
+        ]
+      }
+    },
+    "/api/v1/staff/journals/courses/{course_offering_id}/groups/{group_id}/assessments/{assessment_group_id}/results/{student_id}/history": {
+      "get": {
+        "operationId": "get_score_history_api_v1_staff_journals_courses__course_offering_id__groups__group_id__assessments__assessment_group_id__results__student_id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "assessment_group_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Assessment Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Student Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_JournalEvent_ScoreSnapshot__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Score History",
+        "tags": [
+          "staff-journals"
+        ]
+      }
+    },
+    "/api/v1/staff/journals/courses/{course_offering_id}/groups/{group_id}/final-results": {
+      "get": {
+        "operationId": "list_finals_api_v1_staff_journals_courses__course_offering_id__groups__group_id__final_results_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "student_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Student Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_StaffFinalRow_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Finals",
+        "tags": [
+          "staff-journals"
+        ]
+      }
+    },
+    "/api/v1/staff/journals/courses/{course_offering_id}/groups/{group_id}/lessons": {
+      "get": {
+        "operationId": "list_lessons_api_v1_staff_journals_courses__course_offering_id__groups__group_id__lessons_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lesson_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lesson Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "starts_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Starts From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "starts_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Starts Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "scheduled",
+                    "cancelled",
+                    "moved"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_JournalLesson_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Lessons",
+        "tags": [
+          "staff-journals"
+        ]
+      }
+    },
+    "/api/v1/staff/journals/courses/{course_offering_id}/groups/{group_id}/lessons/{lesson_id}/attendance": {
+      "get": {
+        "operationId": "list_attendance_api_v1_staff_journals_courses__course_offering_id__groups__group_id__lessons__lesson_id__attendance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "lesson_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Lesson Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "student_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Student Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_StaffAttendanceRow_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Attendance",
+        "tags": [
+          "staff-journals"
+        ]
+      }
+    },
+    "/api/v1/staff/journals/courses/{course_offering_id}/groups/{group_id}/students": {
+      "get": {
+        "operationId": "list_students_api_v1_staff_journals_courses__course_offering_id__groups__group_id__students_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "student_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Student Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_StaffJournalStudent_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Students",
+        "tags": [
+          "staff-journals"
+        ]
+      }
+    },
+    "/api/v1/staff/journals/courses/{course_offering_id}/historical-final-students": {
+      "get": {
+        "operationId": "list_historical_final_students_api_v1_staff_journals_courses__course_offering_id__historical_final_students_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "student_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+                  "maxLength": 19,
+                  "pattern": "^[1-9][0-9]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Student Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_HistoricalFinalStudent_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Historical Final Students",
+        "tags": [
+          "staff-journals"
+        ]
+      }
+    },
+    "/api/v1/staff/journals/courses/{course_offering_id}/students/{student_id}/final-result/history": {
+      "get": {
+        "operationId": "get_final_history_api_v1_staff_journals_courses__course_offering_id__students__student_id__final_result_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "course_offering_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Course Offering Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "student_id",
+            "required": true,
+            "schema": {
+              "description": "Positive PostgreSQL BIGINT ID: 1..9223372036854775807",
+              "maxLength": 19,
+              "pattern": "^[1-9][0-9]*$",
+              "title": "Student Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_JournalEvent_FinalSnapshot__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Final History",
+        "tags": [
+          "staff-journals"
         ]
       }
     },

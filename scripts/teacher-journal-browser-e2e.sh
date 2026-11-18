@@ -39,7 +39,7 @@ cleanup() {
     docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down --volumes --remove-orphans
   fi
   if (( status != 0 )); then
-    echo 'Teacher journal browser E2E failed; recent API and Vite logs:'
+    echo 'Journal browser E2E failed; recent API and Vite logs:'
     tail -n 80 "$API_LOG" "$VITE_LOG" 2>/dev/null || true
   fi
   rm -rf "$TEMP_DIR"
@@ -90,6 +90,11 @@ if [[ "$ready" != true ]]; then
 fi
 
 node frontend/e2e/teacher-journal.browser.mjs &
+TEST_PID=$!
+wait "$TEST_PID"
+TEST_PID=""
+
+node frontend/e2e/staff-journal.browser.mjs &
 TEST_PID=$!
 wait "$TEST_PID"
 TEST_PID=""

@@ -184,4 +184,9 @@ SELECT 'GRANT INSERT, SELECT (id, created_at) ON public.audit_events TO uni_spac
 WHERE to_regclass('public.audit_events') IS NOT NULL \gexec
 SELECT 'GRANT UPDATE (academic_status) ON public.students TO uni_space_api'
 WHERE to_regclass('public.students') IS NOT NULL \gexec
+-- #133. Read only the subject-specific projection, preserving the audit table ACL.
+SELECT 'ALTER VIEW public.staff_journal_events OWNER TO uni_space_migrator'
+WHERE to_regclass('public.staff_journal_events') IS NOT NULL \gexec
+SELECT 'GRANT SELECT ON public.staff_journal_events TO uni_space_api'
+WHERE to_regclass('public.staff_journal_events') IS NOT NULL \gexec
 COMMIT;

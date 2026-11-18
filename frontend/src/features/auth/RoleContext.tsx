@@ -5,7 +5,13 @@ import { Link, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 import { CabinetLayout, UserMenu } from '../../app/CabinetLayout'
-import { getRoleNavigation, getStartRoute, hasPermission, staffSections } from './roleNavigation'
+import {
+  getRoleNavigation,
+  getStartRoute,
+  getStaffJournalRoute,
+  hasPermission,
+  staffSections,
+} from './roleNavigation'
 import type { AuthorizationContext, PermissionCode } from './roleNavigation'
 
 const RoleContext = createContext<AuthorizationContext | null>(null)
@@ -28,6 +34,7 @@ export function RoleAccess() {
     refetchOnMount: 'always',
     refetchOnWindowFocus: 'always',
     refetchOnReconnect: 'always',
+    refetchInterval: location.pathname === '/staff/journals' ? 15_000 : false,
   })
   const lastNavigation = useRef(location.key)
   const { refetch } = query
@@ -96,12 +103,18 @@ export function RoleStart() {
 export function RoleGuard({
   role,
   permission,
+  anyOfPermissions,
 }: {
   role: AuthorizationContext['role']
   permission?: PermissionCode
+  anyOfPermissions?: readonly PermissionCode[]
 }) {
   const context = useRoleContext()
-  if (context.role !== role || (permission && !hasPermission(context, permission)))
+  if (
+    context.role !== role ||
+    (permission && !hasPermission(context, permission)) ||
+    (anyOfPermissions && !anyOfPermissions.some((code) => hasPermission(context, code)))
+  )
     return <AccessDenied />
   return <Outlet />
 }
@@ -150,7 +163,11 @@ export function StaffHome() {
       {sections.map(({ permission, label }) => (
         <section key={permission} id={permission}>
           <h2>{label}</h2>
-          {permission === 'news.publish' ? (
+          {permission === 'grades.edit' || permission === 'attendance.edit' ? (
+            <p>
+              <Link to={getStaffJournalRoute(permission)}>Открыть журнал</Link>
+            </p>
+          ) : permission === 'news.publish' ? (
             <p>
               <Link to="/staff/news">Открыть редактор новостей</Link>
             </p>
