@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.exc import IntegrityError
@@ -181,7 +183,13 @@ def test_student_group_change_is_one_update_and_rolls_back_both_fields(subgroups
     assert s.request().json()["items"] == []
 
 
-def test_subgroup_schedule_query_count_is_constant(subgroups):
+def test_subgroup_schedule_query_count_is_constant(subgroups, monkeypatch):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 18, tzinfo=UTC).astimezone(tz)
+
+    monkeypatch.setattr("app.schedule.service.datetime", Clock)
     s = subgroups
 
     def count():
@@ -206,7 +214,7 @@ def test_subgroup_schedule_query_count_is_constant(subgroups):
     small = count()
     for _ in range(20):
         chain()
-    assert count() == small == 7
+    assert count() == small == 10  # Includes batched marks, linked works and membership.
 
 
 def test_unknown_distribution_authorizes_common_move_positions_only(subgroups):
