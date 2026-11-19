@@ -10,6 +10,7 @@ import jwt
 import pytest
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy import delete, event, func, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import router as auth_routes
@@ -1563,3 +1564,49 @@ def test_notifications_are_private_and_use_stable_keyset_pagination(auth):
         422,
         "validation_error",
     )
+
+
+def test_notifications_keep_legacy_invalid_targets_readable(auth):
+    client, engine, user_ids, _logins, _student_ids = auth
+    _login, _cookie, access = login(auth, 0)
+
+    # Simulate rows written before the new NOT VALID check constraint was
+    # introduced. PostgreSQL continues to allow those historical rows, while
+    # enforcing the constraint for new writes.
+    with engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE notifications DROP CONSTRAINT ck_notifications_entity_id_positive")
+        )
+        connection.execute(
+            text(
+                "INSERT INTO notifications (user_id, type, title, body, entity_type, entity_id) "
+                "VALUES (:user_id, 'legacy', 'Invalid target', 'Still readable', "
+                "'application', :entity_id)"
+            ),
+            [
+                {"user_id": user_ids[0], "entity_id": 0},
+                {"user_id": user_ids[0], "entity_id": -1},
+            ],
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE notifications ADD CONSTRAINT ck_notifications_entity_id_positive "
+                "CHECK (entity_id IS NULL OR entity_id > 0) NOT VALID"
+            )
+        )
+
+    response = client.request("GET", "/api/v1/notifications?limit=100", access=access)
+    assert response.status_code == 200, response.text
+    legacy = [item for item in response.json()["items"] if item["title"] == "Invalid target"]
+    assert len(legacy) == 2
+    assert all(item["body"] == "Still readable" for item in legacy)
+    assert all(item["entity_id"] is None for item in legacy)
+
+    with pytest.raises(IntegrityError), engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO notifications (user_id, type, title, body, entity_id) "
+                "VALUES (:user_id, 'invalid', 'Rejected', 'Rejected', 0)"
+            ),
+            {"user_id": user_ids[0]},
+        )

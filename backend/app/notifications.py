@@ -110,7 +110,12 @@ def list_notifications(
             created_at=item.created_at,
             read_at=item.read_at,
             entity_type=item.entity_type,
-            entity_id=str(item.entity_id) if item.entity_id is not None else None,
+            # Legacy rows can predate the positive-ID constraint. Keep their
+            # notification readable, but omit an invalid target so clients
+            # never render it as a link.
+            entity_id=(
+                str(item.entity_id) if item.entity_id is not None and item.entity_id > 0 else None
+            ),
         )
         for item in rows
     ]

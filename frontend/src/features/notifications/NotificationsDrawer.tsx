@@ -91,6 +91,7 @@ export function NotificationsDrawer({
   const [moreError, setMoreError] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [messages, setMessages] = useState<Record<string, string>>({})
+  const hasUnreadItems = items.some((item) => item.read_at === null)
   const operationRef = useRef<AbortController | null>(null)
   const activeRef = useRef(isOpen)
   useLayoutEffect(() => {
@@ -350,7 +351,7 @@ export function NotificationsDrawer({
           >
             ×
           </button>
-          {((unreadCount !== undefined && unreadCount > 0) || messages.all) && (
+          {((unreadCount !== undefined && unreadCount > 0) || hasUnreadItems || messages.all) && (
             <button
               className="notification-more"
               type="button"
