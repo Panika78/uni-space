@@ -381,6 +381,14 @@ function CatalogPicker({
   useEffect(() => {
     if (query.error instanceof ApiClientError && query.error.status === 403) onForbidden?.()
   }, [query.error, onForbidden])
+  const closeAndRestoreFocus = () => {
+    setSearch('')
+    setExpanded(false)
+    if (document.activeElement !== inputRef.current) {
+      skipFocusOpenRef.current = true
+      inputRef.current?.focus()
+    }
+  }
   const toggle = (id: string) => {
     const selected = items.find((item) => item.id === id)
     if (selected) {
@@ -389,13 +397,11 @@ function CatalogPicker({
     }
     if (!multiple) {
       onChange([id])
-      setSearch('')
-      setExpanded(false)
+      closeAndRestoreFocus()
       return
     }
     onChange(value.includes(id) ? value.filter((item) => item !== id) : [...value, id])
-    setSearch('')
-    setExpanded(false)
+    closeAndRestoreFocus()
   }
   const selectedNames = value.map((id) => selectedLabels[id] ?? 'Название недоступно')
   const visibleItems = allowedIds ? items.filter((item) => allowedIds.includes(item.id)) : items

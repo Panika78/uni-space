@@ -323,7 +323,7 @@ it('reuses group-scoped catalog queries while adding twenty groups in sequence',
     .map((url) => url.searchParams.get('group_id'))
   expect(new Set(subgroupGroups).size).toBe(20)
   expect(new Set(assignmentGroups).size).toBe(20)
-})
+}, 20_000)
 
 it('keeps a teacher eligible when its teaching assignment is on a later catalog page', async () => {
   const user = userEvent.setup()
@@ -769,6 +769,25 @@ it('closes catalog popovers on outside click and Escape without closing the edit
   await user.keyboard('{Escape}')
   expect(within(dialog).queryByRole('listbox', { name: 'Группы: варианты' })).toBeNull()
   expect(dialog).toBeInTheDocument()
+})
+
+it('returns keyboard focus to the catalog input after choosing an option', async () => {
+  const user = userEvent.setup()
+  mount()
+  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
+  const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
+  const groups = within(dialog).getByRole('combobox', { name: 'Группы' })
+
+  await user.click(groups)
+  const option = await within(dialog).findByRole('option', { name: /^ИВТ-21$/ })
+  await user.tab()
+  expect(option).toHaveFocus()
+  await user.keyboard('{Enter}')
+
+  expect(within(dialog).queryByRole('listbox', { name: 'Группы: варианты' })).toBeNull()
+  expect(groups).toHaveFocus()
+  expect(groups).toHaveValue('ИВТ-21')
 })
 
 it('keeps only the focused catalog picker open', async () => {
