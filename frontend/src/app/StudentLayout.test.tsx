@@ -1,7 +1,18 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+vi.mock('../features/auth/RoleContext', () => ({
+  useRoleContext: () => ({ user_id: '1', role: 'student', org_unit_id: null, permissions: [] }),
+}))
+vi.mock('../shared/api/client', () => ({
+  apiFetch: vi.fn(async (url: string) => {
+    if (url === '/api/v1/notifications/unread-count') return { count: 0 }
+    if (url.startsWith('/api/v1/notifications?')) return { items: [], next_cursor: null }
+    throw new Error(`Unexpected API request: ${url}`)
+  }),
+}))
 import { StudentLayout } from './StudentLayout'
 
 const auth = vi.hoisted(() => ({ logout: vi.fn() }))
@@ -41,19 +52,23 @@ function mockViewport(initialWidth: number) {
 
 function renderStudentLayout(path = '/schedule') {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route element={<StudentLayout />}>
-          <Route path="/schedule" element={<h1>Расписание</h1>} />
-          <Route path="/academics" element={<h1>Успеваемость</h1>} />
-          <Route path="/profile" element={<h1>Мой профиль</h1>} />
-          <Route path="/notifications" element={null} />
-          <Route path="/applications/:id" element={<h1>Заявление</h1>} />
-          <Route path="/services/:code" element={<h1>Услуга</h1>} />
-          <Route path="/news/:id" element={<h1>Новость</h1>} />
-        </Route>
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route element={<StudentLayout />}>
+            <Route path="/schedule" element={<h1>Расписание</h1>} />
+            <Route path="/academics" element={<h1>Успеваемость</h1>} />
+            <Route path="/profile" element={<h1>Мой профиль</h1>} />
+            <Route path="/notifications" element={null} />
+            <Route path="/applications/:id" element={<h1>Заявление</h1>} />
+            <Route path="/services/:code" element={<h1>Услуга</h1>} />
+            <Route path="/news/:id" element={<h1>Новость</h1>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 }
 

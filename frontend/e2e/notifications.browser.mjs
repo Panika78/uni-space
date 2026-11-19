@@ -1,4 +1,4 @@
-/* global process, console, document, window, Element, performance, MutationObserver, setTimeout, clearTimeout */
+/* global process, console, document, window, Element, URL, performance, MutationObserver, setTimeout, clearTimeout */
 // Run against local Vite + the real backend with two prepared fictional accounts.
 // Playwright is supplied by the existing browser tooling used for auth.browser.mjs.
 import assert from 'node:assert/strict'
@@ -9,13 +9,16 @@ const password = process.env.AUTH_TEST_PASSWORD
 assert.ok(login && password, 'Provide fictional AUTH_TEST_LOGIN_A and AUTH_TEST_PASSWORD')
 
 const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
+  executablePath: process.env.CHROMIUM_PATH || undefined,
   headless: true,
   args: ['--no-sandbox'],
 })
 const context = await browser.newContext({ viewport: { width: 360, height: 800 } })
 const page = await context.newPage()
 const apiError = (code) => ({ error: { code, message: 'internal server detail', details: [] } })
+await context.route('**/api/v1/notifications/unread-count', (route) =>
+  route.fulfill({ status: 503, json: apiError('internal_error') }),
+)
 const check = (name) => console.log(`PASS ${name}`)
 const assertCssWidth = (actual, expected, label) =>
   assert.ok(
@@ -212,6 +215,9 @@ try {
           items: [
             {
               id: 'notification-first',
+              read_at: null,
+              entity_type: null,
+              entity_id: null,
               type: 'unknown_browser_fixture',
               title: 'Первая фиктивная запись',
               body: 'Проверка полнотекстового отображения',
@@ -233,6 +239,9 @@ try {
           items: [
             {
               id: 'notification-last',
+              read_at: null,
+              entity_type: null,
+              entity_id: null,
               type: 'unknown_browser_fixture',
               title: 'Последняя фиктивная запись',
               body: 'Последняя страница',
@@ -342,6 +351,97 @@ try {
   await closeDrawerAndAssert('desktop backdrop pointer click', () => page.mouse.click(20, 450))
   await context.unroute('**/api/v1/notifications?*')
   check('desktop drawer restores focus after close button, Escape, and backdrop')
+
+  let readAllConfirmed = false
+  let releaseReadAll
+  const readAllResponse = new Promise((resolve) => {
+    releaseReadAll = resolve
+  })
+  let readAllRequestEntered
+  const readAllEntered = new Promise((resolve) => {
+    readAllRequestEntered = resolve
+  })
+  await context.route('**/api/v1/notifications?*', (route) => {
+    const url = new URL(route.request().url())
+    const cursor = url.searchParams.get('cursor')
+    if (cursor === 'notifications-page-two') {
+      return route.fulfill({
+        json: {
+          items: [
+            {
+              id: 'notification-unread-for-read-all',
+              type: 'unknown_browser_fixture',
+              title: 'Непрочитанная фиктивная запись',
+              body: 'Непрочитанная запись находится на второй странице',
+              read_at: readAllConfirmed ? '2026-11-19T10:00:00Z' : null,
+              created_at: '2026-11-19T09:00:00Z',
+            },
+          ],
+          next_cursor: null,
+        },
+      })
+    }
+    return route.fulfill({
+      json: {
+        items: Array.from({ length: 20 }, (_, index) => ({
+          id: `notification-read-${index + 1}`,
+          type: 'unknown_browser_fixture',
+          title: `Прочитанная фиктивная запись ${index + 1}`,
+          body: 'Первые двадцать записей уже прочитаны',
+          read_at: '2026-11-19T08:00:00Z',
+          created_at: '2026-11-19T07:00:00Z',
+        })),
+        next_cursor: 'notifications-page-two',
+      },
+    })
+  })
+  await context.route('**/api/v1/notifications/read-all', async (route) => {
+    readAllRequestEntered()
+    await readAllResponse
+    readAllConfirmed = true
+    await route.fulfill({ json: { updated_count: 1 } })
+  })
+  await bell.click()
+  const readAllDialog = page.getByRole('dialog', { name: 'Уведомления' })
+  await page.getByText('Прочитанная фиктивная запись 1', { exact: true }).waitFor()
+  assert.equal(
+    await readAllDialog
+      .getByRole('button', { name: 'Отметить все прочитанными', exact: true })
+      .count(),
+    1,
+    'read-all must stay available even though page one contains only read entries',
+  )
+  const countBadge = page.locator('.notification-count')
+  assert.equal(await countBadge.textContent(), '!', '503 count must show an error, not a number')
+  const failedCountLabel = await countBadge.getAttribute('aria-label')
+  await readAllDialog.getByRole('button', { name: 'Показать ещё', exact: true }).click()
+  await page.getByText('Непрочитанная фиктивная запись', { exact: true }).waitFor()
+  await readAllDialog
+    .getByRole('button', { name: 'Отметить все прочитанными', exact: true })
+    .click()
+  await readAllEntered
+  await page.getByText('Не прочитано', { exact: true }).waitFor()
+  assert.equal(readAllConfirmed, false, 'list state must not update before server confirmation')
+  assert.equal(
+    await countBadge.getAttribute('aria-label'),
+    failedCountLabel,
+    'badge must not change while the read-all response is pending',
+  )
+  releaseReadAll()
+  await page.getByText('Не прочитано', { exact: true }).waitFor({ state: 'detached' })
+  assert.equal(readAllConfirmed, true)
+  assert.equal(
+    await readAllDialog
+      .getByRole('button', { name: 'Отметить все прочитанными', exact: true })
+      .count(),
+    1,
+    'read-all remains available while the count endpoint is unavailable',
+  )
+  await readAllDialog.getByRole('button', { name: 'Показать ещё', exact: true }).click()
+  await page.getByText('Непрочитанная фиктивная запись', { exact: true }).waitFor()
+  assert.equal(await page.getByText('Не прочитано', { exact: true }).count(), 0)
+  await closeDrawerAndAssert('read-all after count failure', () => page.keyboard.press('Escape'))
+  check('read-all works with a 503 unread count and updates only after server confirmation')
 } finally {
   releaseLastPageGate()
   await context.close()

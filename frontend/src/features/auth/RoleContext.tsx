@@ -151,6 +151,7 @@ export function RoleLayout() {
   return (
     <CabinetLayout
       student={false}
+      notificationScope={`${context.user_id}:${context.role}`}
       navigation={getRoleNavigation(context)}
       home={getStartRoute(context)}
     />

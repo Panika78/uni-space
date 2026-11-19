@@ -358,6 +358,7 @@ try {
       const path = new URL(url).pathname
       return (
         path.startsWith('/api/v1/auth/') ||
+        path === '/api/v1/notifications/unread-count' ||
         (name === 'admin' && path === '/api/v1/admin/users') ||
         (name === 'teacher' && path === '/api/v1/teaching/assignments') ||
         (name === 'reviewer' && path === '/api/v1/staff/applications')
@@ -411,7 +412,11 @@ try {
     }
     await page.getByRole('button', { name: 'Меню пользователя' }).click()
     assert.equal(await page.getByRole('link', { name: 'Мой профиль' }).count(), 0)
-    assert.equal(await page.getByRole('button', { name: 'Уведомления' }).count(), 0)
+    assert.equal(
+      await page.getByRole('button', { name: 'Уведомления', exact: true }).isVisible(),
+      true,
+      'All authenticated roles should retain access to their own notification center',
+    )
     assert.equal(
       await page
         .getByRole('button', { name: /Создать|Удалить|Одобрить|Отклонить|Сохранить/ })

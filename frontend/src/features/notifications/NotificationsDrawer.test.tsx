@@ -1,10 +1,13 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiFetch } from '../../shared/api/client'
 import { NotificationsDrawer } from './NotificationsDrawer'
 
-vi.mock('../../shared/api/client', () => ({ apiFetch: vi.fn() }))
+vi.mock('../../shared/api/client', async (original) => ({
+  ...(await original<typeof import('../../shared/api/client')>()),
+  apiFetch: vi.fn(),
+}))
 
 const notification = {
   id: '1',
@@ -27,7 +30,7 @@ describe('NotificationsDrawer', () => {
     document.body.append(trigger)
     trigger.focus()
     const onClose = vi.fn()
-    const view = render(<NotificationsDrawer onClose={onClose} />)
+    const view = render(<NotificationsDrawer onClose={onClose} unreadCount={0} />)
     await screen.findByText('Уведомление')
     expect(screen.getByText(notification.title)).toBeTruthy()
     expect(document.querySelector('.notification-item__body')?.textContent).toBe(notification.body)
@@ -164,4 +167,116 @@ describe('NotificationsDrawer', () => {
     await waitFor(() => expect(screen.queryByText('Старый ответ')).not.toBeInTheDocument())
     expect(screen.getByText('Свежие уведомления')).toBeInTheDocument()
   })
+})
+
+afterEach(() => {
+  cleanup()
+  document.body.style.overflow = ''
+})
+
+it('resolves the target before confirming read and never updates optimistically', async () => {
+  let confirm!: (value: { id: string; read_at: string }) => void
+  const onNavigate = vi.fn()
+  const refresh = vi.fn()
+  vi.mocked(apiFetch).mockReset()
+  vi.mocked(apiFetch)
+    .mockResolvedValueOnce({
+      items: [{ ...notification, read_at: null, entity_type: 'application', entity_id: '8' }],
+      next_cursor: null,
+    })
+    .mockResolvedValueOnce({ path: '/applications/8' })
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          confirm = resolve
+        }),
+    )
+  render(
+    <NotificationsDrawer
+      onClose={() => undefined}
+      onNavigate={onNavigate}
+      onRefreshCount={refresh}
+    />,
+  )
+  fireEvent.click(await screen.findByRole('button', { name: 'Открыть объект' }))
+  await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(3))
+  expect(screen.getByText('Не прочитано')).toBeInTheDocument()
+  expect(refresh).not.toHaveBeenCalled()
+  expect(onNavigate).not.toHaveBeenCalled()
+  confirm({ id: '1', read_at: '2026-11-18T12:00:00Z' })
+  await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('/applications/8'))
+  expect(screen.queryByText('Не прочитано')).not.toBeInTheDocument()
+})
+
+it('rejects a server redirect outside contracted routes without marking read', async () => {
+  vi.mocked(apiFetch).mockReset()
+  vi.mocked(apiFetch)
+    .mockResolvedValueOnce({
+      items: [{ ...notification, read_at: null, entity_type: 'application', entity_id: '8' }],
+      next_cursor: null,
+    })
+    .mockResolvedValueOnce({ path: '//foreign.example/private' })
+  const onNavigate = vi.fn()
+  render(<NotificationsDrawer onClose={() => undefined} onNavigate={onNavigate} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Открыть объект' }))
+  expect(await screen.findByText('Объект недоступен')).toBeInTheDocument()
+  expect(apiFetch).toHaveBeenCalledTimes(2)
+  expect(screen.getByRole('button', { name: 'Отметить прочитанным' })).toBeInTheDocument()
+  expect(onNavigate).not.toHaveBeenCalled()
+})
+
+it('drops late target resolution after closing the drawer', async () => {
+  let resolve!: (value: { path: string }) => void
+  vi.mocked(apiFetch).mockReset()
+  vi.mocked(apiFetch)
+    .mockResolvedValueOnce({
+      items: [{ ...notification, read_at: null, entity_type: 'lesson', entity_id: '8' }],
+      next_cursor: null,
+    })
+    .mockImplementationOnce(
+      () =>
+        new Promise((complete) => {
+          resolve = complete
+        }),
+    )
+  const onNavigate = vi.fn()
+  const view = render(
+    <NotificationsDrawer isOpen onClose={() => undefined} onNavigate={onNavigate} />,
+  )
+  fireEvent.click(await screen.findByRole('button', { name: 'Открыть объект' }))
+  await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(2))
+  view.rerender(
+    <NotificationsDrawer isOpen={false} onClose={() => undefined} onNavigate={onNavigate} />,
+  )
+  resolve({ path: '/schedule?date=2026-11-18&mode=day&lesson_id=8' })
+  await Promise.resolve()
+  expect(onNavigate).not.toHaveBeenCalled()
+  expect(apiFetch).toHaveBeenCalledTimes(2)
+})
+
+it('aborts target resolution synchronously on unmount before accepting any completion', async () => {
+  let resolve!: (value: { path: string }) => void
+  vi.mocked(apiFetch).mockReset()
+  vi.mocked(apiFetch)
+    .mockResolvedValueOnce({
+      items: [{ ...notification, read_at: null, entity_type: 'application', entity_id: '8' }],
+      next_cursor: null,
+    })
+    .mockImplementationOnce(
+      () =>
+        new Promise((complete) => {
+          resolve = complete
+        }),
+    )
+  const onNavigate = vi.fn()
+  const view = render(<NotificationsDrawer onClose={() => undefined} onNavigate={onNavigate} />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Открыть объект' }))
+  await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(2))
+  const signal = vi.mocked(apiFetch).mock.calls[1][1]?.signal
+  view.unmount()
+  expect(signal?.aborted).toBe(true)
+  resolve({ path: '/applications/8' })
+  await Promise.resolve()
+  expect(apiFetch).toHaveBeenCalledTimes(2)
+  expect(onNavigate).not.toHaveBeenCalled()
 })

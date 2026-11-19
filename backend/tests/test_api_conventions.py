@@ -54,6 +54,20 @@ class LocationBody(BaseModel):
 SYNTHETIC_SECRET = "f06-synthetic-token-7b10"
 
 
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("PATCH", "/api/v1/notifications/1/read"),
+        ("POST", "/api/v1/notifications/read-all"),
+    ],
+)
+def test_notification_mutations_require_authentication_before_body_validation(method, path):
+    with TestClient(app) as client:
+        response = client.request(method, path, json={})
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_access"
+
+
 def make_error_test_app() -> FastAPI:
     test_app = FastAPI()
     test_app.add_middleware(ApiHeadersMiddleware)
@@ -879,6 +893,10 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
         "/api/v1/news",
         "/api/v1/news/{id}",
         "/api/v1/notifications",
+        "/api/v1/notifications/unread-count",
+        "/api/v1/notifications/read-all",
+        "/api/v1/notifications/{id}/read",
+        "/api/v1/notifications/{id}/target",
     }
     assert client.get("/api/v1").status_code == 404
     assert client.get("/docs").status_code == 404

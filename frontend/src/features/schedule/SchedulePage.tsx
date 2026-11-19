@@ -1,7 +1,7 @@
 import { useAccessSuspended } from '../../shared/ui/AccessRecovery'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
@@ -206,6 +206,8 @@ export function SchedulePage() {
   const { preferences, savePreferences, showCancelled, hasUncertainSave, hasExplicitSaveError } =
     useSchedulePreferences()
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
+  const requestedLessonId = params.get('lesson_id')
   const selectedDate = params.get('date')
   const date = selectedDate && isValidCalendarDate(selectedDate) ? selectedDate : getMoscowDate()
   const mode = params.get('mode') === 'week' ? 'week' : 'day'
@@ -218,6 +220,7 @@ export function SchedulePage() {
   }
   const [navigation, setNavigation] = useState<Lesson['latest_lesson']>(null)
   const pageRef = useRef<HTMLElement>(null)
+  const focusedRequest = useRef<string | null>(null)
   const [todayRequest, setTodayRequest] = useState(0)
   const pendingToday = useRef(false)
   const pendingPosition = useRef<string | null>(null)
@@ -327,6 +330,39 @@ export function SchedulePage() {
       cancelAnimationFrame(frame)
     }
   }, [todayRequest, mode, date, query.isSuccess, query.isFetching, query.data, isSuspended])
+  const requestedLesson =
+    requestedLessonId && query.isSuccess && !query.isFetching && !isLoading
+      ? listDayLessons(query.data.items, date).find((lesson) => lesson.id === requestedLessonId)
+      : undefined
+  useEffect(() => {
+    if (!requestedLessonId) {
+      focusedRequest.current = null
+      return
+    }
+    if (isSuspended || !requestedLesson || query.isFetching || isLoading) return
+    const request = `${location.key}:${date}:${requestedLessonId}`
+    const target = Array.from(
+      pageRef.current?.querySelectorAll<HTMLElement>(
+        '.schedule-day.is-selected [data-lesson-id]',
+      ) ?? [],
+    ).find((card) => card.dataset.lessonId === requestedLessonId)
+    if (!target) return
+    target.classList.add('lesson-card--notification-target')
+    if (focusedRequest.current !== request) {
+      target.focus()
+      target.scrollIntoView?.({ block: 'center' })
+      focusedRequest.current = request
+    }
+    return () => target.classList.remove('lesson-card--notification-target')
+  }, [
+    location.key,
+    date,
+    requestedLessonId,
+    requestedLesson,
+    query.isFetching,
+    isLoading,
+    isSuspended,
+  ])
   const isPositionUnavailable =
     navigation !== null &&
     getMoscowDate(new Date(navigation.starts_at)) === date &&
@@ -355,6 +391,11 @@ export function SchedulePage() {
           </p>
         </div>
       </div>
+      {requestedLessonId &&
+        query.isSuccess &&
+        !query.isFetching &&
+        !isLoading &&
+        !requestedLesson && <p role="status">Объект недоступен</p>}
       <div className="schedule-toolbar">
         <div className="schedule-modes" data-mode={mode} role="group" aria-label="Вид расписания">
           <button aria-pressed={mode === 'day'} onClick={() => setView(date, 'day')}>
@@ -525,6 +566,7 @@ export function SchedulePage() {
                 (lesson) =>
                   showCancelled ||
                   lesson.status !== 'cancelled' ||
+                  lesson.id === requestedLessonId ||
                   (navigation?.id === lesson.id &&
                     getMoscowDate(new Date(navigation.starts_at)) === date),
               )

@@ -76,6 +76,7 @@ beforeEach(() => {
   vi.mocked(apiFetch).mockImplementation(async (input, init) => {
     const url = new URL(String(input), window.location.href)
     if (url.pathname === '/api/v1/auth/context') return context as never
+    if (url.pathname === '/api/v1/notifications/unread-count') return { count: 0 } as never
     if (url.pathname.endsWith('/catalog/groups'))
       return { items: [{ id: '3', name: 'ИВТ-21' }], next_after_id: null } as never
     if (url.pathname.endsWith('/catalog/teachers'))

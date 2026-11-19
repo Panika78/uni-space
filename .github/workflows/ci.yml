@@ -451,6 +451,8 @@ jobs:
           AUTH_TEST_LOGIN_A="$SERVICES_TEST_LOGIN" \
           AUTH_TEST_PASSWORD="$SERVICES_TEST_PASSWORD" \
           node frontend/e2e/notifications.browser.mjs
+      - name: Run real notification read and navigation Chromium acceptance
+        run: bash scripts/notifications-browser-e2e.sh
       - name: Restart API between browser suites
         run: |
           set -e

@@ -575,6 +575,11 @@ try {
       ? route.fulfill({ json: currentProfile })
       : route.continue(),
   )
+  await context.route('**/api/v1/notifications/unread-count', (route) =>
+    route.request().headers().authorization === 'Bearer fictional-browser-token'
+      ? route.fulfill({ json: { count: 0 } })
+      : route.continue(),
+  )
   await context.route('**/api/v1/users/me/preferences', (route) =>
     route.request().headers().authorization === 'Bearer fictional-browser-token'
       ? route.fulfill({ json: { show_cancelled_lessons: true } })
@@ -626,6 +631,7 @@ try {
   await context.unroute('**/api/v1/users/me')
   await context.unroute('**/api/v1/auth/context')
   await context.unroute('**/api/v1/users/me/preferences')
+  await context.unroute('**/api/v1/notifications/unread-count')
   await holdAuthLock()
   const beforeWaitingLogout = countAuth()
   await clickLogout(page)

@@ -1,4 +1,4 @@
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useNavigate } from 'react-router-dom'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { focusManager, onlineManager, QueryClientProvider } from '@tanstack/react-query'
@@ -23,11 +23,11 @@ const response = (items = [createLesson()]): components['schemas']['ScheduleResp
   timezone: 'Europe/Moscow',
   items,
 })
-function renderSchedule() {
+function renderSchedule(initialEntry = '/') {
   const queryClient = createQueryClient()
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter useTransitions={false}>
+      <MemoryRouter initialEntries={[initialEntry]} useTransitions={false}>
         <SchedulePage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -459,3 +459,96 @@ it.each(['scheduled', 'moved', 'cancelled'] as const)(
     )
   },
 )
+
+it('opens a notification lesson from the URL after an authoritative schedule response', async () => {
+  request.mockResolvedValue(response([createLesson({ id: '8' })]))
+  renderSchedule('/schedule?date=2026-11-10&mode=day&lesson_id=8')
+  const card = await screen.findByRole('article')
+  await waitFor(() => expect(card).toHaveFocus())
+  expect(card).toHaveClass('lesson-card--notification-target')
+})
+
+it('does not expose an unavailable notification lesson from a direct URL', async () => {
+  request.mockResolvedValue(response([]))
+  renderSchedule('/schedule?date=2026-11-10&mode=day&lesson_id=999')
+  expect(await screen.findByText('Объект недоступен')).toBeInTheDocument()
+  expect(screen.queryByRole('article')).not.toBeInTheDocument()
+})
+
+it('restores notification lesson focus and scrolling after Back and Forward', async () => {
+  request.mockResolvedValue(response([createLesson({ id: '8' })]))
+  const scroll = vi.fn()
+  const originalScroll = HTMLElement.prototype.scrollIntoView
+  HTMLElement.prototype.scrollIntoView = scroll
+  function HistoryControls() {
+    const navigate = useNavigate()
+    return (
+      <>
+        <button onClick={() => navigate(-1)}>Назад</button>
+        <button onClick={() => navigate(1)}>Вперёд</button>
+      </>
+    )
+  }
+  try {
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter
+          useTransitions={false}
+          initialEntries={[
+            '/schedule?date=2026-11-10&mode=day',
+            '/schedule?date=2026-11-10&mode=day&lesson_id=8',
+          ]}
+          initialIndex={1}
+        >
+          <HistoryControls />
+          <SchedulePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    const card = await screen.findByRole('article')
+    await waitFor(() => expect(card).toHaveFocus())
+    const initialScrolls = scroll.mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: 'Назад' }))
+    await waitFor(() => expect(card).not.toHaveClass('lesson-card--notification-target'))
+    screen.getByRole('button', { name: 'Вперёд' }).focus()
+    fireEvent.click(screen.getByRole('button', { name: 'Вперёд' }))
+    await waitFor(() => expect(card).toHaveFocus())
+    expect(card).toHaveClass('lesson-card--notification-target')
+    expect(scroll.mock.calls.length).toBeGreaterThan(initialScrolls)
+  } finally {
+    HTMLElement.prototype.scrollIntoView = originalScroll
+  }
+})
+
+it('refocuses the notification lesson when navigating to the same URL again', async () => {
+  request.mockResolvedValue(response([createLesson({ id: '8' })]))
+  const path = '/schedule?date=2026-11-10&mode=day&lesson_id=8'
+  const scroll = vi.fn()
+  const originalScroll = HTMLElement.prototype.scrollIntoView
+  HTMLElement.prototype.scrollIntoView = scroll
+  function SameTarget() {
+    const navigate = useNavigate()
+    return <button onClick={() => navigate(path)}>Открыть снова</button>
+  }
+  try {
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter useTransitions={false} initialEntries={[path]}>
+          <SameTarget />
+          <SchedulePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    const card = await screen.findByRole('article')
+    await waitFor(() => expect(card).toHaveFocus())
+    const initialScrolls = scroll.mock.calls.length
+    const trigger = screen.getByRole('button', { name: 'Открыть снова' })
+    trigger.focus()
+    expect(trigger).toHaveFocus()
+    fireEvent.click(trigger)
+    await waitFor(() => expect(card).toHaveFocus())
+    expect(scroll.mock.calls.length).toBeGreaterThan(initialScrolls)
+  } finally {
+    HTMLElement.prototype.scrollIntoView = originalScroll
+  }
+})

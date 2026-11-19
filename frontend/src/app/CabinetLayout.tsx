@@ -1,3 +1,7 @@
+import { authEpochStorageKey } from '../features/auth/authSession'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { apiFetch } from '../shared/api/client'
+import type { components } from '../shared/api/schema'
 import { useAccessSuspended } from '../shared/ui/AccessRecovery'
 import {
   createContext,
@@ -27,7 +31,14 @@ const ShellContext = createContext<{
   student: boolean
   home: string
   initials: string
-}>({ navigation: [], student: false, home: '/cabinet', initials: '—' })
+  notificationScope: string
+}>({
+  navigation: [],
+  student: false,
+  home: '/cabinet',
+  initials: '—',
+  notificationScope: 'unscoped',
+})
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   const { navigation } = useContext(ShellContext)
@@ -342,16 +353,18 @@ export function CabinetLayout({
   student = false,
   home,
   initials = '—',
+  notificationScope = home,
   children,
 }: {
   navigation: readonly NavigationItem[]
   student?: boolean
   home: string
   initials?: string
+  notificationScope?: string
   children?: ReactNode
 }) {
   return (
-    <ShellContext.Provider value={{ navigation, student, home, initials }}>
+    <ShellContext.Provider value={{ navigation, student, home, initials, notificationScope }}>
       <CabinetShell>{children}</CabinetShell>
     </ShellContext.Provider>
   )
@@ -359,7 +372,7 @@ export function CabinetLayout({
 
 function CabinetShell({ children }: { children?: ReactNode }) {
   const isSuspended = useAccessSuspended()
-  const { student, home } = useContext(ShellContext)
+  const { student, home, notificationScope } = useContext(ShellContext)
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [exitStatus, setExitStatus] = useState<ExitProtectionStatus>('none')
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
@@ -371,6 +384,68 @@ function CabinetShell({ children }: { children?: ReactNode }) {
   const navigate = useNavigate()
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
   const showNotifications = isNotificationsOpen || location.pathname === '/notifications'
+  const countClient = useQueryClient()
+  const countEpoch = localStorage.getItem(authEpochStorageKey) ?? 'initial'
+  const countGeneration = useRef<AbortController | null>(null)
+  useLayoutEffect(() => {
+    const controller = new AbortController()
+    countGeneration.current = controller
+    if (isSuspended) controller.abort()
+    return () => controller.abort()
+  }, [countEpoch, notificationScope, isSuspended])
+  const count = useQuery({
+    queryKey: ['notifications-unread-count', countEpoch, notificationScope],
+    queryFn: ({ signal }) =>
+      apiFetch<components['schemas']['NotificationUnreadCount']>(
+        '/api/v1/notifications/unread-count',
+        {
+          authenticated: true,
+          signal,
+        },
+      ),
+    enabled: !isSuspended,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
+    refetchOnReconnect: 'always',
+  })
+  const { refetch: refetchCount } = count
+  const refreshCount = useCallback(() => {
+    const generation = countGeneration.current
+    if (!generation || generation.signal.aborted) return
+    // Cancel even an initial request without cached data: refetch alone reuses it.
+    void countClient
+      .cancelQueries({
+        queryKey: ['notifications-unread-count', countEpoch, notificationScope],
+        exact: true,
+      })
+      .then(() => {
+        if (!generation.signal.aborted && countGeneration.current === generation)
+          void refetchCount()
+      })
+  }, [countClient, countEpoch, notificationScope, refetchCount])
+  useEffect(() => {
+    if (showNotifications && !isSuspended) refreshCount()
+  }, [showNotifications, isSuspended, refreshCount])
+  useEffect(() => {
+    if (isSuspended) return
+    window.addEventListener('focus', refreshCount)
+    window.addEventListener('pageshow', refreshCount)
+    return () => {
+      window.removeEventListener('focus', refreshCount)
+      window.removeEventListener('pageshow', refreshCount)
+    }
+  }, [isSuspended, refreshCount])
+  const unreadCount =
+    !isSuspended && count.isSuccess && !count.isFetching ? count.data.count : undefined
+  const navigateFromNotification = useCallback(
+    (path: string) => {
+      setIsNotificationsOpen(false)
+      navigate(path)
+    },
+    [navigate],
+  )
   const closeDrawer = useCallback(() => setIsDrawerOpen(false), [])
   const openNotifications = useCallback(() => {
     setIsDrawerOpen(false)
@@ -378,12 +453,12 @@ function CabinetShell({ children }: { children?: ReactNode }) {
   }, [])
   const closeNotifications = useCallback(() => {
     setIsNotificationsOpen(false)
-    if (location.pathname === '/notifications') navigate('/schedule', { replace: true })
+    if (location.pathname === '/notifications') navigate(home, { replace: true })
     window.setTimeout(() => {
       const trigger = notificationTriggerRef.current
       if (trigger && !trigger.closest('[hidden], [inert]')) trigger.focus()
     }, 0)
-  }, [location.pathname, navigate])
+  }, [location.pathname, navigate, home])
 
   useEffect(() => closeDrawer, [location.key, closeDrawer])
 
@@ -448,7 +523,7 @@ function CabinetShell({ children }: { children?: ReactNode }) {
             <br />
             Неофициальный сервис
           </span>
-          {student && (
+          {
             <button
               ref={notificationTriggerRef}
               className="notification-link"
@@ -473,11 +548,30 @@ function CabinetShell({ children }: { children?: ReactNode }) {
                   strokeLinejoin="round"
                 />
               </svg>
+              <span
+                className="notification-count"
+                role="status"
+                aria-label={
+                  unreadCount !== undefined
+                    ? `Непрочитанных: ${unreadCount}`
+                    : count.isError
+                      ? 'Не удалось загрузить счётчик уведомлений'
+                      : 'Обновляем счётчик уведомлений'
+                }
+              >
+                {unreadCount !== undefined
+                  ? unreadCount > 0
+                    ? unreadCount
+                    : null
+                  : count.isError
+                    ? '!'
+                    : '…'}
+              </span>
               <span className="notification-label" aria-hidden="true">
                 Уведомления
               </span>
             </button>
-          )}
+          }
           <UserMenu student={student} exitStatus={exitStatus} />
         </header>
         <main className="student-content" id="main-content" ref={mainContentRef} tabIndex={-1}>
@@ -497,7 +591,13 @@ function CabinetShell({ children }: { children?: ReactNode }) {
         </main>
       </div>
       <MobileDrawer isOpen={isDrawerOpen} onClose={closeDrawer} />
-      {student && <NotificationsDrawer isOpen={showNotifications} onClose={closeNotifications} />}
+      <NotificationsDrawer
+        isOpen={showNotifications}
+        onClose={closeNotifications}
+        unreadCount={unreadCount}
+        onRefreshCount={refreshCount}
+        onNavigate={navigateFromNotification}
+      />
     </div>
   )
 }

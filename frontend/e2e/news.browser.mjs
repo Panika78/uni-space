@@ -558,7 +558,12 @@ try {
     await page.getByRole('alert').waitFor()
     assert.equal(await page.getByLabel('Заголовок').inputValue(), originalTitle)
     assert.equal(await page.getByLabel('Текст новости').inputValue(), body)
-    assert.equal(await page.locator('[role="status"]').count(), 0)
+    assert.equal(
+      await page.getByRole('button', { name: 'Уведомления' }).isVisible(),
+      true,
+      'Notification bell should remain visible during the lost-response scenario',
+    )
+    assert.equal(await page.locator('form').getByRole('status').count(), 0)
     await page.getByRole('button', { name: 'Сохранить черновик', exact: true }).click()
     await page.getByRole('heading', { name: originalTitle, exact: true }).waitFor()
     await staffContext.unroute(createRoute)

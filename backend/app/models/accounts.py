@@ -132,6 +132,10 @@ class Notification(Base):
     __tablename__ = "notifications"
     __table_args__ = (
         PrimaryKeyConstraint("id", name="pk_notifications"),
+        CheckConstraint(
+            "entity_id IS NULL OR entity_id > 0",
+            name="ck_notifications_entity_id_positive",
+        ),
         Index("ix_notifications_user_created_id", "user_id", "created_at", "id"),
     )
 
