@@ -1409,7 +1409,7 @@ RETURNING id;""")
                 )
                 assert notifications.status_code == 200, notifications.text
                 assert notifications.headers["cache-control"] == "no-store"
-                assert notification_id in [
+                assert int(notification_id) in [
                     int(item["id"]) for item in notifications.json()["items"]
                 ]
                 print(
