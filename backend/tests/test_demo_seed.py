@@ -288,6 +288,9 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
         "lessons": db_session.scalar(select(func.count()).select_from(Lesson)),
         "news": db_session.scalar(select(func.count()).select_from(News)),
         "notifications": db_session.scalar(select(func.count()).select_from(Notification)),
+        "pz_notifications": db_session.scalar(
+            select(func.count()).select_from(Notification).where(Notification.user_id == pz.user_id)
+        ),
         "course_groups": db_session.scalar(select(func.count()).select_from(CourseGroup)),
         "results": db_session.scalar(select(func.count()).select_from(AssessmentResult)),
     }
@@ -308,6 +311,9 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
         "lessons": db_session.scalar(select(func.count()).select_from(Lesson)),
         "news": db_session.scalar(select(func.count()).select_from(News)),
         "notifications": db_session.scalar(select(func.count()).select_from(Notification)),
+        "pz_notifications": db_session.scalar(
+            select(func.count()).select_from(Notification).where(Notification.user_id == pz.user_id)
+        ),
         "course_groups": db_session.scalar(select(func.count()).select_from(CourseGroup)),
         "results": db_session.scalar(select(func.count()).select_from(AssessmentResult)),
     }
@@ -329,7 +335,7 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
         db_session.scalar(
             select(func.count()).select_from(Notification).where(Notification.user_id == pz.user_id)
         )
-        == 2
+        == before["pz_notifications"]
     )
 
     # A deliberate password mismatch must abort without rotating hashes or changing
