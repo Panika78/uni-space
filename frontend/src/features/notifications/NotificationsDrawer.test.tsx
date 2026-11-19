@@ -30,7 +30,7 @@ describe('NotificationsDrawer', () => {
     document.body.append(trigger)
     trigger.focus()
     const onClose = vi.fn()
-    const view = render(<NotificationsDrawer onClose={onClose} />)
+    const view = render(<NotificationsDrawer onClose={onClose} unreadCount={0} />)
     await screen.findByText('Уведомление')
     expect(screen.getByText(notification.title)).toBeTruthy()
     expect(document.querySelector('.notification-item__body')?.textContent).toBe(notification.body)

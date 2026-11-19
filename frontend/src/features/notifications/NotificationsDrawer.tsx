@@ -351,7 +351,10 @@ export function NotificationsDrawer({
           >
             ×
           </button>
-          {((unreadCount !== undefined && unreadCount > 0) || hasUnreadItems || messages.all) && (
+          {((unreadCount !== undefined && unreadCount > 0) ||
+            hasUnreadItems ||
+            (unreadCount === undefined && !isLoading && !error && cursor !== null) ||
+            messages.all) && (
             <button
               className="notification-more"
               type="button"

@@ -9,9 +9,10 @@ import httpx
 import jwt
 import pytest
 from fastapi import Depends, FastAPI, HTTPException
-from sqlalchemy import delete, event, func, select, text, update
+from sqlalchemy import create_engine, delete, event, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from test_academics_migrations import run_migration
 
 from app.auth import router as auth_routes
 from app.auth.rate_limit import LoginRateLimiter
@@ -1610,3 +1611,191 @@ def test_notifications_keep_legacy_invalid_targets_readable(auth):
             ),
             {"user_id": user_ids[0]},
         )
+
+
+@pytest.fixture
+def notification_migration_database(postgresql_engine):
+    name = f"uni_space_notification_migration_{uuid4().hex}"
+    with postgresql_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as admin:
+        admin.execute(text(f'CREATE DATABASE "{name}"'))
+    engine = create_engine(postgresql_engine.url.set(database=name))
+    try:
+        yield engine
+    finally:
+        engine.dispose()
+        with postgresql_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as admin:
+            admin.execute(text(f'DROP DATABASE "{name}"'))
+
+
+def test_notification_migration_normalizes_legacy_targets_and_preserves_read_scope(
+    notification_migration_database, monkeypatch
+):
+    engine = notification_migration_database
+    run_migration(engine, "upgrade", "20261119_01")
+
+    test_app = FastAPI()
+    test_app.add_middleware(ApiHeadersMiddleware)
+    install_exception_handlers(test_app)
+    test_app.include_router(router)
+    test_app.include_router(notification_routes)
+    settings = Settings(
+        _env_file=None,
+        app_env="test",
+        jwt_signing_key=KEY,
+        database_url="postgresql+psycopg://unused:unused@localhost/unused",
+        allowed_origins=[ORIGIN],
+    )
+
+    def get_migration_session():
+        with Session(engine, expire_on_commit=False) as db:
+            yield db
+
+    test_app.dependency_overrides[get_db_session] = get_migration_session
+    test_app.dependency_overrides[get_settings] = lambda: settings
+    monkeypatch.setattr(auth_routes, "login_rate_limiter", LoginRateLimiter(limit=1000))
+
+    unique = uuid4().hex
+    with Session(engine) as db, db.begin():
+        users = [
+            User(
+                login=f"notification-migration-{unique}-{index}",
+                password_hash=PASSWORD_HASHER.hash(PASSWORD),
+                full_name="Fictional Student",
+                role="student",
+                is_active=True,
+            )
+            for index in range(2)
+        ]
+        db.add_all(users)
+        db.flush()
+        user_ids = [user.id for user in users]
+        logins = [user.login for user in users]
+
+    client = AuthClient(test_app)
+    first_login = client.login(json={"login": logins[0], "password": PASSWORD})
+    second_login = client.login(json={"login": logins[1], "password": PASSWORD})
+    assert first_login.status_code == 200, first_login.text
+    assert second_login.status_code == 200, second_login.text
+    first_access = first_login.json()["access_token"]
+    second_access = second_login.json()["access_token"]
+
+    # Model an already-upgraded 20261119_01 database with old rows that
+    # predate its NOT VALID check. The forward migration must repair only the
+    # target IDs and then leave ordinary read operations working.
+    run_migration(engine, "downgrade", "20261119_01")
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE notifications DROP CONSTRAINT ck_notifications_entity_id_positive"
+                )
+            )
+            patch_id = connection.scalar(
+                text(
+                    "INSERT INTO notifications "
+                    "(user_id, type, title, body, entity_type, entity_id) "
+                    "VALUES (:user_id, 'legacy', 'Patch legacy target', 'Keep this body', "
+                    "'application', -1) RETURNING id"
+                ),
+                {"user_id": user_ids[0]},
+            )
+            bulk_id = connection.scalar(
+                text(
+                    "INSERT INTO notifications "
+                    "(user_id, type, title, body, entity_type, entity_id) "
+                    "VALUES (:user_id, 'legacy', 'Bulk legacy target', 'Keep this too', "
+                    "'lesson', 0) RETURNING id"
+                ),
+                {"user_id": user_ids[0]},
+            )
+            preserved_read_at = datetime(2026, 11, 1, tzinfo=UTC)
+            read_id = connection.scalar(
+                text(
+                    "INSERT INTO notifications "
+                    "(user_id, type, title, body, entity_type, entity_id, read_at) "
+                    "VALUES (:user_id, 'legacy', 'Already read', 'Keep read state', "
+                    "'application', 42, :read_at) RETURNING id"
+                ),
+                {"user_id": user_ids[0], "read_at": preserved_read_at},
+            )
+            other_id = connection.scalar(
+                text(
+                    "INSERT INTO notifications "
+                    "(user_id, type, title, body, entity_type, entity_id) "
+                    "VALUES (:user_id, 'legacy', 'Other owner', 'Private', 'application', -1) "
+                    "RETURNING id"
+                ),
+                {"user_id": user_ids[1]},
+            )
+            connection.execute(
+                text(
+                    "ALTER TABLE notifications ADD CONSTRAINT ck_notifications_entity_id_positive "
+                    "CHECK (entity_id IS NULL OR entity_id > 0) NOT VALID"
+                )
+            )
+
+        run_migration(engine, "upgrade", "head")
+
+        with engine.connect() as connection:
+            assert connection.scalar(
+                text(
+                    "SELECT convalidated FROM pg_constraint "
+                    "WHERE conname = 'ck_notifications_entity_id_positive'"
+                )
+            )
+            records = (
+                connection.execute(
+                    text(
+                        "SELECT id, entity_id, entity_type, title, body, read_at "
+                        "FROM notifications WHERE id IN (:patch_id, :bulk_id, :read_id, :other_id)"
+                    ),
+                    {
+                        "patch_id": patch_id,
+                        "bulk_id": bulk_id,
+                        "read_id": read_id,
+                        "other_id": other_id,
+                    },
+                )
+                .mappings()
+                .all()
+            )
+        by_id = {record["id"]: record for record in records}
+        assert by_id[patch_id]["entity_id"] is None
+        assert by_id[patch_id]["entity_type"] == "application"
+        assert by_id[patch_id]["title"] == "Patch legacy target"
+        assert by_id[patch_id]["body"] == "Keep this body"
+        assert by_id[bulk_id]["entity_id"] is None
+        assert by_id[bulk_id]["body"] == "Keep this too"
+        assert by_id[read_id]["entity_id"] == 42
+        assert by_id[read_id]["read_at"] == preserved_read_at
+        assert by_id[other_id]["entity_id"] is None
+        assert by_id[other_id]["read_at"] is None
+
+        patched = client.request(
+            "PATCH", f"/api/v1/notifications/{patch_id}/read", access=first_access
+        )
+        assert patched.status_code == 200, patched.text
+        assert patched.json()["read_at"]
+
+        read_all = client.request("POST", "/api/v1/notifications/read-all", access=first_access)
+        assert read_all.status_code == 200, read_all.text
+        assert read_all.json()["updated_count"] == 1
+
+        first_feed = client.request("GET", "/api/v1/notifications?limit=100", access=first_access)
+        assert first_feed.status_code == 200, first_feed.text
+        first_records = {item["id"]: item for item in first_feed.json()["items"]}
+        assert first_records[str(patch_id)]["read_at"] == patched.json()["read_at"]
+        assert first_records[str(bulk_id)]["read_at"]
+        assert (
+            datetime.fromisoformat(first_records[str(read_id)]["read_at"].replace("Z", "+00:00"))
+            == preserved_read_at
+        )
+
+        second_feed = client.request("GET", "/api/v1/notifications?limit=100", access=second_access)
+        assert second_feed.status_code == 200, second_feed.text
+        second_records = second_feed.json()["items"]
+        assert len(second_records) == 1
+        assert second_records[0]["id"] == str(other_id)
+        assert second_records[0]["read_at"] is None
+    finally:
+        run_migration(engine, "upgrade", "head")
