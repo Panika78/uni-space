@@ -39,7 +39,10 @@ function NotificationRow({
     timeZone: 'Europe/Moscow',
   }).format(new Date(item.created_at))
   return (
-    <article className={`notification-item${item.read_at === null ? ' is-unread' : ''}`}>
+    <article
+      className={`notification-item${item.read_at === null ? ' is-unread' : ''}`}
+      data-notification-id={item.id}
+    >
       <p className="notification-item__type">{labels[item.type] ?? 'Уведомление'}</p>
       <h3>{item.title}</h3>
       <p className="notification-item__body">{item.body}</p>
