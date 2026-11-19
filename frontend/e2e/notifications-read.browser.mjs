@@ -54,6 +54,9 @@ const row = (key) =>
 async function open() {
   await bell().click()
   await drawer().waitFor()
+  await drawer().evaluate(async (panel) => {
+    await Promise.all(panel.getAnimations().map((animation) => animation.finished))
+  })
 }
 async function close() {
   await page.keyboard.press('Escape')
@@ -334,8 +337,8 @@ try {
   assert.equal(await bell().evaluate((el) => el === document.activeElement), true)
   check('account isolation, 1440px keyboard focus and Escape')
   await open()
-  await context.setOffline(true)
   await row('other').waitFor()
+  await context.setOffline(true)
   await read('other')
   await drawer().getByRole('alert').waitFor()
   assert.equal(
