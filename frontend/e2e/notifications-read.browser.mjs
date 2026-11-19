@@ -123,6 +123,26 @@ try {
   }
   await drawer().getByRole('button', { name: 'Показать ещё', exact: true }).click()
   await row('old-21').waitFor()
+  const readAll = drawer().getByRole('button', { name: 'Отметить все прочитанными', exact: true })
+  const content = drawer().locator('.notification-drawer__content')
+  await content.evaluate((element) => {
+    element.scrollTop = 0
+  })
+  const readAllBeforeScroll = await readAll.boundingBox()
+  assert.ok(readAllBeforeScroll, 'Read-all must be visible in the drawer header')
+  await content.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+  })
+  assert.ok(await content.evaluate((element) => element.scrollTop > 0))
+  const readAllAfterScroll = await readAll.boundingBox()
+  const header = await drawer().locator('.notification-drawer__header').boundingBox()
+  assert.ok(readAllAfterScroll && header)
+  assert.ok(Math.abs(readAllAfterScroll.y - readAllBeforeScroll.y) <= 0.5)
+  assert.ok(readAllAfterScroll.y >= header.y)
+  assert.ok(readAllAfterScroll.y + readAllAfterScroll.height <= header.y + header.height + 0.5)
+  await content.evaluate((element) => {
+    element.scrollTop = 0
+  })
   await count(30)
   check('360px real all-page count, pagination, unknown type, legacy/partial targets, no auto-read')
 

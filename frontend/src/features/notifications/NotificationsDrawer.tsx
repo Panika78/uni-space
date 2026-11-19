@@ -350,8 +350,6 @@ export function NotificationsDrawer({
           >
             ×
           </button>
-        </header>
-        <div className="notification-drawer__content" aria-live="polite">
           {((unreadCount !== undefined && unreadCount > 0) || messages.all) && (
             <button
               className="notification-more"
@@ -362,6 +360,8 @@ export function NotificationsDrawer({
               Отметить все прочитанными
             </button>
           )}
+        </header>
+        <div className="notification-drawer__content" aria-live="polite">
           {messages.all && <p role="alert">{messages.all}</p>}
           {isLoading && <p className="notification-message">Загружаем уведомления…</p>}
           {error && (
