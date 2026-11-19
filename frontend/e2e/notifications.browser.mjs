@@ -9,7 +9,7 @@ const password = process.env.AUTH_TEST_PASSWORD
 assert.ok(login && password, 'Provide fictional AUTH_TEST_LOGIN_A and AUTH_TEST_PASSWORD')
 
 const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium',
+  executablePath: process.env.CHROMIUM_PATH || undefined,
   headless: true,
   args: ['--no-sandbox'],
 })
@@ -212,6 +212,9 @@ try {
           items: [
             {
               id: 'notification-first',
+              read_at: null,
+              entity_type: null,
+              entity_id: null,
               type: 'unknown_browser_fixture',
               title: 'Первая фиктивная запись',
               body: 'Проверка полнотекстового отображения',
@@ -233,6 +236,9 @@ try {
           items: [
             {
               id: 'notification-last',
+              read_at: null,
+              entity_type: null,
+              entity_id: null,
               type: 'unknown_browser_fixture',
               title: 'Последняя фиктивная запись',
               body: 'Последняя страница',

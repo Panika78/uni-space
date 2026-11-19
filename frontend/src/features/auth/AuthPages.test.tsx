@@ -8,6 +8,21 @@ import { AuthProvider } from './AuthProvider'
 import { LoginPage, ProtectedRoute } from './AuthPages'
 import { StudentLayout } from '../../app/StudentLayout'
 
+vi.mock('./RoleContext', () => ({
+  useRoleContext: () => ({ user_id: '1', role: 'student', org_unit_id: null, permissions: [] }),
+}))
+
+function stubFetch(fetchMock: typeof fetch) {
+  vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+    if (
+      new URL(input instanceof Request ? input.url : String(input), window.location.origin)
+        .pathname === '/api/v1/notifications/unread-count'
+    )
+      return Promise.resolve(Response.json({ count: 0 }))
+    return fetchMock(input, init)
+  })
+}
+
 beforeEach(() => {
   localStorage.clear()
   vi.stubGlobal('navigator', {
@@ -81,7 +96,7 @@ it('submits once, opens schedule and hides it on logout', async () => {
       Response.json({ access_token: 'test-access', token_type: 'bearer', expires_in: 600 }),
     )
     .mockResolvedValueOnce(Response.json({ session_revoked: true }))
-  vi.stubGlobal('fetch', fetchMock)
+  stubFetch(fetchMock)
   renderRoute('/login')
   const user = userEvent.setup()
   await user.type(await screen.findByLabelText('Логин'), 'fictional')
@@ -120,7 +135,7 @@ it('shows rate feedback below the fields and keeps the password', async () => {
         { status: 429, headers: { 'Retry-After': '42' } },
       ),
     )
-  vi.stubGlobal('fetch', fetchMock)
+  stubFetch(fetchMock)
   renderRoute('/login')
   const user = userEvent.setup()
   await user.type(await screen.findByLabelText('Логин'), 'fictional')
@@ -159,7 +174,7 @@ it.each([
     )
   if (result instanceof Response) fetchMock.mockResolvedValueOnce(result)
   else fetchMock.mockRejectedValueOnce(result)
-  vi.stubGlobal('fetch', fetchMock)
+  stubFetch(fetchMock)
   renderRoute('/login')
   const user = userEvent.setup()
   await user.type(await screen.findByLabelText('Логин'), 'fictional')
@@ -212,7 +227,7 @@ it('keeps the ordinary login form after an uncertain logout and recovers on the 
     .mockResolvedValueOnce(
       Response.json({ access_token: 'replacement-access', token_type: 'bearer', expires_in: 600 }),
     )
-  vi.stubGlobal('fetch', fetchMock)
+  stubFetch(fetchMock)
   renderRoute('/login')
   const user = userEvent.setup()
   await user.type(await screen.findByLabelText('Логин'), 'fictional')
@@ -270,7 +285,7 @@ it('does not retry an unconfirmed logout when the browser reports network recove
     )
     .mockRejectedValueOnce(new TypeError('offline'))
     .mockResolvedValueOnce(Response.json({ session_revoked: true }))
-  vi.stubGlobal('fetch', fetchMock)
+  stubFetch(fetchMock)
   renderRoute('/login')
   const user = userEvent.setup()
   await user.type(await screen.findByLabelText('Логин'), 'fictional')

@@ -1,7 +1,7 @@
 import { useAccessSuspended } from '../../shared/ui/AccessRecovery'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { apiFetch } from '../../shared/api/client'
+import { ApiClientError, apiFetch } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { useOverlayPresence } from '../../shared/ui/useOverlayPresence'
 
@@ -15,18 +15,50 @@ const labels: Record<string, string> = {
   document_ready: 'Документ готов',
 }
 
-function NotificationRow({ item }: { item: Notification }) {
+function NotificationRow({
+  item,
+  busy,
+  message,
+  onRead,
+  onOpen,
+}: {
+  item: Notification
+  busy: boolean
+  message?: string
+  onRead: () => void
+  onOpen: () => void
+}) {
+  const hasTarget =
+    !!item.entity_id &&
+    /^[1-9]\d*$/.test(item.entity_id) &&
+    ['application', 'course_offering', 'lesson'].includes(item.entity_type ?? '')
+  const hasInvalidTarget = !hasTarget && (item.entity_type != null || item.entity_id != null)
   const date = new Intl.DateTimeFormat('ru-RU', {
     dateStyle: 'medium',
     timeStyle: 'short',
     timeZone: 'Europe/Moscow',
   }).format(new Date(item.created_at))
   return (
-    <article className="notification-item">
+    <article className={`notification-item${item.read_at === null ? ' is-unread' : ''}`}>
       <p className="notification-item__type">{labels[item.type] ?? 'Уведомление'}</p>
       <h3>{item.title}</h3>
       <p className="notification-item__body">{item.body}</p>
       <time dateTime={item.created_at}>{date}</time>
+      {item.read_at === null && <p className="notification-read-status">Не прочитано</p>}
+      <div className="notification-actions">
+        {hasTarget && (
+          <button type="button" disabled={busy} onClick={onOpen}>
+            Открыть объект
+          </button>
+        )}
+        {item.read_at === null && (
+          <button type="button" disabled={busy} onClick={onRead}>
+            Отметить прочитанным
+          </button>
+        )}
+      </div>
+      {hasInvalidTarget && !message && <p>Объект недоступен</p>}
+      {message && <p role="alert">{message}</p>}
     </article>
   )
 }
@@ -34,9 +66,15 @@ function NotificationRow({ item }: { item: Notification }) {
 export function NotificationsDrawer({
   onClose,
   isOpen: requestedOpen = true,
+  unreadCount,
+  onRefreshCount,
+  onNavigate,
 }: {
   onClose: () => void
   isOpen?: boolean
+  unreadCount?: number
+  onRefreshCount?: () => void
+  onNavigate?: (path: string) => void
 }) {
   const isSuspended = useAccessSuspended()
   const isOpen = requestedOpen && !isSuspended
@@ -51,6 +89,111 @@ export function NotificationsDrawer({
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [error, setError] = useState(false)
   const [moreError, setMoreError] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [messages, setMessages] = useState<Record<string, string>>({})
+  const operationRef = useRef<AbortController | null>(null)
+  const activeRef = useRef(isOpen)
+  useLayoutEffect(() => {
+    activeRef.current = isOpen
+    if (!isOpen) operationRef.current?.abort()
+    return () => {
+      activeRef.current = false
+      operationRef.current?.abort()
+      requestRef.current?.abort()
+    }
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen) operationRef.current?.abort()
+    return () => operationRef.current?.abort()
+  }, [isOpen])
+
+  async function readNotification(item: Notification, openTarget = false) {
+    if (operationRef.current && !operationRef.current.signal.aborted) return
+    const controller = new AbortController()
+    operationRef.current = controller
+    setBusy(item.id)
+    setMessages({})
+    const current = () =>
+      !controller.signal.aborted && activeRef.current && operationRef.current === controller
+    try {
+      let path: string | undefined
+      if (openTarget) {
+        const target = await apiFetch<components['schemas']['NotificationTargetResponse']>(
+          `/api/v1/notifications/${item.id}/target`,
+          {
+            authenticated: true,
+            signal: controller.signal,
+          },
+        )
+        if (!current()) return
+        // Defense in depth: only the contracted internal router destinations.
+        if (
+          !/^\/(?:applications\/[1-9]\d*|staff\/applications\/[1-9]\d*|academics\/courses\/[1-9]\d*|schedule\?date=\d{4}-\d{2}-\d{2}&mode=day&lesson_id=[1-9]\d*)$/.test(
+            target.path,
+          )
+        )
+          throw new ApiClientError('Объект недоступен', 'invalid_target', 404)
+        path = target.path
+      }
+      const result = await apiFetch<components['schemas']['NotificationReadResponse']>(
+        `/api/v1/notifications/${item.id}/read`,
+        { method: 'PATCH', authenticated: true, signal: controller.signal },
+      )
+      if (!current()) return
+      setItems((previous) =>
+        previous.map((row) => (row.id === result.id ? { ...row, read_at: result.read_at } : row)),
+      )
+      onRefreshCount?.()
+      if (path) onNavigate?.(path)
+    } catch (cause) {
+      if (!current()) return
+      setMessages({
+        [item.id]:
+          cause instanceof ApiClientError && [403, 404].includes(cause.status ?? 0)
+            ? 'Объект недоступен'
+            : 'Не удалось выполнить действие. Повторите попытку.',
+      })
+      onRefreshCount?.()
+    } finally {
+      if (operationRef.current === controller) {
+        operationRef.current = null
+        setBusy(null)
+      }
+    }
+  }
+
+  async function readAll() {
+    if (operationRef.current && !operationRef.current.signal.aborted) return
+    const controller = new AbortController()
+    operationRef.current = controller
+    setBusy('all')
+    setMessages({})
+    try {
+      await apiFetch<components['schemas']['NotificationsReadResponse']>(
+        '/api/v1/notifications/read-all',
+        {
+          method: 'POST',
+          authenticated: true,
+          signal: controller.signal,
+        },
+      )
+      if (controller.signal.aborted || !activeRef.current) return
+      onRefreshCount?.()
+      // Reload server timestamps; read-all intentionally does not return them.
+      await load()
+    } catch {
+      if (!controller.signal.aborted && activeRef.current) {
+        setMessages({ all: 'Не удалось подтвердить прочтение. Повторите попытку.' })
+        onRefreshCount?.()
+      }
+    } finally {
+      if (operationRef.current === controller) {
+        operationRef.current = null
+        setBusy(null)
+      }
+    }
+  }
 
   useLayoutEffect(() => {
     if (!isOpen) return
@@ -155,6 +298,8 @@ export function NotificationsDrawer({
     if (!isOpen) return
     const timer = window.setTimeout(() => {
       setItems([])
+      setMessages({})
+      setBusy(null)
       setCursor(null)
       void load()
     }, 0)
@@ -207,6 +352,17 @@ export function NotificationsDrawer({
           </button>
         </header>
         <div className="notification-drawer__content" aria-live="polite">
+          {((unreadCount !== undefined && unreadCount > 0) || messages.all) && (
+            <button
+              className="notification-more"
+              type="button"
+              disabled={busy !== null}
+              onClick={() => void readAll()}
+            >
+              Отметить все прочитанными
+            </button>
+          )}
+          {messages.all && <p role="alert">{messages.all}</p>}
           {isLoading && <p className="notification-message">Загружаем уведомления…</p>}
           {error && (
             <div className="notification-message" role="alert">
@@ -220,7 +376,14 @@ export function NotificationsDrawer({
             <p className="notification-message">Пока нет уведомлений.</p>
           )}
           {items.map((item) => (
-            <NotificationRow key={item.id} item={item} />
+            <NotificationRow
+              key={item.id}
+              item={item}
+              busy={busy !== null}
+              message={messages[item.id]}
+              onRead={() => void readNotification(item)}
+              onOpen={() => void readNotification(item, true)}
+            />
           ))}
           {moreError && (
             <p className="notification-message" role="alert">

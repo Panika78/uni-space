@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
@@ -51,6 +51,7 @@ beforeEach(() => {
     if (url.pathname === '/api/v1/users/me' && !url.search) return Promise.resolve(profile)
     if (url.pathname === '/api/v1/users/me/preferences')
       return Promise.resolve({ show_cancelled_lessons: true })
+    if (url.pathname === '/api/v1/notifications/unread-count') return Promise.resolve({ count: 3 })
     if (url.pathname === '/api/v1/notifications')
       return Promise.resolve({ items: [], next_cursor: null })
     if (
@@ -162,6 +163,7 @@ it('loads StudentAccess before the real schedule and keeps the working profile r
     '/api/v1/users/me',
     '/api/v1/users/me/preferences',
     '/api/v1/schedule',
+    '/api/v1/notifications/unread-count',
   ])
   await userEvent.setup().click(screen.getByRole('button', { name: 'Меню пользователя' }))
   await userEvent.setup().click(screen.getByRole('link', { name: 'Мой профиль' }))
@@ -204,4 +206,68 @@ it('keeps the notification route behind the existing authentication guard', asyn
   renderRouter('/notifications')
   expect(await screen.findByRole('heading', { name: 'Вход в систему' })).toBeInTheDocument()
   expect(screen.queryByRole('dialog', { name: 'Уведомления' })).not.toBeInTheDocument()
+})
+
+it('refreshes the authoritative unread count when the window regains focus', async () => {
+  auth.status = 'authenticated'
+  renderRouter('/schedule')
+  expect(await screen.findByLabelText('Непрочитанных: 3')).toHaveTextContent('3')
+  const before = vi
+    .mocked(apiFetch)
+    .mock.calls.filter(([url]) => String(url).includes('/unread-count')).length
+  fireEvent.focus(window)
+  await waitFor(() =>
+    expect(
+      vi.mocked(apiFetch).mock.calls.filter(([url]) => String(url).includes('/unread-count'))
+        .length,
+    ).toBeGreaterThan(before),
+  )
+  expect(await screen.findByLabelText('Непрочитанных: 3')).toHaveTextContent('3')
+})
+
+it('replaces a delayed initial unread count after a confirmed read', async () => {
+  auth.status = 'authenticated'
+  const fallback = vi.mocked(apiFetch).getMockImplementation()!
+  const staleResponses: ((value: { count: number }) => void)[] = []
+  let didRead = false
+  vi.mocked(apiFetch).mockImplementation((input, init) => {
+    const path = new URL(String(input), location.href).pathname
+    if (path.endsWith('/unread-count')) {
+      if (didRead) return Promise.resolve({ count: 0 })
+      return new Promise((resolve) => staleResponses.push(resolve))
+    }
+    if (path === '/api/v1/notifications')
+      return Promise.resolve({
+        items: [
+          {
+            id: '7',
+            title: 'Новое сообщение',
+            body: 'Текст',
+            type: 'future',
+            created_at: '2026-11-10T10:00:00Z',
+            read_at: null,
+            entity_type: null,
+            entity_id: null,
+          },
+        ],
+        next_cursor: null,
+      })
+    if (path === '/api/v1/notifications/7/read') {
+      didRead = true
+      return Promise.resolve({ id: '7', read_at: '2026-11-10T10:01:00Z' })
+    }
+    return fallback(input, init)
+  })
+  renderRouter('/schedule')
+  await screen.findByRole('article', { name: 'Вымышленная дисциплина' })
+  fireEvent.click(screen.getByRole('button', { name: 'Уведомления' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Отметить прочитанным' }))
+  await waitFor(() => expect(didRead).toBe(true))
+  await waitFor(() =>
+    expect(document.querySelector('[aria-label="Непрочитанных: 0"]')).not.toBeNull(),
+  )
+  for (const resolve of staleResponses) resolve({ count: 3 })
+  await Promise.resolve()
+  expect(document.querySelector('[aria-label="Непрочитанных: 0"]')).not.toBeNull()
+  expect(document.querySelector('[aria-label="Непрочитанных: 3"]')).toBeNull()
 })

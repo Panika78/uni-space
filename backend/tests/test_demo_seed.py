@@ -630,6 +630,8 @@ def test_demo_seed_requires_confirmation_of_full_target(monkeypatch, target_fiel
     seed = load_seed_module()
     url = make_url(get_settings().database_url.get_secret_value())
     configure_seed_target(monkeypatch, url)
+    if target_field == "DEMO_SEED_ALLOWED_PORT":
+        wrong_value = str((url.port or 5432) % 65535 + 1)
     monkeypatch.setenv(target_field, wrong_value)
     with pytest.raises(RuntimeError, match=r"DEMO_SEED_ALLOWED_\* values"):
         seed.require_safe_target()

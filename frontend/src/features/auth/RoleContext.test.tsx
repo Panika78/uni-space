@@ -21,12 +21,14 @@ beforeEach(() => {
   vi.stubGlobal('innerWidth', 360)
   context = { user_id: '42', role: 'teacher', org_unit_id: null, permissions: [] }
   vi.mocked(apiFetch).mockImplementation(async (url) =>
-    String(url).startsWith('/api/v1/admin/users')
-      ? { items: [], next_after_id: null }
-      : String(url).startsWith('/api/v1/teaching/assignments') ||
-          String(url).startsWith('/api/v1/staff/applications?')
-        ? { items: [], next_cursor: null }
-        : context,
+    url === '/api/v1/notifications/unread-count'
+      ? { count: 0 }
+      : String(url).startsWith('/api/v1/admin/users')
+        ? { items: [], next_after_id: null }
+        : String(url).startsWith('/api/v1/teaching/assignments') ||
+            String(url).startsWith('/api/v1/staff/applications?')
+          ? { items: [], next_cursor: null }
+          : context,
   )
 })
 afterEach(() => {
@@ -60,12 +62,13 @@ it.each([
       .mock.calls.every(
         ([url]) =>
           url === '/api/v1/auth/context' ||
+          url === '/api/v1/notifications/unread-count' ||
           (role === 'teacher' && String(url).startsWith('/api/v1/teaching/assignments')) ||
           (role === 'admin' && String(url).startsWith('/api/v1/admin/users')),
       ),
   ).toBe(true)
   expect(screen.queryByRole('link', { name: 'Мой профиль' })).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: 'Уведомления' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Уведомления' })).toBeInTheDocument()
 })
 it('preserves the student start despite empty staff grants', () => {
   expect(getStartRoute({ ...context, role: 'student' })).toBe('/schedule')
@@ -125,7 +128,12 @@ it.each([
 ])('rejects a teacher direct visit to %s before student API calls', async (path) => {
   mount(path)
   expect(await screen.findByRole('alert')).toHaveTextContent('Доступ запрещён')
-  expect(vi.mocked(apiFetch).mock.calls.map(([url]) => url)).toEqual(['/api/v1/auth/context'])
+  expect(
+    vi
+      .mocked(apiFetch)
+      .mock.calls.filter(([url]) => url !== '/api/v1/notifications/unread-count')
+      .map(([url]) => url),
+  ).toEqual(['/api/v1/auth/context'])
 })
 it('does not mount a shell before the initial context resolves', async () => {
   let resolve!: (value: AuthorizationContext) => void
@@ -236,7 +244,13 @@ it.each([
   context = { ...context, role }
   mount(path)
   expect(await screen.findByRole('alert')).toHaveTextContent('Доступ запрещён')
-  expect(vi.mocked(apiFetch).mock.calls.every(([url]) => url === '/api/v1/auth/context')).toBe(true)
+  expect(
+    vi
+      .mocked(apiFetch)
+      .mock.calls.every(
+        ([url]) => url === '/api/v1/auth/context' || url === '/api/v1/notifications/unread-count',
+      ),
+  ).toBe(true)
 })
 it('preserves shell navigation state while revalidating and navigating within a role', async () => {
   const user = userEvent.setup()

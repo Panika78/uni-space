@@ -1544,9 +1544,7 @@ def test_notifications_are_private_and_use_stable_keyset_pagination(auth):
         )
         db.execute(delete(Student).where(Student.user_id == user_ids[0]))
         db.execute(update(User).where(User.id == user_ids[0]).values(role="teacher"))
-    assert_error(
-        client.request("GET", "/api/v1/notifications", access=first_access), 403, "forbidden"
-    )
+    assert client.request("GET", "/api/v1/notifications", access=first_access).status_code == 200
     with Session(engine) as db, db.begin():
         db.execute(update(User).where(User.id == user_ids[0]).values(role="student"))
         db.add(Student(**old_student))

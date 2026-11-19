@@ -23,6 +23,21 @@ afterEach(() => {
   vi.resetAllMocks()
 })
 
+function mockPasswordApi(error?: Error) {
+  vi.mocked(apiFetch).mockImplementation(async (url) => {
+    if (url === '/api/v1/notifications/unread-count') return { count: 0 }
+    if (url === '/api/v1/auth/password') {
+      if (error) throw error
+      return undefined
+    }
+    throw new Error(`Unexpected API request: ${String(url)}`)
+  })
+}
+
+function passwordRequests() {
+  return vi.mocked(apiFetch).mock.calls.filter(([url]) => url === '/api/v1/auth/password')
+}
+
 function mount() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const router = createMemoryRouter(
@@ -42,7 +57,7 @@ function mount() {
 
 it.each([360, 1440])('renders a single settings form at %i px', async (width) => {
   window.innerWidth = width
-  vi.mocked(apiFetch).mockResolvedValue(undefined)
+  mockPasswordApi()
   mount()
   expect(await screen.findByRole('heading', { name: 'Смена пароля' })).toBeInTheDocument()
   expect(screen.getByLabelText('Действующий пароль')).toBeInTheDocument()
@@ -51,7 +66,7 @@ it.each([360, 1440])('renders a single settings form at %i px', async (width) =>
 })
 
 it('counts Unicode code points, accepts a 12 character phrase and ends the session', async () => {
-  vi.mocked(apiFetch).mockResolvedValue(undefined)
+  mockPasswordApi()
   mount()
   const user = userEvent.setup()
   await user.type(screen.getByLabelText('Действующий пароль'), 'fictional-current')
@@ -59,7 +74,7 @@ it('counts Unicode code points, accepts a 12 character phrase and ends the sessi
   await user.type(screen.getByLabelText('Повторите новый пароль'), '😀'.repeat(11))
   await user.click(screen.getByRole('button', { name: 'Сменить пароль' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('от 12 до 128')
-  expect(apiFetch).not.toHaveBeenCalled()
+  expect(passwordRequests()).toHaveLength(0)
 
   await user.clear(screen.getByLabelText('Новый пароль'))
   await user.clear(screen.getByLabelText('Повторите новый пароль'))
@@ -69,7 +84,7 @@ it('counts Unicode code points, accepts a 12 character phrase and ends the sessi
   await user.click(screen.getByRole('button', { name: 'Сменить пароль' }))
   expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
   expect(auth.finishPasswordChange).toHaveBeenCalledOnce()
-  const request = vi.mocked(apiFetch).mock.calls[0]
+  const request = passwordRequests()[0]
   expect(request?.[1]).toMatchObject({ authenticated: true, replayAfterRefresh: false })
   expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
     current_password: 'fictional-current',
@@ -79,33 +94,35 @@ it('counts Unicode code points, accepts a 12 character phrase and ends the sessi
 })
 
 it('accepts exactly 128 Unicode code points and rejects 129 before sending', async () => {
-  vi.mocked(apiFetch).mockResolvedValue(undefined)
+  mockPasswordApi()
   mount()
   const user = userEvent.setup()
   const exactMaximum = '🔐'.repeat(128)
   await user.type(screen.getByLabelText('Действующий пароль'), 'fictional-current')
-  await user.type(screen.getByLabelText('Новый пароль'), exactMaximum)
-  await user.type(screen.getByLabelText('Повторите новый пароль'), exactMaximum)
+  await user.click(screen.getByLabelText('Новый пароль'))
+  await user.paste(exactMaximum)
+  await user.click(screen.getByLabelText('Повторите новый пароль'))
+  await user.paste(exactMaximum)
   await user.click(screen.getByRole('button', { name: 'Сменить пароль' }))
   expect(await screen.findByRole('heading', { name: 'Вход' })).toBeInTheDocument()
-  expect(JSON.parse(String(vi.mocked(apiFetch).mock.calls[0]?.[1]?.body)).new_password).toBe(
-    exactMaximum,
-  )
+  expect(JSON.parse(String(passwordRequests()[0]?.[1]?.body)).new_password).toBe(exactMaximum)
 
   cleanup()
   vi.mocked(apiFetch).mockClear()
   mount()
   const secondUser = userEvent.setup()
   await secondUser.type(screen.getByLabelText('Действующий пароль'), 'fictional-current')
-  await secondUser.type(screen.getByLabelText('Новый пароль'), 'x'.repeat(129))
-  await secondUser.type(screen.getByLabelText('Повторите новый пароль'), 'x'.repeat(129))
+  await secondUser.click(screen.getByLabelText('Новый пароль'))
+  await secondUser.paste('x'.repeat(129))
+  await secondUser.click(screen.getByLabelText('Повторите новый пароль'))
+  await secondUser.paste('x'.repeat(129))
   await secondUser.click(screen.getByRole('button', { name: 'Сменить пароль' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('от 12 до 128')
-  expect(apiFetch).not.toHaveBeenCalled()
+  expect(passwordRequests()).toHaveLength(0)
 })
 
 it('does not repeat a request after a lost response and reports uncertainty', async () => {
-  vi.mocked(apiFetch).mockRejectedValue(new Error('network failure'))
+  mockPasswordApi(new Error('network failure'))
   mount()
   const user = userEvent.setup()
   await user.type(screen.getByLabelText('Действующий пароль'), 'fictional-current')
@@ -113,14 +130,12 @@ it('does not repeat a request after a lost response and reports uncertainty', as
   await user.type(screen.getByLabelText('Повторите новый пароль'), 'fictional new phrase')
   await user.click(screen.getByRole('button', { name: 'Сменить пароль' }))
   expect(await screen.findByRole('heading', { name: 'Проверьте вход' })).toBeInTheDocument()
-  expect(apiFetch).toHaveBeenCalledOnce()
+  expect(passwordRequests()).toHaveLength(1)
   expect(auth.finishPasswordChange).toHaveBeenCalledWith(true)
 })
 
 it('keeps the settings form and session after an invalid current password', async () => {
-  vi.mocked(apiFetch).mockRejectedValue(
-    new ApiClientError('Invalid credentials', 'invalid_credentials', 401),
-  )
+  mockPasswordApi(new ApiClientError('Invalid credentials', 'invalid_credentials', 401))
   mount()
   const user = userEvent.setup()
   await user.type(screen.getByLabelText('Действующий пароль'), 'fictional-wrong')
@@ -134,7 +149,7 @@ it('keeps the settings form and session after an invalid current password', asyn
 })
 
 it('explains empty and mismatched confirmation and focuses its field', async () => {
-  vi.mocked(apiFetch).mockResolvedValue(undefined)
+  mockPasswordApi()
   mount()
   const user = userEvent.setup()
   const current = screen.getByLabelText('Действующий пароль')
@@ -153,11 +168,11 @@ it('explains empty and mismatched confirmation and focuses its field', async () 
   await user.click(screen.getByRole('button', { name: 'Сменить пароль' }))
   expect(confirm).toHaveFocus()
   expect(screen.getByText('Пароли не совпадают.')).toBeInTheDocument()
-  expect(apiFetch).not.toHaveBeenCalled()
+  expect(passwordRequests()).toHaveLength(0)
 })
 
 it('reveals only the password field whose visibility control is activated', async () => {
-  vi.mocked(apiFetch).mockResolvedValue(undefined)
+  mockPasswordApi()
   mount()
   const user = userEvent.setup()
   const current = screen.getByLabelText('Действующий пароль')
@@ -173,6 +188,7 @@ it('keeps the student password form and drafts mounted during a temporary profil
   role.value = 'student'
   let unavailable = false
   vi.mocked(apiFetch).mockImplementation(async (url) => {
+    if (url === '/api/v1/notifications/unread-count') return { count: 0 }
     if (url === '/api/v1/users/me') {
       if (unavailable) throw new ApiClientError('Unavailable', 'http_error', 503)
       return { full_name: 'Вымышленный студент' }
@@ -214,6 +230,7 @@ it.each([401, 403])('does not retain the student password form after HTTP %i', a
   role.value = 'student'
   let denied = false
   vi.mocked(apiFetch).mockImplementation(async (url) => {
+    if (url === '/api/v1/notifications/unread-count') return { count: 0 }
     if (url === '/api/v1/users/me') {
       if (denied) throw new ApiClientError('Access denied', 'access_denied', status)
       return { full_name: 'Вымышленный студент' }

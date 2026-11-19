@@ -105,6 +105,8 @@ beforeEach(() => {
         account = JSON.parse(String(init?.body)).login === 'student-a' ? 'A' : 'B'
         return Response.json({ access_token: account, token_type: 'bearer', expires_in: 600 })
       }
+      if (path === '/api/v1/notifications/unread-count')
+        return Response.json({ count: account === 'A' ? 3 : 1 })
       if (path.endsWith('/logout')) return Response.json({ session_revoked: true })
       if (path.endsWith('/auth/context')) {
         if (contextError === 0) throw new TypeError('offline')
