@@ -594,9 +594,13 @@ with engine.connect() as c:
     for column in ('news_id', 'response_data'):
         assert c.execute(text("SELECT has_column_privilege(current_user,'news_create_requests',:column,'UPDATE')"), {'column': column}).scalar_one()
     assert c.execute(text("SELECT has_table_privilege(current_user,'notifications','SELECT')")).scalar_one()
-    for privilege in ('INSERT','UPDATE','DELETE'):
+    for privilege in ('UPDATE','DELETE'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'notifications',:privilege)"), {'privilege': privilege}).scalar_one()
-    assert not c.execute(text("SELECT has_sequence_privilege(current_user,'notifications_id_seq','USAGE')")).scalar_one()
+    for column in ('user_id','logical_event_key','audience_group_id','type','title','body','entity_type','entity_id'):
+        assert c.execute(text("SELECT has_column_privilege(current_user,'notifications',:column,'INSERT')"), {'column': column}).scalar_one()
+    for column in ('id','read_at','created_at'):
+        assert not c.execute(text("SELECT has_column_privilege(current_user,'notifications',:column,'INSERT')"), {'column': column}).scalar_one()
+    assert c.execute(text("SELECT has_sequence_privilege(current_user,'notifications_id_seq','USAGE')")).scalar_one()
     for privilege in ('SELECT','UPDATE','DELETE','TRUNCATE'):
         assert not c.execute(text("SELECT has_table_privilege(current_user,'audit_events',:privilege)"), {'privilege': privilege}).scalar_one()
     assert c.execute(text("SELECT has_table_privilege(current_user,'audit_events','INSERT')")).scalar_one()
@@ -732,9 +736,8 @@ for statement in (
     "INSERT INTO disciplines (name) VALUES ('forbidden')",
     "UPDATE org_units SET name='forbidden'", "DELETE FROM programs",
     "UPDATE news SET author_user_id=NULL", "DELETE FROM news", "TRUNCATE news",
-    "INSERT INTO notifications (user_id,type,title,body) VALUES (1,'forbidden','forbidden','forbidden')",
+    "INSERT INTO notifications (id,user_id,type,title,body) VALUES (1,1,'forbidden','forbidden','forbidden')",
     "UPDATE notifications SET title='forbidden'", "DELETE FROM notifications",
-    "SELECT nextval('public.notifications_id_seq')",
     "UPDATE audit_events SET reason='correction'", "DELETE FROM audit_events",
     "SELECT * FROM audit_events",
     "SELECT * FROM audit_events", "SELECT nextval('public.audit_events_id_seq')",

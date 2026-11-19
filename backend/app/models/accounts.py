@@ -132,6 +132,9 @@ class Notification(Base):
     __tablename__ = "notifications"
     __table_args__ = (
         PrimaryKeyConstraint("id", name="pk_notifications"),
+        UniqueConstraint(
+            "logical_event_key", "user_id", name="uq_notifications_logical_event_recipient"
+        ),
         CheckConstraint(
             "entity_id IS NULL OR entity_id > 0",
             name="ck_notifications_entity_id_positive",
@@ -140,6 +143,12 @@ class Notification(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=False), primary_key=True)
+    # Stable identity of the committed domain history row that caused this
+    # notification. Legacy/manual notifications may have no event key.
+    logical_event_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # The recipient's group when a course-scoped event was addressed. This is
+    # retained so later reads can redact notifications after a group transfer.
+    audience_group_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", name="fk_notifications_user_id_users"), nullable=False
     )

@@ -191,7 +191,9 @@ def test_alembic_graph_preserves_notifications_and_has_one_academic_head():
     from alembic.script import ScriptDirectory
 
     graph = ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
-    assert graph.get_heads() == ["20261119_02"]
+    assert graph.get_heads() == ["20261119_04"]
+    assert graph.get_revision("20261119_04").down_revision == "20261119_03"
+    assert graph.get_revision("20261119_03").down_revision == "20261119_02"
     assert graph.get_revision("20261119_02").down_revision == "20261119_01"
     assert graph.get_revision("20261119_01").down_revision == "20261118_04"
     assert graph.get_revision("20261118_04").down_revision == "20261118_03"
@@ -215,7 +217,7 @@ def test_alembic_graph_preserves_notifications_and_has_one_academic_head():
 
 
 def test_upgrade_main_notifications_preserves_rows_and_creates_academics(migration_database):
-    from app.models import Notification, User
+    from app.models import User
 
     engine = migration_database
     run_migration(engine, "upgrade", "20261112_01")
@@ -229,18 +231,19 @@ def test_upgrade_main_notifications_preserves_rows_and_creates_academics(migrati
         )
         db.add(user)
         db.flush()
-        db.add(
-            Notification(
-                user_id=user.id,
-                type="fictional_type",
-                title="Существующее уведомление",
-                body="Вымышленные данные до установки успеваемости",
-                entity_type="fictional_entity",
-                entity_id=42,
-            )
+        db.execute(
+            text(
+                "INSERT INTO notifications (user_id,type,title,body,entity_type,entity_id) "
+                "VALUES (:user_id,'fictional_type','Существующее уведомление',"
+                "'Вымышленные данные до установки успеваемости','fictional_entity',42)"
+            ),
+            {"user_id": user.id},
         )
         db.commit()
-    notification_snapshot = text("SELECT jsonb_agg(to_jsonb(n) ORDER BY id) FROM notifications n")
+    notification_snapshot = text(
+        "SELECT jsonb_agg((to_jsonb(n) - 'logical_event_key' - 'audience_group_id') ORDER BY id) "
+        "FROM notifications n"
+    )
     with engine.connect() as db:
         before = db.scalar(notification_snapshot)
         assert db.scalar(text("SELECT to_regclass('public.assessments')")) is None
@@ -248,7 +251,7 @@ def test_upgrade_main_notifications_preserves_rows_and_creates_academics(migrati
     run_migration(engine, "check")
     with engine.connect() as db:
         assert db.scalar(notification_snapshot) == before
-        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261119_02"
+        assert db.scalar(text("SELECT version_num FROM alembic_version")) == "20261119_04"
         for table in ("assessments", "assessment_groups", "assessment_results", "final_results"):
             assert (
                 db.scalar(text("SELECT to_regclass(:table)"), {"table": f"public.{table}"})

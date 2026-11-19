@@ -27,6 +27,7 @@ from app.models import (
     TeachingAssignment,
     User,
 )
+from app.notification_events import create_schedule_notifications
 from app.permissions import PermissionCode, require_staff_permission
 from app.schedule.conflicts import LessonProposal, validate_lesson_conflicts
 from app.schedule.editor_schemas import (
@@ -267,7 +268,7 @@ def snapshot(item: EditorLesson) -> dict:
 
 
 def audit_lesson(db, actor, lesson_id, action, before):
-    write_audit_event(
+    return write_audit_event(
         db,
         actor=actor,
         entity_type="lesson",
@@ -352,8 +353,8 @@ def insert_lesson(db, actor, data, previous_id=None):
     # operation: its intermediate revisions are invisible outside our lock.
     db.execute(update(Lesson).where(Lesson.id == lesson.id).values(version=1))
     db.refresh(lesson)
-    audit_lesson(db, actor, lesson.id, "create", None)
-    return lesson
+    event = audit_lesson(db, actor, lesson.id, "create", None)
+    return lesson, event
 
 
 def mark_assessment_dates(db, actor, lesson_id):
@@ -400,8 +401,9 @@ def mutate_lesson(
     require_editor(db, actor)
     if action == "create":
         validate_state(db, data)
-        target = insert_lesson(db, actor, data)
+        target, audit_event = insert_lesson(db, actor, data)
         event = ScheduleChanged(target.id, action)
+        before_snapshot = None
     else:
         lesson = db.scalar(
             select(Lesson)
@@ -420,6 +422,7 @@ def mutate_lesson(
             raise HTTPException(409, "invalid_transition")
         old = get_editor_lesson(db, lesson_id)
         before = snapshot(old)
+        before_snapshot = before
         if action == "move" and data.starts_at == old.starts_at and data.ends_at == old.ends_at:
             raise HTTPException(409, "invalid_transition")
         if action == "update":
@@ -498,9 +501,22 @@ def mutate_lesson(
         db.refresh(lesson)
         if action in ("cancel", "move"):
             mark_assessment_dates(db, actor, lesson_id)
-        audit_lesson(db, actor, lesson_id, action, before)
-        target = insert_lesson(db, actor, data, lesson_id) if action == "move" else lesson
+        audit_event = audit_lesson(db, actor, lesson_id, action, before)
+        if action == "move":
+            target, _new_audit_event = insert_lesson(db, actor, data, lesson_id)
+        else:
+            target = lesson
         event = ScheduleChanged(lesson_id, action, target.id if action == "move" else None)
+    notification_before = (
+        before_snapshot | {"id": int(lesson_id)} if before_snapshot is not None else None
+    )
+    notification_after = snapshot(get_editor_lesson(db, target.id)) | {"id": int(target.id)}
+    create_schedule_notifications(
+        db,
+        event_id=audit_event.id,
+        before=notification_before,
+        after=notification_after,
+    )
     # A transactional hook for the future notification integration. The owner
     # exposes events only after commit; rollback removes them in the router.
     db.info.setdefault("schedule_events", []).append(event)

@@ -12,6 +12,7 @@ from app.models import (
     AssessmentGroup,
     AuditEvent,
     Lesson,
+    Notification,
     OrgUnit,
     StaffPermission,
     StaffProfile,
@@ -124,6 +125,75 @@ def test_editor_crud_versions_noop_and_subgroup_audit(editor):
     assert e.request_editor("PATCH", path, data).json()["version"] == 3
     assert e.request_editor("DELETE", path).status_code == 405
     assert e.request_editor("PATCH", path, data | {"status": "moved"}).status_code == 422
+
+
+def test_schedule_write_generates_one_notification_per_current_student_and_teacher(editor):
+    e = editor
+    student = e.students[1]
+    student.group_id = e.groups[0].id
+    student.subgroup_id = e.a.id
+    e.db.flush()
+    item = create(e)
+    student_rows = e.db.scalars(
+        select(Notification).where(Notification.user_id == student.user_id)
+    ).all()
+    teacher_user = e.teacher.user_id
+    teacher_rows = e.db.scalars(
+        select(Notification).where(Notification.user_id == teacher_user)
+    ).all()
+    assert len(student_rows) == len(teacher_rows) == 1
+    assert student_rows[0].entity_type == "lesson"
+    assert student_rows[0].entity_id == int(item["id"])
+    assert teacher_rows[0].entity_type is None and teacher_rows[0].entity_id is None
+
+    path = f"/lessons/{item['id']}"
+    changed_payload = e.payload(
+        version=1,
+        starts_at="2026-11-10T11:00:00+03:00",
+        ends_at="2026-11-10T12:00:00+03:00",
+    )
+    updated = e.request_editor("PATCH", path, changed_payload)
+    assert updated.status_code == 200, updated.text
+    unchanged = e.request_editor("PATCH", path, changed_payload | {"version": 2})
+    assert unchanged.status_code == 200
+    assert e.db.query(Notification).filter_by(user_id=student.user_id).count() == 2
+    assert e.db.query(Notification).filter_by(user_id=teacher_user).count() == 2
+
+
+def test_notification_insert_failure_rolls_back_schedule_and_audit(editor):
+    e = editor
+    e.db.execute(
+        text("""
+        CREATE FUNCTION reject_notification_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            RAISE EXCEPTION 'notification insert rejected';
+        END
+        $$
+        """)
+    )
+    e.db.execute(
+        text("CREATE TRIGGER reject_notification_insert BEFORE INSERT ON notifications "
+             "FOR EACH ROW EXECUTE FUNCTION reject_notification_insert()")
+    )
+    e.db.commit()
+    before = {
+        "lessons": e.db.scalar(select(func.count()).select_from(Lesson)),
+        "audit": e.db.scalar(select(func.count()).select_from(AuditEvent)),
+        "notifications": e.db.scalar(select(func.count()).select_from(Notification)),
+    }
+    try:
+        response = e.request_editor("POST", body=e.payload())
+        assert response.status_code == 500, response.text
+        assert e.db.scalar(select(func.count()).select_from(Lesson)) == before["lessons"]
+        assert e.db.scalar(select(func.count()).select_from(AuditEvent)) == before["audit"]
+        assert e.db.scalar(select(func.count()).select_from(Notification)) == before[
+            "notifications"
+        ]
+    finally:
+        e.db.rollback()
+        e.db.execute(text("DROP TRIGGER reject_notification_insert ON notifications"))
+        e.db.execute(text("DROP FUNCTION reject_notification_insert()"))
+        e.db.commit()
 
 
 def test_move_chain_cancel_restore_and_student_schedule(editor):

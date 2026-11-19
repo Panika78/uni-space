@@ -1598,10 +1598,13 @@ def test_notifications_keep_legacy_invalid_targets_readable(auth):
 
     response = client.request("GET", "/api/v1/notifications?limit=100", access=access)
     assert response.status_code == 200, response.text
-    legacy = [item for item in response.json()["items"] if item["title"] == "Invalid target"]
+    legacy = [item for item in response.json()["items"] if item["title"] == "Обновление"]
     assert len(legacy) == 2
-    assert all(item["body"] == "Still readable" for item in legacy)
-    assert all(item["entity_id"] is None for item in legacy)
+    assert all(
+        item["body"] == "Откройте нужный раздел, чтобы проверить актуальную информацию."
+        for item in legacy
+    )
+    assert all(item["entity_id"] is None and item["entity_type"] is None for item in legacy)
 
     with pytest.raises(IntegrityError), engine.begin() as connection:
         connection.execute(

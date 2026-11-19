@@ -788,6 +788,7 @@ try {
         group_id: env.TEACHER_JOURNAL_GROUP_A,
         title: `Объявление ${index + 1}`,
         body: 'ДлинныйТекст'.repeat(40),
+        is_important: index === 0,
       },
     })
     assert.equal(response.status(), 201)
@@ -804,12 +805,44 @@ try {
   fixture('prepare-announcement-transfer')
   const studentContext = await browser.newContext()
   const studentPage = await studentContext.newPage()
-  const loginResponse = await studentPage.request.post(`${baseURL}/api/v1/auth/login`, {
-    headers: { Origin: baseURL },
-    data: { login: env.TEACHER_JOURNAL_STUDENT_LOGIN, password: env.TEACHER_JOURNAL_PASSWORD },
-  })
+  await studentPage.goto(`${baseURL}/login`)
+  await studentPage.getByLabel('Логин').fill(env.TEACHER_JOURNAL_STUDENT_LOGIN)
+  await studentPage.getByLabel('Пароль').fill(env.TEACHER_JOURNAL_PASSWORD)
+  const loginResponsePromise = studentPage.waitForResponse((response) =>
+    response.url().endsWith('/auth/login'),
+  )
+  await studentPage.getByRole('button', { name: 'Войти' }).click()
+  const loginResponse = await loginResponsePromise
   assert.equal(loginResponse.status(), 200)
   const studentToken = (await loginResponse.json()).access_token
+  await studentPage.waitForURL('**/schedule')
+  await studentPage.getByRole('button', { name: 'Уведомления', exact: true }).waitFor()
+  const openNotifications = async () => {
+    await studentPage.getByRole('button', { name: 'Уведомления', exact: true }).click()
+    const drawer = studentPage.getByRole('dialog', { name: 'Уведомления', exact: true })
+    await drawer.waitFor()
+    await drawer.evaluate(async (panel) => {
+      await Promise.all(panel.getAnimations().map((animation) => animation.finished))
+    })
+    return drawer
+  }
+  let drawer = await openNotifications()
+  const resultNotification = drawer
+    .locator('article.notification-item')
+    .filter({ hasText: 'Изменился результат контрольной или экзамена' })
+    .first()
+  await resultNotification.waitFor()
+  await resultNotification.getByRole('button', { name: 'Открыть объект' }).click()
+  await studentPage.waitForURL(`**/academics/courses/${env.TEACHER_JOURNAL_COURSE_A}`)
+  await studentPage.goto(`${baseURL}/schedule`)
+  drawer = await openNotifications()
+  const importantNotification = drawer
+    .locator('article.notification-item')
+    .filter({ hasText: 'Новое важное объявление по дисциплине' })
+    .first()
+  await importantNotification.waitFor()
+  await importantNotification.getByRole('button', { name: 'Открыть объект' }).click()
+  await studentPage.waitForURL(`**/academics/courses/${env.TEACHER_JOURNAL_COURSE_A}`)
   await studentPage.addInitScript((token) => {
     if (window.location.pathname === '/e2e/announcement-feed.html') {
       window.sessionStorage.setItem('announcement-fixture-bearer', token)
@@ -822,6 +855,24 @@ try {
   await studentPage.getByRole('button', { name: 'Показать ещё' }).click()
   await studentPage.getByText(title, { exact: true }).waitFor()
   fixture('transfer-announcement-student')
+  await studentPage.goto(`${baseURL}/schedule`)
+  drawer = await openNotifications()
+  assert.equal(
+    await drawer.getByText('Новое важное объявление по дисциплине', { exact: true }).count(),
+    0,
+  )
+  assert.ok(await drawer.getByText('Обновление', { exact: true }).count())
+  assert.equal(
+    await drawer.getByRole('button', { name: 'Открыть объект' }).count(),
+    0,
+  )
+  await studentPage.keyboard.press('Escape')
+  await studentPage.goto(
+    `${baseURL}/e2e/announcement-feed.html?course=${env.TEACHER_JOURNAL_COURSE_A}`,
+  )
+  await studentPage
+    .getByText(lostResponseTitle, { exact: true })
+    .waitFor({ state: 'hidden' })
   await studentPage.getByRole('button', { name: 'Обновить ленту' }).click()
   await studentPage.getByText(lostResponseTitle, { exact: true }).waitFor({ state: 'hidden' })
   await studentPage.getByText(title, { exact: true }).waitFor()

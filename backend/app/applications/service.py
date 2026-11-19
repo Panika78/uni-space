@@ -30,6 +30,7 @@ from app.models import (
     StudyGroup,
     User,
 )
+from app.notification_events import create_domain_notifications
 from app.permissions import (
     PermissionCode,
     get_application_scope,
@@ -268,16 +269,44 @@ def update_application(
         if accessible_id is None:
             raise HTTPException(404, "not_found")
         raise HTTPException(409, "version_conflict")
-    db.add(
-        ApplicationHistory(
+    history = ApplicationHistory(
             application_id=application.id,
             actor_user_id=actor_user_id,
             from_status=previous_status,
             to_status=to_status,
             comment=comment,
         )
-    )
+    db.add(history)
     db.flush()
+    if to_status in {"in_review", "needs_correction", "approved", "rejected"}:
+        student_user_id = db.scalar(
+            select(Student.user_id).where(Student.id == application.student_id)
+        )
+        labels = {
+            "in_review": ("Заявление принято в работу", "Проверьте текущий статус заявления."),
+            "needs_correction": (
+                "Требуется доработка заявления",
+                "Откройте заявление, чтобы посмотреть требования к доработке.",
+            ),
+            "approved": ("Заявление одобрено", "Проверьте состояние документа в заявлении."),
+            "rejected": (
+                "По заявлению принято решение",
+                "Откройте заявление, чтобы посмотреть статус.",
+            ),
+        }
+        title, body = labels[to_status]
+        create_domain_notifications(
+            db,
+            logical_event_key=f"application_history:{history.id}",
+            recipient_user_ids={student_user_id} if student_user_id is not None else set(),
+            notification_type=f"application_{to_status}",
+            title=title,
+            body=body,
+            entity_type="application",
+            entity_ids_by_user={student_user_id: application.id}
+            if student_user_id is not None
+            else None,
+        )
     return changed
 
 

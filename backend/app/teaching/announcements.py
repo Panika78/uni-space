@@ -14,6 +14,7 @@ from app.audit import write_audit_event
 from app.core.pagination import InvalidCursorError, decode_page_cursor, paginate_results
 from app.core.schemas import DateTime, Page, PaginationParams, RequestModel
 from app.models import CourseGroup, Student, Teacher, TeacherAnnouncement, TeachingAssignment, User
+from app.notification_events import create_domain_notifications
 from app.teaching.validation import TeachingId
 
 
@@ -195,7 +196,7 @@ def create_announcement(
             return response
 
         inserted = True
-        write_audit_event(
+        event = write_audit_event(
             db,
             actor=user,
             entity_type="teacher_announcement",
@@ -210,6 +211,40 @@ def create_announcement(
                 "is_important": record.is_important,
             },
         )
+        if record.is_important:
+            audience_groups = (
+                {group_id}
+                if group_id is not None
+                else set(db.scalars(course_groups(course_id)))
+            )
+            memberships = (
+                db.execute(
+                    select(Student.user_id, Student.group_id)
+                    .join(User, User.id == Student.user_id)
+                    .where(
+                        Student.group_id.in_(audience_groups),
+                        Student.academic_status == "enrolled",
+                        User.is_active.is_(True),
+                    )
+                    .order_by(Student.id)
+                    .with_for_update(of=Student)
+                ).all()
+                if audience_groups
+                else []
+            )
+            recipient_group_ids = {int(user_id): int(group_id) for user_id, group_id in memberships}
+            recipient_ids = set(recipient_group_ids)
+            create_domain_notifications(
+                db,
+                logical_event_key=f"audit:{event.id}",
+                recipient_user_ids=recipient_ids,
+                notification_type="important_announcement",
+                title="Новое важное объявление по дисциплине",
+                body="Откройте страницу дисциплины, чтобы прочитать объявление.",
+                entity_type="course_offering",
+                entity_ids_by_user={user_id: course_id for user_id in recipient_ids},
+                audience_group_ids_by_user=recipient_group_ids,
+            )
         response = serialize_announcement(record, user.full_name)
         db.commit()
         return response

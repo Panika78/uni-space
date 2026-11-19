@@ -22,6 +22,7 @@ from app.models import (
     ApplicationHistory,
     AuthSession,
     IssuedDocument,
+    Notification,
     OrgUnit,
     RefreshToken,
     ServiceType,
@@ -227,6 +228,23 @@ def test_full_workflow_correction_resubmit_history_and_relogin(context):
     assert approved.status_code == 200
     assert approved.json()["review_status"] == "approved"
     assert approved.json()["document_status"] == "pending"
+    with Session(c["engine"]) as db:
+        generated = db.scalars(
+            select(Notification)
+            .where(Notification.user_id == c["student_users"][0])
+            .order_by(Notification.id)
+        ).all()
+        assert [item.type for item in generated] == [
+            "application_in_review",
+            "application_needs_correction",
+            "application_in_review",
+            "application_approved",
+        ]
+        assert all(
+            item.entity_type == "application" and item.entity_id == identifier
+            for item in generated
+        )
+        assert all("адрес" not in item.body for item in generated)
     # Fresh authenticated session and DB session must return persisted state/history.
     fresh = c["login"]()
     detail = c["request"]("GET", f"/api/v1/applications/{identifier}", fresh).json()

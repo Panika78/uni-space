@@ -13,6 +13,7 @@ from app.core.schemas import ApiError, Date, Id, Page, RequestModel
 from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_db_session
 from app.models import CourseGroup, CourseOffering, FinalResult, Student, User
+from app.notification_events import create_domain_notifications
 from app.permissions import PermissionCode, get_authorization_context, require_staff_permission
 from app.teaching.ordering import STUDENT_KEY_PREFIX, get_student_name_key
 from app.teaching.router import JOURNAL, Scope
@@ -149,7 +150,7 @@ def _update_final_result(db, user, course_id, student_id, patch, *, delete=False
                     setattr(result, name, value)
             db.flush()
             # #86 can consume committed audit event IDs; rollback publishes nothing.
-            write_audit_event(
+            event = write_audit_event(
                 db,
                 actor=user,
                 entity_type="final_result",
@@ -157,6 +158,29 @@ def _update_final_result(db, user, course_id, student_id, patch, *, delete=False
                 action=action,
                 before_data=before,
                 after_data=after,
+            )
+            student_membership = db.execute(
+                select(Student.user_id, Student.group_id)
+                .where(Student.id == student_id)
+                .with_for_update(of=Student)
+            ).one_or_none()
+            recipient_user_id = student_membership.user_id if student_membership else None
+            create_domain_notifications(
+                db,
+                logical_event_key=f"audit:{event.id}",
+                recipient_user_ids={recipient_user_id}
+                if recipient_user_id is not None
+                else set(),
+                notification_type="final_result_changed",
+                title="Обновлены сведения об итоговой аттестации",
+                body="Проверьте итог или сведения о пересдаче на странице дисциплины.",
+                entity_type="course_offering",
+                entity_ids_by_user={recipient_user_id: course_id}
+                if recipient_user_id is not None
+                else None,
+                audience_group_ids_by_user={recipient_user_id: student_membership.group_id}
+                if recipient_user_id is not None and student_membership.group_id is not None
+                else None,
             )
         response = serialize_result(course_id, student_id, result if after else None)
         db.commit()

@@ -19,6 +19,7 @@ from app.models import (
     CourseOffering,
     Discipline,
     IssuedDocument,
+    Notification,
     OrgUnit,
     Program,
     RefreshToken,
@@ -323,6 +324,8 @@ def test_application_http_routes_use_real_bearer_authentication(
             f"Заявление {students[1].login} — 東京",
         ]
     finally:
+        user_ids = [user.id for user in students] + [teacher.id]
+        session.execute(delete(Notification).where(Notification.user_id.in_(user_ids)))
         if created_ids:
             session.query(IssuedDocument).filter(
                 IssuedDocument.application_id.in_(created_ids)
@@ -330,7 +333,6 @@ def test_application_http_routes_use_real_bearer_authentication(
             session.query(Application).filter(Application.id.in_(created_ids)).delete(
                 synchronize_session=False
             )
-        user_ids = [user.id for user in students] + [teacher.id]
         session.execute(
             delete(RefreshToken).where(
                 RefreshToken.session_id.in_(

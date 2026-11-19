@@ -431,7 +431,7 @@ MVP2-05: отметка сохраняет исходные группу/под�
 | Таблица | Ключевые поля | Назначение | Когда |
 |---|---|---|---|
 | `news` | `id PK`, `title`, `body`, `author_user_id FK NULL`, `published_at`, `is_published` | Официальные университетские новости | MVP 1 |
-| `notifications` | `id PK`, `user_id FK`, `type`, `title`, `body`, `entity_type NULL`, `entity_id NULL`, `read_at NULL`, `created_at` | Персональные системные оповещения | MVP 1 |
+| `notifications` | `id PK`, `user_id FK`, `logical_event_key NULL`, `audience_group_id NULL`, `type`, `title`, `body`, `entity_type NULL`, `entity_id NULL`, `read_at NULL`, `created_at` | Персональные системные оповещения и доменные события | MVP 1 / MVP 2 |
 | `teacher_announcements` | `id PK`, `course_offering_id FK`, `teacher_id FK`, `group_id FK NULL`, `title`, `body`, `is_important`, `created_at` | Объявления по проведению дисциплины; `group_id NULL` — все актуальные группы проведения | MVP 2 |
 | `news_targets` | `id PK`, `news_id FK`, `target_type`, `target_id` | Адресная публикация для факультета/программы/группы и т. д. | Extended |
 
@@ -440,6 +440,10 @@ MVP2-05: отметка сохраняет исходные группу/под�
 - `news` — официальные публикации университета;
 - `teacher_announcements` — объявления конкретного преподавателя по его дисциплинам и группам;
 - `notifications` — адресные события для конкретного пользователя.
+- Для автоматически созданных уведомлений пара `(logical_event_key, user_id)` уникальна.
+- `audience_group_id` сохраняет группу, в контексте которой получатель получил событие; текущая группа проверяется при чтении и переходе.
+  Ключ основан на ID существующей audit/history/issued-document записи; исторические
+  и общие уведомления могут иметь `NULL`.
 
 Объявления добавляет миграция `20261118_03` после миграции журнала деканата
 `20261118_01`. Составной FK

@@ -25,6 +25,7 @@ from app.models import (
     CourseOffering,
     Discipline,
     FinalResult,
+    Notification,
     OrgUnit,
     Program,
     Student,
@@ -502,6 +503,12 @@ def committed_academics(postgresql_engine):
                 )
             )
             db.execute(delete(AssessmentGroup).where(AssessmentGroup.id.in_(assignment_ids)))
+            user_ids = [
+                inspect(obj).identity[0]
+                for obj in s.created
+                if isinstance(obj, User) and inspect(obj).identity
+            ]
+            db.execute(delete(Notification).where(Notification.user_id.in_(user_ids)))
             for obj in reversed(s.created):
                 state = inspect(obj)
                 if state.identity:

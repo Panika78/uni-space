@@ -31,6 +31,7 @@ from app.models import (
     TeachingAssignment,
     User,
 )
+from app.notification_events import create_domain_notifications
 from app.permissions import PermissionCode, get_authorization_context, require_staff_permission
 from app.schedule.participants import get_student_lesson_condition
 from app.teaching.ordering import STUDENT_KEY_PREFIX, get_student_name_key
@@ -117,6 +118,7 @@ def write_assessment_score(
             "graded_at": datetime.now(UTC),
         }
         inserted = False
+        notification_event = None
         if result is None and score is not None:
             write_started = True
             inserted_result = db.execute(
@@ -140,7 +142,7 @@ def write_assessment_score(
                 )
 
         if inserted:
-            write_audit_event(
+            notification_event = write_audit_event(
                 db,
                 actor=user,
                 entity_type="assessment_result",
@@ -174,7 +176,7 @@ def write_assessment_score(
                 }
                 result_id = result.id
                 db.delete(result)
-                write_audit_event(
+                notification_event = write_audit_event(
                     db,
                     actor=user,
                     entity_type="assessment_result",
@@ -201,7 +203,7 @@ def write_assessment_score(
                 result.graded_by_user_id = user.id
                 result.graded_at = datetime.now(UTC)
                 db.flush()
-                write_audit_event(
+                notification_event = write_audit_event(
                     db,
                     actor=user,
                     entity_type="assessment_result",
@@ -219,6 +221,28 @@ def write_assessment_score(
                     "score": result.score,
                     "graded_at": result.graded_at,
                 }
+        if notification_event is not None and assessment.type in {"test", "exam"}:
+            student_membership = db.execute(
+                select(Student.user_id, Student.group_id)
+                .where(Student.id == student_id)
+                .with_for_update(of=Student)
+            ).one_or_none()
+            student_user_id = student_membership.user_id if student_membership else None
+            create_domain_notifications(
+                db,
+                logical_event_key=f"audit:{notification_event.id}",
+                recipient_user_ids={student_user_id} if student_user_id is not None else set(),
+                notification_type="assessment_result_changed",
+                title="Изменился результат контрольной или экзамена",
+                body="Проверьте свой результат на странице дисциплины.",
+                entity_type="course_offering",
+                entity_ids_by_user={student_user_id: course_id}
+                if student_user_id is not None
+                else None,
+                audience_group_ids_by_user={student_user_id: student_membership.group_id}
+                if student_user_id is not None and student_membership.group_id is not None
+                else None,
+            )
         db.commit()
         return response
     except BaseException as exc:
