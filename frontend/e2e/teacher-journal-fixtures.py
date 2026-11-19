@@ -437,6 +437,7 @@ def main() -> None:
             "TEACHER_JOURNAL_STUDENT_C": str(students[2].id),
             "TEACHER_JOURNAL_FOREIGN_STUDENT": str(student_b.id),
             "TEACHER_JOURNAL_DATE": lesson_day.isoformat(),
+            "TEACHER_JOURNAL_TODAY": now.date().isoformat(),
             "TEACHER_JOURNAL_SUFFIX": suffix,
         }
     for key, value in values.items():

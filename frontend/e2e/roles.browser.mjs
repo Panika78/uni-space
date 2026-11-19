@@ -360,7 +360,8 @@ try {
         path.startsWith('/api/v1/auth/') ||
         path === '/api/v1/notifications/unread-count' ||
         (name === 'admin' && path === '/api/v1/admin/users') ||
-        (name === 'teacher' && path === '/api/v1/teaching/assignments') ||
+        (name === 'teacher' &&
+          ['/api/v1/teaching/assignments', '/api/v1/teaching/schedule'].includes(path)) ||
         (name === 'reviewer' && path === '/api/v1/staff/applications')
       )
     }

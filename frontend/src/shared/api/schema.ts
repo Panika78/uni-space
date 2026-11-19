@@ -1456,6 +1456,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/teaching/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Teacher Schedule */
+        get: operations["get_teacher_schedule_api_v1_teaching_schedule_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/me": {
         parameters: {
             query?: never;
@@ -3216,6 +3233,100 @@ export interface components {
             is_important: boolean;
             /** Title */
             title: string;
+        };
+        /** TeacherCourseOfferingRef */
+        TeacherCourseOfferingRef: {
+            discipline: components["schemas"]["Ref"];
+            /** Id */
+            id: string;
+        };
+        /** TeacherLessonGroup */
+        TeacherLessonGroup: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            subgroup: components["schemas"]["Ref"] | null;
+        };
+        /** TeacherLessonPosition */
+        TeacherLessonPosition: {
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /** Id */
+            id: string;
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "scheduled" | "cancelled" | "moved";
+        };
+        /** TeacherRoomRef */
+        TeacherRoomRef: {
+            building: components["schemas"]["Ref"];
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** TeacherScheduleItem */
+        TeacherScheduleItem: {
+            course_offering: components["schemas"]["TeacherCourseOfferingRef"];
+            /**
+             * Ends At
+             * Format: date-time
+             */
+            ends_at: string;
+            /** Groups */
+            groups: components["schemas"]["TeacherLessonGroup"][];
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "lecture" | "seminar" | "lab" | "other";
+            latest_lesson: components["schemas"]["TeacherLessonPosition"] | null;
+            previous_lesson: components["schemas"]["TeacherLessonPosition"] | null;
+            /** Rooms */
+            rooms: components["schemas"]["TeacherRoomRef"][];
+            /**
+             * Starts At
+             * Format: date-time
+             */
+            starts_at: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "scheduled" | "cancelled" | "moved";
+        };
+        /** TeacherScheduleResponse */
+        TeacherScheduleResponse: {
+            /**
+             * Date From
+             * Format: date
+             */
+            date_from: string;
+            /**
+             * Date To
+             * Format: date
+             */
+            date_to: string;
+            /** Items */
+            items: components["schemas"]["TeacherScheduleItem"][];
+            /**
+             * Timezone
+             * @constant
+             */
+            timezone: "Europe/Moscow";
         };
         /** TeachingAssignmentResponse */
         TeachingAssignmentResponse: {
@@ -10810,6 +10921,65 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    get_teacher_schedule_api_v1_teaching_schedule_get: {
+        parameters: {
+            query: {
+                date_from: string;
+                date_to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeacherScheduleResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

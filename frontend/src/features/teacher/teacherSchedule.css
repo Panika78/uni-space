@@ -1,0 +1,79 @@
+.teacher-schedule-page {
+  max-width: 1080px;
+  margin-inline: auto;
+}
+.teacher-schedule-page .schedule-day-arrows {
+  display: flex;
+}
+.teacher-schedule-days {
+  display: grid;
+  gap: 18px;
+}
+.teacher-schedule-day {
+  min-width: 0;
+}
+.teacher-schedule-day h2 {
+  margin: 12px 0;
+  font-size: 20px;
+}
+.teacher-schedule-empty {
+  color: var(--muted);
+  padding: 16px 0;
+}
+.teacher-lesson-card {
+  margin: 10px 0;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.teacher-lesson-card p {
+  margin: 6px 0 0;
+}
+.teacher-lesson-time {
+  color: var(--accent);
+  font-weight: 700;
+}
+.teacher-lesson-title {
+  margin: 8px 0 0;
+  font-size: 18px;
+}
+.teacher-lesson-title.is-inactive {
+  text-decoration: line-through;
+}
+.teacher-lesson-meta,
+.teacher-lesson-status {
+  color: var(--muted);
+}
+.teacher-lesson-groups {
+  font-weight: 600;
+}
+.teacher-lesson-card.is-cancelled {
+  opacity: 0.78;
+}
+.teacher-lesson-card.is-moved {
+  border-style: dashed;
+}
+@media (max-width: 600px) {
+  .teacher-schedule-page .schedule-toolbar {
+    align-items: stretch;
+    padding: 14px;
+  }
+  .teacher-schedule-page .schedule-modes button {
+    min-width: 0;
+    flex: 1;
+    padding-inline: 12px;
+  }
+  .teacher-schedule-page .schedule-day-arrows {
+    justify-content: space-between;
+  }
+  .teacher-schedule-page .schedule-date {
+    justify-content: space-between;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .teacher-schedule-page .schedule-modes::before {
+    transition: none;
+  }
+}

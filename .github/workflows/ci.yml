@@ -709,6 +709,13 @@ jobs:
           JWT_SIGNING_KEY: test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ
           PLAYWRIGHT_MODULE: ${{ github.workspace }}/work/browser-tooling/node_modules/playwright/index.mjs
         run: bash scripts/teacher-journal-browser-e2e.sh
+      - name: Run teacher schedule in Chromium
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+psycopg://uni_space_test:test-only-password@127.0.0.1:55432/uni_space_test
+          JWT_SIGNING_KEY: test-only-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ
+          PLAYWRIGHT_MODULE: ${{ github.workspace }}/work/browser-tooling/node_modules/playwright/index.mjs
+        run: bash scripts/teacher-schedule-browser-e2e.sh
 
   staff-schedule-editor-browser:
     name: Staff schedule editor in Chromium

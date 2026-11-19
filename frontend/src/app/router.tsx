@@ -4,7 +4,6 @@ import {
   RoleStart,
   RoleGuard,
   RoleLayout,
-  ModuleUnavailable,
   StaffHome,
 } from '../features/auth/RoleContext'
 import { StudentAccess, StudentProfilePage } from '../features/profile/StudentProfile'
@@ -36,6 +35,7 @@ import { StaffApplicationDetail } from '../features/staffApplications/StaffAppli
 import { StaffSchedulePage } from '../features/schedule/StaffSchedulePage'
 import { StaffJournalsPage } from '../features/staff-journals/StaffJournalsPage'
 import { TeacherJournalsPage } from '../features/teacher/TeacherJournalsPage'
+import { TeacherSchedulePage } from '../features/teacher/TeacherSchedulePage'
 import type { ReactNode } from 'react'
 import type { RouteObject } from 'react-router-dom'
 
@@ -193,7 +193,7 @@ export const appRoutes: RouteObject[] = [
                       },
                       {
                         path: '/teacher/schedule',
-                        element: <ModuleUnavailable title="Расписание" />,
+                        element: <TeacherSchedulePage />,
                       },
                     ],
                   },
