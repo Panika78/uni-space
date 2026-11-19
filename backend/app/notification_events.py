@@ -75,17 +75,17 @@ def create_domain_notifications(
 def create_schedule_notifications(
     db: Session, *, event_id: int, before: dict | None, after: dict
 ) -> None:
-    """Notify the union of current student audiences before and after a lesson write."""
+    """Notify changed student audiences using the schedule card each one sees."""
     from sqlalchemy import and_, or_
 
     from app.models import Student, Teacher
 
-    def audience(snapshot: dict | None) -> tuple[set[int], dict[int, int]]:
+    def audience(snapshot: dict | None) -> dict[int, int]:
         if snapshot is None or snapshot["status"] != "scheduled":
-            return set(), {}
+            return {}
         scopes = snapshot["participants"]
         if not scopes:
-            return set(), {}
+            return {}
         predicates = [
             and_(
                 Student.group_id == item["group_id"],
@@ -108,59 +108,75 @@ def create_schedule_notifications(
             )
             .with_for_update(of=Student)
         ).all()
-        targets = {int(user_id): int(snapshot["id"]) for user_id, _student_id in rows}
-        return set(targets), targets
+        return {int(user_id): int(snapshot["id"]) for user_id, _student_id in rows}
 
-    before_users, targets = audience(before)
-    after_users, after_targets = audience(after)
-    targets.update(after_targets)
-    teacher_ids = {
-        int(snapshot["teacher_id"])
-        for snapshot in (before, after)
-        if snapshot is not None and snapshot["teacher_id"] is not None
-    }
-    teacher_scopes = []
-    for snapshot in (before, after):
-        if snapshot is not None and snapshot["teacher_id"] is not None:
-            groups = snapshot["group_ids"]
-            if groups:
-                teacher_scopes.append(
-                    (
-                        snapshot["teacher_id"],
-                        snapshot["course_offering_id"],
-                        groups,
-                    )
-                )
-    teacher_users = set()
-    if teacher_ids and teacher_scopes:
-        from sqlalchemy import and_, or_
+    before_targets = audience(before)
+    after_targets = audience(after)
+    before_users = set(before_targets)
+    after_users = set(after_targets)
 
-        teacher_users = set(
-            db.scalars(
-                select(Teacher.user_id)
-                .join(User, User.id == Teacher.user_id)
-                .join(TeachingAssignment, TeachingAssignment.teacher_id == Teacher.id)
-                .where(
-                    Teacher.id.in_(teacher_ids),
-                    User.is_active.is_(True),
-                    User.role == "teacher",
-                    or_(
-                        *[
-                            and_(
-                                TeachingAssignment.teacher_id == teacher_id,
-                                TeachingAssignment.course_offering_id == course_id,
-                                TeachingAssignment.group_id.in_(group_ids),
-                            )
-                            for teacher_id, course_id, group_ids in teacher_scopes
-                        ]
-                    ),
-                )
-            )
+    # Group/subgroup membership selects who sees a row; changing that selector
+    # alone does not change the row shown to a student who remains in the
+    # audience. The student card displays time, course, kind, teacher, rooms,
+    # and moved/cancelled state, but not the full participant-group list.
+    def visible_schedule(snapshot: dict | None) -> tuple | None:
+        if snapshot is None:
+            return None
+        return (
+            snapshot["id"],
+            snapshot["course_offering_id"],
+            snapshot["starts_at"],
+            snapshot["ends_at"],
+            snapshot["kind"],
+            snapshot["status"],
+            snapshot["teacher_id"],
+            tuple(snapshot["room_ids"]),
+            snapshot["previous_lesson_id"],
         )
+
+    student_users = (before_users - after_users) | (after_users - before_users)
+    if visible_schedule(before) != visible_schedule(after):
+        student_users |= before_users & after_users
+    targets = {
+        user_id: after_targets[user_id] if user_id in after_targets else before_targets[user_id]
+        for user_id in student_users
+    }
+
+    def teacher_audience(snapshot: dict | None) -> dict[int, set[int]]:
+        if snapshot is None or snapshot["teacher_id"] is None or not snapshot["group_ids"]:
+            return {}
+        assignments = db.execute(
+            select(Teacher.user_id, TeachingAssignment.group_id)
+            .join(User, User.id == Teacher.user_id)
+            .join(TeachingAssignment, TeachingAssignment.teacher_id == Teacher.id)
+            .where(
+                Teacher.id == snapshot["teacher_id"],
+                TeachingAssignment.course_offering_id == snapshot["course_offering_id"],
+                TeachingAssignment.group_id.in_(snapshot["group_ids"]),
+                User.is_active.is_(True),
+                User.role == "teacher",
+            )
+        ).all()
+        groups_by_user: dict[int, set[int]] = {}
+        for user_id, group_id in assignments:
+            groups_by_user.setdefault(int(user_id), set()).add(int(group_id))
+        return groups_by_user
+
+    before_teacher_groups = teacher_audience(before)
+    after_teacher_groups = teacher_audience(after)
+    before_teachers = set(before_teacher_groups)
+    after_teachers = set(after_teacher_groups)
+    teacher_users = (before_teachers - after_teachers) | (after_teachers - before_teachers)
+    for user_id in before_teachers & after_teachers:
+        if (
+            visible_schedule(before) != visible_schedule(after)
+            or before_teacher_groups[user_id] != after_teacher_groups[user_id]
+        ):
+            teacher_users.add(user_id)
     create_domain_notifications(
         db,
         logical_event_key=f"audit:{event_id}",
-        recipient_user_ids=before_users | after_users | teacher_users,
+        recipient_user_ids=student_users | teacher_users,
         notification_type="schedule_changed",
         title="Изменилось расписание",
         body="Проверьте актуальное расписание.",

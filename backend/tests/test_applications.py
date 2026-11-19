@@ -589,6 +589,7 @@ def test_application_routes_work_with_minimal_postgresql_role(
         connection.execute(text(f"GRANT SELECT ON service_types TO {role}"))
         connection.execute(text(f"GRANT SELECT ON application_attachments TO {role}"))
         connection.execute(text(f"GRANT SELECT ON issued_documents, users, students TO {role}"))
+        connection.execute(text(f"GRANT UPDATE (is_active) ON users TO {role}"))
         connection.execute(
             text(f"GRANT SELECT ON academic_terms, org_units, programs, study_groups TO {role}")
         )
@@ -610,6 +611,14 @@ def test_application_routes_work_with_minimal_postgresql_role(
         connection.execute(text(f"GRANT USAGE ON SEQUENCE issued_documents_id_seq TO {role}"))
         connection.execute(text(f"GRANT SELECT, INSERT ON application_history TO {role}"))
         connection.execute(text(f"GRANT USAGE ON SEQUENCE application_history_id_seq TO {role}"))
+        connection.execute(
+            text(
+                f"GRANT INSERT (user_id, logical_event_key, audience_group_id, type, title, body, "
+                f"entity_type, entity_id) ON notifications TO {role}"
+            )
+        )
+        connection.execute(text(f"GRANT SELECT ON notifications TO {role}"))
+        connection.execute(text(f"GRANT USAGE ON SEQUENCE notifications_id_seq TO {role}"))
 
     admin = Session(postgresql_engine, expire_on_commit=False)
     api_engine = None
@@ -674,6 +683,28 @@ def test_application_routes_work_with_minimal_postgresql_role(
         assert response.headers["location"] == f"/api/v1/applications/{response.json()['id']}"
         assert client.get("/api/v1/applications").json()["items"] == [response.json()]
         assert client.get(response.headers["location"]).json() == response.json()
+        application_id = int(response.json()["id"])
+        generated = admin.scalars(
+            select(Notification)
+            .where(
+                Notification.user_id == user.id,
+                Notification.entity_type == "application",
+                Notification.entity_id == application_id,
+            )
+            .order_by(Notification.id)
+        ).all()
+        approved_history = admin.scalar(
+            select(ApplicationHistory).where(
+                ApplicationHistory.application_id == application_id,
+                ApplicationHistory.to_status == "approved",
+            )
+        )
+        document_id = admin.scalar(
+            select(IssuedDocument.id).where(IssuedDocument.application_id == application_id)
+        )
+        assert [item.type for item in generated] == ["application_approved", "document_ready"]
+        assert generated[0].logical_event_key == f"application_history:{approved_history.id}"
+        assert generated[1].logical_event_key == f"issued_document:{document_id}"
         with postgresql_engine.connect() as connection:
             assert not connection.execute(
                 text("SELECT has_table_privilege(:role, 'applications', 'UPDATE')"),
@@ -689,6 +720,7 @@ def test_application_routes_work_with_minimal_postgresql_role(
         if api_engine is not None:
             api_engine.dispose()
         if student is not None:
+            admin.execute(delete(Notification).where(Notification.user_id == user.id))
             admin.execute(
                 delete(IssuedDocument).where(
                     IssuedDocument.application_id.in_(

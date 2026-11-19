@@ -10,6 +10,15 @@ type Page = components['schemas']['NotificationPage']
 
 const labels: Record<string, string> = {
   schedule_changed: 'Изменение расписания',
+  assessment_date_changed: 'Изменена дата работы',
+  assessment_result_changed: 'Новый результат работы',
+  final_result_changed: 'Изменён результат итоговой аттестации',
+  important_announcement: 'Важное объявление',
+  application_in_review: 'Заявление принято в работу',
+  application_needs_correction: 'Требуется доработка заявления',
+  application_approved: 'Заявление одобрено',
+  application_rejected: 'По заявлению принято решение',
+  // Preserve labels for legacy notification rows from the original MVP.
   assessment_created: 'Новая работа',
   application_updated: 'Изменение заявления',
   document_ready: 'Документ готов',

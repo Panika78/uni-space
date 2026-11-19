@@ -14,7 +14,7 @@ from uuid import uuid4
 
 import pytest
 from pypdf import PdfReader
-from sqlalchemy import delete, event, func, select
+from sqlalchemy import delete, event, func, select, text
 from sqlalchemy.orm import Session
 
 from app.auth.security import create_access_token
@@ -149,11 +149,22 @@ def test_invalid_renderer_output_stays_failed_without_publication(
             db.scalar(select(IssuedDocument.id).where(IssuedDocument.application_id == identifier))
             is None
         )
-        assert (
-            db.scalar(
-                select(Notification.id).where(Notification.user_id == context["student_users"][0])
+        application_events = db.scalars(
+            select(Notification).where(
+                Notification.user_id == context["student_users"][0],
+                Notification.entity_type == "application",
+                Notification.entity_id == identifier,
             )
-            is None
+        ).all()
+        approved_history = db.scalar(
+            select(ApplicationHistory).where(
+                ApplicationHistory.application_id == identifier,
+                ApplicationHistory.to_status == "approved",
+            )
+        )
+        assert [row.type for row in application_events] == ["application_approved"]
+        assert (
+            application_events[0].logical_event_key == f"application_history:{approved_history.id}"
         )
     assert list((context["root"] / "issued_documents").glob("*.pdf")) == []
     _cleanup_application(context, identifier)
@@ -647,6 +658,34 @@ def test_automatic_certificate_is_approved_before_pdf_and_bytes_never_change(
     assert response.headers["location"].endswith(f"/applications/{identifier}")
     assert (body["review_status"], body["document_status"]) == ("approved", "ready")
     assert body["document"] and "storage_key" not in body["document"]
+    with Session(context["engine"]) as db:
+        history = db.scalars(
+            select(ApplicationHistory)
+            .where(ApplicationHistory.application_id == identifier)
+            .order_by(ApplicationHistory.id)
+        ).all()
+        document = db.scalar(
+            select(IssuedDocument).where(IssuedDocument.application_id == identifier)
+        )
+        events = db.scalars(
+            select(Notification)
+            .where(
+                Notification.user_id == context["student_users"][0],
+                Notification.entity_type == "application",
+                Notification.entity_id == identifier,
+            )
+            .order_by(Notification.id)
+        ).all()
+        assert [item.type for item in events] == ["application_approved", "document_ready"]
+        assert [item.logical_event_key for item in events] == [
+            f"application_history:{history[1].id}",
+            f"issued_document:{document.id}",
+        ]
+        assert len({item.logical_event_key for item in events}) == 2
+        assert [(item.from_status, item.to_status) for item in history] == [
+            (None, "submitted"),
+            ("submitted", "approved"),
+        ]
 
     path = f"/api/v1/applications/{identifier}/document"
     first = context["client"].request("GET", path, access=owner_token)
@@ -688,6 +727,20 @@ def test_automatic_certificate_is_approved_before_pdf_and_bytes_never_change(
         assert len(history) == 2
         assert history[1].from_status == "submitted"
         assert history[1].to_status == "approved" and history[1].actor_user_id is None
+        events = db.scalars(
+            select(Notification)
+            .where(
+                Notification.user_id == context["student_users"][0],
+                Notification.entity_type == "application",
+                Notification.entity_id == identifier,
+            )
+            .order_by(Notification.id)
+        ).all()
+        assert [item.type for item in events] == ["application_approved", "document_ready"]
+        assert [item.logical_event_key for item in events] == [
+            f"application_history:{history[1].id}",
+            f"issued_document:{document.id}",
+        ]
     _cleanup_application(context, identifier)
 
 
@@ -804,6 +857,22 @@ def test_render_failure_keeps_approval_and_concurrent_retries_issue_once(
             )
             == 1
         )
+        application_events = db.scalars(
+            select(Notification)
+            .where(
+                Notification.user_id == context["student_users"][0],
+                Notification.entity_type == "application",
+                Notification.entity_id == identifier,
+            )
+            .order_by(Notification.id)
+        ).all()
+        assert [item.type for item in application_events] == [
+            "application_approved",
+            "document_ready",
+        ]
+        assert application_events[0].logical_event_key.startswith("application_history:")
+        assert application_events[1].logical_event_key.startswith("issued_document:")
+        assert application_events[0].logical_event_key != application_events[1].logical_event_key
         assert (
             len(
                 db.scalars(
@@ -1072,6 +1141,7 @@ def test_preflight_failure_rechecks_staff_scope_after_permission_revocation(
 
     context = issue_context
     engine = context["engine"]
+    auth_settings = context["client"].app.dependency_overrides[get_settings]()
     suffix = uuid4().hex
     with Session(engine) as db, db.begin():
         accounting = db.scalar(
@@ -1118,7 +1188,7 @@ def test_preflight_failure_rechecks_staff_scope_after_permission_revocation(
             permission.id,
             session.id,
         )
-        staff_token = create_access_token(session, get_settings())["access_token"]
+        staff_token = create_access_token(session, auth_settings)["access_token"]
         application = Application(
             student_id=context["student_ids"][0],
             service_type_id=service.id,
@@ -1265,7 +1335,142 @@ def test_explicit_process_approves_existing_automatic_application_once(issue_con
         assert len(history) == 2
         assert history[-1].from_status == "submitted"
         assert history[-1].to_status == "approved" and history[-1].actor_user_id is None
+        events = db.scalars(
+            select(Notification)
+            .where(
+                Notification.user_id == context["student_users"][0],
+                Notification.entity_type == "application",
+                Notification.entity_id == identifier,
+            )
+            .order_by(Notification.id)
+        ).all()
+        assert [item.type for item in events] == ["application_approved", "document_ready"]
+        assert events[0].logical_event_key == f"application_history:{history[-1].id}"
+        assert events[1].logical_event_key == f"issued_document:{document_id}"
     _cleanup_application(context, identifier)
+
+
+@pytest.mark.parametrize("path", ["initial_submission", "legacy_process"])
+def test_automatic_approval_notification_insert_failure_rolls_back(issue_context, path):
+    context = issue_context
+    token = _login(context)
+    identifier = None
+    if path == "legacy_process":
+        with Session(context["engine"]) as db, db.begin():
+            service = db.scalar(select(ServiceType).where(ServiceType.code == "study_certificate"))
+            row = Application(
+                student_id=context["student_ids"][0],
+                service_type_id=service.id,
+                review_status="submitted",
+                document_status="pending",
+                form_data={"place_of_submission": "Вымышленное сохранённое место"},
+                version=1,
+            )
+            db.add(row)
+            db.flush()
+            identifier = row.id
+            db.add(
+                ApplicationHistory(
+                    application_id=row.id,
+                    actor_user_id=context["student_users"][0],
+                    from_status=None,
+                    to_status="submitted",
+                )
+            )
+
+    with Session(context["engine"]) as db:
+        db.execute(
+            text("""
+                CREATE FUNCTION reject_application_notification() RETURNS trigger
+                LANGUAGE plpgsql AS $$
+                BEGIN
+                    RAISE EXCEPTION 'injected application notification insert failure';
+                END
+                $$
+            """)
+        )
+        db.execute(
+            text(
+                "CREATE TRIGGER reject_application_notification BEFORE INSERT ON notifications "
+                "FOR EACH ROW EXECUTE FUNCTION reject_application_notification()"
+            )
+        )
+        db.commit()
+    try:
+        if path == "initial_submission":
+            response = context["client"].request(
+                "POST",
+                "/api/v1/applications",
+                access=token,
+                json={
+                    "service_code": "study_certificate",
+                    "form_data": {"place_of_submission": "Вымышленное место"},
+                },
+            )
+            assert response.status_code == 500, response.text
+        else:
+            response = context["client"].request(
+                "POST",
+                f"/api/v1/applications/{identifier}/document/process",
+                access=token,
+            )
+            assert response.status_code == 500, response.text
+    finally:
+        with Session(context["engine"]) as db:
+            db.execute(text("DROP TRIGGER reject_application_notification ON notifications"))
+            db.execute(text("DROP FUNCTION reject_application_notification()"))
+            db.commit()
+
+    with Session(context["engine"]) as db:
+        if path == "initial_submission":
+            assert (
+                db.scalar(
+                    select(func.count(Application.id)).where(
+                        Application.student_id == context["student_ids"][0],
+                        Application.service_type_id
+                        == select(ServiceType.id)
+                        .where(ServiceType.code == "study_certificate")
+                        .scalar_subquery(),
+                    )
+                )
+                == 0
+            )
+        else:
+            current = db.get(Application, identifier)
+            assert (current.review_status, current.document_status, current.version) == (
+                "submitted",
+                "pending",
+                1,
+            )
+            assert (
+                db.scalar(
+                    select(func.count(ApplicationHistory.id)).where(
+                        ApplicationHistory.application_id == identifier
+                    )
+                )
+                == 1
+            )
+        if identifier is not None:
+            assert (
+                db.scalar(
+                    select(func.count(IssuedDocument.id)).where(
+                        IssuedDocument.application_id == identifier
+                    )
+                )
+                == 0
+            )
+            assert (
+                db.scalar(
+                    select(func.count(Notification.id)).where(
+                        Notification.user_id == context["student_users"][0],
+                        Notification.entity_type == "application",
+                        Notification.entity_id == identifier,
+                    )
+                )
+                == 0
+            )
+    if identifier is not None:
+        _cleanup_application(context, identifier)
 
 
 @pytest.mark.parametrize(
@@ -1521,6 +1726,7 @@ def test_transcript_uses_server_saved_period_scores_and_manual_final(issue_conte
 def test_accounting_pdf_starts_only_after_scoped_staff_approval(issue_context):
     context = issue_context
     engine = context["engine"]
+    auth_settings = context["client"].app.dependency_overrides[get_settings]()
     suffix = uuid4().hex
     with Session(engine) as db:
         accounting = db.scalar(
@@ -1560,7 +1766,7 @@ def test_accounting_pdf_starts_only_after_scoped_staff_approval(issue_context):
         )
         db.add(session)
         db.flush()
-        staff_token = create_access_token(session, get_settings())["access_token"]
+        staff_token = create_access_token(session, auth_settings)["access_token"]
         staff_id, profile_id, accounting_id = staff.id, profile.id, accounting.id
         staff_session_id = session.id
 
@@ -1606,8 +1812,8 @@ def test_accounting_pdf_starts_only_after_scoped_staff_approval(issue_context):
         )
         db.add_all([outside_session, admin_session])
         db.flush()
-        outside_token = create_access_token(outside_session, get_settings())["access_token"]
-        admin_token = create_access_token(admin_session, get_settings())["access_token"]
+        outside_token = create_access_token(outside_session, auth_settings)["access_token"]
+        admin_token = create_access_token(admin_session, auth_settings)["access_token"]
         outside_staff_id, outside_profile_id = outside_staff.id, outside_profile.id
         admin_id = admin.id
         outside_session_id, admin_session_id = outside_session.id, admin_session.id
@@ -1680,9 +1886,34 @@ def test_accounting_pdf_starts_only_after_scoped_staff_approval(issue_context):
             select(ApplicationHistory).where(ApplicationHistory.application_id == identifier)
         ).all()
         assert history[-1].actor_user_id == staff_id
-        assert db.scalar(
+        document_id = db.scalar(
             select(IssuedDocument.id).where(IssuedDocument.application_id == identifier)
         )
+        assert document_id is not None
+        application_events = db.scalars(
+            select(Notification)
+            .where(
+                Notification.user_id == context["student_users"][0],
+                Notification.entity_type == "application",
+                Notification.entity_id == identifier,
+            )
+            .order_by(Notification.id)
+        ).all()
+        assert [item.type for item in application_events] == [
+            "application_in_review",
+            "application_approved",
+            "document_ready",
+        ]
+        approval_history = db.scalar(
+            select(ApplicationHistory).where(
+                ApplicationHistory.application_id == identifier,
+                ApplicationHistory.to_status == "approved",
+            )
+        )
+        assert (
+            application_events[1].logical_event_key == f"application_history:{approval_history.id}"
+        )
+        assert application_events[2].logical_event_key == f"issued_document:{document_id}"
     _cleanup_application(context, identifier)
     with Session(engine) as db, db.begin():
         db.execute(delete(RefreshToken).where(RefreshToken.session_id == staff_session_id))

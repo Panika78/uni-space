@@ -25,6 +25,30 @@ describe('NotificationsDrawer', () => {
     document.body.style.overflow = ''
   })
 
+  it.each([
+    ['schedule_changed', 'Изменение расписания'],
+    ['assessment_date_changed', 'Изменена дата работы'],
+    ['assessment_result_changed', 'Новый результат работы'],
+    ['final_result_changed', 'Изменён результат итоговой аттестации'],
+    ['important_announcement', 'Важное объявление'],
+    ['application_in_review', 'Заявление принято в работу'],
+    ['application_needs_correction', 'Требуется доработка заявления'],
+    ['application_approved', 'Заявление одобрено'],
+    ['application_rejected', 'По заявлению принято решение'],
+    ['document_ready', 'Документ готов'],
+    ['assessment_created', 'Новая работа'],
+    ['application_updated', 'Изменение заявления'],
+  ])('shows the Russian category label for %s', async (type, label) => {
+    vi.mocked(apiFetch).mockResolvedValueOnce({
+      items: [{ ...notification, type }],
+      next_cursor: null,
+    })
+    render(<NotificationsDrawer onClose={() => undefined} />)
+    expect(
+      await screen.findByText(label, { selector: '.notification-item__type' }),
+    ).toBeInTheDocument()
+  })
+
   it('loads private text, traps focus, locks background scroll, and closes with Escape', async () => {
     const trigger = document.createElement('button')
     document.body.append(trigger)
