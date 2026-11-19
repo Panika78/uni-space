@@ -2051,6 +2051,7 @@ DELETE FROM refresh_tokens WHERE session_id IN (
     SELECT id FROM auth_sessions WHERE user_id=(SELECT id FROM users WHERE login='{student_login}')
 );
 DELETE FROM auth_sessions WHERE user_id=(SELECT id FROM users WHERE login='{student_login}');
+DELETE FROM notifications WHERE user_id=(SELECT id FROM users WHERE login='{student_login}');
 DELETE FROM students WHERE user_id=(SELECT id FROM users WHERE login='{student_login}');
 DELETE FROM users WHERE login='{student_login}';
 DELETE FROM study_groups WHERE name='{student_login}';
