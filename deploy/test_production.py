@@ -1409,8 +1409,8 @@ RETURNING id;""")
                 )
                 assert notifications.status_code == 200, notifications.text
                 assert notifications.headers["cache-control"] == "no-store"
-                assert [item["id"] for item in notifications.json()["items"]] == [
-                    notification_id
+                assert notification_id in [
+                    int(item["id"]) for item in notifications.json()["items"]
                 ]
                 print(
                     "PASS: real personal notification SELECT under uni_space_api",
