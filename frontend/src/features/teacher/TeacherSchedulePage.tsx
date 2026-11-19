@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStates'
@@ -57,7 +57,7 @@ export function TeacherSchedulePage() {
     refetchOnWindowFocus: true,
     placeholderData: undefined,
   })
-  const items = query.data?.items ?? emptyItems
+  const items = query.isFetching ? emptyItems : (query.data?.items ?? emptyItems)
   const groups = useMemo(() => {
     const visibleDays = groupLessonsByVisibleDays(items, from, to)
     for (const lessons of Object.values(visibleDays)) {
@@ -135,8 +135,8 @@ export function TeacherSchedulePage() {
         </label>
       </div>
       <p className="schedule-timezone">Время указано по Москве · Europe/Moscow</p>
-      {query.isPending ? <LoadingState title="Загружаем расписание…" /> : null}
-      {query.isError ? (
+      {query.isPending || query.isFetching ? <LoadingState title="Загружаем расписание…" /> : null}
+      {!query.isFetching && query.isError ? (
         <ErrorState
           title={errorTitle(query.error)}
           description={
@@ -147,8 +147,10 @@ export function TeacherSchedulePage() {
           onRetry={() => void query.refetch()}
         />
       ) : null}
-      {query.isSuccess && items.length === 0 ? <EmptyState title="Занятий нет" /> : null}
-      {query.isSuccess && items.length > 0 ? (
+      {!query.isFetching && query.isSuccess && items.length === 0 ? (
+        <EmptyState title="Занятий нет" />
+      ) : null}
+      {!query.isFetching && query.isSuccess && items.length > 0 ? (
         <div className="teacher-schedule-days">
           {visibleDays.map((day) => (
             <section className="teacher-schedule-day" key={day} aria-labelledby={`day-${day}`}>
@@ -194,9 +196,19 @@ function LessonCard({ item }: { item: Item }) {
       {cancelled ? <p className="teacher-lesson-status">Отменено</p> : null}
       {moved ? (
         <p className="teacher-lesson-status">
-          {item.latest_lesson
-            ? `Перенесено на ${formatDate(getMoscowDate(new Date(item.latest_lesson.starts_at)))} · ${formatTime(item.latest_lesson.starts_at)}`
-            : 'Перенесено'}
+          {item.latest_lesson ? (
+            <>
+              <Link
+                to={`/teacher/schedule?date=${getMoscowDate(new Date(item.latest_lesson.starts_at))}&mode=day`}
+              >
+                Перенесено на {formatDate(getMoscowDate(new Date(item.latest_lesson.starts_at)))} ·{' '}
+                {formatTime(item.latest_lesson.starts_at)}
+              </Link>
+              {item.latest_lesson.status === 'cancelled' ? ' · отменено' : null}
+            </>
+          ) : (
+            'Перенесено'
+          )}
         </p>
       ) : null}
     </article>

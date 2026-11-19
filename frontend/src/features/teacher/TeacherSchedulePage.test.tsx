@@ -8,13 +8,15 @@ import { apiFetch, ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
 import { TeacherSchedulePage } from './TeacherSchedulePage'
 
+const roleContext = vi.hoisted(() => ({ userId: 'teacher-a' }))
+
 vi.mock('../../shared/api/client', async (original) => ({
   ...(await original<typeof import('../../shared/api/client')>()),
   apiFetch: vi.fn(),
 }))
 vi.mock('../auth/RoleContext', () => ({
   useRoleContext: () => ({
-    user_id: 'teacher-a',
+    user_id: roleContext.userId,
     role: 'teacher',
     permissions: [],
     org_unit_id: null,
@@ -22,8 +24,43 @@ vi.mock('../auth/RoleContext', () => ({
 }))
 
 afterEach(() => {
+  roleContext.userId = 'teacher-a'
   cleanup()
   vi.clearAllMocks()
+})
+
+it('does not show a delayed response from the previous account after switching accounts', async () => {
+  let resolveOld!: (value: typeof response) => void
+  const oldAccountResponse = new Promise<typeof response>((resolve) => {
+    resolveOld = resolve
+  })
+  vi.mocked(apiFetch)
+    .mockReturnValueOnce(oldAccountResponse)
+    .mockResolvedValueOnce({
+      ...response,
+      items: [
+        {
+          ...response.items[0],
+          id: '42',
+          course_offering: { id: '11', discipline: { id: '5', name: 'История второго аккаунта' } },
+        },
+      ],
+    })
+  const queryClient = createQueryClient()
+  const tree = () => (
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/teacher/schedule?date=2026-11-10&mode=day']}>
+        <TeacherSchedulePage />
+      </MemoryRouter>
+    </QueryClientProvider>
+  )
+  const view = render(tree())
+  roleContext.userId = 'teacher-b'
+  view.rerender(tree())
+  expect(await screen.findByText('История второго аккаунта')).toBeInTheDocument()
+  resolveOld(response)
+  expect(screen.queryByText('Алгебра')).not.toBeInTheDocument()
+  expect(screen.getByText('История второго аккаунта')).toBeInTheDocument()
 })
 
 const response: components['schemas']['TeacherScheduleResponse'] = {
@@ -63,6 +100,33 @@ it('loads the teacher schedule and safely renders a moved lesson', async () => {
     expect.stringContaining('/api/v1/teaching/schedule?date_from=2026-11-10&date_to=2026-11-10'),
     expect.objectContaining({ authenticated: true, cache: 'no-store' }),
   )
+})
+
+it('links to the allowed terminal position and marks a cancelled move', async () => {
+  vi.mocked(apiFetch).mockResolvedValue({
+    ...response,
+    items: [
+      {
+        ...response.items[0],
+        latest_lesson: {
+          id: '32',
+          starts_at: '2026-11-20T06:00:00Z',
+          ends_at: '2026-11-20T07:30:00Z',
+          status: 'cancelled',
+        },
+      },
+    ],
+  })
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={['/teacher/schedule?date=2026-11-10&mode=day']}>
+        <TeacherSchedulePage />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+  const link = await screen.findByRole('link', { name: /Перенесено на/ })
+  expect(link).toHaveAttribute('href', '/teacher/schedule?date=2026-11-20&mode=day')
+  expect(link.closest('.teacher-lesson-status')).toHaveTextContent('отменено')
 })
 
 it('shows a forbidden response safely and retries only the read request', async () => {

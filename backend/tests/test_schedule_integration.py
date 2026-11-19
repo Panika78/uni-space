@@ -49,6 +49,14 @@ def returned_lesson_ids(payload):
     return ids
 
 
+def teacher_schedule_request(schedule, start="2026-11-10", end=None):
+    return schedule.client.get(
+        "/api/v1/teaching/schedule",
+        params={"date_from": start, "date_to": end or start},
+        headers={"Authorization": f"Bearer {schedule.tokens[2]}"},
+    )
+
+
 @pytest.fixture
 def schedule(db_session):
     db = db_session
@@ -199,6 +207,27 @@ def test_teacher_schedule_uses_teacher_and_actual_group_scope(schedule):
     )
 
 
+@pytest.mark.parametrize("status", ["cancelled", "moved"])
+def test_teacher_schedule_inactive_overnight_positions_only_appear_on_start_date(schedule, status):
+    s = schedule
+    s.add(
+        TeachingAssignment,
+        course_offering_id=s.offering.id,
+        group_id=s.groups[0].id,
+        teacher_id=s.teacher.id,
+    )
+    lesson = s.lesson(
+        "2026-11-10T23:30:00+03:00",
+        "2026-11-11T00:30:00+03:00",
+        teacher_id=s.teacher.id,
+        status=status,
+    )
+    assert [item["id"] for item in teacher_schedule_request(s, "2026-11-10").json()["items"]] == [
+        str(lesson.id)
+    ]
+    assert teacher_schedule_request(s, "2026-11-11").json()["items"] == []
+
+
 def test_teacher_schedule_move_chain_hides_unassigned_positions(schedule):
     s = schedule
     s.add(
@@ -239,6 +268,29 @@ def test_teacher_schedule_move_chain_hides_unassigned_positions(schedule):
         ).json()["items"]
         == []
     )
+
+
+def test_teacher_schedule_move_chain_stops_at_first_non_moved_position(schedule):
+    s = schedule
+    s.add(
+        TeachingAssignment,
+        course_offering_id=s.offering.id,
+        group_id=s.groups[0].id,
+        teacher_id=s.teacher.id,
+    )
+    root = s.lesson(status="moved", teacher_id=s.teacher.id)
+    terminal = s.lesson(
+        "2026-11-20T09:00:00+03:00", previous_lesson_id=root.id, teacher_id=s.teacher.id
+    )
+    corrupt = s.lesson(
+        "2026-12-20T09:00:00+03:00",
+        status="cancelled",
+        previous_lesson_id=terminal.id,
+        teacher_id=s.teacher.id,
+    )
+    item = teacher_schedule_request(s).json()["items"][0]
+    assert item["latest_lesson"]["id"] == str(terminal.id)
+    assert item["latest_lesson"]["id"] != str(corrupt.id)
 
 
 def test_teacher_schedule_query_count_does_not_grow_per_lesson(schedule):

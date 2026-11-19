@@ -2,7 +2,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import DateTime, and_, cast, literal, select
+from sqlalchemy import DateTime, and_, cast, literal, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.models import (
@@ -65,8 +65,18 @@ def list_teacher_schedule(db: Session, teacher_id: int, params: TeacherScheduleP
         .where(
             Lesson.teacher_id == teacher_id,
             Lesson.is_additional.is_(False),
-            Lesson.starts_at < range_end,
-            Lesson.ends_at > range_start,
+            or_(
+                and_(
+                    Lesson.status == "scheduled",
+                    Lesson.starts_at < range_end,
+                    Lesson.ends_at > range_start,
+                ),
+                and_(
+                    Lesson.status.in_(("cancelled", "moved")),
+                    Lesson.starts_at >= range_start,
+                    Lesson.starts_at < range_end,
+                ),
+            ),
             _has_teacher_scope(Lesson.id, Lesson.course_offering_id, teacher_id),
         )
         .order_by(Lesson.starts_at, Lesson.id)
@@ -177,7 +187,9 @@ def list_teacher_schedule(db: Session, teacher_id: int, params: TeacherScheduleP
                 child.status,
                 child.is_additional,
                 child.previous_lesson_id,
-            ).join(child, child.previous_lesson_id == chain.c.id)
+            )
+            .join(child, child.previous_lesson_id == chain.c.id)
+            .where(chain.c.status == "moved")
         )
         for position in db.execute(
             select(chain).where(

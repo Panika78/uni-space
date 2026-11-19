@@ -1,4 +1,4 @@
-/* global process, console, document, window, URL */
+/* global process, console, document, window, URL, Event */
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
@@ -24,6 +24,9 @@ const loadSchedule = async (page, url) => {
   const response = page.waitForResponse((item) => item.url().includes('/api/v1/teaching/schedule'))
   await page.goto(url)
   return response
+}
+const refocusPage = async (page) => {
+  await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')))
 }
 const browser = await chromium.launch({
   executablePath: env.CHROMIUM_PATH || undefined,
@@ -55,6 +58,32 @@ try {
   const ownLesson = body.items.find((item) => item.id === env.TEACHER_JOURNAL_LESSON_A)
   await page.getByText(ownLesson.course_offering.discipline.name, { exact: true }).first().waitFor()
 
+  let rejectNextSchedule = true
+  await page.route('**/api/v1/teaching/schedule*', async (route) => {
+    if (!rejectNextSchedule) return route.continue()
+    rejectNextSchedule = false
+    await route.fulfill({
+      status: 403,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: { code: 'forbidden', message: 'Доступ запрещён', details: [] },
+      }),
+    })
+  })
+  const forbiddenResponse = page.waitForResponse(
+    (response) => response.url().includes('/api/v1/teaching/schedule') && response.status() === 403,
+  )
+  await refocusPage(page)
+  assert.equal((await forbiddenResponse).status(), 403)
+  await page.getByRole('alert').filter({ hasText: 'Доступ запрещён' }).waitFor()
+  assert.equal(
+    await page.getByText(ownLesson.course_offering.discipline.name, { exact: true }).count(),
+    0,
+  )
+  await page.unroute('**/api/v1/teaching/schedule*')
+  await page.getByRole('button', { name: 'Повторить' }).click()
+  await page.getByText(ownLesson.course_offering.discipline.name, { exact: true }).first().waitFor()
+
   const nextDateObject = new Date(`${env.TEACHER_JOURNAL_DATE}T12:00:00Z`)
   nextDateObject.setUTCDate(nextDateObject.getUTCDate() + 1)
   const nextDate = nextDateObject.toISOString().slice(0, 10)
@@ -68,10 +97,19 @@ try {
   await page.getByLabel('Выбрать дату').fill(nextDate)
   assert.equal((await selectedDateResponse).status(), 200)
   await page.getByText('Занятий нет').waitFor()
-  await page.getByRole('button', { name: 'Сегодня' }).click()
-  await page.waitForURL(`**/teacher/schedule?date=${env.TEACHER_JOURNAL_DATE}&mode=day`)
+  await page.getByRole('button', { name: 'Сегодня' }).focus()
+  await page.keyboard.press('Enter')
+  await page.waitForURL(`**/teacher/schedule?date=${env.TEACHER_JOURNAL_TODAY}&mode=day`)
+  await page.getByLabel('Выбрать дату').fill(env.TEACHER_JOURNAL_DATE)
   await page.getByText(ownLesson.course_offering.discipline.name, { exact: true }).first().waitFor()
-  await page.getByRole('button', { name: 'Неделя' }).click()
+  await page.getByRole('button', { name: 'Неделя' }).focus()
+  await page.keyboard.press('Enter')
+  assert.equal(
+    await page
+      .getByRole('button', { name: 'Неделя' })
+      .evaluate((element) => element === document.activeElement),
+    true,
+  )
   await page
     .getByRole('heading', {
       name: /понедельник|вторник|среда|четверг|пятница|суббота|воскресенье/i,
@@ -93,7 +131,7 @@ try {
   const revokedPromise = page.waitForResponse((response) =>
     response.url().includes('/api/v1/teaching/schedule'),
   )
-  await page.reload()
+  await refocusPage(page)
   const revokedScope = await revokedPromise
   assert.equal(revokedScope.status(), 200)
   await page.getByText('Занятий нет').waitFor()
