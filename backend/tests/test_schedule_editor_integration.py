@@ -172,8 +172,10 @@ def test_notification_insert_failure_rolls_back_schedule_and_audit(editor):
         """)
     )
     e.db.execute(
-        text("CREATE TRIGGER reject_notification_insert BEFORE INSERT ON notifications "
-             "FOR EACH ROW EXECUTE FUNCTION reject_notification_insert()")
+        text(
+            "CREATE TRIGGER reject_notification_insert BEFORE INSERT ON notifications "
+            "FOR EACH ROW EXECUTE FUNCTION reject_notification_insert()"
+        )
     )
     e.db.commit()
     before = {
@@ -186,9 +188,9 @@ def test_notification_insert_failure_rolls_back_schedule_and_audit(editor):
         assert response.status_code == 500, response.text
         assert e.db.scalar(select(func.count()).select_from(Lesson)) == before["lessons"]
         assert e.db.scalar(select(func.count()).select_from(AuditEvent)) == before["audit"]
-        assert e.db.scalar(select(func.count()).select_from(Notification)) == before[
-            "notifications"
-        ]
+        assert (
+            e.db.scalar(select(func.count()).select_from(Notification)) == before["notifications"]
+        )
     finally:
         e.db.rollback()
         e.db.execute(text("DROP TRIGGER reject_notification_insert ON notifications"))

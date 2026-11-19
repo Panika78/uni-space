@@ -131,12 +131,15 @@ def test_publish_and_read_current_audience(journal):
     common = publish(s, None, title="Общее").json()
     other_author = publish(s, first, teacher=1).json()
     assert common["group_id"] is None and common["is_important"] is False
-    assert s.db.scalar(
-        select(func.count(Notification.id)).where(
-            Notification.user_id.in_([student.user_id for student in s.students]),
-            Notification.logical_event_key == event_key,
+    assert (
+        s.db.scalar(
+            select(func.count(Notification.id)).where(
+                Notification.user_id.in_([student.user_id for student in s.students]),
+                Notification.logical_event_key == event_key,
+            )
         )
-    ) == 2
+        == 2
+    )
     assert student_feed(s).json()["items"] == [other_author, common, address]
     assert student_feed(s, student=1).json()["items"] == [common]
     assert student_feed(s, course=1).json()["items"] == []

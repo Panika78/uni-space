@@ -22,7 +22,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "uq_notifications_logical_event_recipient", "notifications", type_="unique"
-    )
+    op.drop_constraint("uq_notifications_logical_event_recipient", "notifications", type_="unique")
     op.drop_column("notifications", "logical_event_key")

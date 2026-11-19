@@ -213,9 +213,7 @@ def create_announcement(
         )
         if record.is_important:
             audience_groups = (
-                {group_id}
-                if group_id is not None
-                else set(db.scalars(course_groups(course_id)))
+                {group_id} if group_id is not None else set(db.scalars(course_groups(course_id)))
             )
             memberships = (
                 db.execute(

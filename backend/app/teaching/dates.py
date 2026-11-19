@@ -142,9 +142,7 @@ def update_assessment_dates(db, actor, course_id, assessment_id, request):
         ).all()
         recipient_group_ids = {int(user_id): int(group_id) for user_id, group_id in memberships}
         recipient_ids = set(recipient_group_ids)
-        offering_id = db.scalar(
-            select(CourseOffering.id).where(CourseOffering.id == course_id)
-        )
+        offering_id = db.scalar(select(CourseOffering.id).where(CourseOffering.id == course_id))
         create_domain_notifications(
             db,
             logical_event_key=f"audit:{date_change_events[0].id}",

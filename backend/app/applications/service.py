@@ -270,12 +270,12 @@ def update_application(
             raise HTTPException(404, "not_found")
         raise HTTPException(409, "version_conflict")
     history = ApplicationHistory(
-            application_id=application.id,
-            actor_user_id=actor_user_id,
-            from_status=previous_status,
-            to_status=to_status,
-            comment=comment,
-        )
+        application_id=application.id,
+        actor_user_id=actor_user_id,
+        from_status=previous_status,
+        to_status=to_status,
+        comment=comment,
+    )
     db.add(history)
     db.flush()
     if to_status in {"in_review", "needs_correction", "approved", "rejected"}:

@@ -140,18 +140,21 @@ def test_concurrent_event_delivery_deduplicates_but_distinct_events_survive(noti
                 )
                 db.commit()
         with Session(engine) as db:
-            assert db.scalar(
-                select(func.count()).select_from(Notification).where(
-                    Notification.logical_event_key.like(f"{event_key}%"),
-                    Notification.user_id == user_id,
+            assert (
+                db.scalar(
+                    select(func.count())
+                    .select_from(Notification)
+                    .where(
+                        Notification.logical_event_key.like(f"{event_key}%"),
+                        Notification.user_id == user_id,
+                    )
                 )
-            ) == 3
+                == 3
+            )
     finally:
         with Session(engine) as db:
             db.execute(
-                delete(Notification).where(
-                    Notification.logical_event_key.like(f"{event_key}%")
-                )
+                delete(Notification).where(Notification.logical_event_key.like(f"{event_key}%"))
             )
             db.delete(db.get(User, user_id))
             db.commit()

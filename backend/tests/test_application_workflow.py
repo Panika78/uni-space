@@ -241,8 +241,7 @@ def test_full_workflow_correction_resubmit_history_and_relogin(context):
             "application_approved",
         ]
         assert all(
-            item.entity_type == "application" and item.entity_id == identifier
-            for item in generated
+            item.entity_type == "application" and item.entity_id == identifier for item in generated
         )
         assert all("адрес" not in item.body for item in generated)
     # Fresh authenticated session and DB session must return persisted state/history.

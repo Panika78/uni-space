@@ -149,9 +149,12 @@ def test_invalid_renderer_output_stays_failed_without_publication(
             db.scalar(select(IssuedDocument.id).where(IssuedDocument.application_id == identifier))
             is None
         )
-        assert db.scalar(
-            select(Notification.id).where(Notification.user_id == context["student_users"][0])
-        ) is None
+        assert (
+            db.scalar(
+                select(Notification.id).where(Notification.user_id == context["student_users"][0])
+            )
+            is None
+        )
     assert list((context["root"] / "issued_documents").glob("*.pdf")) == []
     _cleanup_application(context, identifier)
 
@@ -792,12 +795,15 @@ def test_render_failure_keeps_approval_and_concurrent_retries_issue_once(
             db.scalar(select(Application.document_status).where(Application.id == identifier))
             == "ready"
         )
-        assert db.scalar(
-            select(func.count(Notification.id)).where(
-                Notification.user_id == context["student_users"][0],
-                Notification.type == "document_ready",
+        assert (
+            db.scalar(
+                select(func.count(Notification.id)).where(
+                    Notification.user_id == context["student_users"][0],
+                    Notification.type == "document_ready",
+                )
             )
-        ) == 1
+            == 1
+        )
         assert (
             len(
                 db.scalars(

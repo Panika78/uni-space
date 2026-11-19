@@ -168,9 +168,7 @@ def _update_final_result(db, user, course_id, student_id, patch, *, delete=False
             create_domain_notifications(
                 db,
                 logical_event_key=f"audit:{event.id}",
-                recipient_user_ids={recipient_user_id}
-                if recipient_user_id is not None
-                else set(),
+                recipient_user_ids={recipient_user_id} if recipient_user_id is not None else set(),
                 notification_type="final_result_changed",
                 title="Обновлены сведения об итоговой аттестации",
                 body="Проверьте итог или сведения о пересдаче на странице дисциплины.",
