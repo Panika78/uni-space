@@ -162,7 +162,7 @@ try {
       await row(key).getByRole('button', { name: 'Открыть объект', exact: true }).count(),
       0,
     )
-    await count(30)
+    await count(30 - index)
     await read(key)
     await count(29 - index)
   }
