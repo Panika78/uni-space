@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, event, select
+from sqlalchemy import delete, event, func, select
 from sqlalchemy.orm import Session
 from test_student_course_integration import course as course_fixture
 
@@ -27,6 +27,7 @@ from app.models import (
     Subgroup,
     User,
 )
+from app.notification_events import create_domain_notifications
 from app.notifications import router
 
 pytestmark = pytest.mark.integration
@@ -88,6 +89,75 @@ def test_read_contract_count_pagination_and_idempotency(notifications):
     s.notification()
     assert s.notify("GET", "/unread-count").json() == {"count": 1}
     assert s.notify("GET", params={"limit": 100}).json()["items"][-1]["id"] == str(old.id)
+
+
+def test_concurrent_event_delivery_deduplicates_but_distinct_events_survive(notifications):
+    s = notifications
+    event_key = f"concurrent-test:{uuid4().hex}"
+    engine = s.db.get_bind().engine
+    with Session(engine) as db:
+        user = User(
+            login=uuid4().hex,
+            password_hash="unused",
+            full_name="Параллельный студент",
+            role="student",
+            is_active=True,
+        )
+        db.add(user)
+        db.commit()
+        user_id = user.id
+    barrier = Barrier(2)
+
+    def deliver():
+        with Session(engine) as db:
+            db.begin()
+            barrier.wait(timeout=5)
+            create_domain_notifications(
+                db,
+                logical_event_key=event_key,
+                recipient_user_ids={user_id},
+                notification_type="test_event",
+                title="Тестовое событие",
+                body="Проверка однократной доставки.",
+                entity_type=None,
+            )
+            db.commit()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            [future.result(timeout=10) for future in (pool.submit(deliver), pool.submit(deliver))]
+        for suffix in ("first-change", "second-change"):
+            with Session(engine) as db:
+                db.begin()
+                create_domain_notifications(
+                    db,
+                    logical_event_key=f"{event_key}:{suffix}",
+                    recipient_user_ids={user_id},
+                    notification_type="test_event",
+                    title="Тестовое событие",
+                    body="Проверка отдельного изменения.",
+                    entity_type=None,
+                )
+                db.commit()
+        with Session(engine) as db:
+            assert (
+                db.scalar(
+                    select(func.count())
+                    .select_from(Notification)
+                    .where(
+                        Notification.logical_event_key.like(f"{event_key}%"),
+                        Notification.user_id == user_id,
+                    )
+                )
+                == 3
+            )
+    finally:
+        with Session(engine) as db:
+            db.execute(
+                delete(Notification).where(Notification.logical_event_key.like(f"{event_key}%"))
+            )
+            db.delete(db.get(User, user_id))
+            db.commit()
 
 
 def test_all_roles_own_notifications_and_uniform_not_found(notifications):
@@ -445,6 +515,38 @@ def test_lesson_target_tracks_formal_subgroup_and_deleted_target(notifications):
     assert s.notify("GET", path).status_code == 404
     assert s.notify("GET", "/unread-count").json() == {"count": 1}
     assert s.notify("PATCH", f"/{item.id}/read").status_code == 200
+
+
+def test_notification_list_redacts_target_after_access_is_lost(notifications):
+    s = notifications
+    s.students[0].group_id = s.groups[1].id
+    s.db.flush()
+    item = s.notification(
+        entity_type="course_offering",
+        entity_id=s.courses[1].id,
+        audience_group_id=s.groups[0].id,
+    )
+    item.title = "Приватное название прежней дисциплины"
+    item.body = "Содержимое прежней группы"
+    s.db.flush()
+    assert s.notify("GET", f"/{item.id}/target").status_code == 404
+    response = s.notify("GET", params={"limit": 100})
+    assert response.status_code == 200
+    notification = next(row for row in response.json()["items"] if row["id"] == str(item.id))
+    assert notification == {
+        "id": str(item.id),
+        "type": "update",
+        "title": "Обновление",
+        "body": "Откройте нужный раздел, чтобы проверить актуальную информацию.",
+        "created_at": notification["created_at"],
+        "read_at": None,
+        "entity_type": None,
+        "entity_id": None,
+    }
+    assert "прежней" not in notification["body"]
+    assert s.notify("GET", "/unread-count").json() == {"count": 1}
+    assert s.notify("PATCH", f"/{item.id}/read").status_code == 200
+    assert s.notify("GET", "/unread-count").json() == {"count": 0}
 
 
 def test_lesson_target_uses_moscow_calendar_date_at_utc_day_boundary(notifications):

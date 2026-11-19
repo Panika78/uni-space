@@ -64,6 +64,12 @@ FROM pg_tables WHERE schemaname='public' AND tablename IN
 -- Notification mutations may only change server-managed read state.
 SELECT 'GRANT UPDATE (read_at) ON public.notifications TO uni_space_api'
 WHERE to_regclass('public.notifications') IS NOT NULL \gexec
+SELECT 'GRANT INSERT (user_id, logical_event_key, audience_group_id, type, title, body, entity_type, entity_id)
+        ON public.notifications TO uni_space_api'
+WHERE to_regclass('public.notifications') IS NOT NULL \gexec
+SELECT format('GRANT USAGE ON SEQUENCE %s TO uni_space_api',
+              pg_get_serial_sequence('public.notifications', 'id'))
+WHERE to_regclass('public.notifications') IS NOT NULL \gexec
 -- Status changes append the required event in the same transaction. The API
 -- cannot read or mutate arbitrary audit history; RETURNING needs only these columns.
 SELECT 'GRANT INSERT ON public.audit_events TO uni_space_api'

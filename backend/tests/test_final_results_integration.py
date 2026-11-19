@@ -13,6 +13,7 @@ from app.models import (
     AuditEvent,
     AuthSession,
     FinalResult,
+    Notification,
     OrgUnit,
     StaffPermission,
     StaffProfile,
@@ -71,14 +72,17 @@ def test_scales_retake_clear_delete_and_audit(results, kind):
     assert s.save("GET").json()["has_debt"] is False
     data = s.save("POST", {"retake_date": "2027-01-10", "retake_location": "A-101"}).json()
     assert data["grade_value"] is None and data["has_debt"] is False
+    assert s.db.query(Notification).filter_by(user_id=s.students[0].user_id).count() == 1
     result_id = data["result_id"]
-    assert s.request().status_code == 200
+    academics_response = s.request()
+    assert academics_response.status_code == 200, academics_response.text
     student_item = next(
         i for i in s.request().json()["items"] if i["course_offering_id"] == str(s.courses[0].id)
     )
     assert student_item["final_result"]["has_debt"] is False
     assert s.events()[-1].action == "create"
     assert s.save(body={"retake_location": "B-202"}).status_code == 200
+    assert s.db.query(Notification).filter_by(user_id=s.students[0].user_id).count() == 2
     event = s.events()[-1]
     assert event.before_data["retake_location"] == "A-101"
     assert event.after_data["retake_location"] == "B-202"
@@ -86,6 +90,7 @@ def test_scales_retake_clear_delete_and_audit(results, kind):
     assert s.save(body={}).status_code == 200
     assert s.save(body={"retake_location": "B-202"}).status_code == 200
     assert len(s.events()) == count
+    assert s.db.query(Notification).filter_by(user_id=s.students[0].user_id).count() == 2
     field = "passed" if kind == "pass_fail" else "grade_value"
     failure = False if kind == "pass_fail" else 2
     success = True if kind == "pass_fail" else 5

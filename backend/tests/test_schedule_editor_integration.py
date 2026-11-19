@@ -2,6 +2,7 @@
 
 from datetime import date
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import func, select, text
@@ -11,12 +12,18 @@ from test_schedule_integration import schedule  # noqa: F401
 from app.models import (
     AssessmentGroup,
     AuditEvent,
+    CourseGroup,
     Lesson,
+    Notification,
     OrgUnit,
     StaffPermission,
     StaffProfile,
+    Student,
+    StudyGroup,
     Subgroup,
+    Teacher,
     TeachingAssignment,
+    User,
 )
 from app.schedule.editor_router import router
 
@@ -114,7 +121,16 @@ def test_editor_crud_versions_noop_and_subgroup_audit(editor):
     updated = e.request_editor("PATCH", path, data)
     assert updated.status_code == 200, updated.text
     assert updated.json()["version"] == 2
+    notification_count = e.db.scalar(
+        select(func.count(Notification.id)).where(Notification.entity_id == int(item["id"]))
+    )
     assert e.request_editor("PATCH", path, data).status_code == 409
+    assert (
+        e.db.scalar(
+            select(func.count(Notification.id)).where(Notification.entity_id == int(item["id"]))
+        )
+        == notification_count
+    )
     audit = events(e)[-1]
     assert audit.actor_user_id == e.actor.id
     assert audit.before_data["group_ids"] == audit.after_data["group_ids"]
@@ -124,6 +140,436 @@ def test_editor_crud_versions_noop_and_subgroup_audit(editor):
     assert e.request_editor("PATCH", path, data).json()["version"] == 3
     assert e.request_editor("DELETE", path).status_code == 405
     assert e.request_editor("PATCH", path, data | {"status": "moved"}).status_code == 422
+
+
+def test_schedule_write_generates_one_notification_per_current_student_and_teacher(editor):
+    e = editor
+    student = e.students[1]
+    student.group_id = e.groups[0].id
+    student.subgroup_id = e.a.id
+    e.db.flush()
+    item = create(e)
+    student_rows = e.db.scalars(
+        select(Notification).where(Notification.user_id == student.user_id)
+    ).all()
+    teacher_user = e.teacher.user_id
+    teacher_rows = e.db.scalars(
+        select(Notification).where(Notification.user_id == teacher_user)
+    ).all()
+    assert len(student_rows) == len(teacher_rows) == 1
+    assert student_rows[0].entity_type == "lesson"
+    assert student_rows[0].entity_id == int(item["id"])
+    assert teacher_rows[0].entity_type is None and teacher_rows[0].entity_id is None
+
+    path = f"/lessons/{item['id']}"
+    changed_payload = e.payload(
+        version=1,
+        starts_at="2026-11-10T11:00:00+03:00",
+        ends_at="2026-11-10T12:00:00+03:00",
+    )
+    updated = e.request_editor("PATCH", path, changed_payload)
+    assert updated.status_code == 200, updated.text
+    unchanged = e.request_editor("PATCH", path, changed_payload | {"version": 2})
+    assert unchanged.status_code == 200
+    assert e.db.query(Notification).filter_by(user_id=student.user_id).count() == 2
+    assert e.db.query(Notification).filter_by(user_id=teacher_user).count() == 2
+
+
+def test_schedule_notification_audience_tracks_visible_row_changes(editor):
+    e = editor
+    group_a, group_b = e.groups
+    group_c = e.add(StudyGroup, name="ТЕСТ-C", program_id=group_a.program_id, course_number=1)
+    e.add(CourseGroup, course_offering_id=e.offering.id, group_id=group_c.id)
+    e.add(
+        TeachingAssignment,
+        teacher_id=e.teacher.id,
+        course_offering_id=e.offering.id,
+        group_id=group_c.id,
+    )
+
+    def add_student(login, name, group):
+        user = e.add(
+            User,
+            login=login,
+            password_hash="unusable-fixture",
+            full_name=name,
+            role="student",
+            is_active=True,
+        )
+        return e.add(Student, user_id=user.id, group_id=group.id, academic_status="enrolled")
+
+    student_a = add_student(f"schedule-notification-a-{uuid4().hex}", "Вымышленный A", group_a)
+    student_b = e.students[1]
+    student_c = add_student(f"schedule-notification-c-{uuid4().hex}", "Вымышленный C", group_c)
+    teacher_user = e.add(
+        User,
+        login=f"schedule-notification-teacher-{uuid4().hex}",
+        password_hash="unusable-fixture",
+        full_name="Новый преподаватель",
+        role="teacher",
+        is_active=True,
+    )
+    replacement_teacher = e.add(Teacher, full_name="Новый преподаватель", user_id=teacher_user.id)
+    e.add(
+        TeachingAssignment,
+        teacher_id=replacement_teacher.id,
+        course_offering_id=e.offering.id,
+        group_id=group_a.id,
+    )
+    e.add(
+        TeachingAssignment,
+        teacher_id=replacement_teacher.id,
+        course_offering_id=e.offering.id,
+        group_id=group_c.id,
+    )
+    e.db.flush()
+    student_users = {"A": student_a.user_id, "B": student_b.user_id, "C": student_c.user_id}
+
+    item = create(
+        e,
+        participants=[
+            {"group_id": str(group_a.id), "subgroup_id": None},
+            {"group_id": str(group_b.id), "subgroup_id": None},
+        ],
+    )
+    lesson_id = int(item["id"])
+    creation_event = e.db.scalar(
+        select(AuditEvent).where(
+            AuditEvent.entity_type == "lesson",
+            AuditEvent.entity_id == lesson_id,
+            AuditEvent.action == "create",
+        )
+    )
+    assert creation_event is not None
+    creation_rows = e.db.scalars(
+        select(Notification).where(Notification.logical_event_key == f"audit:{creation_event.id}")
+    ).all()
+    assert {row.user_id for row in creation_rows if row.user_id in student_users.values()} == {
+        student_users["A"],
+        student_users["B"],
+    }
+    assert e.teacher.user_id in {row.user_id for row in creation_rows}
+
+    path = f"/lessons/{lesson_id}"
+    participant_change = e.request_editor(
+        "PATCH",
+        path,
+        e.payload(
+            version=1,
+            participants=[
+                {"group_id": str(group_a.id), "subgroup_id": None},
+                {"group_id": str(group_c.id), "subgroup_id": None},
+            ],
+        ),
+    )
+    assert participant_change.status_code == 200, participant_change.text
+    participant_event = e.db.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.entity_type == "lesson", AuditEvent.action == "update")
+        .order_by(AuditEvent.id.desc())
+    )
+    assert participant_event is not None
+    participant_rows = e.db.scalars(
+        select(Notification).where(
+            Notification.logical_event_key == f"audit:{participant_event.id}"
+        )
+    ).all()
+    assert {row.user_id for row in participant_rows} == {
+        student_users["B"],
+        student_users["C"],
+        e.teacher.user_id,
+    }
+    assert len({row.logical_event_key for row in participant_rows}) == 1
+    assert participant_rows[0].type == "schedule_changed"
+
+    unchanged = e.request_editor(
+        "PATCH",
+        path,
+        e.payload(
+            version=2,
+            participants=[
+                {"group_id": str(group_a.id), "subgroup_id": None},
+                {"group_id": str(group_c.id), "subgroup_id": None},
+            ],
+        ),
+    )
+    assert unchanged.status_code == 200, unchanged.text
+    assert (
+        e.db.scalar(select(func.count(AuditEvent.id)).where(AuditEvent.entity_type == "lesson"))
+        == 2
+    )
+
+    visible_change = e.request_editor(
+        "PATCH",
+        path,
+        e.payload(
+            version=2,
+            participants=[
+                {"group_id": str(group_a.id), "subgroup_id": None},
+                {"group_id": str(group_c.id), "subgroup_id": None},
+            ],
+            teacher_id=str(replacement_teacher.id),
+            starts_at="2026-11-10T11:00:00+03:00",
+            ends_at="2026-11-10T12:00:00+03:00",
+            room_ids=[str(e.rooms[1].id)],
+        ),
+    )
+    assert visible_change.status_code == 200, visible_change.text
+    visible_event = e.db.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.entity_type == "lesson", AuditEvent.action == "update")
+        .order_by(AuditEvent.id.desc())
+    )
+    assert visible_event is not None and visible_event.id != participant_event.id
+    visible_rows = e.db.scalars(
+        select(Notification).where(Notification.logical_event_key == f"audit:{visible_event.id}")
+    ).all()
+    assert {row.user_id for row in visible_rows} == {
+        student_users["A"],
+        student_users["C"],
+        e.teacher.user_id,
+        teacher_user.id,
+    }
+    assert {row.logical_event_key for row in visible_rows}.isdisjoint(
+        {row.logical_event_key for row in participant_rows}
+    )
+    assert visible_change.json()["starts_at"] == "2026-11-10T08:00:00Z"
+    assert (
+        e.db.scalar(
+            select(func.count(Notification.id)).where(
+                Notification.user_id == student_users["A"],
+                Notification.type == "schedule_changed",
+            )
+        )
+        == 2
+    )
+    assert (
+        e.db.scalar(
+            select(func.count(Notification.id)).where(
+                Notification.user_id == student_users["B"],
+                Notification.type == "schedule_changed",
+            )
+        )
+        == 2
+    )
+    assert (
+        e.db.scalar(
+            select(func.count(Notification.id)).where(
+                Notification.user_id == student_users["C"],
+                Notification.type == "schedule_changed",
+            )
+        )
+        == 2
+    )
+
+    move = e.request_editor(
+        "POST",
+        path + "/move",
+        e.payload(
+            version=3,
+            starts_at="2026-11-11T11:00:00+03:00",
+            ends_at="2026-11-11T12:00:00+03:00",
+            participants=[
+                {"group_id": str(group_a.id), "subgroup_id": None},
+                {"group_id": str(group_c.id), "subgroup_id": None},
+            ],
+            teacher_id=str(replacement_teacher.id),
+            room_ids=[str(e.rooms[1].id)],
+        ),
+    )
+    assert move.status_code == 201, move.text
+    moved_id = int(move.json()["id"])
+    move_event = e.db.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.entity_type == "lesson", AuditEvent.action == "move")
+        .order_by(AuditEvent.id.desc())
+    )
+    move_rows = e.db.scalars(
+        select(Notification).where(Notification.logical_event_key == f"audit:{move_event.id}")
+    ).all()
+    assert {row.user_id for row in move_rows} == {
+        student_users["A"],
+        student_users["C"],
+        teacher_user.id,
+    }
+    assert {row.entity_id for row in move_rows if row.user_id in student_users.values()} == {
+        moved_id
+    }
+    assert e.db.get(Lesson, lesson_id).status == "moved"
+    assert e.db.get(Lesson, moved_id).previous_lesson_id == lesson_id
+
+    cancelled = e.request_editor("POST", f"/lessons/{moved_id}/cancel", {"version": 1})
+    assert cancelled.status_code == 200, cancelled.text
+    cancel_event = e.db.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.entity_type == "lesson", AuditEvent.action == "cancel")
+        .order_by(AuditEvent.id.desc())
+    )
+    cancel_rows = e.db.scalars(
+        select(Notification).where(Notification.logical_event_key == f"audit:{cancel_event.id}")
+    ).all()
+    assert {row.user_id for row in cancel_rows} == {
+        student_users["A"],
+        student_users["C"],
+        teacher_user.id,
+    }
+    assert e.db.get(Lesson, moved_id).status == "cancelled"
+
+    restored = e.request_editor("POST", f"/lessons/{moved_id}/restore", {"version": 2})
+    assert restored.status_code == 200, restored.text
+    restore_event = e.db.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.entity_type == "lesson", AuditEvent.action == "restore")
+        .order_by(AuditEvent.id.desc())
+    )
+    restore_rows = e.db.scalars(
+        select(Notification).where(Notification.logical_event_key == f"audit:{restore_event.id}")
+    ).all()
+    assert {row.user_id for row in restore_rows} == {
+        student_users["A"],
+        student_users["C"],
+        teacher_user.id,
+    }
+    assert e.db.get(Lesson, moved_id).status == "scheduled"
+    assert (
+        len(
+            {
+                f"audit:{participant_event.id}",
+                f"audit:{visible_event.id}",
+                f"audit:{move_event.id}",
+                f"audit:{cancel_event.id}",
+                f"audit:{restore_event.id}",
+            }
+        )
+        == 5
+    )
+    assert (
+        e.db.scalar(
+            select(func.count(Notification.id)).where(
+                Notification.user_id == student_users["A"],
+                Notification.type == "schedule_changed",
+            )
+        )
+        == 5
+    )
+    assert (
+        e.db.scalar(
+            select(func.count(Notification.id)).where(
+                Notification.user_id == student_users["B"],
+                Notification.type == "schedule_changed",
+            )
+        )
+        == 2
+    )
+    assert (
+        e.db.scalar(
+            select(func.count(Notification.id)).where(
+                Notification.user_id == student_users["C"],
+                Notification.type == "schedule_changed",
+            )
+        )
+        == 5
+    )
+
+
+def test_schedule_subgroup_transfer_notifies_only_departing_and_arriving_students(editor):
+    e = editor
+    group = e.groups[0]
+
+    def subgroup_student(login, name, subgroup):
+        user = e.add(
+            User,
+            login=login,
+            password_hash="unusable-fixture",
+            full_name=name,
+            role="student",
+            is_active=True,
+        )
+        return e.add(
+            Student,
+            user_id=user.id,
+            group_id=group.id,
+            subgroup_id=subgroup.id,
+            academic_status="enrolled",
+        )
+
+    departing = subgroup_student(f"schedule-subgroup-a-{uuid4().hex}", "Студент A", e.a)
+    arriving = subgroup_student(f"schedule-subgroup-b-{uuid4().hex}", "Студент B", e.b)
+    e.db.flush()
+    item = create(
+        e,
+        participants=[{"group_id": str(group.id), "subgroup_id": str(e.a.id)}],
+    )
+    creation = e.db.scalar(
+        select(AuditEvent).where(
+            AuditEvent.entity_type == "lesson",
+            AuditEvent.entity_id == int(item["id"]),
+            AuditEvent.action == "create",
+        )
+    )
+    created_rows = e.db.scalars(
+        select(Notification).where(Notification.logical_event_key == f"audit:{creation.id}")
+    ).all()
+    assert {row.user_id for row in created_rows} == {departing.user_id, e.teacher.user_id}
+
+    response = e.request_editor(
+        "PATCH",
+        f"/lessons/{item['id']}",
+        e.payload(
+            version=1,
+            participants=[{"group_id": str(group.id), "subgroup_id": str(e.b.id)}],
+        ),
+    )
+    assert response.status_code == 200, response.text
+    changed = e.db.scalar(
+        select(AuditEvent)
+        .where(AuditEvent.entity_type == "lesson", AuditEvent.action == "update")
+        .order_by(AuditEvent.id.desc())
+    )
+    rows = e.db.scalars(
+        select(Notification).where(Notification.logical_event_key == f"audit:{changed.id}")
+    ).all()
+    assert {row.user_id for row in rows} == {departing.user_id, arriving.user_id}
+    assert {row.type for row in rows} == {"schedule_changed"}
+    assert len({row.logical_event_key for row in rows}) == 1
+
+
+def test_notification_insert_failure_rolls_back_schedule_and_audit(editor):
+    e = editor
+    e.db.execute(
+        text("""
+        CREATE FUNCTION reject_notification_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+            RAISE EXCEPTION 'notification insert rejected';
+        END
+        $$
+        """)
+    )
+    e.db.execute(
+        text(
+            "CREATE TRIGGER reject_notification_insert BEFORE INSERT ON notifications "
+            "FOR EACH ROW EXECUTE FUNCTION reject_notification_insert()"
+        )
+    )
+    e.db.commit()
+    before = {
+        "lessons": e.db.scalar(select(func.count()).select_from(Lesson)),
+        "audit": e.db.scalar(select(func.count()).select_from(AuditEvent)),
+        "notifications": e.db.scalar(select(func.count()).select_from(Notification)),
+    }
+    try:
+        response = e.request_editor("POST", body=e.payload())
+        assert response.status_code == 500, response.text
+        assert e.db.scalar(select(func.count()).select_from(Lesson)) == before["lessons"]
+        assert e.db.scalar(select(func.count()).select_from(AuditEvent)) == before["audit"]
+        assert (
+            e.db.scalar(select(func.count()).select_from(Notification)) == before["notifications"]
+        )
+    finally:
+        e.db.rollback()
+        e.db.execute(text("DROP TRIGGER reject_notification_insert ON notifications"))
+        e.db.execute(text("DROP FUNCTION reject_notification_insert()"))
+        e.db.commit()
 
 
 def test_move_chain_cancel_restore_and_student_schedule(editor):
@@ -418,6 +864,8 @@ def test_failure_of_new_move_target_audit_rolls_back_source_and_continuation(edi
     from app.schedule import editor_service
 
     e = editor
+    lessons_before = e.db.scalar(select(func.count()).select_from(Lesson))
+    audits_before = len(events(e))
     item = create(e)
     original = editor_service.write_audit_event
 
@@ -430,8 +878,8 @@ def test_failure_of_new_move_target_audit_rolls_back_source_and_continuation(edi
     response = e.request_editor("POST", f"/lessons/{item['id']}/move", move_payload(e, version=1))
     assert response.status_code == 500
     assert e.request_editor("GET", f"/lessons/{item['id']}").json() == item
-    assert e.db.scalar(select(func.count()).select_from(Lesson)) == 1
-    assert len(events(e)) == 1
+    assert e.db.scalar(select(func.count()).select_from(Lesson)) == lessons_before + 1
+    assert len(events(e)) == audits_before + 1
 
 
 def test_schedule_changes_preserve_works_scores_assignments_and_unlinked_flags(editor):

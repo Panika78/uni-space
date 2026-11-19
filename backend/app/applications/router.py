@@ -411,15 +411,16 @@ async def submit_application(
             application.review_status = "approved"
             application.version = 2
             application.updated_at = datetime.now(UTC)
-            db.add(
-                ApplicationHistory(
-                    application_id=application.id,
-                    actor_user_id=None,
-                    from_status="submitted",
-                    to_status="approved",
-                    comment=None,
-                )
+            approved_history = ApplicationHistory(
+                application_id=application.id,
+                actor_user_id=None,
+                from_status="submitted",
+                to_status="approved",
+                comment=None,
             )
+            db.add(approved_history)
+            db.flush()
+            workflow.notify_application_status(db, application, approved_history)
         description, requirements = workflow.SERVICE_DETAILS[service.code]
         payload = ApplicationResponse(
             id=str(application.id),
@@ -1182,15 +1183,16 @@ def process_legacy_automatic_document(
             locked.review_status = "approved"
             locked.version += 1
             locked.updated_at = datetime.now(UTC)
-            db.add(
-                ApplicationHistory(
-                    application_id=locked.id,
-                    actor_user_id=None,
-                    from_status=previous,
-                    to_status="approved",
-                    comment=None,
-                )
+            approved_history = ApplicationHistory(
+                application_id=locked.id,
+                actor_user_id=None,
+                from_status=previous,
+                to_status="approved",
+                comment=None,
             )
+            db.add(approved_history)
+            db.flush()
+            workflow.notify_application_status(db, locked, approved_history)
             db.commit()
         elif locked.review_status == "approved" and locked.document_status == "ready":
             document = db.scalar(

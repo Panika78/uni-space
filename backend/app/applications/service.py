@@ -30,6 +30,7 @@ from app.models import (
     StudyGroup,
     User,
 )
+from app.notification_events import create_domain_notifications
 from app.permissions import (
     PermissionCode,
     get_application_scope,
@@ -43,6 +44,40 @@ APPLICATION_FORMS = {
     "academic_leave": AcademicLeaveFormData,
     "accounting_certificate": AccountingCertificateFormData,
 }
+
+APPLICATION_STATUS_NOTIFICATION_LABELS = {
+    "in_review": ("Заявление принято в работу", "Проверьте текущий статус заявления."),
+    "needs_correction": (
+        "Требуется доработка заявления",
+        "Откройте заявление, чтобы посмотреть требования к доработке.",
+    ),
+    "approved": ("Заявление одобрено", "Проверьте состояние документа в заявлении."),
+    "rejected": ("По заявлению принято решение", "Откройте заявление, чтобы посмотреть статус."),
+}
+
+
+def notify_application_status(
+    db: Session, application: Application, history: ApplicationHistory
+) -> None:
+    """Create the owner notification for a real status transition in this transaction."""
+    if history.to_status not in APPLICATION_STATUS_NOTIFICATION_LABELS:
+        return
+    student_user_id = db.scalar(select(Student.user_id).where(Student.id == application.student_id))
+    if student_user_id is None:
+        return
+    title, body = APPLICATION_STATUS_NOTIFICATION_LABELS[history.to_status]
+    create_domain_notifications(
+        db,
+        logical_event_key=f"application_history:{history.id}",
+        recipient_user_ids={student_user_id},
+        notification_type=f"application_{history.to_status}",
+        title=title,
+        body=body,
+        entity_type="application",
+        entity_ids_by_user={student_user_id: application.id},
+    )
+
+
 SERVICE_DETAILS = {
     "study_certificate": (
         "Подтверждает факт обучения. Укажите место предоставления.",
@@ -268,16 +303,16 @@ def update_application(
         if accessible_id is None:
             raise HTTPException(404, "not_found")
         raise HTTPException(409, "version_conflict")
-    db.add(
-        ApplicationHistory(
-            application_id=application.id,
-            actor_user_id=actor_user_id,
-            from_status=previous_status,
-            to_status=to_status,
-            comment=comment,
-        )
+    history = ApplicationHistory(
+        application_id=application.id,
+        actor_user_id=actor_user_id,
+        from_status=previous_status,
+        to_status=to_status,
+        comment=comment,
     )
+    db.add(history)
     db.flush()
+    notify_application_status(db, changed, history)
     return changed
 
 

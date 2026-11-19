@@ -143,7 +143,7 @@ def test_downgrade_rejects_populated_distribution_without_losing_data(migration_
     result = run_migration(engine, "downgrade", "20261114_02", success=False)
     assert "Cannot downgrade populated subgroups" in result.stderr
     with engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261119_02"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261119_04"
         assert (
             connection.scalar(text("SELECT count(*) FROM students WHERE subgroup_id IS NOT NULL"))
             == 1

@@ -14,7 +14,9 @@ from app.models import (
     FinalResult,
     Lesson,
     LessonGroup,
+    Notification,
     Subgroup,
+    TeachingAssignment,
 )
 
 pytestmark = pytest.mark.integration
@@ -69,6 +71,14 @@ def events(s):
         select(AuditEvent)
         .where(AuditEvent.entity_type == "assessment_group")
         .order_by(AuditEvent.id)
+    ).all()
+
+
+def date_notifications(s):
+    return s.db.scalars(
+        select(Notification)
+        .where(Notification.type == "assessment_date_changed")
+        .order_by(Notification.id)
     ).all()
 
 
@@ -214,10 +224,12 @@ def test_batch_rejects_whole_action_without_partial_audit(dates_context, bad):
             group_id=s.groups[1].id,
         )
         s.db.commit()
+    notifications_before = date_notifications(s)
     response = s.patch([item(s.work), invalid])
     assert response.status_code == 404, response.text
     assert s.db.get(AssessmentGroup, s.work.id).planned_date is None
     assert not events(s)
+    assert date_notifications(s) == notifications_before
 
 
 def test_multiple_authorized_groups_have_independent_dates(dates_context):
@@ -236,6 +248,75 @@ def test_multiple_authorized_groups_have_independent_dates(dates_context):
     assert len(events(s)) == 2
     assert s.db.get(AssessmentGroup, s.work.id).planned_date == date(2026, 9, 2)
     assert s.db.get(AssessmentGroup, s.other.id).planned_date == date(2026, 9, 3)
+
+
+@pytest.mark.parametrize("assessment_type", ["test", "exam"])
+def test_date_notifications_group_one_or_many_changed_assignments_and_noop(
+    dates_context, assessment_type
+):
+    from app.models import Assessment
+
+    s = dates_context
+    assessment = s.db.get(Assessment, s.work.assessment_id)
+    assessment.type = assessment_type
+    s.add(
+        TeachingAssignment,
+        teacher_id=s.teachers[0].id,
+        course_offering_id=s.courses[0].id,
+        group_id=s.groups[1].id,
+    )
+    s.db.commit()
+
+    single = s.patch([item(s.work, "2026-09-02")])
+    assert single.status_code == 200, single.text
+    single_rows = date_notifications(s)
+    assert {row.user_id for row in single_rows} == {
+        s.students[0].user_id,
+        s.students[2].user_id,
+    }
+    assert {row.type for row in single_rows} == {"assessment_date_changed"}
+    single_event = events(s)[0]
+    assert {row.logical_event_key for row in single_rows} == {f"audit:{single_event.id}"}
+    assert {row.entity_type for row in single_rows} == {"course_offering"}
+    assert {row.entity_id for row in single_rows} == {s.courses[0].id}
+    assert {row.audience_group_id for row in single_rows} == {s.groups[0].id}
+
+    no_op = s.patch([item(s.work, "2026-09-02")])
+    assert no_op.status_code == 200, no_op.text
+    assert len(events(s)) == 1
+    assert date_notifications(s) == single_rows
+
+    multiple = s.patch([item(s.work, "2026-09-04"), item(s.other, "2026-09-05")])
+    assert multiple.status_code == 200, multiple.text
+    grouped_rows = date_notifications(s)
+    second_event = events(s)[1]
+    second_rows = [
+        row for row in grouped_rows if row.logical_event_key == f"audit:{second_event.id}"
+    ]
+    assert {row.user_id for row in second_rows} == {
+        s.students[0].user_id,
+        s.students[1].user_id,
+        s.students[2].user_id,
+    }
+    assert len(second_rows) == 3
+    assert len({row.logical_event_key for row in second_rows}) == 1
+    assert second_rows[0].logical_event_key != single_rows[0].logical_event_key
+    assert s.db.get(AssessmentGroup, s.work.id).planned_date == date(2026, 9, 4)
+    assert s.db.get(AssessmentGroup, s.other.id).planned_date == date(2026, 9, 5)
+
+
+@pytest.mark.parametrize("assessment_type", ["seminar", "homework", "other"])
+def test_unsupported_assessment_date_changes_do_not_notify(dates_context, assessment_type):
+    from app.models import Assessment
+
+    s = dates_context
+    s.db.get(Assessment, s.work.assessment_id).type = assessment_type
+    s.db.commit()
+    response = s.patch([item(s.work, "2026-09-04")])
+    assert response.status_code == 200, response.text
+    assert s.db.get(AssessmentGroup, s.work.id).planned_date == date(2026, 9, 4)
+    assert len(events(s)) == 1
+    assert date_notifications(s) == []
 
 
 @pytest.mark.parametrize(
@@ -297,6 +378,7 @@ def test_explicit_link_required_and_wrong_offering_hidden(dates_context):
 
 def test_revoked_scope_roles_and_audit_failure_rollback(dates_context, monkeypatch):
     s = dates_context
+    notifications_before = date_notifications(s)
     assert s.patch(teacher=1).status_code == 404
     assert s.patch(teacher=2).status_code == 404
     token = s.teacher_tokens[0]
@@ -311,6 +393,7 @@ def test_revoked_scope_roles_and_audit_failure_rollback(dates_context, monkeypat
     assert s.patch().status_code == 500
     assert s.db.get(AssessmentGroup, s.work.id).planned_date is None
     assert not events(s)
+    assert date_notifications(s) == notifications_before
     s.db.delete(s.grants[0])
     s.db.commit()
     assert s.patch().status_code == 404
@@ -327,6 +410,7 @@ def test_database_conflict_rolls_back_entire_request(dates_context, monkeypatch,
 
     error = Conflict()
     error.sqlstate = sqlstate
+    notifications_before = date_notifications(s)
 
     def fail(*args, **kwargs):
         raise OperationalError("conflict", {}, error)
@@ -337,6 +421,7 @@ def test_database_conflict_rolls_back_entire_request(dates_context, monkeypatch,
     assert response.json()["error"]["code"] == "version_conflict"
     assert s.db.get(AssessmentGroup, s.work.id).planned_date is None
     assert not events(s)
+    assert date_notifications(s) == notifications_before
 
 
 def test_second_group_audit_failure_rolls_back_first_group_and_event(dates_context, monkeypatch):

@@ -48,9 +48,11 @@ async function count(expected) {
 const bell = () => page.getByRole('button', { name: 'Уведомления', exact: true })
 const drawer = () => page.getByRole('dialog', { name: 'Уведомления', exact: true })
 const row = (key) =>
-  drawer()
-    .locator('article.notification-item')
-    .filter({ has: page.getByText(`NOTIFY ${key}`, { exact: true }) })
+  data.ids[key]
+    ? drawer().locator(`article.notification-item[data-notification-id="${data.ids[key]}"]`)
+    : drawer()
+        .locator('article.notification-item')
+        .filter({ has: page.getByText(`NOTIFY ${key}`, { exact: true }) })
 async function open() {
   await bell().click()
   await drawer().waitFor()
@@ -150,11 +152,19 @@ try {
   check('360px real all-page count, pagination, unknown type, legacy/partial targets, no auto-read')
 
   for (const [index, key] of ['foreign', 'deleted'].entries()) {
-    await row(key).getByRole('button', { name: 'Открыть объект', exact: true }).click()
-    await row(key).getByRole('alert').filter({ hasText: 'Объект недоступен' }).waitFor()
-    assert.equal(new URL(page.url()).pathname, '/schedule')
+    await row(key).waitFor()
+    assert.equal(await row(key).getByRole('heading').textContent(), 'Обновление')
+    assert.equal(
+      await row(key).locator('.notification-item__body').textContent(),
+      'Откройте нужный раздел, чтобы проверить актуальную информацию.',
+    )
+    assert.equal(
+      await row(key).getByRole('button', { name: 'Открыть объект', exact: true }).count(),
+      0,
+    )
     await count(30 - index)
     await read(key)
+    await count(29 - index)
   }
   await badge(28)
   await read('general')

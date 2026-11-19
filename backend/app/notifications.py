@@ -119,6 +119,22 @@ def list_notifications(
         )
         for item in rows
     ]
+    # Stored notification text and object identifiers can outlive the access
+    # that justified them. Reuse the same resolver as click-through and redact
+    # inaccessible targets at read time while preserving own read state.
+    for item, row in zip(items, rows, strict=True):
+        if row.entity_type is None and row.entity_id is None:
+            continue
+        try:
+            resolve_notification_target(db, user, row)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            item.type = "update"
+            item.title = "Обновление"
+            item.body = "Откройте нужный раздел, чтобы проверить актуальную информацию."
+            item.entity_type = None
+            item.entity_id = None
     return paginate_results(
         items,
         key=lambda item: (item.created_at.isoformat(), int(item.id)),
@@ -222,6 +238,8 @@ def resolve_notification_target(db: Session, user: User, item: Notification) -> 
         raise HTTPException(404, "not_found")
     student = db.scalar(select(Student).where(Student.user_id == user.id))
     if student is None:
+        raise HTTPException(404, "not_found")
+    if item.audience_group_id is not None and student.group_id != item.audience_group_id:
         raise HTTPException(404, "not_found")
     if item.entity_type == "application":
         get_owned_application(db, student, identifier)

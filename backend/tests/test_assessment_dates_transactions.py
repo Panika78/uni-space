@@ -15,7 +15,7 @@ from test_teaching_integration import journal as journal_fixture
 
 from app.audit import write_audit_event
 from app.dependencies.database import get_db_session
-from app.models import AssessmentGroup, AuditEvent, Lesson, LessonGroup, User
+from app.models import AssessmentGroup, AuditEvent, Lesson, LessonGroup, Notification, User
 from app.teaching.dates import get_date_snapshot, update_assessment_dates
 from app.teaching.schemas import AssessmentDatesRequest
 
@@ -56,6 +56,13 @@ def create_context(db):
 
 def cleanup_context(s):
     s.db.rollback()
+    s.db.execute(
+        delete(Notification).where(
+            Notification.user_id.in_(
+                [u.id for u in s.teacher_users] + [student.user_id for student in s.students]
+            )
+        )
+    )
     s.db.execute(
         delete(AuditEvent).where(AuditEvent.actor_user_id.in_([u.id for u in s.teacher_users]))
     )

@@ -86,10 +86,24 @@ def test_publish_and_read_current_audience(journal):
     assert address["body"] == body
     assert "\n" not in address["excerpt"]
     assert address["is_important"] is True
+    event = s.db.scalar(
+        select(AuditEvent).where(
+            AuditEvent.entity_type == "teacher_announcement",
+            AuditEvent.entity_id == int(address["id"]),
+        )
+    )
+    event_key = f"audit:{event.id}"
     assert student_feed(s).json()["items"] == [address]
     assert student_feed(s, student=1).json()["items"] == []
     assert student_feed(s, course=1).json()["items"] == []
     assert student_feed(s, student=1, course=1).status_code == 404
+    generated = s.db.scalars(
+        select(Notification).where(Notification.user_id == s.students[0].user_id)
+    ).all()
+    assert len(generated) == 1
+    assert generated[0].entity_type == "course_offering"
+    assert generated[0].entity_id == s.courses[0].id
+    assert generated[0].type == "important_announcement"
 
     faculty = s.add(OrgUnit, name="Второй вымышленный факультет", type="faculty")
     program = s.add(
@@ -117,6 +131,15 @@ def test_publish_and_read_current_audience(journal):
     common = publish(s, None, title="Общее").json()
     other_author = publish(s, first, teacher=1).json()
     assert common["group_id"] is None and common["is_important"] is False
+    assert (
+        s.db.scalar(
+            select(func.count(Notification.id)).where(
+                Notification.user_id.in_([student.user_id for student in s.students]),
+                Notification.logical_event_key == event_key,
+            )
+        )
+        == 2
+    )
     assert student_feed(s).json()["items"] == [other_author, common, address]
     assert student_feed(s, student=1).json()["items"] == [common]
     assert student_feed(s, course=1).json()["items"] == []
@@ -134,14 +157,17 @@ def test_publish_and_read_current_audience(journal):
     changed_feed = student_feed(s)
     assert changed_feed.json()["items"] == [common]
     assert changed_feed.headers["X-Announcement-Group-Id"] == str(new_group.id)
-    assert s.db.scalar(select(func.count(Notification.id))) == 0
+    generated = s.db.scalars(
+        select(Notification)
+        .where(Notification.logical_event_key == event_key)
+        .order_by(Notification.user_id)
+    ).all()
+    assert {row.user_id for row in generated} == {
+        s.students[0].user_id,
+        s.students[2].user_id,
+    }
+    assert len(generated) == 2
 
-    event = s.db.scalar(
-        select(AuditEvent).where(
-            AuditEvent.entity_type == "teacher_announcement",
-            AuditEvent.entity_id == int(address["id"]),
-        )
-    )
     assert event.action == "create" and event.actor_user_id == s.teacher_users[0].id
     assert event.before_data is None
     assert event.after_data == {

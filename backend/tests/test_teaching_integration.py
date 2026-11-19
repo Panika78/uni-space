@@ -13,6 +13,7 @@ from app.models import (
     AuthSession,
     Lesson,
     LessonGroup,
+    Notification,
     OrgUnit,
     StaffPermission,
     StaffProfile,
@@ -161,6 +162,7 @@ def test_score_write_range_noop_update_delete_and_transfer(journal):
 
     created = write(0)
     assert created.status_code == 200 and created.json()["score"] == 0
+    assert s.db.query(Notification).filter_by(user_id=s.students[0].user_id).count() == 1
     result_id = int(created.json()["result_id"])
     result = s.db.get(AssessmentResult, result_id)
     graded_at, grader = result.graded_at, result.graded_by_user_id
@@ -168,6 +170,7 @@ def test_score_write_range_noop_update_delete_and_transfer(journal):
     event_count = s.db.query(AuditEvent).filter_by(entity_type="assessment_result").count()
     assert event_count == 1
     assert write(5).status_code == 200
+    assert s.db.query(Notification).filter_by(user_id=s.students[0].user_id).count() == 2
     assert result.graded_at != graded_at and result.graded_by_user_id == s.teacher_users[0].id
     updated_at = result.graded_at
     updated_by = result.graded_by_user_id
@@ -175,9 +178,11 @@ def test_score_write_range_noop_update_delete_and_transfer(journal):
     assert result.graded_at == updated_at and result.graded_by_user_id == updated_by
     assert result.graded_by_user_id == grader
     assert s.db.query(AuditEvent).filter_by(entity_type="assessment_result").count() == 2
+    assert s.db.query(Notification).filter_by(user_id=s.students[0].user_id).count() == 2
     for invalid in (-1, 1.5, 11):
         assert write(invalid).status_code == 422
     assert write(None).status_code == 200
+    assert s.db.query(Notification).filter_by(user_id=s.students[0].user_id).count() == 3
     assert s.db.get(AssessmentResult, result_id) is None
     actions = [
         event.action
@@ -196,6 +201,7 @@ def test_score_write_range_noop_update_delete_and_transfer(journal):
     assert deleted_event.before_data["score"] == 5 and deleted_event.after_data is None
     historical = write(3)
     assert historical.status_code == 200
+    assert s.db.query(Notification).filter_by(user_id=s.students[0].user_id).count() == 4
     historical_id = int(historical.json()["result_id"])
     s.students[0].group_id = s.groups[1].id
     s.db.flush()

@@ -97,6 +97,25 @@ def test_production_role_can_only_update_notification_read_state(runtime_engine)
                     {"id": identifier},
                 )
             db.rollback()
+        for column in (
+            "user_id",
+            "logical_event_key",
+            "audience_group_id",
+            "type",
+            "title",
+            "body",
+            "entity_type",
+            "entity_id",
+        ):
+            assert db.scalar(
+                text("SELECT has_column_privilege(current_user,'notifications',:column,'INSERT')"),
+                {"column": column},
+            )
+        for column in ("id", "read_at", "created_at"):
+            assert not db.scalar(
+                text("SELECT has_column_privilege(current_user,'notifications',:column,'INSERT')"),
+                {"column": column},
+            )
         for privilege in ("INSERT", "DELETE"):
             assert not db.scalar(
                 text("SELECT has_table_privilege(current_user,'notifications',:privilege)"),

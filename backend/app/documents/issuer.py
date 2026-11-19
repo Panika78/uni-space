@@ -23,6 +23,7 @@ from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.documents import pdf, storage
 from app.models import Application, IssuedDocument, ServiceType, Student, User
+from app.notification_events import create_domain_notifications
 from app.permissions import PermissionCode, get_application_scope, get_authorization_context
 
 logger = logging.getLogger(__name__)
@@ -425,6 +426,21 @@ def issue_document(
             application.version += 1
             application.updated_at = func.statement_timestamp()
             db.flush()
+            student_user_id = db.scalar(
+                select(Student.user_id).where(Student.id == application.student_id)
+            )
+            create_domain_notifications(
+                db,
+                logical_event_key=f"issued_document:{document.id}",
+                recipient_user_ids={student_user_id} if student_user_id is not None else set(),
+                notification_type="document_ready",
+                title="Документ готов",
+                body="Откройте заявление, чтобы посмотреть выданный документ.",
+                entity_type="application",
+                entity_ids_by_user={student_user_id: application.id}
+                if student_user_id is not None
+                else None,
+            )
             commit_attempted = True
             db.commit()
             return DocumentState(
