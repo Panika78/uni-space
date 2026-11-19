@@ -335,7 +335,11 @@ try {
   check('account isolation, 1440px keyboard focus and Escape')
   await open()
   await context.setOffline(true)
-  await read('other')
+  // Use the button's native click event here: the viewport is intentionally wide,
+  // and the request immediately disables the control while the offline fetch settles.
+  await row('other')
+    .getByRole('button', { name: 'Отметить прочитанным', exact: true })
+    .evaluate((button) => button.click())
   await drawer().getByRole('alert').waitFor()
   assert.equal(
     await row('other').getByRole('button', { name: 'Отметить прочитанным', exact: true }).count(),
