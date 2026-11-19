@@ -341,6 +341,9 @@ function CatalogPicker({
   onForbidden?: () => void
   onResolvedItem?: (item: CatalogItem) => void
 }) {
+  const pickerRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const skipFocusOpenRef = useRef(false)
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState(false)
   const [resolvedLabels, setResolvedLabels] = useState<Record<string, string>>(labelOverrides)
@@ -357,6 +360,19 @@ function CatalogPicker({
     enabled: expanded,
   })
   const items = useMemo(() => query.data?.pages.flatMap((page) => page.items) ?? [], [query.data])
+  useEffect(() => {
+    if (!expanded) return
+    const closeWhenOutside = (event: Event) => {
+      if (event.target instanceof Node && !pickerRef.current?.contains(event.target))
+        setExpanded(false)
+    }
+    document.addEventListener('pointerdown', closeWhenOutside)
+    document.addEventListener('focusin', closeWhenOutside)
+    return () => {
+      document.removeEventListener('pointerdown', closeWhenOutside)
+      document.removeEventListener('focusin', closeWhenOutside)
+    }
+  }, [expanded])
   const selectedLabels = {
     ...resolvedLabels,
     ...Object.fromEntries(items.map((item) => [item.id, item.name])),
@@ -378,14 +394,29 @@ function CatalogPicker({
       return
     }
     onChange(value.includes(id) ? value.filter((item) => item !== id) : [...value, id])
+    setSearch('')
+    setExpanded(false)
   }
   const selectedNames = value.map((id) => selectedLabels[id] ?? 'Название недоступно')
   const visibleItems = allowedIds ? items.filter((item) => allowedIds.includes(item.id)) : items
   return (
-    <div className="staff-schedule__picker">
+    <div
+      ref={pickerRef}
+      className="staff-schedule__picker"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && expanded) {
+          event.preventDefault()
+          event.stopPropagation()
+          setExpanded(false)
+          skipFocusOpenRef.current = true
+          inputRef.current?.focus()
+        }
+      }}
+    >
       <label>
         {label}
         <input
+          ref={inputRef}
           aria-label={label}
           role="combobox"
           aria-expanded={expanded}
@@ -393,13 +424,27 @@ function CatalogPicker({
           aria-invalid={invalid || undefined}
           value={expanded ? search : selectedNames.join(', ')}
           placeholder="Поиск по названию"
+          onClick={() => {
+            if (!expanded) {
+              setExpanded(true)
+              setSearch('')
+            }
+          }}
           onFocus={() => {
-            setExpanded(true)
-            setSearch('')
+            if (skipFocusOpenRef.current) {
+              skipFocusOpenRef.current = false
+            } else {
+              setExpanded(true)
+              setSearch('')
+            }
           }}
           onChange={(event) => setSearch(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Escape') setExpanded(false)
+            if (event.key === 'Escape' && expanded) {
+              event.preventDefault()
+              event.stopPropagation()
+              setExpanded(false)
+            }
           }}
         />
       </label>
