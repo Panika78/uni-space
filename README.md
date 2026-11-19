@@ -65,6 +65,12 @@ MVP2-24 (#77): в журнале преподавателя доступны у�
 Проверки входят в PostgreSQL integration suite и
 `npm run e2e:teacher-journal --prefix frontend`.
 
+Issue #144: `/teacher/schedule` использует персональный read-only API
+`GET /api/v1/teaching/schedule` с текущим teacher scope, датами Москвы,
+официальными статусами, доступными группами/подгруппами, аудиториями и
+безопасной навигацией переносов. Teacher schedule не использует студенческую
+персонализацию или staff `schedule.edit`.
+
 ## Текущий статус
 
 Созданы воспроизводимые основы backend и frontend, общие API-соглашения,

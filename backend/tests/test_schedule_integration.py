@@ -29,13 +29,24 @@ from app.models import (
     Student,
     StudyGroup,
     Teacher,
+    TeachingAssignment,
     User,
 )
 from app.schedule.router import router
 from app.schedule.schemas import ScheduleParams
 from app.schedule.service import list_student_schedule
+from app.schedule.teacher_router import router as teacher_schedule_router
 
 pytestmark = pytest.mark.integration
+
+
+def returned_lesson_ids(payload):
+    ids = {item["id"] for item in payload["items"]}
+    for item in payload["items"]:
+        for key in ("previous_lesson", "latest_lesson"):
+            if item[key] is not None:
+                ids.add(item[key]["id"])
+    return ids
 
 
 @pytest.fixture
@@ -131,6 +142,7 @@ def schedule(db_session):
     app.add_middleware(ApiHeadersMiddleware)
     install_exception_handlers(app)
     app.include_router(router)
+    app.include_router(teacher_schedule_router)
     app.dependency_overrides[get_db_session] = lambda: db
     app.dependency_overrides[get_settings] = lambda: settings
     client = TestClient(app)
@@ -143,6 +155,201 @@ def schedule(db_session):
         )
 
     return SimpleNamespace(**locals())
+
+
+def test_teacher_schedule_uses_teacher_and_actual_group_scope(schedule):
+    s = schedule
+    s.add(
+        TeachingAssignment,
+        course_offering_id=s.offering.id,
+        group_id=s.groups[0].id,
+        teacher_id=s.teacher.id,
+    )
+    shared = s.lesson(assigned=s.groups, teacher_id=s.teacher.id, room_ids=[r.id for r in s.rooms])
+    outsider_group = s.lesson(assigned=s.groups[1:], teacher_id=s.teacher.id)
+    wrong_teacher = s.lesson(teacher_id=s.standalone.id)
+    unassigned = s.lesson(assigned=[], teacher_id=s.teacher.id)
+    additional = s.lesson(teacher_id=s.teacher.id, is_additional=True)
+
+    response = s.client.get(
+        "/api/v1/teaching/schedule",
+        params={"date_from": "2026-11-10", "date_to": "2026-11-10"},
+        headers={"Authorization": f"Bearer {s.tokens[2]}"},
+    )
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["items"]] == [str(shared.id)]
+    item = response.json()["items"][0]
+    assert item["groups"] == [
+        {"id": str(s.groups[0].id), "name": s.groups[0].name, "subgroup": None}
+    ]
+    assert len(item["rooms"]) == 2
+    assert "attendance_status" not in item and "linked_assessments" not in item
+    exposed_ids = returned_lesson_ids(response.json())
+    assert all(
+        str(value.id) not in exposed_ids
+        for value in (outsider_group, wrong_teacher, unassigned, additional)
+    )
+    assert (
+        s.client.get(
+            "/api/v1/teaching/schedule",
+            params={"date_from": "2026-11-10", "date_to": "2026-12-11"},
+            headers={"Authorization": f"Bearer {s.tokens[2]}"},
+        ).status_code
+        == 422
+    )
+
+
+def test_teacher_schedule_move_chain_hides_unassigned_positions(schedule):
+    s = schedule
+    s.add(
+        TeachingAssignment,
+        course_offering_id=s.offering.id,
+        group_id=s.groups[0].id,
+        teacher_id=s.teacher.id,
+    )
+    s.add(
+        TeachingAssignment,
+        course_offering_id=s.offering.id,
+        group_id=s.groups[0].id,
+        teacher_id=s.standalone.id,
+    )
+    root = s.lesson(status="moved", teacher_id=s.teacher.id)
+    hidden = s.lesson(
+        "2026-11-20T09:00:00+03:00",
+        status="moved",
+        previous_lesson_id=root.id,
+        teacher_id=s.standalone.id,
+    )
+    terminal = s.lesson(
+        "2026-12-20T09:00:00+03:00", previous_lesson_id=hidden.id, teacher_id=s.teacher.id
+    )
+    response = s.client.get(
+        "/api/v1/teaching/schedule",
+        params={"date_from": "2026-11-10", "date_to": "2026-11-10"},
+        headers={"Authorization": f"Bearer {s.tokens[2]}"},
+    )
+    item = response.json()["items"][0]
+    assert item["latest_lesson"]["id"] == str(terminal.id)
+    assert str(hidden.id) not in returned_lesson_ids(response.json())
+    assert (
+        s.client.get(
+            "/api/v1/teaching/schedule",
+            params={"date_from": "2026-11-20", "date_to": "2026-11-20"},
+            headers={"Authorization": f"Bearer {s.tokens[2]}"},
+        ).json()["items"]
+        == []
+    )
+
+
+def test_teacher_schedule_query_count_does_not_grow_per_lesson(schedule):
+    from sqlalchemy import event
+
+    s = schedule
+    s.add(
+        TeachingAssignment,
+        course_offering_id=s.offering.id,
+        group_id=s.groups[0].id,
+        teacher_id=s.teacher.id,
+    )
+    s.lesson(teacher_id=s.teacher.id)
+    counts = []
+
+    def count_selects(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            counts.append(statement)
+
+    event.listen(s.db.bind, "before_cursor_execute", count_selects)
+    try:
+        first = s.client.get(
+            "/api/v1/teaching/schedule",
+            params={"date_from": "2026-11-10", "date_to": "2026-11-10"},
+            headers={"Authorization": f"Bearer {s.tokens[2]}"},
+        )
+        assert first.status_code == 200
+        small_count = len(counts)
+        counts.clear()
+        for _ in range(9):
+            s.lesson(teacher_id=s.teacher.id)
+        counts.clear()
+        large = s.client.get(
+            "/api/v1/teaching/schedule",
+            params={"date_from": "2026-11-10", "date_to": "2026-11-10"},
+            headers={"Authorization": f"Bearer {s.tokens[2]}"},
+        )
+        assert large.status_code == 200
+        assert len(large.json()["items"]) == 10
+        assert len(counts) == small_count
+    finally:
+        event.remove(s.db.bind, "before_cursor_execute", count_selects)
+
+
+def test_teacher_schedule_empty_scope_revocation_and_role_errors(schedule):
+    from sqlalchemy import delete
+
+    s = schedule
+    url = "/api/v1/teaching/schedule"
+    params = {"date_from": "2026-11-10", "date_to": "2026-11-10"}
+    assert s.client.get(url, params=params).status_code == 401
+    assert (
+        s.client.get(
+            url, params=params, headers={"Authorization": f"Bearer {s.tokens[0]}"}
+        ).status_code
+        == 403
+    )
+    empty = s.client.get(url, params=params, headers={"Authorization": f"Bearer {s.tokens[2]}"})
+    assert empty.status_code == 200 and empty.json()["items"] == []
+
+    assignment = s.add(
+        TeachingAssignment,
+        course_offering_id=s.offering.id,
+        group_id=s.groups[0].id,
+        teacher_id=s.teacher.id,
+    )
+    null_teacher = s.lesson(teacher_id=None)
+    own = s.lesson(teacher_id=s.teacher.id)
+    assert own.id != null_teacher.id
+    before_revoke = s.client.get(
+        url, params=params, headers={"Authorization": f"Bearer {s.tokens[2]}"}
+    )
+    assert [item["id"] for item in before_revoke.json()["items"]] == [str(own.id)]
+    s.db.execute(delete(TeachingAssignment).where(TeachingAssignment.id == assignment.id))
+    after_revoke = s.client.get(
+        url, params=params, headers={"Authorization": f"Bearer {s.tokens[2]}"}
+    )
+    assert after_revoke.status_code == 200 and after_revoke.json()["items"] == []
+
+
+def test_teacher_schedule_midnight_and_date_range_boundaries(schedule):
+    s = schedule
+    s.add(
+        TeachingAssignment,
+        course_offering_id=s.offering.id,
+        group_id=s.groups[0].id,
+        teacher_id=s.teacher.id,
+    )
+    overnight = s.lesson(
+        "2026-11-10T23:30:00+03:00",
+        "2026-11-11T00:30:00+03:00",
+        teacher_id=s.teacher.id,
+    )
+    url = "/api/v1/teaching/schedule"
+    headers = {"Authorization": f"Bearer {s.tokens[2]}"}
+    first_day = s.client.get(
+        url, params={"date_from": "2026-11-10", "date_to": "2026-11-10"}, headers=headers
+    )
+    second_day = s.client.get(
+        url, params={"date_from": "2026-11-11", "date_to": "2026-11-11"}, headers=headers
+    )
+    assert [item["id"] for item in first_day.json()["items"]] == [str(overnight.id)]
+    assert [item["id"] for item in second_day.json()["items"]] == [str(overnight.id)]
+    thirty_one_days = s.client.get(
+        url, params={"date_from": "2026-11-01", "date_to": "2026-12-01"}, headers=headers
+    )
+    assert thirty_one_days.status_code == 200
+    thirty_two_days = s.client.get(
+        url, params={"date_from": "2026-11-01", "date_to": "2026-12-02"}, headers=headers
+    )
+    assert thirty_two_days.status_code == 422
 
 
 def test_schedule_isolates_actual_assignments_and_returns_shared_lesson_once(schedule):

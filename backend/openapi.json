@@ -5615,6 +5615,242 @@
         "title": "TeacherAnnouncementCreate",
         "type": "object"
       },
+      "TeacherCourseOfferingRef": {
+        "additionalProperties": false,
+        "properties": {
+          "discipline": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "discipline"
+        ],
+        "title": "TeacherCourseOfferingRef",
+        "type": "object"
+      },
+      "TeacherLessonGroup": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "subgroup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Ref"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "subgroup"
+        ],
+        "title": "TeacherLessonGroup",
+        "type": "object"
+      },
+      "TeacherLessonPosition": {
+        "additionalProperties": false,
+        "properties": {
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "scheduled",
+              "cancelled",
+              "moved"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "starts_at",
+          "ends_at",
+          "status"
+        ],
+        "title": "TeacherLessonPosition",
+        "type": "object"
+      },
+      "TeacherRoomRef": {
+        "additionalProperties": false,
+        "properties": {
+          "building": {
+            "$ref": "#/components/schemas/Ref"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "building"
+        ],
+        "title": "TeacherRoomRef",
+        "type": "object"
+      },
+      "TeacherScheduleItem": {
+        "additionalProperties": false,
+        "properties": {
+          "course_offering": {
+            "$ref": "#/components/schemas/TeacherCourseOfferingRef"
+          },
+          "ends_at": {
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/TeacherLessonGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "id": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "lecture",
+              "seminar",
+              "lab",
+              "other"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "latest_lesson": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TeacherLessonPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "previous_lesson": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TeacherLessonPosition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rooms": {
+            "items": {
+              "$ref": "#/components/schemas/TeacherRoomRef"
+            },
+            "title": "Rooms",
+            "type": "array"
+          },
+          "starts_at": {
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "scheduled",
+              "cancelled",
+              "moved"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "starts_at",
+          "ends_at",
+          "status",
+          "kind",
+          "course_offering",
+          "groups",
+          "rooms",
+          "previous_lesson",
+          "latest_lesson"
+        ],
+        "title": "TeacherScheduleItem",
+        "type": "object"
+      },
+      "TeacherScheduleResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "date_from": {
+            "format": "date",
+            "title": "Date From",
+            "type": "string"
+          },
+          "date_to": {
+            "format": "date",
+            "title": "Date To",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TeacherScheduleItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "timezone": {
+            "const": "Europe/Moscow",
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date_from",
+          "date_to",
+          "timezone",
+          "items"
+        ],
+        "title": "TeacherScheduleResponse",
+        "type": "object"
+      },
       "TeachingAssignmentResponse": {
         "additionalProperties": false,
         "properties": {
@@ -17985,6 +18221,94 @@
           }
         ],
         "summary": "List Journal Students",
+        "tags": [
+          "teaching"
+        ]
+      }
+    },
+    "/api/v1/teaching/schedule": {
+      "get": {
+        "operationId": "get_teacher_schedule_api_v1_teaching_schedule_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Date From",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Date To",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeacherScheduleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Teacher Schedule",
         "tags": [
           "teaching"
         ]

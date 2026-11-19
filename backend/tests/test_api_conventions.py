@@ -832,6 +832,7 @@ def test_api_prefix_and_existing_documentation_paths_remain_available() -> None:
         "/api/v1/attendance/lessons/{lesson_id}",
         "/api/v1/attendance/lessons/{lesson_id}/students/{student_id}",
         "/api/v1/teaching/assignments",
+        "/api/v1/teaching/schedule",
         "/api/v1/teaching/courses/{course_offering_id}/announcements",
         "/api/v1/teaching/courses/{course_offering_id}/groups/{group_id}/announcements",
         "/api/v1/academics/courses/{course_offering_id}/announcements",
