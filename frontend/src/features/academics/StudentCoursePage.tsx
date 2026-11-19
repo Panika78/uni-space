@@ -1,4 +1,11 @@
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ApiClientError } from '../../shared/api/client'
@@ -100,6 +107,8 @@ export function StudentCoursePage() {
   const client = useQueryClient()
   const heading = useRef<HTMLHeadingElement>(null)
   const tabButtons = useRef<Array<HTMLButtonElement | null>>([])
+  const tabsRef = useRef<HTMLDivElement>(null)
+  const [indicatorReady, setIndicatorReady] = useState(false)
   const path = `/api/v1/academics/courses/${encodeURIComponent(courseOfferingId)}`
   const rootKey = ['student-course', ...(scope?.key ?? []), courseOfferingId] as const
   const passport = useQuery({
@@ -111,6 +120,28 @@ export function StudentCoursePage() {
   useEffect(() => {
     heading.current?.focus({ preventScroll: true })
   }, [courseOfferingId])
+
+  useLayoutEffect(() => {
+    const tabsElement = tabsRef.current
+    const selectedIndex = tabs.findIndex(([id]) => id === tab)
+    const selectedButton = tabButtons.current[selectedIndex]
+    if (!tabsElement || !selectedButton) return
+
+    const positionIndicator = () => {
+      tabsElement.style.setProperty('--tab-x', `${selectedButton.offsetLeft - 5}px`)
+      tabsElement.style.setProperty('--tab-width', `${selectedButton.offsetWidth}px`)
+    }
+    positionIndicator()
+    if (!indicatorReady) {
+      const frame = requestAnimationFrame(() => setIndicatorReady(true))
+      return () => cancelAnimationFrame(frame)
+    }
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(positionIndicator)
+    observer.observe(tabsElement)
+    observer.observe(selectedButton)
+    return () => observer.disconnect()
+  }, [indicatorReady, tab])
 
   function selectTab(next: Tab) {
     setParams(next === 'overview' ? {} : { tab: next }, {
@@ -229,7 +260,12 @@ export function StudentCoursePage() {
               {passport.isFetching ? 'Обновляем…' : 'Обновить'}
             </button>
           </header>
-          <div className="student-course__tabs" role="tablist" aria-label="Дисциплина">
+          <div
+            ref={tabsRef}
+            className={`student-course__tabs${indicatorReady ? ' indicator-ready' : ''}`}
+            role="tablist"
+            aria-label="Дисциплина"
+          >
             {tabs.map(([id, label], index) => (
               <button
                 key={id}

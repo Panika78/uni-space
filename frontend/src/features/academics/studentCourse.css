@@ -21,29 +21,58 @@
   color: var(--muted);
 }
 .student-course__tabs {
+  position: relative;
+  isolation: isolate;
   display: flex;
+  width: fit-content;
+  max-width: 100%;
   overflow-x: auto;
-  gap: 0.25rem;
-  padding: 0.25rem;
-  border-bottom: 1px solid var(--line);
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #f2e7e2;
+  scrollbar-width: none;
+}
+.student-course__tabs::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: 5px;
+  bottom: 5px;
+  left: 5px;
+  width: var(--tab-width, 0px);
+  border-radius: 9px;
+  background: var(--accent);
+  box-shadow: 0 3px 9px rgb(120 31 50 / 13%);
+  transform: translateX(var(--tab-x, 0));
+  transition: none;
+  pointer-events: none;
+}
+.student-course__tabs.indicator-ready::before {
+  transition:
+    transform 280ms var(--ease),
+    width 280ms var(--ease);
 }
 .student-course__tabs button {
   flex: 0 0 auto;
   min-height: 44px;
-  padding-inline: 0.8rem;
+  padding-inline: 0.95rem;
   border: 0;
-  border-bottom: 3px solid transparent;
+  border-radius: 9px;
   background: transparent;
-  color: inherit;
+  color: #65565a;
+  font-size: 13px;
+  font-weight: 700;
   white-space: nowrap;
+  transition: color 160ms ease;
 }
 .student-course__tabs button[aria-selected='true'] {
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 700;
+  color: #fff;
 }
 .student-course__panel {
   margin-top: 1rem;
+  min-height: 270px;
 }
 .student-course__overview {
   display: grid;
@@ -141,5 +170,12 @@
   .student-course__score,
   .student-course__rows--attendance li > .attendance-mark {
     text-align: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .student-course__tabs::before,
+  .student-course__tabs button {
+    transition: none !important;
   }
 }

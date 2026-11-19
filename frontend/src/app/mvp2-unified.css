@@ -1,0 +1,374 @@
+/* Role based MVP2 screens share the established Uni Space surface and control language.
+   This stylesheet is loaded only by RoleLayout so the accepted MVP1 pages keep their UI. */
+.mvp2-role-surface {
+  display: contents;
+}
+
+.mvp2-role-surface
+  :is(
+    .teacher-journal,
+    .staff-journal,
+    .staff-applications,
+    .staff-schedule,
+    .staff-students-page,
+    .staff-news-page,
+    .admin-users
+  ) {
+  color: var(--ink, #292326);
+}
+
+.mvp2-role-surface
+  :is(
+    .teacher-journal__selectors summary,
+    .teacher-journal__selectors button[data-course-id][data-group-id],
+    .teacher-journal select,
+    .teacher-journal input,
+    .staff-journal input,
+    .staff-journal select,
+    .staff-applications__filters :is(input, select),
+    .staff-applications__dialog textarea,
+    .staff-schedule__filters input,
+    .staff-schedule__filters select,
+    .staff-schedule__form-fields :is(input, select),
+    .staff-schedule__picker input,
+    .staff-students-page :is(input, select),
+    .staff-news-page :is(input, select, textarea),
+    .admin-users :is(input, select, textarea)
+  ) {
+  min-height: 44px;
+  border-color: #dfd0c9;
+  border-radius: 10px;
+  background-color: #fffefd;
+  color: #292326;
+  font: inherit;
+}
+
+.mvp2-role-surface .staff-student-filters :is(input, select),
+.mvp2-role-surface .student-status-form select,
+.mvp2-role-surface .student-id-field input {
+  min-height: 44px;
+  border-color: #dfd0c9;
+  border-radius: 10px;
+  background: #fffefd;
+  color: #292326;
+}
+
+.mvp2-role-surface
+  :is(
+    .teacher-journal,
+    .staff-journal,
+    .staff-applications,
+    .staff-schedule,
+    .staff-students-page,
+    .admin-users
+  )
+  label {
+  color: #554b4e;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.mvp2-role-surface
+  :is(
+    .teacher-journal :is(input, select, textarea),
+    .staff-journal :is(input, select, textarea),
+    .staff-applications :is(input, select, textarea),
+    .staff-schedule :is(input, select, textarea),
+    .staff-students-page :is(input, select, textarea),
+    .staff-news-page :is(input, select, textarea),
+    .admin-users :is(input, select, textarea)
+  ):focus-visible {
+  outline: 3px solid var(--focus-ring, #781f32);
+  outline-offset: 2px;
+  border-color: var(--accent, #781f32);
+}
+
+.mvp2-role-surface
+  :is(
+    .teacher-journal__selectors summary,
+    .teacher-journal__selectors button[data-course-id][data-group-id],
+    .journal-student,
+    .journal-work-card,
+    .staff-journal-history,
+    .staff-applications__dialog,
+    .staff-schedule__filters,
+    .staff-schedule__lesson,
+    .staff-student-card,
+    .staff-news-row,
+    .admin-user-list li
+  ) {
+  border-color: var(--line, #e8dad1);
+  border-radius: 14px;
+  background-color: #fffefd;
+  box-shadow: 0 3px 12px rgb(66 31 37 / 4%);
+}
+
+.mvp2-role-surface .staff-student-filters {
+  border-color: var(--line, #e8dad1);
+  border-radius: 17px;
+  background: #fffefd;
+  box-shadow: var(--shadow, 0 8px 24px rgb(66 31 37 / 5%));
+}
+
+.mvp2-role-surface
+  :is(
+    .staff-student-card p,
+    .student-status-form p,
+    .staff-student-filters label,
+    .student-status-form > label,
+    .student-id-field
+  ) {
+  color: var(--muted, #706467);
+}
+
+.mvp2-role-surface
+  :is(
+    .staff-student-filters button,
+    .staff-student-status button,
+    .student-form-actions button,
+    .student-next-page
+  ) {
+  min-height: 42px;
+  border-radius: 9px;
+  background: var(--accent, #781f32);
+  color: #fff;
+}
+
+.mvp2-role-surface .staff-status-link a {
+  color: var(--accent, #781f32);
+}
+
+.mvp2-role-surface .student-status-dialog {
+  border: 1px solid var(--line, #e8dad1);
+  border-radius: 17px;
+  background: #fffefd;
+  box-shadow: 0 18px 60px rgb(36 26 28 / 27%);
+}
+
+.mvp2-role-surface .student-status-overlay {
+  background: rgb(36 26 28 / 55%);
+}
+
+.mvp2-role-surface
+  :is(
+    .teacher-journal__selectors summary,
+    .teacher-journal__selectors button[data-course-id][data-group-id]
+  ) {
+  text-align: left;
+}
+
+/* Compact segmented controls mirror the services switch; the selected state exists on
+   the first paint, so opening a route never animates from a false default position. */
+.mvp2-role-surface .teacher-journal__tabs,
+.mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений'],
+.mvp2-role-surface .staff-schedule__tabs {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  width: fit-content;
+  max-width: 100%;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 5px;
+  border: 1px solid var(--line, #e8dad1);
+  border-radius: 13px;
+  background: #f2e7e2;
+  scrollbar-width: none;
+}
+
+.mvp2-role-surface .teacher-journal__tabs::before,
+.mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений']::before,
+.mvp2-role-surface .staff-schedule__tabs[role='tablist']::before,
+.mvp2-role-surface .staff-schedule__tabs[aria-label='Период']::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset-block: 5px;
+  left: 5px;
+  width: var(--mvp2-segment-width, calc((100% - 15px) / 2));
+  border-radius: 9px;
+  background: var(--accent, #781f32);
+  box-shadow: 0 3px 9px rgb(120 31 50 / 13%);
+  transform: translateX(var(--mvp2-segment-offset, 0));
+  transition: transform 280ms var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
+  pointer-events: none;
+}
+
+.mvp2-role-surface .teacher-journal__tabs:has(button[aria-selected='true']:nth-child(2))::before {
+  --mvp2-segment-offset: calc(100% + 4px);
+}
+
+.mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений'] {
+  --mvp2-segment-width: calc((100% - 24px) / 4);
+}
+.mvp2-role-surface
+  .staff-applications
+  > nav[aria-label='Очередь заявлений']:has(a[aria-current]:nth-child(2))::before {
+  --mvp2-segment-offset: calc(100% + 4px);
+}
+.mvp2-role-surface
+  .staff-applications
+  > nav[aria-label='Очередь заявлений']:has(a[aria-current]:nth-child(3))::before {
+  --mvp2-segment-offset: calc(200% + 8px);
+}
+.mvp2-role-surface
+  .staff-applications
+  > nav[aria-label='Очередь заявлений']:has(a[aria-current]:nth-child(4))::before {
+  --mvp2-segment-offset: calc(300% + 12px);
+}
+
+.mvp2-role-surface .staff-schedule__tabs[role='tablist'] {
+  --mvp2-segment-width: calc((100% - 22px) / 3);
+}
+.mvp2-role-surface
+  .staff-schedule__tabs[role='tablist']:has(button[aria-selected='true']:nth-child(2))::before {
+  --mvp2-segment-offset: calc(100% + 4px);
+}
+.mvp2-role-surface
+  .staff-schedule__tabs[role='tablist']:has(button[aria-selected='true']:nth-child(3))::before {
+  --mvp2-segment-offset: calc(200% + 8px);
+}
+.mvp2-role-surface
+  .staff-schedule__tabs[aria-label='Период']:has(button[aria-pressed='true']:nth-child(2))::before {
+  --mvp2-segment-offset: calc(100% + 4px);
+}
+
+.mvp2-role-surface .teacher-journal__tabs > button,
+.mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений'] > a,
+.mvp2-role-surface .staff-schedule__tabs > button {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 9px 14px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #65565a;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 160ms ease;
+}
+
+.mvp2-role-surface .teacher-journal__tabs > button[aria-selected='true'],
+.mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений'] > a[aria-current],
+.mvp2-role-surface .staff-schedule__tabs > button.is-active {
+  color: white;
+}
+
+.mvp2-role-surface
+  :is(
+    .staff-applications__actions,
+    .staff-schedule__actions,
+    .staff-news-actions,
+    .staff-student-filters
+  ) {
+  align-items: center;
+  gap: 10px;
+}
+
+.mvp2-role-surface
+  :is(.staff-applications__filters, .staff-schedule__filters, .staff-student-filters) {
+  padding: 18px;
+  border-color: var(--line, #e8dad1);
+  border-radius: 17px;
+  background: #fffefd;
+  box-shadow: var(--shadow, 0 8px 24px rgb(66 31 37 / 5%));
+}
+
+.mvp2-role-surface
+  :is(
+    .staff-schedule__primary,
+    .staff-schedule__secondary,
+    .staff-schedule__danger,
+    .admin-users button,
+    .staff-applications button,
+    .staff-journal button,
+    .staff-news-page button,
+    .staff-students-page button
+  ) {
+  min-height: 42px;
+  border-radius: 9px;
+  font: inherit;
+  font-weight: 650;
+}
+
+.mvp2-role-surface .admin-users :focus-visible {
+  outline-color: var(--focus-ring, #781f32);
+}
+
+.mvp2-role-surface
+  :is(.student-status-dialog, .staff-applications__dialog, .staff-journal-history):focus-visible {
+  outline-color: var(--focus-ring, #781f32);
+}
+
+.mvp2-role-surface .admin-user-list {
+  margin: 12px 0;
+  padding: 0;
+}
+
+.mvp2-role-surface .admin-user-list li {
+  margin-block: 8px;
+  padding: 16px 18px;
+}
+
+@media (max-width: 720px) {
+  .mvp2-role-surface :is(.teacher-journal__selectors, .journal-work-card) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mvp2-role-surface .staff-applications__filters,
+  .mvp2-role-surface .staff-schedule__filters {
+    padding: 14px;
+  }
+
+  .mvp2-role-surface :is(.staff-applications__filters, .staff-schedule__filters) > * {
+    min-width: 0;
+  }
+
+  .mvp2-role-surface .journal-student {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .mvp2-role-surface .journal-save {
+    grid-column: 1 / -1;
+    min-width: 0;
+    text-align: right;
+  }
+}
+
+@media (max-width: 420px) {
+  .mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений'] {
+    width: 100%;
+  }
+
+  .mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений'] > a {
+    min-width: 0;
+    padding-inline: 7px;
+    white-space: normal;
+  }
+
+  .mvp2-role-surface .journal-student {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mvp2-role-surface .teacher-journal__tabs::before,
+  .mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений']::before,
+  .mvp2-role-surface .staff-schedule__tabs::before,
+  .mvp2-role-surface
+    :is(
+      .teacher-journal__tabs > button,
+      .staff-applications > nav[aria-label='Очередь заявлений'] > a,
+      .staff-schedule__tabs > button
+    ) {
+    transition: none !important;
+  }
+}

@@ -7,6 +7,7 @@ import { Link, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 import { CabinetLayout, UserMenu } from '../../app/CabinetLayout'
+import '../../app/mvp2-unified.css'
 import {
   getRoleNavigation,
   getStartRoute,
@@ -149,12 +150,14 @@ function AccessDenied() {
 export function RoleLayout() {
   const context = useRoleContext()
   return (
-    <CabinetLayout
-      student={false}
-      notificationScope={`${context.user_id}:${context.role}`}
-      navigation={getRoleNavigation(context)}
-      home={getStartRoute(context)}
-    />
+    <div className="mvp2-role-surface">
+      <CabinetLayout
+        student={false}
+        notificationScope={`${context.user_id}:${context.role}`}
+        navigation={getRoleNavigation(context)}
+        home={getStartRoute(context)}
+      />
+    </div>
   )
 }
 
