@@ -862,17 +862,12 @@ try {
     0,
   )
   assert.ok(await drawer.getByText('Обновление', { exact: true }).count())
-  assert.equal(
-    await drawer.getByRole('button', { name: 'Открыть объект' }).count(),
-    0,
-  )
+  assert.equal(await drawer.getByRole('button', { name: 'Открыть объект' }).count(), 0)
   await studentPage.keyboard.press('Escape')
   await studentPage.goto(
     `${baseURL}/e2e/announcement-feed.html?course=${env.TEACHER_JOURNAL_COURSE_A}`,
   )
-  await studentPage
-    .getByText(lostResponseTitle, { exact: true })
-    .waitFor({ state: 'hidden' })
+  await studentPage.getByText(lostResponseTitle, { exact: true }).waitFor({ state: 'hidden' })
   await studentPage.getByRole('button', { name: 'Обновить ленту' }).click()
   await studentPage.getByText(lostResponseTitle, { exact: true }).waitFor({ state: 'hidden' })
   await studentPage.getByText(title, { exact: true }).waitFor()
