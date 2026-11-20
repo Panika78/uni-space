@@ -219,6 +219,22 @@
   .mvp2-student-surface .student-content {
     padding: 25px 15px 54px;
   }
+  .mvp2-student-surface .academics-table,
+  .mvp2-student-surface .academics-table tbody {
+    background: transparent;
+  }
+  .mvp2-student-surface .academics-table {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .mvp2-student-surface .academics-table tr {
+    margin: 0 0 12px;
+    border: 1px solid #e8dad1;
+    border-radius: 17px;
+    background: #fffefd;
+    box-shadow: 0 5px 16px rgb(66 31 37 / 4%);
+  }
   .mvp2-student-surface .academics-table tr {
     padding-inline: 10px;
   }
