@@ -790,6 +790,34 @@ it('returns keyboard focus to the catalog input after choosing an option', async
   expect(groups).toHaveValue('ИВТ-21')
 })
 
+it('continues group search immediately after keyboard selection and reopens with ArrowDown', async () => {
+  const user = userEvent.setup()
+  mount()
+  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
+  const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
+  const groups = within(dialog).getByRole('combobox', { name: 'Группы' })
+
+  await user.click(groups)
+  await within(dialog).findByRole('option', { name: /^ИВТ-21$/ })
+  await user.tab()
+  await user.keyboard('{Enter}')
+  expect(groups).toHaveFocus()
+  expect(groups).toHaveValue('ИВТ-21')
+  expect(groups).toHaveAttribute('aria-expanded', 'false')
+
+  await user.keyboard('П')
+  expect(groups).toHaveAttribute('aria-expanded', 'true')
+  expect(groups).toHaveValue('П')
+  await within(dialog).findByRole('listbox', { name: 'Группы: варианты' })
+  await user.keyboard('{Escape}')
+  expect(groups).toHaveAttribute('aria-expanded', 'false')
+
+  await user.keyboard('{ArrowDown}')
+  expect(groups).toHaveAttribute('aria-expanded', 'true')
+  expect(await within(dialog).findByRole('listbox', { name: 'Группы: варианты' })).toBeVisible()
+})
+
 it('keeps only the focused catalog picker open', async () => {
   const user = userEvent.setup()
   mount()

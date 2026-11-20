@@ -344,6 +344,7 @@ function CatalogPicker({
   const pickerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const skipFocusOpenRef = useRef(false)
+  const selectInputAfterCloseRef = useRef(false)
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState(false)
   const [resolvedLabels, setResolvedLabels] = useState<Record<string, string>>(labelOverrides)
@@ -384,6 +385,7 @@ function CatalogPicker({
   const closeAndRestoreFocus = () => {
     setSearch('')
     setExpanded(false)
+    selectInputAfterCloseRef.current = true
     if (document.activeElement !== inputRef.current) {
       skipFocusOpenRef.current = true
       inputRef.current?.focus()
@@ -404,6 +406,17 @@ function CatalogPicker({
     closeAndRestoreFocus()
   }
   const selectedNames = value.map((id) => selectedLabels[id] ?? 'Название недоступно')
+  const selectedValue = selectedNames.join(', ')
+  useLayoutEffect(() => {
+    if (
+      !expanded &&
+      selectInputAfterCloseRef.current &&
+      document.activeElement === inputRef.current
+    ) {
+      inputRef.current?.select()
+    }
+    selectInputAfterCloseRef.current = false
+  }, [expanded, selectedValue])
   const visibleItems = allowedIds ? items.filter((item) => allowedIds.includes(item.id)) : items
   return (
     <div
@@ -428,7 +441,7 @@ function CatalogPicker({
           aria-expanded={expanded}
           aria-autocomplete="list"
           aria-invalid={invalid || undefined}
-          value={expanded ? search : selectedNames.join(', ')}
+          value={expanded ? search : selectedValue}
           placeholder="Поиск по названию"
           onClick={() => {
             if (!expanded) {
@@ -444,12 +457,30 @@ function CatalogPicker({
               setSearch('')
             }
           }}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(event) => {
+            setSearch(event.target.value)
+            if (!expanded) setExpanded(true)
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Escape' && expanded) {
               event.preventDefault()
               event.stopPropagation()
               setExpanded(false)
+            } else if (event.key === 'ArrowDown' && !expanded) {
+              event.preventDefault()
+              setSearch('')
+              setExpanded(true)
+            } else if (
+              !expanded &&
+              event.key.length === 1 &&
+              !event.ctrlKey &&
+              !event.metaKey &&
+              !event.altKey &&
+              !event.nativeEvent.isComposing
+            ) {
+              event.preventDefault()
+              setSearch(event.key)
+              setExpanded(true)
             }
           }}
         />
