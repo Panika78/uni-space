@@ -552,7 +552,9 @@ function StaffJournal({ access }: { access: JournalAccess }) {
   const [openedScope, setOpenedScope] = useState('')
   return (
     <div className="staff-journal">
+      <p className="section-eyebrow">Кабинет сотрудника</p>
       <h1>Журнал деканата</h1>
+      <p className="service-subtitle">Дисциплины, группы, успеваемость и история изменений.</p>
       <section aria-labelledby="staff-journal-catalog">
         <h2 id="staff-journal-catalog">Дисциплины и группы</h2>
         <Search

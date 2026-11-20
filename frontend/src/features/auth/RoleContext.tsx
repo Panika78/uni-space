@@ -174,41 +174,81 @@ export function StaffHome() {
   const context = useRoleContext()
   const sections = staffSections.filter(({ permission }) => hasPermission(context, permission))
   return (
-    <section className="section-page">
+    <section className="section-page staff-home">
+      <p className="section-eyebrow">Кабинет сотрудника</p>
       <h1>{sections.length ? 'Кабинет сотрудника' : 'Нет доступных разделов'}</h1>
+      <p className="service-subtitle">Рабочее пространство деканата и учебных подразделений.</p>
       {!sections.length && (
         <p>
           Обратитесь к администратору для назначения полномочий. Вы можете выйти через меню
           пользователя.
         </p>
       )}
-      {sections.map(({ permission, label }) => (
-        <section key={permission} id={permission}>
-          <h2>{label}</h2>
-          {permission === 'grades.edit' || permission === 'attendance.edit' ? (
-            <p>
-              <Link to={getStaffJournalRoute(permission)}>Открыть журнал</Link>
-            </p>
-          ) : permission === 'news.publish' ? (
-            <p>
-              <Link to="/staff/news">Открыть редактор новостей</Link>
-            </p>
-          ) : permission === 'applications.review' ? (
-            <p>
-              <Link to="/staff/applications">Открыть очередь заявлений</Link>
-            </p>
-          ) : permission === 'schedule.edit' ? (
-            <p>
-              <Link to="/staff/schedule">Открыть редактор расписания</Link>
-            </p>
-          ) : (
-            <p>
-              Модуль пока недоступен. Полномочие предоставлено, функциональность будет подключена на
-              следующем этапе MVP2.
-            </p>
-          )}
-        </section>
-      ))}
+      {sections.length > 0 && <h2 className="staff-home__section-title">Быстрый доступ</h2>}
+      <div className="staff-home__grid">
+        {sections.map(({ permission, label }) => {
+          const href =
+            permission === 'grades.edit' || permission === 'attendance.edit'
+              ? getStaffJournalRoute(permission)
+              : permission === 'news.publish'
+                ? '/staff/news'
+                : permission === 'applications.review'
+                  ? '/staff/applications'
+                  : permission === 'schedule.edit'
+                    ? '/staff/schedule'
+                    : null
+          const action =
+            permission === 'grades.edit' || permission === 'attendance.edit'
+              ? 'Открыть журнал'
+              : permission === 'news.publish'
+                ? 'Открыть редактор новостей'
+                : permission === 'applications.review'
+                  ? 'Открыть очередь заявлений'
+                  : permission === 'schedule.edit'
+                    ? 'Открыть редактор расписания'
+                    : 'Модуль пока недоступен'
+          const description =
+            permission === 'applications.review'
+              ? 'Рассмотрение заявлений, возвраты и решения.'
+              : permission === 'schedule.edit'
+                ? 'Создание, перенос и отмена официальных занятий.'
+                : permission === 'grades.edit'
+                  ? 'Баллы, посещаемость и история изменений.'
+                  : permission === 'attendance.edit'
+                    ? 'Посещаемость и история изменений.'
+                    : permission === 'news.publish'
+                      ? 'Редактор объявлений для студенческой ленты.'
+                      : 'Раздел доступен согласно выданным полномочиям.'
+          return (
+            <section key={permission} id={permission} className="staff-home__card">
+              <span className="staff-home__icon" aria-hidden="true">
+                {permission === 'applications.review'
+                  ? '▤'
+                  : permission === 'schedule.edit'
+                    ? '▦'
+                    : permission === 'grades.edit' || permission === 'attendance.edit'
+                      ? '◇'
+                      : permission === 'news.publish'
+                        ? '▧'
+                        : '○'}
+              </span>
+              <div className="staff-home__card-content">
+                <h3>{label}</h3>
+                <p>
+                  {href
+                    ? description
+                    : 'Функциональность будет подключена на следующем этапе MVP2.'}
+                </p>
+                {href && (
+                  <Link aria-label={`${action}: ${label}`} to={href}>
+                    {action} <span aria-hidden="true">→</span>
+                  </Link>
+                )}
+              </div>
+            </section>
+          )
+        })}
+      </div>
     </section>
   )
 }

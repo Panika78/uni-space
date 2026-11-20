@@ -141,9 +141,16 @@ export function UsersPage() {
   })
   return (
     <section className="admin-users">
+      <p className="section-eyebrow">Администрирование</p>
       <h1>Пользователи</h1>
-      <Link to="/admin/users/new">Создать пользователя</Link>
+      <p className="admin-users__intro">Управление учётными записями и полномочиями.</p>
+      <div className="admin-users__toolbar">
+        <Link className="admin-users__create" to="/admin/users/new">
+          ＋ Создать пользователя
+        </Link>
+      </div>
       <form
+        className="admin-users__search-form"
         onSubmit={(e) => {
           e.preventDefault()
           const form = new FormData(e.currentTarget)
@@ -165,18 +172,41 @@ export function UsersPage() {
       ) : (
         <>
           {query.data.items.length === 0 && <p>Пользователи не найдены.</p>}
-          <ul className="admin-user-list">
-            {query.data.items.map((user) => (
-              <li key={user.id}>
-                <Link to={`/admin/users/${user.id}`}>
-                  {user.full_name} · {user.login}
-                </Link>
-                <span>
-                  {roles[user.role]} · {user.is_active ? 'Активен' : 'Заблокирован'}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="admin-users__table-wrap">
+            <table className="admin-users__table">
+              <thead>
+                <tr>
+                  <th scope="col">Пользователь</th>
+                  <th scope="col">Логин</th>
+                  <th scope="col">Роль</th>
+                  <th scope="col">Состояние</th>
+                  <th scope="col">
+                    <span className="sr-only">Действия</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {query.data.items.map((user) => (
+                  <tr key={user.id}>
+                    <th scope="row">{user.full_name}</th>
+                    <td>{user.login}</td>
+                    <td>{roles[user.role]}</td>
+                    <td>
+                      <span className={`admin-users__status${user.is_active ? '' : ' is-blocked'}`}>
+                        <i aria-hidden="true" />
+                        {user.is_active ? 'Активен' : 'Заблокирован'}
+                      </span>
+                    </td>
+                    <td>
+                      <Link className="admin-users__detail" to={`/admin/users/${user.id}`}>
+                        Подробнее <span aria-hidden="true">→</span>
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {after && <button onClick={() => setParams({ q })}>Начало списка</button>}
           {query.data.next_after_id && (
             <button onClick={() => setParams({ q, after_id: query.data.next_after_id! })}>
@@ -232,8 +262,14 @@ export function CreateUserPage() {
     )
   return (
     <section className="admin-users">
-      <h1>Создание пользователя</h1>
-      <Link to="/admin/users">К списку пользователей</Link>
+      <Link className="admin-users__back" to="/admin/users">
+        ‹ К списку пользователей
+      </Link>
+      <p className="section-eyebrow">Администрирование</p>
+      <h1>Новый пользователь</h1>
+      <p className="admin-users__intro">
+        Создание учётной записи и назначение первоначальной роли.
+      </p>
       {error && <p role="alert">{error}</p>}
       {uncertain !== null ? (
         <p role="alert">
@@ -245,6 +281,7 @@ export function CreateUserPage() {
         </p>
       ) : (
         <form
+          className="admin-users__create-form"
           onSubmit={async (e) => {
             e.preventDefault()
             if (inFlight.current) return
@@ -289,13 +326,18 @@ export function CreateUserPage() {
             }
           }}
         >
+          <h2>Данные пользователя</h2>
           <label>
-            Логин
-            <input name="login" required maxLength={256} autoComplete="off" />
+            <span>
+              Фамилия, имя, отчество <span aria-hidden="true">*</span>
+            </span>
+            <input aria-label="ФИО" name="full_name" required maxLength={256} />
           </label>
           <label>
-            ФИО
-            <input name="full_name" required maxLength={256} />
+            <span>
+              Логин <span aria-hidden="true">*</span>
+            </span>
+            <input aria-label="Логин" name="login" required maxLength={256} autoComplete="off" />
           </label>
           <label>
             Роль
@@ -328,8 +370,21 @@ export function CreateUserPage() {
               сохраняются.
             </p>
           )}
-          <p>Пароль сгенерирует сервер. Он будет показан один раз после создания.</p>
-          <button disabled={busy}>{busy ? 'Создаём…' : 'Создать'}</button>
+          <p className="admin-users__security-note">
+            <strong>Безопасность доступа</strong>
+            <span>
+              Пароль сгенерирует сервер и покажет один раз после создания. Назначение учётных данных
+              выполняется через защищённый backend.
+            </span>
+          </p>
+          <div className="admin-users__actions">
+            <Link className="admin-users__cancel" to="/admin/users">
+              Отмена
+            </Link>
+            <button aria-label={busy ? 'Создаём' : 'Создать'} disabled={busy}>
+              {busy ? 'Создаём…' : 'Создать пользователя'}
+            </button>
+          </div>
         </form>
       )}
     </section>
@@ -374,28 +429,39 @@ function UserDetailContent({ id }: { id: string }) {
   }
   if (resetPassword !== null)
     return (
-      <section className="admin-users" aria-labelledby="password-reset-title">
-        <h1 id="password-reset-title" tabIndex={-1}>
-          Пароль сброшен
-        </h1>
-        <p>
-          Сохраните пароль сейчас и безопасно передайте пользователю. После закрытия получить его
-          повторно нельзя.
-        </p>
-        <p>
-          Выданный пароль: <strong className="admin-secret">{resetPassword}</strong>
-        </p>
-        <button onClick={() => setResetPassword(null)}>Закрыть и удалить пароль с экрана</button>
+      <section className="admin-users admin-user-detail" aria-labelledby="password-reset-title">
+        <div className="admin-user-detail__heading">
+          <Link to="/admin/users">‹ К списку пользователей</Link>
+          <p className="section-eyebrow">Администрирование</p>
+          <h1 id="password-reset-title" tabIndex={-1}>
+            Пароль сброшен
+          </h1>
+        </div>
+        <article className="admin-user-detail__notice">
+          <p>
+            Сохраните пароль сейчас и безопасно передайте пользователю. После закрытия получить его
+            повторно нельзя.
+          </p>
+          <p>
+            Выданный пароль: <strong className="admin-secret">{resetPassword}</strong>
+          </p>
+          <button onClick={() => setResetPassword(null)}>Закрыть и удалить пароль с экрана</button>
+        </article>
       </section>
     )
   if (query.isPending) return <p role="status">Загрузка учётной записи…</p>
   if (query.isError)
     return (
-      <section className="admin-users">
-        <h1>Пользователь</h1>
-        <p role="alert">{errorText(query.error)}</p>
-        <button onClick={() => void query.refetch()}>Повторить</button>
-        <Link to="/admin/users">К списку</Link>
+      <section className="admin-users admin-user-detail">
+        <div className="admin-user-detail__heading">
+          <Link to="/admin/users">‹ К списку пользователей</Link>
+          <p className="section-eyebrow">Администрирование</p>
+          <h1>Карточка пользователя</h1>
+        </div>
+        <article className="admin-user-detail__notice">
+          <p role="alert">{errorText(query.error)}</p>
+          <button onClick={() => void query.refetch()}>Повторить</button>
+        </article>
       </section>
     )
   const user = query.data
@@ -407,13 +473,13 @@ function UserDetailContent({ id }: { id: string }) {
     : availableSections[0]?.permission
   const academic = selectedCode !== 'applications.review' && selectedCode !== 'news.publish'
   return (
-    <section className="admin-users">
-      <h1>{user.full_name}</h1>
-      <Link to="/admin/users">К списку пользователей</Link>
-      <p>Логин: {user.login}</p>
-      <p>
-        {roles[user.role]} · {user.is_active ? 'Активен' : 'Заблокирован'}
-      </p>
+    <section className="admin-users admin-user-detail">
+      <div className="admin-user-detail__heading">
+        <Link to="/admin/users">‹ К списку пользователей</Link>
+        <p className="section-eyebrow">Администрирование</p>
+        <h1>Карточка пользователя</h1>
+        <h2 className="admin-user-detail__subtitle">{user.full_name}</h2>
+      </div>
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
       {resetUncertain && (
@@ -422,133 +488,181 @@ function UserDetailContent({ id }: { id: string }) {
           секрет нельзя. Проверьте состояние с пользователем перед новым сбросом.
         </p>
       )}
-      {user.id !== actor.user_id && (
-        <button
-          disabled={busy || resetting}
-          onClick={async () => {
-            if (!window.confirm('Сбросить пароль? Новый случайный пароль будет показан один раз.'))
-              return
-            setResetting(true)
-            setResetUncertain(false)
-            setError('')
-            try {
-              const result = await apiFetch<components['schemas']['ResetUserPassword']>(
-                `${base}/users/${id}/password-reset`,
-                { authenticated: true, replayAfterRefresh: false, method: 'POST' },
-              )
-              if (!isResetPasswordResponse(result)) {
-                setResetUncertain(true)
-                return
-              }
-              setResetPassword(result.password)
-              setError('')
-              void query.refetch()
-            } catch (resetError) {
-              if (isDefinitiveApiRejection(resetError)) {
-                const statusMessage =
-                  resetError.status === 403
-                    ? 'Сброс отклонён: недостаточно прав.'
-                    : resetError.status === 404
-                      ? 'Сброс отклонён: учётная запись не найдена.'
-                      : resetError.status === 409
-                        ? 'Сброс отклонён: операция недопустима для этой учётной записи.'
-                        : resetError.status === 422
-                          ? 'Сброс отклонён: проверьте запрос.'
-                          : 'Сервер вернул ошибку при сбросе пароля.'
-                setError(statusMessage)
-              } else {
-                setResetUncertain(true)
-              }
-            } finally {
-              setResetting(false)
-            }
-          }}
-        >
-          {resetting ? 'Сбрасываем…' : 'Сбросить пароль'}
-        </button>
-      )}
-      <button
-        disabled={busy || user.id === actor.user_id}
-        onClick={() => {
-          if (
-            window.confirm(
-              user.is_active
-                ? 'Заблокировать пользователя и отозвать все его сессии?'
-                : 'Разблокировать пользователя? Потребуется новый вход.',
-            )
-          )
-            void change('active', 'PUT', { is_active: !user.is_active })
-        }}
-      >
-        {user.is_active ? 'Заблокировать' : 'Разблокировать'}
-      </button>
-      {user.id === actor.user_id && <p>Самоблокировка запрещена.</p>}
-      {user.student_id && (
-        <p>
-          Профиль студента: {user.student_id}, группа: {user.group_id}
-        </p>
-      )}
-      {user.teacher_id && <p>Профиль преподавателя: {user.teacher_id}</p>}
-      {user.staff_profile_id && (
-        <>
-          <h2>Подразделение и разрешения</h2>
-          <p>Текущее подразделение: {user.org_unit_id}</p>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (window.confirm('Сменить подразделение? Все прежние разрешения будут отозваны.'))
-                void change('department', 'PUT', { org_unit_id: unit })
-            }}
-          >
-            <ProfileSelect kind="org_units" value={unit} onChange={setUnit} />
-            <button disabled={busy || !unit || unit === user.org_unit_id}>
-              Сменить подразделение и отозвать права
+      <div className={`admin-user-detail__grid${user.staff_profile_id ? ' has-permissions' : ''}`}>
+        <article className="admin-user-detail__card">
+          <h2>Данные учётной записи</h2>
+          <dl className="admin-user-detail__facts">
+            <div>
+              <dt>ФИО</dt>
+              <dd>{user.full_name}</dd>
+            </div>
+            <div>
+              <dt>Логин</dt>
+              <dd>{user.login}</dd>
+            </div>
+            <div>
+              <dt>Роль</dt>
+              <dd>{roles[user.role]}</dd>
+            </div>
+            <div>
+              <dt>Состояние</dt>
+              <dd>
+                <span className={`admin-users__status${user.is_active ? '' : ' is-blocked'}`}>
+                  <i />
+                  {user.is_active ? 'Активен' : 'Заблокирован'}
+                </span>
+              </dd>
+            </div>
+            {user.student_id && (
+              <div>
+                <dt>Профиль студента</dt>
+                <dd>
+                  ID {user.student_id} · группа {user.group_id}
+                </dd>
+              </div>
+            )}
+            {user.teacher_id && (
+              <div>
+                <dt>Профиль преподавателя</dt>
+                <dd>ID {user.teacher_id}</dd>
+              </div>
+            )}
+            {user.staff_profile_id && (
+              <div>
+                <dt>Профиль сотрудника</dt>
+                <dd>ID {user.staff_profile_id}</dd>
+              </div>
+            )}
+          </dl>
+          {user.id !== actor.user_id && (
+            <button
+              disabled={busy || resetting}
+              onClick={async () => {
+                if (
+                  !window.confirm('Сбросить пароль? Новый случайный пароль будет показан один раз.')
+                )
+                  return
+                setResetting(true)
+                setResetUncertain(false)
+                setError('')
+                try {
+                  const result = await apiFetch<components['schemas']['ResetUserPassword']>(
+                    `${base}/users/${id}/password-reset`,
+                    { authenticated: true, replayAfterRefresh: false, method: 'POST' },
+                  )
+                  if (!isResetPasswordResponse(result)) {
+                    setResetUncertain(true)
+                    return
+                  }
+                  setResetPassword(result.password)
+                  setError('')
+                  void query.refetch()
+                } catch (resetError) {
+                  if (isDefinitiveApiRejection(resetError)) {
+                    const statusMessage =
+                      resetError.status === 403
+                        ? 'Сброс отклонён: недостаточно прав.'
+                        : resetError.status === 404
+                          ? 'Сброс отклонён: учётная запись не найдена.'
+                          : resetError.status === 409
+                            ? 'Сброс отклонён: операция недопустима для этой учётной записи.'
+                            : resetError.status === 422
+                              ? 'Сброс отклонён: проверьте запрос.'
+                              : 'Сервер вернул ошибку при сбросе пароля.'
+                    setError(statusMessage)
+                  } else {
+                    setResetUncertain(true)
+                  }
+                } finally {
+                  setResetting(false)
+                }
+              }}
+            >
+              {resetting ? 'Сбрасываем…' : 'Сбросить пароль'}
             </button>
-          </form>
-          <ul>
-            {user.permissions.map((grant) => (
-              <li key={grant.permission_code}>
-                {staffSections.find((s) => s.permission === grant.permission_code)?.label} · scope:{' '}
-                {grant.scope_org_unit_id ?? 'все группы'}{' '}
-                <button disabled={busy} onClick={() => void change('permissions', 'DELETE', grant)}>
-                  Отозвать {grant.permission_code}
-                </button>
-              </li>
-            ))}
-          </ul>
-          {user.permissions.length === 0 && <p>Разрешений нет.</p>}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              void change('permissions', 'PUT', {
-                permission_code: selectedCode,
-                scope_org_unit_id: academic ? null : user.org_unit_id,
-              })
+          )}
+          <button
+            disabled={busy || user.id === actor.user_id}
+            onClick={() => {
+              if (
+                window.confirm(
+                  user.is_active
+                    ? 'Заблокировать пользователя и отозвать все его сессии?'
+                    : 'Разблокировать пользователя? Потребуется новый вход.',
+                )
+              )
+                void change('active', 'PUT', { is_active: !user.is_active })
             }}
           >
-            <label>
-              Разрешение
-              <select
-                aria-label="Разрешение"
-                value={selectedCode ?? ''}
-                onChange={(e) => setCode(e.target.value as Grant['permission_code'])}
-              >
-                {availableSections.map((s) => (
-                  <option key={s.permission} value={s.permission}>
-                    {s.label} ({s.permission})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <p>
-              {academic
-                ? 'Все учебные группы. Доступно только сотрудникам деканата.'
-                : 'Только текущее подразделение сотрудника.'}
-            </p>
-            <button disabled={busy || !selectedCode}>Выдать разрешение</button>
-          </form>
-        </>
-      )}
+            {user.is_active ? 'Заблокировать' : 'Разблокировать'}
+          </button>
+          {user.id === actor.user_id && <p>Самоблокировка запрещена.</p>}
+        </article>
+        {user.staff_profile_id && (
+          <article className="admin-user-detail__card admin-user-detail__permissions">
+            <h2>Подразделение и разрешения</h2>
+            <p>Текущее подразделение: {user.org_unit_id}</p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (window.confirm('Сменить подразделение? Все прежние разрешения будут отозваны.'))
+                  void change('department', 'PUT', { org_unit_id: unit })
+              }}
+            >
+              <ProfileSelect kind="org_units" value={unit} onChange={setUnit} />
+              <button disabled={busy || !unit || unit === user.org_unit_id}>
+                Сменить подразделение и отозвать права
+              </button>
+            </form>
+            <h3>Текущие разрешения</h3>
+            <ul className="admin-user-detail__grants">
+              {user.permissions.map((grant) => (
+                <li key={grant.permission_code}>
+                  {staffSections.find((s) => s.permission === grant.permission_code)?.label} ·
+                  scope: {grant.scope_org_unit_id ?? 'все группы'}{' '}
+                  <button
+                    disabled={busy}
+                    onClick={() => void change('permissions', 'DELETE', grant)}
+                  >
+                    Отозвать {grant.permission_code}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {user.permissions.length === 0 && <p>Разрешений нет.</p>}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                void change('permissions', 'PUT', {
+                  permission_code: selectedCode,
+                  scope_org_unit_id: academic ? null : user.org_unit_id,
+                })
+              }}
+            >
+              <label>
+                Разрешение
+                <select
+                  aria-label="Разрешение"
+                  value={selectedCode ?? ''}
+                  onChange={(e) => setCode(e.target.value as Grant['permission_code'])}
+                >
+                  {availableSections.map((s) => (
+                    <option key={s.permission} value={s.permission}>
+                      {s.label} ({s.permission})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p>
+                {academic
+                  ? 'Все учебные группы. Доступно только сотрудникам деканата.'
+                  : 'Только текущее подразделение сотрудника.'}
+              </p>
+              <button disabled={busy || !selectedCode}>Выдать разрешение</button>
+            </form>
+          </article>
+        )}
+      </div>
     </section>
   )
 }

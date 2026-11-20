@@ -967,14 +967,50 @@ function StaffStudentDetailContent({ id }: { id: string }) {
   const student = query.data
   return (
     <section className="section-page staff-students-page">
-      <h1 tabIndex={-1}>{student.full_name}</h1>
-      <StudentIdentity student={student} />
-      <Link to={`/staff/students?${params.toString()}`}>К результатам поиска</Link>
-      {canEdit && (
-        <button type="button" onClick={(e) => setEditing(e.currentTarget)}>
-          Изменить статус
-        </button>
-      )}
+      <div className="staff-student-detail__heading">
+        <Link aria-label="К результатам поиска" to={`/staff/students?${params.toString()}`}>
+          ‹ К результатам поиска
+        </Link>
+        <p className="section-eyebrow">Работа со студентами</p>
+        <h1 tabIndex={-1}>{student.full_name}</h1>
+        <p className="staff-student-detail__subtitle">Карточка студента</p>
+      </div>
+      <article className="staff-student-detail__card">
+        <h2>Учебные сведения</h2>
+        <dl className="staff-student-detail__facts">
+          <div>
+            <dt>Учебная группа</dt>
+            <dd>{student.group.name}</dd>
+          </div>
+          <div>
+            <dt>Курс</dt>
+            <dd>{student.course_number}</dd>
+          </div>
+          <div>
+            <dt>Образовательная программа</dt>
+            <dd>{student.program.name}</dd>
+          </div>
+          <div>
+            <dt>Факультет</dt>
+            <dd>{student.faculty.name}</dd>
+          </div>
+          <div>
+            <dt>Академический статус</dt>
+            <dd>
+              <span className="staff-student-detail__status">
+                {statusLabels[student.academic_status]}
+              </span>
+            </dd>
+          </div>
+        </dl>
+        {canEdit && (
+          <div className="staff-student-detail__actions">
+            <button type="button" onClick={(e) => setEditing(e.currentTarget)}>
+              Изменить статус
+            </button>
+          </div>
+        )}
+      </article>
       {editing && canEdit && (
         <StatusDialog
           key={student.id}

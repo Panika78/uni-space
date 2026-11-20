@@ -11,16 +11,25 @@ import { AccessRecovery, isTemporaryAccessError } from '../../shared/ui/AccessRe
 import { getRoleNavigation, getStartRoute } from './roleNavigation'
 import { useRoleContext } from './RoleContext'
 import { useAuth } from './AuthProvider'
+import { Icon } from '../../shared/ui/Icon'
 import { getStudentProfile } from '../profile/studentReads'
 import './passwordSettings.css'
 
 export function PasswordSettingsPage() {
   const context = useRoleContext()
-  if (context.role === 'student') return <StudentPasswordSettings />
+  if (context.role === 'student') {
+    return (
+      <div className="mvp2-student-surface">
+        <StudentPasswordSettings />
+      </div>
+    )
+  }
   return (
-    <CabinetLayout navigation={getRoleNavigation(context)} home={getStartRoute(context)}>
-      <PasswordSettingsForm />
-    </CabinetLayout>
+    <div className="mvp2-role-surface">
+      <CabinetLayout navigation={getRoleNavigation(context)} home={getStartRoute(context)}>
+        <PasswordSettingsForm />
+      </CabinetLayout>
+    </div>
   )
 }
 
@@ -198,120 +207,142 @@ function PasswordSettingsForm() {
 
   return (
     <section className="section-page password-settings" aria-labelledby="password-title">
+      <p className="section-eyebrow">Настройки</p>
       <h1 id="password-title">Настройки</h1>
-      <h2>Смена пароля</h2>
-      <p>После смены пароля все устройства выйдут из аккаунта. Затем войдите с новым паролем.</p>
-      <p>Новый пароль: от 12 до 128 Unicode-символов. Пробелы и символы Unicode разрешены.</p>
-      <form onSubmit={handleSubmit} noValidate>
-        <div className="password-field">
-          <label htmlFor="current-password">Действующий пароль</label>
-          <input
-            id="current-password"
-            ref={currentRef}
-            type={visible.current ? 'text' : 'password'}
-            autoComplete="current-password"
-            value={currentPassword}
-            onChange={(event) => {
-              if (Array.from(event.target.value).length <= 1024) {
-                setCurrentPassword(event.target.value)
-                setErrors((value) => ({ ...value, current: '' }))
-              } else {
-                reportErrors({
-                  current: 'Действующий пароль не может быть длиннее 1024 символов.',
-                  next: '',
-                  confirm: '',
-                })
+      <p className="service-subtitle">Управление параметрами учётной записи.</p>
+      <div className="password-settings__card">
+        <div className="password-settings__card-heading">
+          <span aria-hidden="true">
+            <Icon name="settings" />
+          </span>
+          <div>
+            <h2>Смена пароля</h2>
+            <p>Защита вашей учётной записи</p>
+          </div>
+        </div>
+        <aside className="password-settings__notice" aria-label="После смены пароля">
+          <Icon name="info" />
+          <div>
+            <strong>После смены пароля</strong>
+            <p>Все активные устройства выйдут из аккаунта. Затем войдите с новым паролем.</p>
+          </div>
+        </aside>
+        <form onSubmit={handleSubmit} noValidate>
+          <div className="password-field">
+            <label htmlFor="current-password">Действующий пароль</label>
+            <input
+              id="current-password"
+              ref={currentRef}
+              type={visible.current ? 'text' : 'password'}
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={(event) => {
+                if (Array.from(event.target.value).length <= 1024) {
+                  setCurrentPassword(event.target.value)
+                  setErrors((value) => ({ ...value, current: '' }))
+                } else {
+                  reportErrors({
+                    current: 'Действующий пароль не может быть длиннее 1024 символов.',
+                    next: '',
+                    confirm: '',
+                  })
+                }
+              }}
+              required
+              disabled={busy}
+              aria-invalid={Boolean(errors.current)}
+              aria-describedby={errors.current ? 'current-password-error' : undefined}
+            />
+            <button
+              type="button"
+              onClick={() => setVisible((value) => ({ ...value, current: !value.current }))}
+              aria-label={
+                visible.current ? 'Скрыть действующий пароль' : 'Показать действующий пароль'
               }
-            }}
-            required
-            disabled={busy}
-            aria-invalid={Boolean(errors.current)}
-            aria-describedby={errors.current ? 'current-password-error' : undefined}
-          />
-          <button
-            type="button"
-            onClick={() => setVisible((value) => ({ ...value, current: !value.current }))}
-            aria-label={
-              visible.current ? 'Скрыть действующий пароль' : 'Показать действующий пароль'
-            }
-            disabled={busy}
-          >
-            {visible.current ? 'Скрыть' : 'Показать'}
-          </button>
-          {errors.current && (
-            <span id="current-password-error" role="alert">
-              {errors.current}
-            </span>
-          )}
-        </div>
-        <div className="password-field">
-          <label htmlFor="new-password">Новый пароль</label>
-          <input
-            id="new-password"
-            ref={nextRef}
-            type={visible.next ? 'text' : 'password'}
-            autoComplete="new-password"
-            value={newPassword}
-            onChange={(event) => {
-              setNewPassword(Array.from(event.target.value).slice(0, 129).join(''))
-              setErrors((value) => ({ ...value, next: '', confirm: '' }))
-            }}
-            required
-            disabled={busy}
-            aria-invalid={Boolean(errors.next)}
-            aria-describedby={errors.next ? 'new-password-error' : undefined}
-          />
-          <button
-            type="button"
-            onClick={() => setVisible((value) => ({ ...value, next: !value.next }))}
-            aria-label={visible.next ? 'Скрыть новый пароль' : 'Показать новый пароль'}
-            disabled={busy}
-          >
-            {visible.next ? 'Скрыть' : 'Показать'}
-          </button>
-          {errors.next && (
-            <span id="new-password-error" role="alert">
-              {errors.next}
-            </span>
-          )}
-        </div>
-        <div className="password-field">
-          <label htmlFor="confirm-password">Повторите новый пароль</label>
-          <input
-            id="confirm-password"
-            ref={confirmRef}
-            type={visible.confirm ? 'text' : 'password'}
-            autoComplete="new-password"
-            value={confirmPassword}
-            onChange={(event) => {
-              setConfirmPassword(Array.from(event.target.value).slice(0, 129).join(''))
-              setErrors((value) => ({ ...value, confirm: '' }))
-            }}
-            required
-            disabled={busy}
-            aria-invalid={Boolean(errors.confirm)}
-            aria-describedby={errors.confirm ? 'confirm-password-error' : undefined}
-          />
-          <button
-            type="button"
-            onClick={() => setVisible((value) => ({ ...value, confirm: !value.confirm }))}
-            aria-label={
-              visible.confirm ? 'Скрыть подтверждение пароля' : 'Показать подтверждение пароля'
-            }
-            disabled={busy}
-          >
-            {visible.confirm ? 'Скрыть' : 'Показать'}
-          </button>
-          {errors.confirm && (
-            <span id="confirm-password-error" role="alert">
-              {errors.confirm}
-            </span>
-          )}
-        </div>
-        <button type="submit" disabled={busy}>
-          {busy ? 'Сохраняем…' : 'Сменить пароль'}
-        </button>
-      </form>
+              disabled={busy}
+            >
+              {visible.current ? 'Скрыть' : 'Показать'}
+            </button>
+            {errors.current && (
+              <span id="current-password-error" role="alert">
+                {errors.current}
+              </span>
+            )}
+          </div>
+          <div className="password-field">
+            <label htmlFor="new-password">Новый пароль</label>
+            <input
+              id="new-password"
+              ref={nextRef}
+              type={visible.next ? 'text' : 'password'}
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(event) => {
+                setNewPassword(Array.from(event.target.value).slice(0, 129).join(''))
+                setErrors((value) => ({ ...value, next: '', confirm: '' }))
+              }}
+              required
+              disabled={busy}
+              aria-invalid={Boolean(errors.next)}
+              aria-describedby={errors.next ? 'new-password-error' : undefined}
+            />
+            <button
+              type="button"
+              onClick={() => setVisible((value) => ({ ...value, next: !value.next }))}
+              aria-label={visible.next ? 'Скрыть новый пароль' : 'Показать новый пароль'}
+              disabled={busy}
+            >
+              {visible.next ? 'Скрыть' : 'Показать'}
+            </button>
+            {errors.next && (
+              <span id="new-password-error" role="alert">
+                {errors.next}
+              </span>
+            )}
+          </div>
+          <div className="password-field">
+            <label htmlFor="confirm-password">Повторите новый пароль</label>
+            <input
+              id="confirm-password"
+              ref={confirmRef}
+              type={visible.confirm ? 'text' : 'password'}
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => {
+                setConfirmPassword(Array.from(event.target.value).slice(0, 129).join(''))
+                setErrors((value) => ({ ...value, confirm: '' }))
+              }}
+              required
+              disabled={busy}
+              aria-invalid={Boolean(errors.confirm)}
+              aria-describedby={errors.confirm ? 'confirm-password-error' : undefined}
+            />
+            <button
+              type="button"
+              onClick={() => setVisible((value) => ({ ...value, confirm: !value.confirm }))}
+              aria-label={
+                visible.confirm ? 'Скрыть подтверждение пароля' : 'Показать подтверждение пароля'
+              }
+              disabled={busy}
+            >
+              {visible.confirm ? 'Скрыть' : 'Показать'}
+            </button>
+            {errors.confirm && (
+              <span id="confirm-password-error" role="alert">
+                {errors.confirm}
+              </span>
+            )}
+          </div>
+          <p className="password-settings__rules">
+            Новый пароль: от 12 до 128 символов. Пробелы и символы Unicode разрешены.
+          </p>
+          <div className="password-settings__form-actions">
+            <button type="submit" disabled={busy}>
+              {busy ? 'Сохраняем…' : 'Сменить пароль'}
+            </button>
+          </div>
+        </form>
+      </div>
     </section>
   )
 }
