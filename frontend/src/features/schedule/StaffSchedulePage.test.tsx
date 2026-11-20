@@ -298,9 +298,11 @@ it('reuses group-scoped catalog queries while adding twenty groups in sequence',
   const groupPicker = within(dialog)
     .getByRole('combobox', { name: 'Группы' })
     .closest<HTMLElement>('.staff-schedule__picker')!
-  const options = within(groupPicker).getAllByRole('option')
-  expect(options).toHaveLength(20)
-  for (const option of options) await user.click(option)
+  expect(within(groupPicker).getAllByRole('option')).toHaveLength(20)
+  for (let index = 1; index <= 20; index += 1) {
+    if (index > 1) await user.click(within(dialog).getByRole('combobox', { name: 'Группы' }))
+    await user.click(await within(groupPicker).findByRole('option', { name: `Группа ${index}` }))
+  }
   await waitFor(() => {
     const calls = vi
       .mocked(apiFetch)
@@ -321,7 +323,7 @@ it('reuses group-scoped catalog queries while adding twenty groups in sequence',
     .map((url) => url.searchParams.get('group_id'))
   expect(new Set(subgroupGroups).size).toBe(20)
   expect(new Set(assignmentGroups).size).toBe(20)
-})
+}, 20_000)
 
 it('keeps a teacher eligible when its teaching assignment is on a later catalog page', async () => {
   const user = userEvent.setup()
@@ -723,6 +725,111 @@ it('keeps a version-conflict draft until the user explicitly adopts the fresh ve
     version: 4,
     starts_at: '2026-11-17T20:15:00+03:00',
   })
+})
+
+it('closes catalog popovers after selection and allows reopening group and room pickers', async () => {
+  const user = userEvent.setup()
+  mount()
+  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
+  const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
+
+  for (const [label, optionName] of [
+    ['Группы', /^ИВТ-21$/],
+    ['Аудитории', /205/],
+  ] as const) {
+    const picker = within(dialog).getByRole('combobox', { name: label })
+    await user.click(picker)
+    await user.click(await within(dialog).findByRole('option', { name: optionName }))
+    expect(within(dialog).queryByRole('listbox', { name: `${label}: варианты` })).toBeNull()
+    await user.click(picker)
+    expect(await within(dialog).findByRole('listbox', { name: `${label}: варианты` })).toBeVisible()
+  }
+})
+
+it('closes catalog popovers on outside click and Escape without closing the editor', async () => {
+  const user = userEvent.setup()
+  mount()
+  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
+  const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
+  const groups = within(dialog).getByRole('combobox', { name: 'Группы' })
+
+  await user.click(groups)
+  await within(dialog).findByRole('listbox', { name: 'Группы: варианты' })
+  await user.click(within(dialog).getByRole('heading', { name: 'Добавить занятие' }))
+  expect(within(dialog).queryByRole('listbox', { name: 'Группы: варианты' })).toBeNull()
+
+  await user.click(groups)
+  const option = await within(dialog).findByRole('option', { name: /^ИВТ-21$/ })
+  await user.click(option)
+  await user.click(groups)
+  const reopenedOption = await within(dialog).findByRole('option', { name: /^ИВТ-21$/ })
+  reopenedOption.focus()
+  await user.keyboard('{Escape}')
+  expect(within(dialog).queryByRole('listbox', { name: 'Группы: варианты' })).toBeNull()
+  expect(dialog).toBeInTheDocument()
+})
+
+it('returns keyboard focus to the catalog input after choosing an option', async () => {
+  const user = userEvent.setup()
+  mount()
+  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
+  const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
+  const groups = within(dialog).getByRole('combobox', { name: 'Группы' })
+
+  await user.click(groups)
+  const option = await within(dialog).findByRole('option', { name: /^ИВТ-21$/ })
+  await user.tab()
+  expect(option).toHaveFocus()
+  await user.keyboard('{Enter}')
+
+  expect(within(dialog).queryByRole('listbox', { name: 'Группы: варианты' })).toBeNull()
+  expect(groups).toHaveFocus()
+  expect(groups).toHaveValue('ИВТ-21')
+})
+
+it('continues group search immediately after keyboard selection and reopens with ArrowDown', async () => {
+  const user = userEvent.setup()
+  mount()
+  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
+  const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
+  const groups = within(dialog).getByRole('combobox', { name: 'Группы' })
+
+  await user.click(groups)
+  await within(dialog).findByRole('option', { name: /^ИВТ-21$/ })
+  await user.tab()
+  await user.keyboard('{Enter}')
+  expect(groups).toHaveFocus()
+  expect(groups).toHaveValue('ИВТ-21')
+  expect(groups).toHaveAttribute('aria-expanded', 'false')
+
+  await user.keyboard('П')
+  expect(groups).toHaveAttribute('aria-expanded', 'true')
+  expect(groups).toHaveValue('П')
+  await within(dialog).findByRole('listbox', { name: 'Группы: варианты' })
+  await user.keyboard('{Escape}')
+  expect(groups).toHaveAttribute('aria-expanded', 'false')
+
+  await user.keyboard('{ArrowDown}')
+  expect(groups).toHaveAttribute('aria-expanded', 'true')
+  expect(await within(dialog).findByRole('listbox', { name: 'Группы: варианты' })).toBeVisible()
+})
+
+it('keeps only the focused catalog picker open', async () => {
+  const user = userEvent.setup()
+  mount()
+  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
+  const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
+
+  await user.click(within(dialog).getByRole('combobox', { name: 'Группы' }))
+  await within(dialog).findByRole('listbox', { name: 'Группы: варианты' })
+  await user.click(within(dialog).getByRole('combobox', { name: 'Аудитории' }))
+  expect(within(dialog).queryByRole('listbox', { name: 'Группы: варианты' })).toBeNull()
+  expect(await within(dialog).findByRole('listbox', { name: 'Аудитории: варианты' })).toBeVisible()
 })
 
 it('saves and reopens multiple subgroups from one group without collapsing the participant pairs', async () => {
