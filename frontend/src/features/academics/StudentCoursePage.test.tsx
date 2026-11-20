@@ -116,6 +116,9 @@ it('starts with work and scores and omits overview and lesson tabs', async () =>
   }
   expect(work).toHaveAttribute('aria-selected', 'true')
   expect(work).toHaveAttribute('tabIndex', '0')
+  expect(document.querySelector('.student-course__tabs')?.getAttribute('style')).toContain(
+    '--tab-width',
+  )
 
   work.focus()
   await user.keyboard('{ArrowRight}')
