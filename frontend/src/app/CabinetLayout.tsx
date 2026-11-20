@@ -24,7 +24,19 @@ import { useOverlayPresence } from '../shared/ui/useOverlayPresence'
 export type NavigationItem = {
   to: string
   label: string
-  icon: 'calendar' | 'graduation' | 'file' | 'book' | 'user'
+  icon:
+    | 'calendar'
+    | 'graduation'
+    | 'file'
+    | 'book'
+    | 'user'
+    | 'clipboard'
+    | 'chart'
+    | 'checklist'
+    | 'users'
+    | 'groups'
+    | 'news'
+  disabled?: boolean
 }
 const ShellContext = createContext<{
   navigation: readonly NavigationItem[]
@@ -46,6 +58,21 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <nav className="student-navigation" aria-label="Разделы кабинета">
       {navigation.map((item) => {
+        if (item.disabled)
+          return (
+            <span
+              key={item.label}
+              className="student-navigation__link is-disabled"
+              aria-disabled="true"
+              title={`${item.label} — В разработке`}
+            >
+              <span className="navigation-icon" aria-hidden="true">
+                <Icon name={item.icon} />
+              </span>
+              <span className="navigation-label">{item.label}</span>
+              <span className="navigation-status">В разработке</span>
+            </span>
+          )
         const [targetPath, targetSearch] = item.to.split('?')
         const isQueryMatch =
           targetSearch &&
@@ -587,6 +614,11 @@ function CabinetShell({ children }: { children?: ReactNode }) {
             <UnsavedChangesProvider value={{ status: exitStatus, setStatus: setExitStatus }}>
               <Outlet />
             </UnsavedChangesProvider>
+          )}
+          {!(student && location.pathname === '/schedule') && (
+            <footer className="mvp2-screen-footer">
+              Uni Space · Конкурсный прототип · Неофициальный сервис
+            </footer>
           )}
         </main>
       </div>

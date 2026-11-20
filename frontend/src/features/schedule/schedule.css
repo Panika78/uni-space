@@ -206,15 +206,15 @@
 .schedule-day__lessons {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 14px;
+  gap: 10px;
 }
 .lesson-card {
   display: grid;
   grid-template-columns: minmax(160px, 195px) minmax(0, 1fr);
   align-items: center;
-  gap: 24px;
-  padding: 22px 27px;
-  min-height: 116px;
+  gap: 18px;
+  padding: 16px 21px;
+  min-height: 98px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface);
@@ -698,6 +698,29 @@
   width: 20px;
   height: 20px;
   flex-shrink: 0;
+  accent-color: #781f32;
+}
+
+.schedule-display-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 20px;
+  row-gap: 2px;
+  margin: -9px 0 14px;
+}
+.schedule-display-options #schedule-preference-status {
+  min-height: 1.3em;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.schedule-display-options #schedule-preference-status.is-visually-quiet {
+  opacity: 0;
+}
+.schedule-display-options .schedule-timezone {
+  margin: 0;
+  font-size: 12px;
 }
 
 .schedule-gap {

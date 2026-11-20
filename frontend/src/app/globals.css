@@ -427,6 +427,25 @@ a {
   background: #782c3c;
   box-shadow: inset 3px 0 var(--gold);
 }
+.student-navigation__link.is-disabled {
+  color: #a99c9d;
+  cursor: default;
+  opacity: 0.72;
+}
+.student-navigation__link.is-disabled:hover {
+  color: #a99c9d;
+  background: transparent;
+}
+.navigation-status {
+  margin-left: auto;
+  color: #d7b8be;
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.sidebar-collapsed .navigation-status {
+  display: none;
+}
 .navigation-icon {
   display: grid;
   width: 22px;

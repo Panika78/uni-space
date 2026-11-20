@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useId, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { apiFetch, ApiClientError, isDefinitiveApiRejection } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
@@ -12,6 +12,7 @@ type Create = components['schemas']['CreateUser']
 type Grant = components['schemas']['PermissionGrant']
 type Page = components['schemas']['UserPage']
 type Options = components['schemas']['LookupPage']
+type LookupItem = components['schemas']['LookupItem']
 const base = '/api/v1/admin'
 const roles = {
   student: 'Студент',
@@ -53,8 +54,15 @@ function ProfileSelect({
 }) {
   const [q, setQ] = useState('')
   const [after, setAfter] = useState('')
+  const [previousCursors, setPreviousCursors] = useState<string[]>([])
+  const [open, setOpen] = useState(false)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [selected, setSelected] = useState<LookupItem | null>(null)
+  const root = useRef<HTMLFieldSetElement>(null)
+  const listboxId = useId().replaceAll(':', '')
   const query = useQuery({
     queryKey: ['admin-options', kind, q, after],
+    enabled: open,
     staleTime: 0,
     gcTime: 0,
     refetchOnMount: 'always',
@@ -64,63 +72,158 @@ function ProfileSelect({
         signal,
       ),
   })
+  const items = query.data?.items ?? []
+  const current =
+    items.find((item) => item.id === value) ?? (selected?.id === value ? selected : null)
   const label = {
     groups: 'Учебная группа',
     teachers: 'Свободный преподаватель',
     org_units: 'Подразделение',
   }[kind]
+  useEffect(() => {
+    if (!open) return
+    const closeOutside = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    return () => document.removeEventListener('pointerdown', closeOutside)
+  }, [open])
+  function choose(item: LookupItem) {
+    setSelected(item)
+    onChange(item.id)
+    setOpen(false)
+    setQ('')
+  }
   return (
-    <fieldset>
+    <fieldset className="admin-profile-picker" ref={root}>
       <legend>{label}</legend>
       <label>
-        Поиск в справочнике
+        Поиск и выбор
         <input
-          value={q}
+          role="combobox"
+          aria-label={label}
+          aria-autocomplete="list"
+          aria-expanded={open}
+          aria-controls={`${listboxId}-options`}
+          aria-activedescendant={
+            open && activeIndex >= 0 && activeIndex < items.length
+              ? `${listboxId}-option-${activeIndex}`
+              : undefined
+          }
+          autoComplete="off"
+          required={!value}
+          value={open ? q : (current?.name ?? (value ? `Выбрано: ${value}` : ''))}
+          placeholder={open ? 'Введите название для поиска' : 'Нажмите и начните вводить'}
+          onFocus={() => {
+            setOpen(true)
+            setQ('')
+            setAfter('')
+            setPreviousCursors([])
+            setActiveIndex(0)
+          }}
           onChange={(e) => {
             setQ(e.target.value)
             setAfter('')
+            setPreviousCursors([])
+            setOpen(true)
+            setActiveIndex(0)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setOpen(false)
+              setQ('')
+            } else if (event.key === 'ArrowDown') {
+              event.preventDefault()
+              setOpen(true)
+              setActiveIndex((index) => Math.min(index + 1, items.length - 1))
+            } else if (event.key === 'ArrowUp') {
+              event.preventDefault()
+              setActiveIndex((index) => Math.max(index - 1, 0))
+            } else if (event.key === 'Enter' && open && activeIndex >= 0 && items[activeIndex]) {
+              event.preventDefault()
+              choose(items[activeIndex])
+            }
           }}
         />
       </label>
-      {query.isPending ? (
-        <p role="status">Загрузка вариантов…</p>
-      ) : query.isError ? (
-        <p role="alert">
-          {errorText(query.error)}{' '}
-          <button type="button" onClick={() => void query.refetch()}>
-            Повторить
+      {value && !open && (
+        <span className="admin-profile-picker__selected">
+          <button
+            type="button"
+            onClick={() => {
+              onChange('')
+              setSelected(null)
+            }}
+            aria-label={`Очистить ${label}`}
+          >
+            Очистить
           </button>
-        </p>
-      ) : (
-        <>
-          <label>
-            {label}
-            <select required value={value} onChange={(e) => onChange(e.target.value)}>
-              <option value="">Выберите…</option>
-              {value && !query.data.items.some((i) => i.id === value) && (
-                <option value={value}>Выбрано: {value}</option>
-              )}
-              {query.data.items.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name} · ID {item.id}
-                  {item.context ? ` · ${item.context}` : ''}
-                  {item.type ? ` (${item.type})` : ''}
-                </option>
+        </span>
+      )}
+      {open && (
+        <div className="admin-profile-picker__popup">
+          {query.isPending && <p role="status">Загрузка вариантов…</p>}
+          {query.isError && (
+            <p role="alert">
+              {errorText(query.error)}{' '}
+              <button type="button" onClick={() => void query.refetch()}>
+                Повторить
+              </button>
+            </p>
+          )}
+          {!query.isPending && !query.isError && items.length === 0 && (
+            <p role="status">Подходящих записей нет.</p>
+          )}
+          {!query.isError && items.length > 0 && (
+            <ul id={`${listboxId}-options`} role="listbox" aria-label={label}>
+              {items.map((item, index) => (
+                <li
+                  id={`${listboxId}-option-${index}`}
+                  key={item.id}
+                  role="option"
+                  aria-selected={item.id === value}
+                  data-value={item.id}
+                  className={index === activeIndex ? 'is-active' : undefined}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  onClick={() => choose(item)}
+                >
+                  <strong>{item.name}</strong>
+                  <span>
+                    ID {item.id}
+                    {item.context ? ` · ${item.context}` : ''}
+                    {item.type ? ` · ${item.type}` : ''}
+                  </span>
+                </li>
               ))}
-            </select>
-          </label>
-          {query.data.items.length === 0 && <p>Подходящих записей нет.</p>}
-          {after && (
-            <button type="button" onClick={() => setAfter('')}>
-              Начало справочника
+            </ul>
+          )}
+          {!!previousCursors.length && (
+            <button
+              type="button"
+              onClick={() => {
+                setAfter(previousCursors.at(-1) ?? '')
+                setPreviousCursors((cursors) => cursors.slice(0, -1))
+                setActiveIndex(0)
+              }}
+            >
+              Предыдущие варианты
             </button>
           )}
-          {query.data.next_after_id && (
-            <button type="button" onClick={() => setAfter(query.data.next_after_id ?? '')}>
-              Следующие варианты
+          {query.data?.next_after_id && (
+            <button
+              type="button"
+              disabled={query.isFetching}
+              onClick={() => {
+                setPreviousCursors((cursors) => [...cursors, after])
+                setAfter(query.data?.next_after_id ?? '')
+                setActiveIndex(0)
+              }}
+            >
+              {query.isFetching ? 'Загружаем…' : 'Следующие варианты'}
             </button>
           )}
-        </>
+        </div>
       )}
     </fieldset>
   )
@@ -242,22 +345,29 @@ export function CreateUserPage() {
   if (created)
     return (
       <section className="admin-users">
-        <h1 tabIndex={-1} ref={secretHeading}>
-          Пользователь создан
-        </h1>
-        <p>{created.user.login}</p>
-        <p>
-          Сохраните пароль сейчас и безопасно передайте пользователю. После закрытия получить его
-          повторно нельзя.
-        </p>
-        <p>
-          Первоначальный пароль:{' '}
-          <strong className="admin-secret">{created.initial_password}</strong>
-        </p>
-        <button onClick={() => setCreated(null)}>Закрыть и удалить пароль с экрана</button>
-        <Link onClick={() => setCreated(null)} to={`/admin/users/${created.user.id}`}>
-          Открыть учётную запись
-        </Link>
+        <p className="section-eyebrow">Администрирование</p>
+        <article className="admin-users__result-card" aria-labelledby="user-created-title">
+          <h1 id="user-created-title" tabIndex={-1} ref={secretHeading}>
+            Пользователь создан
+          </h1>
+          <p>
+            Учётная запись <strong>{created.user.login}</strong> готова.
+          </p>
+          <p>
+            Сохраните пароль сейчас и безопасно передайте пользователю. После закрытия получить его
+            повторно нельзя.
+          </p>
+          <p>
+            Первоначальный пароль:
+            <strong className="admin-secret">{created.initial_password}</strong>
+          </p>
+          <div className="admin-users__result-actions">
+            <button onClick={() => setCreated(null)}>Закрыть и удалить пароль с экрана</button>
+            <Link onClick={() => setCreated(null)} to={`/admin/users/${created.user.id}`}>
+              Открыть учётную запись
+            </Link>
+          </div>
+        </article>
       </section>
     )
   return (
@@ -284,6 +394,10 @@ export function CreateUserPage() {
           className="admin-users__create-form"
           onSubmit={async (e) => {
             e.preventDefault()
+            if (role !== 'admin' && !profile) {
+              setError('Выберите профиль из результатов поиска.')
+              return
+            }
             if (inFlight.current) return
             inFlight.current = true
             setBusy(true)
@@ -398,6 +512,7 @@ export function UserDetailPage() {
 
 function UserDetailContent({ id }: { id: string }) {
   const actor = useRoleContext()
+  const queryClient = useQueryClient()
   const query = useQuery({
     queryKey: ['admin-user', id],
     queryFn: ({ signal }) => read<Detail>(`/users/${id}`, signal),
@@ -417,8 +532,8 @@ function UserDetailContent({ id }: { id: string }) {
     setError('')
     setNotice('')
     try {
-      await write<Detail>(`/users/${id}/${path}`, method, body)
-      await query.refetch()
+      const updated = await write<Detail>(`/users/${id}/${path}`, method, body)
+      queryClient.setQueryData(['admin-user', id], updated)
       setNotice('Изменения сохранены.')
     } catch (err) {
       setError(errorText(err))
@@ -465,8 +580,14 @@ function UserDetailContent({ id }: { id: string }) {
       </section>
     )
   const user = query.data
-  const availableSections = staffSections.filter((section) =>
-    user.available_permission_codes?.includes(section.permission),
+  const availableSections = staffSections.filter(
+    (section) =>
+      user.available_permission_codes?.includes(section.permission) &&
+      !user.permissions.some((grant) => grant.permission_code === section.permission) &&
+      !(
+        section.permission === 'students.read' &&
+        user.permissions.some((grant) => grant.permission_code === 'students.status.edit')
+      ),
   )
   const selectedCode = availableSections.some((section) => section.permission === code)
     ? code
@@ -630,36 +751,40 @@ function UserDetailContent({ id }: { id: string }) {
               ))}
             </ul>
             {user.permissions.length === 0 && <p>Разрешений нет.</p>}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                void change('permissions', 'PUT', {
-                  permission_code: selectedCode,
-                  scope_org_unit_id: academic ? null : user.org_unit_id,
-                })
-              }}
-            >
-              <label>
-                Разрешение
-                <select
-                  aria-label="Разрешение"
-                  value={selectedCode ?? ''}
-                  onChange={(e) => setCode(e.target.value as Grant['permission_code'])}
-                >
-                  {availableSections.map((s) => (
-                    <option key={s.permission} value={s.permission}>
-                      {s.label} ({s.permission})
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p>
-                {academic
-                  ? 'Все учебные группы. Доступно только сотрудникам деканата.'
-                  : 'Только текущее подразделение сотрудника.'}
-              </p>
-              <button disabled={busy || !selectedCode}>Выдать разрешение</button>
-            </form>
+            {availableSections.length ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  void change('permissions', 'PUT', {
+                    permission_code: selectedCode,
+                    scope_org_unit_id: academic ? null : user.org_unit_id,
+                  })
+                }}
+              >
+                <label>
+                  Разрешение
+                  <select
+                    aria-label="Разрешение"
+                    value={selectedCode ?? ''}
+                    onChange={(e) => setCode(e.target.value as Grant['permission_code'])}
+                  >
+                    {availableSections.map((s) => (
+                      <option key={s.permission} value={s.permission}>
+                        {s.label} ({s.permission})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p>
+                  {academic
+                    ? 'Все учебные группы. Доступно только сотрудникам деканата.'
+                    : 'Только текущее подразделение сотрудника.'}
+                </p>
+                <button disabled={busy || !selectedCode}>Выдать разрешение</button>
+              </form>
+            ) : (
+              <p role="status">Все доступные разрешения уже выданы.</p>
+            )}
           </article>
         )}
       </div>

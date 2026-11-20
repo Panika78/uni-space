@@ -1,4 +1,4 @@
-/* global process, document, console, URL */
+/* global process, document, console, location, URL */
 // Real FastAPI/PostgreSQL staff editor flow; fixture accounts are fictional and isolated.
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
@@ -13,6 +13,8 @@ const studentLogin = process.env.STAFF_SCHEDULE_STUDENT_LOGIN
 const groupName = process.env.STAFF_SCHEDULE_GROUP
 const secondGroupName = process.env.STAFF_SCHEDULE_SECOND_GROUP
 const secondRoomName = process.env.STAFF_SCHEDULE_SECOND_ROOM
+const roomName = process.env.STAFF_SCHEDULE_ROOM
+const secondRoomLabel = process.env.STAFF_SCHEDULE_SECOND_ROOM_LABEL
 const scheduleDate = process.env.STAFF_SCHEDULE_DATE
 const subjectName = `Вымышленная дисциплина ${process.env.STAFF_SCHEDULE_SUFFIX}`
 assert.ok(
@@ -23,6 +25,8 @@ assert.ok(
     studentLogin &&
     groupName &&
     secondGroupName &&
+    roomName &&
+    secondRoomLabel &&
     secondRoomName &&
     scheduleDate,
 )
@@ -49,10 +53,14 @@ async function login(page, login, destination = '**/staff') {
 async function openSchedule(page, selectedGroup = groupName, date = scheduleDate) {
   await page.goto(`${baseURL}/staff/schedule?date=${encodeURIComponent(date)}`)
   await page.getByRole('heading', { name: 'Редактор расписания' }).waitFor()
-  const search = page.getByRole('combobox', { name: 'Поиск: группы' })
+  const search = page.getByRole('combobox', { name: 'Группа' })
+  await search.click()
   await search.fill(selectedGroup)
-  await page.getByLabel('Выберите: группы').waitFor()
-  await page.getByLabel('Выберите: группы').selectOption({ label: selectedGroup })
+  await page
+    .locator('.staff-schedule__options')
+    .getByRole('option', { name: new RegExp(selectedGroup) })
+    .first()
+    .click()
   await page.getByText(subjectName, { exact: true }).first().waitFor()
 }
 
@@ -62,10 +70,11 @@ function shiftDate(value, days) {
   return result.toISOString().slice(0, 10)
 }
 
-async function chooseOption(page, label, optionName) {
+async function chooseOption(page, label, optionName, searchOverride) {
   const input = page.getByRole('combobox', { name: label, exact: true })
   await input.click()
-  const searchValue = optionName instanceof RegExp ? optionName.source : optionName
+  const searchValue =
+    searchOverride ?? (optionName instanceof RegExp ? optionName.source : optionName)
   await input.fill(searchValue)
   const pattern =
     optionName instanceof RegExp
@@ -87,8 +96,8 @@ async function createLesson(page, start, end, kind = 'seminar') {
   await dialog.getByLabel('А', { exact: true }).check()
   await dialog.getByLabel('Б', { exact: true }).check()
   await chooseOption(page, 'Преподаватель', new RegExp('Вымышленный преподаватель'))
-  await chooseOption(page, 'Аудитории', '205')
-  await chooseOption(page, 'Аудитории', secondRoomName)
+  await chooseOption(page, 'Аудитории', roomName, '205')
+  await chooseOption(page, 'Аудитории', secondRoomLabel, '206')
   await dialog.getByLabel('Дата начала').fill(scheduleDate)
   await dialog.getByLabel('Дата окончания').fill(scheduleDate)
   await dialog.getByLabel('Время начала · Москва').fill(start)
@@ -138,7 +147,7 @@ try {
   await chooseOption(firstPage, 'Дисциплина и проведение', subjectName)
   await chooseOption(firstPage, 'Группы', groupName)
   await chooseOption(firstPage, 'Преподаватель', new RegExp('Вымышленный преподаватель'))
-  await chooseOption(firstPage, 'Аудитории', '205')
+  await chooseOption(firstPage, 'Аудитории', roomName, '205')
   await conflictDialog.getByLabel('Дата начала').fill(scheduleDate)
   await conflictDialog.getByLabel('Дата окончания').fill(scheduleDate)
   await conflictDialog.getByLabel('Время начала · Москва').fill('18:15')
@@ -192,17 +201,25 @@ try {
   await moveDialog.getByLabel('Дата окончания').fill(firstMoveDate)
   await moveDialog.getByRole('button', { name: `${groupName} ×` }).click()
   await chooseOption(firstPage, 'Группы', secondGroupName)
-  await moveDialog.getByRole('button', { name: /205 ×/ }).click()
-  await chooseOption(firstPage, 'Аудитории', secondRoomName)
+  await moveDialog
+    .getByRole('button', {
+      name: new RegExp(`${roomName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} ×`),
+    })
+    .click()
+  await chooseOption(firstPage, 'Аудитории', secondRoomLabel, '206')
   await moveDialog.getByRole('button', { name: 'Сохранить' }).click()
   await moveDialog.waitFor({ state: 'hidden' })
   await firstPage.getByRole('tab', { name: 'Аудитории' }).click()
-  const roomSelect = firstPage.getByLabel('Выберите: аудитории')
-  const room205Id = await roomSelect
-    .locator('option')
-    .filter({ hasText: '205' })
-    .getAttribute('value')
-  await roomSelect.selectOption(room205Id)
+  const roomSelect = firstPage.getByRole('combobox', { name: 'Аудитория' })
+  await roomSelect.click()
+  await roomSelect.fill('205')
+  await firstPage
+    .locator('.staff-schedule__options')
+    .getByRole('option', { name: new RegExp(roomName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) })
+    .first()
+    .click()
+  const room205Id = new URL(firstPage.url()).searchParams.get('resource_id')
+  assert.ok(room205Id)
   const movedOriginal = firstPage
     .locator('.staff-schedule__lesson.is-moved')
     .filter({ hasText: subjectName })
@@ -210,29 +227,34 @@ try {
   await movedOriginal.getByRole('button', { name: 'Следующее занятие' }).click()
   await firstPage.getByText('20:00–21:30').waitFor()
   assert.equal(await firstPage.getByLabel('Выбрать дату').inputValue(), firstMoveDate)
-  assert.ok((await firstPage.getByLabel('Поиск: аудитории').inputValue()).includes(secondRoomName))
-  const selectedTargetRoomId = await roomSelect
-    .locator('option')
-    .filter({ hasText: secondRoomName })
-    .getAttribute('value')
-  assert.equal(await roomSelect.inputValue(), selectedTargetRoomId)
+  assert.ok(
+    (await firstPage.getByRole('combobox', { name: 'Аудитория' }).inputValue()).includes(
+      secondRoomName,
+    ),
+  )
+  const selectedTargetRoomId = new URL(firstPage.url()).searchParams.get('resource_id')
+  assert.ok(selectedTargetRoomId)
   await firstPage.reload()
   await firstPage.getByRole('heading', { name: 'Редактор расписания' }).waitFor()
   await firstPage.waitForFunction(
-    ({ id }) => document.querySelector('select[aria-label="Выберите: аудитории"]')?.value === id,
+    ({ id }) => new URL(location.href).searchParams.get('resource_id') === id,
     { id: selectedTargetRoomId },
     { timeout: 5000 },
   )
-  assert.ok((await firstPage.getByLabel('Поиск: аудитории').inputValue()).includes(secondRoomName))
+  assert.ok(
+    (await firstPage.getByRole('combobox', { name: 'Аудитория' }).inputValue()).includes(
+      secondRoomName,
+    ),
+  )
   await firstPage.goBack()
   await firstPage.waitForFunction(
-    ({ id }) => document.querySelector('select[aria-label="Выберите: аудитории"]')?.value === id,
+    ({ id }) => new URL(location.href).searchParams.get('resource_id') === id,
     { id: room205Id },
     { timeout: 5000 },
   )
   await firstPage.goForward()
   await firstPage.waitForFunction(
-    ({ id }) => document.querySelector('select[aria-label="Выберите: аудитории"]')?.value === id,
+    ({ id }) => new URL(location.href).searchParams.get('resource_id') === id,
     { id: selectedTargetRoomId },
     { timeout: 5000 },
   )
@@ -247,8 +269,12 @@ try {
   await moveDialog.getByLabel('Время окончания · Москва').fill('23:00')
   await moveDialog.getByLabel('Дата начала').fill(secondMoveDate)
   await moveDialog.getByLabel('Дата окончания').fill(secondMoveDate)
-  await moveDialog.getByRole('button', { name: /206 ×/ }).click()
-  await chooseOption(firstPage, 'Аудитории', '205')
+  await moveDialog
+    .getByRole('button', {
+      name: new RegExp(`${secondRoomLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} ×`),
+    })
+    .click()
+  await chooseOption(firstPage, 'Аудитории', roomName, '205')
   await moveDialog.getByRole('button', { name: 'Сохранить' }).click()
   await moveDialog.waitFor({ state: 'hidden' })
   const secondMovedOriginal = firstPage
@@ -258,7 +284,9 @@ try {
   await secondMovedOriginal.getByRole('button', { name: 'Следующее занятие' }).click()
   await firstPage.getByText('22:00–23:00').waitFor()
   assert.equal(await firstPage.getByLabel('Выбрать дату').inputValue(), secondMoveDate)
-  assert.ok((await firstPage.getByLabel('Поиск: аудитории').inputValue()).includes('205'))
+  assert.ok(
+    (await firstPage.getByRole('combobox', { name: 'Аудитория' }).inputValue()).includes('205'),
+  )
   await openSchedule(firstPage, secondGroupName, secondMoveDate)
   pass('real API move chain preserves old positions and follows 19→20→23 history')
 
@@ -358,8 +386,14 @@ try {
   })
   await secondPage.goto(`${baseURL}/staff/schedule?date=${encodeURIComponent(secondMoveDate)}`)
   await secondPage.getByRole('heading', { name: 'Редактор расписания' }).waitFor()
-  await secondPage.getByRole('combobox', { name: 'Поиск: группы' }).fill(secondGroupName)
-  await secondPage.getByLabel('Выберите: группы').selectOption({ label: secondGroupName })
+  const secondGroup = secondPage.getByRole('combobox', { name: 'Группа' })
+  await secondGroup.click()
+  await secondGroup.fill(secondGroupName)
+  await secondPage
+    .locator('.staff-schedule__options')
+    .getByRole('option', { name: new RegExp(secondGroupName) })
+    .first()
+    .click()
   const concurrentMoveCard = secondPage
     .locator('.staff-schedule__lesson')
     .filter({ hasText: subjectName })

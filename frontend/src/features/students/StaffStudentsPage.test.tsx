@@ -107,17 +107,17 @@ it('searches and filters staff students and requires external-basis confirmation
   )
 })
 
-it('lets a status-only staff user enter a known ID without reading the student profile', async () => {
+it('routes a status editor to student search and lets them open a resolved student card', async () => {
   context.permissions = [{ permission_code: 'students.status.edit', scope_org_unit_id: null }]
-  mount('/staff/students/status')
-  expect(
-    await screen.findByRole('heading', { name: 'Изменение академического статуса' }),
-  ).toBeInTheDocument()
-  expect(screen.queryByText('Ёлкина Вымышленная')).not.toBeInTheDocument()
-  await userEvent.setup().type(screen.getByLabelText('ID студента'), '21')
-  expect(await screen.findByText('Студент ID 21')).toBeInTheDocument()
+  const router = mount('/staff/students/status')
+  expect(await screen.findByRole('heading', { name: 'Поиск студентов' })).toBeInTheDocument()
+  expect(router.state.location.pathname).toBe('/staff/students')
+  expect(await screen.findByText(student.full_name)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Изменить статус' })).toBeInTheDocument()
+  await userEvent.setup().click(screen.getByRole('link', { name: student.full_name }))
+  expect(await screen.findByRole('heading', { name: student.full_name })).toBeInTheDocument()
   expect(vi.mocked(apiFetch).mock.calls.map(([url]) => String(url))).not.toContain(
-    '/api/v1/staff/students/21',
+    '/api/v1/staff/students/21/academic-status',
   )
 })
 
@@ -167,28 +167,32 @@ it('blocks a route after its permission is revoked from the effective context', 
   expect(screen.queryByText('Ёлкина Вымышленная')).not.toBeInTheDocument()
 })
 
-it('requires an explicit target for status-only and clears success when the operation changes', async () => {
+it('requires an explicit target from the resolved student card', async () => {
   context.permissions = [{ permission_code: 'students.status.edit', scope_org_unit_id: null }]
   const user = userEvent.setup()
-  mount('/staff/students/status')
-  await screen.findByRole('heading', { name: 'Изменение академического статуса' })
-  await user.type(screen.getByLabelText('ID студента'), '21')
-  const submit = screen.getByRole('button', { name: 'Подтвердить изменение' })
-  expect(screen.getByLabelText('Новый статус')).toHaveValue('')
-  await user.click(screen.getByLabelText('Подтверждаю, что внешнее основание оформлено'))
+  mount('/staff/students')
+  await screen.findByText(student.full_name)
+  await user.click(screen.getByRole('button', { name: 'Изменить статус' }))
+  const dialog = screen.getByRole('dialog', { name: 'Изменение статуса' })
+  const submit = within(dialog).getByRole('button', { name: 'Подтвердить изменение' })
+  expect(within(dialog).getByLabelText('Новый статус')).toHaveValue('')
+  await user.click(within(dialog).getByLabelText('Подтверждаю, что внешнее основание оформлено'))
   expect(submit).toBeDisabled()
   expect(
     vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.method === 'PATCH'),
   ).toHaveLength(0)
-  await user.selectOptions(screen.getByLabelText('Новый статус'), 'academic_leave')
-  expect(screen.getByText(/Переход:/)).toHaveTextContent('В академическом отпуске')
-  await user.click(screen.getByLabelText('Подтверждаю, что внешнее основание оформлено'))
+  await user.selectOptions(within(dialog).getByLabelText('Новый статус'), 'academic_leave')
+  expect(within(dialog).getByText(/Переход:/)).toHaveTextContent('В академическом отпуске')
+  await user.click(within(dialog).getByLabelText('Подтверждаю, что внешнее основание оформлено'))
   await user.click(submit)
-  expect(await screen.findByText(/Статус сохранён:/)).toHaveTextContent('В академическом отпуске')
-  await user.selectOptions(screen.getByLabelText('Основание изменения'), 'correction')
-  expect(screen.queryByText(/Статус сохранён:/)).not.toBeInTheDocument()
-  expect(submit).toBeDisabled()
-  expect(screen.queryByText('Ёлкина Вымышленная')).not.toBeInTheDocument()
+  await waitFor(() =>
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/api/v1/staff/students/21/academic-status',
+      expect.objectContaining({ method: 'PATCH' }),
+    ),
+  )
+  expect(await screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(screen.getByText(student.full_name)).toBeInTheDocument()
 })
 
 it('identifies the selected student and traps/restores keyboard focus', async () => {
@@ -212,7 +216,7 @@ it('identifies the selected student and traps/restores keyboard focus', async ()
 })
 
 it.each([undefined, 500])(
-  'keeps an uncertain write locked without replay or hidden read (%s)',
+  'keeps an uncertain write locked without replay and permits explicit reconciliation (%s)',
   async (status) => {
     context.permissions = [{ permission_code: 'students.status.edit', scope_org_unit_id: null }]
     const original = vi.mocked(apiFetch).getMockImplementation()!
@@ -222,18 +226,16 @@ it.each([undefined, 500])(
       return original(url, init)
     })
     const user = userEvent.setup()
-    mount('/staff/students/status')
-    await screen.findByRole('heading', { name: 'Изменение академического статуса' })
-    await user.type(screen.getByLabelText('ID студента'), '21')
-    await screen.findByText('Предыдущий статус: Обучается')
-    await user.selectOptions(screen.getByLabelText('Новый статус'), 'expelled')
-    await user.click(screen.getByLabelText('Подтверждаю, что внешнее основание оформлено'))
-    await user.click(screen.getByRole('button', { name: 'Подтвердить изменение' }))
+    mount('/staff/students')
+    await screen.findByText(student.full_name)
+    await user.click(screen.getByRole('button', { name: 'Изменить статус' }))
+    const dialog = screen.getByRole('dialog', { name: 'Изменение статуса' })
+    await user.selectOptions(within(dialog).getByLabelText('Новый статус'), 'expelled')
+    await user.click(within(dialog).getByLabelText('Подтверждаю, что внешнее основание оформлено'))
+    await user.click(within(dialog).getByRole('button', { name: 'Подтвердить изменение' }))
     expect(await screen.findByText(/Результат изменения неизвестен/)).toBeInTheDocument()
     expect(screen.queryByText(/Не удалось сохранить статус/)).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: 'Сверить актуальное состояние' }),
-    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Сверить актуальное состояние' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Подтвердить изменение' })).toBeDisabled()
     expect(vi.mocked(apiFetch).mock.calls.filter(([, init]) => init?.body)).toHaveLength(1)
     expect(vi.mocked(apiFetch).mock.calls.map(([url]) => String(url))).not.toContain(
@@ -368,14 +370,15 @@ it('confirms the identity, group and old/new statuses of the specifically select
   )
 })
 
-it('identifies a by-ID target and permits reconciliation when the actor separately has read', async () => {
-  mount('/staff/students/status')
-  await screen.findByRole('heading', { name: 'Изменение академического статуса' })
-  await userEvent.setup().type(screen.getByLabelText('ID студента'), '21')
-  expect(await screen.findByText('Ёлкина Вымышленная · ИВТ-21')).toBeInTheDocument()
+it('requires a resolved student record for status editing', async () => {
+  context.permissions = [{ permission_code: 'students.status.edit', scope_org_unit_id: null }]
+  mount('/staff/students')
+  await screen.findByText(student.full_name)
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Изменить статус' }))
+  expect(await screen.findByText(/Ёлкина Вымышленная · ИВТ-21/)).toBeInTheDocument()
   expect(screen.getByText('Предыдущий статус: Обучается')).toBeInTheDocument()
   expect(apiFetch).toHaveBeenCalledWith(
-    '/api/v1/staff/students/21',
+    '/api/v1/staff/students?limit=20',
     expect.objectContaining({ authenticated: true }),
   )
 })

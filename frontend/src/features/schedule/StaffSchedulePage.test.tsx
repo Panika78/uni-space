@@ -63,6 +63,17 @@ function mount(path = '/staff/schedule') {
   return { client, router }
 }
 
+async function selectGroup(
+  user: ReturnType<typeof userEvent.setup>,
+  query = 'ИВТ-21',
+  option = /ИВТ-21/,
+) {
+  const input = await screen.findByRole('combobox', { name: 'Группа' })
+  await user.click(input)
+  await user.type(input, query)
+  await user.click(await screen.findByRole('option', { name: option }))
+}
+
 beforeEach(() => {
   vi.setSystemTime(new Date('2026-11-17T09:00:00Z'))
   auth.status = 'authenticated'
@@ -147,7 +158,7 @@ it('blocks the direct route without the effective schedule permission', async ()
 it('restores a direct resource URL with its protected catalog display name', async () => {
   mount('/staff/schedule?resource=group&resource_id=3&resource_name=ИВТ-21&date=2026-11-17')
   expect(await screen.findByRole('heading', { name: 'Алгоритмы' })).toBeInTheDocument()
-  expect(screen.getByRole('combobox', { name: 'Поиск: группы' })).toHaveValue('ИВТ-21')
+  expect(screen.getByRole('combobox', { name: 'Группа' })).toHaveValue('ИВТ-21')
   expect(screen.getByText('Иванов Иван · Лекция')).toBeInTheDocument()
 })
 
@@ -248,15 +259,15 @@ it('loads and saves a subgroup that exists only on a later catalog page', async 
     return defaultImplementation(input, init) as never
   })
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user)
   await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
   const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
   await user.click(within(dialog).getByRole('combobox', { name: 'Дисциплина и проведение' }))
   await user.click(await within(dialog).findByRole('option', { name: /Алгоритмы/ }))
   await user.click(within(dialog).getByRole('combobox', { name: 'Группы' }))
-  await user.click(await within(dialog).findByRole('option', { name: /^ИВТ-21$/ }))
+  await user.click(await within(dialog).findByRole('option', { name: /^ИВТ-21\s/ }))
   await user.click(within(dialog).getByLabelText('Вся группа'))
-  await user.click(within(dialog).getByRole('button', { name: 'Показать ещё подгруппы' }))
+  await user.click(within(dialog).getByRole('button', { name: 'Следующие варианты' }))
   await user.click(await within(dialog).findByLabelText('Подгруппа 51'))
   await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
   await waitFor(() => expect(dialog).not.toBeInTheDocument())
@@ -273,7 +284,7 @@ it('loads and saves a subgroup that exists only on a later catalog page', async 
   ])
 })
 
-it('reuses group-scoped catalog queries while adding twenty groups in sequence', async () => {
+it('keeps group selection bounded and queries only required teaching assignments', async () => {
   const user = userEvent.setup()
   const defaultImplementation = vi.mocked(apiFetch).getMockImplementation()!
   vi.mocked(apiFetch).mockImplementation(async (input, init) => {
@@ -289,7 +300,7 @@ it('reuses group-scoped catalog queries while adding twenty groups in sequence',
     return defaultImplementation(input, init) as never
   })
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user, 'Группа 1', /Группа 1 · ID 1/)
   await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
   const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
   await user.click(within(dialog).getByRole('combobox', { name: 'Дисциплина и проведение' }))
@@ -298,14 +309,20 @@ it('reuses group-scoped catalog queries while adding twenty groups in sequence',
   const groupPicker = within(dialog)
     .getByRole('combobox', { name: 'Группы' })
     .closest<HTMLElement>('.staff-schedule__picker')!
-  const options = within(groupPicker).getAllByRole('option')
+  const options = await within(groupPicker).findAllByRole('option')
   expect(options).toHaveLength(20)
-  for (const option of options) await user.click(option)
+  for (let index = 0; index < options.length; index += 1) {
+    if (index > 0) await user.click(within(dialog).getByRole('combobox', { name: 'Группы' }))
+    const option = await within(groupPicker).findByRole('option', {
+      name: `Группа ${index + 1} · ID ${index + 1}`,
+    })
+    await user.click(option)
+  }
   await waitFor(() => {
     const calls = vi
       .mocked(apiFetch)
       .mock.calls.map(([url]) => new URL(String(url), window.location.href))
-    expect(calls.filter((url) => url.pathname.endsWith('/catalog/subgroups'))).toHaveLength(20)
+    expect(calls.filter((url) => url.pathname.endsWith('/catalog/subgroups'))).toHaveLength(0)
     expect(
       calls.filter((url) => url.pathname.endsWith('/catalog/teaching-assignments')),
     ).toHaveLength(20)
@@ -319,7 +336,7 @@ it('reuses group-scoped catalog queries while adding twenty groups in sequence',
   const assignmentGroups = calls
     .filter((url) => url.pathname.endsWith('/catalog/teaching-assignments'))
     .map((url) => url.searchParams.get('group_id'))
-  expect(new Set(subgroupGroups).size).toBe(20)
+  expect(new Set(subgroupGroups).size).toBe(0)
   expect(new Set(assignmentGroups).size).toBe(20)
 })
 
@@ -346,13 +363,13 @@ it('keeps a teacher eligible when its teaching assignment is on a later catalog 
     return defaultImplementation(input, init) as never
   })
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user)
   await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
   const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
   await user.click(within(dialog).getByRole('combobox', { name: 'Дисциплина и проведение' }))
   await user.click(await within(dialog).findByRole('option', { name: /Алгоритмы/ }))
   await user.click(within(dialog).getByRole('combobox', { name: 'Группы' }))
-  await user.click(await within(dialog).findByRole('option', { name: /^ИВТ-21$/ }))
+  await user.click(await within(dialog).findByRole('option', { name: /^ИВТ-21\s/ }))
   await waitFor(() => {
     expect(
       vi
@@ -366,7 +383,7 @@ it('keeps a teacher eligible when its teaching assignment is on a later catalog 
     ).toBe(true)
   })
   await user.click(within(dialog).getByRole('combobox', { name: 'Преподаватель' }))
-  await user.click(await within(dialog).findByRole('option', { name: 'Иванов Иван' }))
+  await user.click(await within(dialog).findByRole('option', { name: /^Иванов Иван\s/ }))
   expect(within(dialog).getByRole('combobox', { name: 'Преподаватель' })).toHaveValue('Иванов Иван')
 })
 
@@ -379,7 +396,7 @@ it('normalizes an impossible date in a direct URL to the current Moscow day', as
 it('loads searchable group schedule and shows readable display values with Moscow times', async () => {
   const user = userEvent.setup()
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user)
   expect(await screen.findByRole('heading', { name: 'Алгоритмы' })).toBeInTheDocument()
   expect(screen.getByText('Иванов Иван · Лекция')).toBeInTheDocument()
   expect(screen.getByText('Корпус А · 205')).toBeInTheDocument()
@@ -407,7 +424,7 @@ it('shows a save-time server conflict next to its field and retains the user dra
     return defaultImplementation(input, init) as never
   })
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user)
   await user.click(await screen.findByRole('button', { name: 'Изменить' }))
   const dialog = await screen.findByRole('dialog', { name: 'Изменить занятие' })
   const start = within(dialog).getByLabelText('Время начала · Москва')
@@ -440,7 +457,7 @@ it.each([
     return defaultImplementation(input, init) as never
   })
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user)
   await user.click(await screen.findByRole('button', { name: 'Изменить' }))
   const dialog = await screen.findByRole('dialog', { name: 'Изменить занятие' })
   const start = within(dialog).getByLabelText('Время начала · Москва')
@@ -464,7 +481,7 @@ it('keeps a network-failed mutation uncertain and never retries it automatically
     return defaultImplementation(input, init) as never
   })
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user)
   await user.click(await screen.findByRole('button', { name: 'Изменить' }))
   const dialog = await screen.findByRole('dialog', { name: 'Изменить занятие' })
   const start = within(dialog).getByLabelText('Время начала · Москва')
@@ -488,7 +505,7 @@ it('keeps a network-failed mutation uncertain and never retries it automatically
 it('creates a complete lesson with a timezone-aware Moscow timestamp', async () => {
   const user = userEvent.setup()
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user)
   await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
   const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
   const offeringPicker = within(dialog).getByRole('combobox', { name: 'Дисциплина и проведение' })
@@ -496,7 +513,7 @@ it('creates a complete lesson with a timezone-aware Moscow timestamp', async () 
   await user.click(await within(dialog).findByRole('option', { name: /Алгоритмы/ }))
   const groupPicker = within(dialog).getByRole('combobox', { name: 'Группы' })
   await user.click(groupPicker)
-  await user.click(await within(dialog).findByRole('option', { name: /^ИВТ-21$/ }))
+  await user.click(await within(dialog).findByRole('option', { name: /^ИВТ-21\s/ }))
   const roomPicker = within(dialog).getByRole('combobox', { name: 'Аудитории' })
   await user.click(roomPicker)
   await user.click(await within(dialog).findByRole('option', { name: /205/ }))
@@ -581,7 +598,7 @@ it('reconciles a lost create response by group and submitted range without claim
     return original(input, init) as never
   })
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user)
   await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
   const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
   const offering = within(dialog).getByRole('combobox', { name: 'Дисциплина и проведение' })
@@ -589,7 +606,7 @@ it('reconciles a lost create response by group and submitted range without claim
   await user.click(await within(dialog).findByRole('option', { name: /Алгоритмы/ }))
   const group = within(dialog).getByRole('combobox', { name: 'Группы' })
   await user.click(group)
-  await user.click(await within(dialog).findByRole('option', { name: /^ИВТ-21$/ }))
+  await user.click(await within(dialog).findByRole('option', { name: /^ИВТ-21\s/ }))
   await user.clear(within(dialog).getByLabelText('Время начала · Москва'))
   await user.type(within(dialog).getByLabelText('Время начала · Москва'), '13:00')
   await user.clear(within(dialog).getByLabelText('Время окончания · Москва'))
@@ -652,9 +669,9 @@ it('resolves a room selection by ID and uses only its room name as the catalog q
     '/staff/schedule?resource=room&resource_id=9&resource_name=Корпус%20Б%20%C2%B7%20205&date=2026-11-17',
   )
   await waitFor(() =>
-    expect(screen.getByLabelText('Поиск: аудитории')).toHaveValue('Корпус Б · 205'),
+    expect(screen.getByRole('combobox', { name: 'Аудитория' })).toHaveValue('Корпус Б · 205'),
   )
-  expect(screen.getByLabelText('Выберите: аудитории')).toHaveValue('9')
+  expect(screen.getByRole('combobox', { name: 'Аудитория' })).toHaveValue('Корпус Б · 205')
   const roomRequest = vi
     .mocked(apiFetch)
     .mock.calls.find(([url]) => String(url).includes('/catalog/rooms?'))
@@ -684,7 +701,7 @@ it('keeps a version-conflict draft until the user explicitly adopts the fresh ve
     return defaultImplementation(input, init) as never
   })
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user)
   await user.click(await screen.findByRole('button', { name: 'Изменить' }))
   const dialog = await screen.findByRole('dialog', { name: 'Изменить занятие' })
   const start = within(dialog).getByLabelText('Время начала · Москва')
@@ -728,13 +745,13 @@ it('keeps a version-conflict draft until the user explicitly adopts the fresh ve
 it('saves and reopens multiple subgroups from one group without collapsing the participant pairs', async () => {
   const user = userEvent.setup()
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user)
   await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
   const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
   await user.click(within(dialog).getByRole('combobox', { name: 'Дисциплина и проведение' }))
   await user.click(await within(dialog).findByRole('option', { name: /Алгоритмы/ }))
   await user.click(within(dialog).getByRole('combobox', { name: 'Группы' }))
-  await user.click(await within(dialog).findByRole('option', { name: /^ИВТ-21$/ }))
+  await user.click(await within(dialog).findByRole('option', { name: /^ИВТ-21\s/ }))
   await user.click(within(dialog).getByLabelText('Вся группа'))
   await user.click(await within(dialog).findByLabelText('Подгруппа А'))
   await user.click(await within(dialog).findByLabelText('Подгруппа Б'))
@@ -806,7 +823,7 @@ it('supports the T1 to null to T2 teacher sequence without resetting other form 
     return defaultImplementation(input, init) as never
   })
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user)
   await user.click(await screen.findByRole('button', { name: 'Изменить' }))
   let dialog = await screen.findByRole('dialog', { name: 'Изменить занятие' })
   await user.click(within(dialog).getByRole('button', { name: 'Убрать преподавателя' }))
@@ -820,7 +837,7 @@ it('supports the T1 to null to T2 teacher sequence without resetting other form 
   await user.click(await screen.findByRole('button', { name: 'Изменить' }))
   dialog = await screen.findByRole('dialog', { name: 'Изменить занятие' })
   await user.click(within(dialog).getByRole('combobox', { name: 'Преподаватель' }))
-  await user.click(await within(dialog).findByRole('option', { name: 'Петров Пётр' }))
+  await user.click(await within(dialog).findByRole('option', { name: /^Петров Пётр\s/ }))
   await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
   await waitFor(() => expect(dialog).not.toBeInTheDocument())
   const patchBodies = vi
@@ -834,7 +851,7 @@ it('supports the T1 to null to T2 teacher sequence without resetting other form 
 it('requires confirmation before cancelling and sends the read version without a reason', async () => {
   const user = userEvent.setup()
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user)
   await user.click(await screen.findByRole('button', { name: 'Отменить' }))
   const dialog = screen.getByRole('dialog', { name: 'Отменить занятие?' })
   await user.click(within(dialog).getByRole('button', { name: 'Подтвердить отмену' }))
@@ -863,7 +880,7 @@ it('shows cancel version conflicts in the dialog and requires a fresh explicit c
     return defaultImplementation(input, init) as never
   })
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user)
   await user.click(await screen.findByRole('button', { name: 'Отменить' }))
   const dialog = screen.getByRole('dialog', { name: 'Отменить занятие?' })
   await user.click(within(dialog).getByRole('button', { name: 'Подтвердить отмену' }))
@@ -892,7 +909,7 @@ it('hides the cancel dialog and schedule data immediately when the server revoke
     return defaultImplementation(input, init) as never
   })
   mount()
-  await user.selectOptions(await screen.findByLabelText('Выберите: группы'), '3')
+  await selectGroup(user)
   await user.click(await screen.findByRole('button', { name: 'Отменить' }))
   const dialog = screen.getByRole('dialog', { name: 'Отменить занятие?' })
   await user.click(within(dialog).getByRole('button', { name: 'Подтвердить отмену' }))

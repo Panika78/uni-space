@@ -1,6 +1,7 @@
 """Create isolated, fictional staff schedule editor browser fixtures."""
 
 import os
+import shlex
 import stat
 from datetime import date, datetime, time, timedelta
 from uuid import uuid4
@@ -52,6 +53,11 @@ def main() -> None:
     password = "Fictional-Staff-Schedule-E2E-2026"
     logins = [f"staff-schedule-{index}-{suffix}" for index in range(1, 4)]
     moscow_today = datetime.now(ZoneInfo("Europe/Moscow")).date()
+    override_date = os.environ.get("STAFF_SCHEDULE_E2E_DATE")
+    if override_date:
+        moscow_today = date.fromisoformat(override_date)
+        if moscow_today < datetime.now(ZoneInfo("Europe/Moscow")).date():
+            raise SystemExit("STAFF_SCHEDULE_E2E_DATE must be today or a future date")
     if moscow_today.month < 2:
         term_start, term_end = date(moscow_today.year - 1, 9, 1), date(moscow_today.year, 1, 31)
     elif moscow_today.month < 9:
@@ -165,13 +171,15 @@ def main() -> None:
             "STAFF_SCHEDULE_PASSWORD": password,
             "STAFF_SCHEDULE_GROUP": groups[0].name,
             "STAFF_SCHEDULE_SECOND_GROUP": groups[1].name,
+            "STAFF_SCHEDULE_ROOM": f"{building.name} · {room.name}",
+            "STAFF_SCHEDULE_SECOND_ROOM_LABEL": f"{building.name} · {second_room.name}",
             "STAFF_SCHEDULE_SECOND_ROOM": second_room.name,
             "STAFF_SCHEDULE_DATE": moscow_today.isoformat(),
             "STAFF_SCHEDULE_LESSON": str(lesson.id),
             "STAFF_SCHEDULE_SUFFIX": suffix,
         }
     for key, value in values.items():
-        print(f"{key}={value}")
+        print(f"{key}={shlex.quote(value)}")
 
 
 if __name__ == "__main__":

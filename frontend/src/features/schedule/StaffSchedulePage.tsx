@@ -1,5 +1,5 @@
-import { useInfiniteQuery, useQueries, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useInfiniteQuery, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useBlocker } from 'react-router-dom'
 import { ApiClientError, apiFetch } from '../../shared/api/client'
@@ -234,6 +234,12 @@ function catalogUrl(
   return `${base}/catalog/${kind}?${params}`
 }
 
+function catalogOptionLabel(kind: CatalogKind, item: CatalogItem) {
+  if (kind === 'rooms' && item.building_name) return `${item.building_name} · ${item.name}`
+  if (kind === 'course-offerings' && item.term_name) return `${item.name} · ${item.term_name}`
+  return item.name
+}
+
 function participantPairs(participants: LessonWrite['participants']) {
   return participants
     .map(({ group_id, subgroup_id }) => `${group_id}:${subgroup_id ?? ''}`)
@@ -343,46 +349,68 @@ function CatalogPicker({
 }) {
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState(false)
+  const [afterId, setAfterId] = useState('')
+  const [cursorHistory, setCursorHistory] = useState<string[]>([])
+  const [activeIndex, setActiveIndex] = useState(0)
   const [resolvedLabels, setResolvedLabels] = useState<Record<string, string>>(labelOverrides)
+  const listboxId = useId().replaceAll(':', '')
+  const pickerRef = useRef<HTMLDivElement>(null)
   const { user_id: userId } = useRoleContext()
-  const query = useInfiniteQuery({
-    queryKey: ['staff-schedule', userId, 'catalog-picker', kind, search, filters],
-    initialPageParam: null as string | null,
-    queryFn: ({ signal, pageParam }) =>
-      apiFetch<components['schemas']['CatalogPage']>(catalogUrl(kind, search, pageParam, filters), {
-        authenticated: true,
-        signal,
-      }),
-    getNextPageParam: (lastPage) => lastPage.next_after_id,
+  const query = useQuery({
+    queryKey: ['staff-schedule', userId, 'catalog-picker', kind, search, afterId, filters],
+    queryFn: ({ signal }) =>
+      apiFetch<components['schemas']['CatalogPage']>(
+        catalogUrl(kind, search, afterId || null, filters),
+        {
+          authenticated: true,
+          signal,
+        },
+      ),
     enabled: expanded,
+    retry: false,
   })
-  const items = useMemo(() => query.data?.pages.flatMap((page) => page.items) ?? [], [query.data])
+  const items = query.data?.items ?? []
   const selectedLabels = {
     ...resolvedLabels,
-    ...Object.fromEntries(items.map((item) => [item.id, item.name])),
+    ...Object.fromEntries(items.map((item) => [item.id, catalogOptionLabel(kind, item)])),
     ...labelOverrides,
   }
+  const visibleItems = allowedIds ? items.filter((item) => allowedIds.includes(item.id)) : items
   useEffect(() => {
     if (query.error instanceof ApiClientError && query.error.status === 403) onForbidden?.()
   }, [query.error, onForbidden])
+  useEffect(() => {
+    if (!expanded) return
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (event.target instanceof Node && !pickerRef.current?.contains(event.target)) {
+        setExpanded(false)
+      }
+    }
+    document.addEventListener('pointerdown', closeOnOutsidePointer)
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+  }, [expanded])
   const toggle = (id: string) => {
     const selected = items.find((item) => item.id === id)
     if (selected) {
-      setResolvedLabels((previous) => ({ ...previous, [id]: selected.name }))
+      setResolvedLabels((previous) => ({ ...previous, [id]: catalogOptionLabel(kind, selected) }))
       onResolvedItem?.(selected)
     }
     if (!multiple) {
       onChange([id])
       setSearch('')
+      setAfterId('')
+      setCursorHistory([])
       setExpanded(false)
       return
     }
     onChange(value.includes(id) ? value.filter((item) => item !== id) : [...value, id])
+    // Keep the multi-select searchable but close its popover after each pick,
+    // so the next form field is never covered by the option list.
+    setExpanded(false)
   }
   const selectedNames = value.map((id) => selectedLabels[id] ?? 'Название недоступно')
-  const visibleItems = allowedIds ? items.filter((item) => allowedIds.includes(item.id)) : items
   return (
-    <div className="staff-schedule__picker">
+    <div className="staff-schedule__picker" ref={pickerRef}>
       <label>
         {label}
         <input
@@ -390,16 +418,40 @@ function CatalogPicker({
           role="combobox"
           aria-expanded={expanded}
           aria-autocomplete="list"
+          aria-controls={`${listboxId}-options`}
+          aria-activedescendant={
+            activeIndex >= 0 && activeIndex < visibleItems.length
+              ? `${listboxId}-option-${activeIndex}`
+              : undefined
+          }
           aria-invalid={invalid || undefined}
           value={expanded ? search : selectedNames.join(', ')}
           placeholder="Поиск по названию"
           onFocus={() => {
             setExpanded(true)
             setSearch('')
+            setAfterId('')
+            setCursorHistory([])
+            setActiveIndex(0)
           }}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(event) => {
+            setSearch(event.target.value)
+            setAfterId('')
+            setCursorHistory([])
+            setActiveIndex(0)
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Escape') setExpanded(false)
+            else if (event.key === 'ArrowDown') {
+              event.preventDefault()
+              setActiveIndex((index) => Math.min(index + 1, visibleItems.length - 1))
+            } else if (event.key === 'ArrowUp') {
+              event.preventDefault()
+              setActiveIndex((index) => Math.max(index - 1, 0))
+            } else if (event.key === 'Enter' && visibleItems[activeIndex]) {
+              event.preventDefault()
+              toggle(visibleItems[activeIndex].id)
+            }
           }}
         />
       </label>
@@ -418,9 +470,9 @@ function CatalogPicker({
         </div>
       )}
       {expanded && (
-        <div className="staff-schedule__options" role="listbox" aria-label={`${label}: варианты`}>
+        <div className="staff-schedule__options">
           {query.isPending ? (
-            <p>Загрузка справочника…</p>
+            <p role="status">Загрузка справочника…</p>
           ) : query.isError ? (
             <p role="alert">
               {getErrorMessage(query.error)}{' '}
@@ -430,29 +482,56 @@ function CatalogPicker({
             </p>
           ) : (
             <>
-              {visibleItems.map((item) => (
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={value.includes(item.id)}
-                  key={item.id}
-                  onClick={() => toggle(item.id)}
-                >
-                  {item.name}
-                  {item.building_name ? ` · ${item.building_name}` : ''}
-                  {item.term_name ? ` · ${item.term_name}` : ''}
-                </button>
-              ))}
-              {items.length === 0 && <p>Ничего не найдено</p>}
-              {query.hasNextPage && (
-                <button
-                  type="button"
-                  disabled={query.isFetchingNextPage}
-                  onClick={() => void query.fetchNextPage()}
-                >
-                  {query.isFetchingNextPage ? 'Загружаем…' : 'Показать ещё'}
-                </button>
-              )}
+              <div id={`${listboxId}-options`} role="listbox" aria-label={`${label}: варианты`}>
+                {visibleItems.map((item, index) => {
+                  const primaryLabel = catalogOptionLabel(kind, item)
+                  const secondaryLabel = item.term_name ?? item.building_name ?? `ID ${item.id}`
+                  return (
+                    <button
+                      id={`${listboxId}-option-${index}`}
+                      type="button"
+                      role="option"
+                      aria-label={`${primaryLabel} · ${secondaryLabel}`}
+                      aria-selected={value.includes(item.id)}
+                      className={activeIndex === index ? 'is-active' : undefined}
+                      key={item.id}
+                      onClick={() => toggle(item.id)}
+                      onMouseEnter={() => setActiveIndex(index)}
+                    >
+                      <strong>{primaryLabel}</strong>
+                      <span>{secondaryLabel}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              {!visibleItems.length && <p role="status">Ничего не найдено</p>}
+              <div className="staff-schedule__catalog-pages">
+                {cursorHistory.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAfterId(cursorHistory.at(-1) ?? '')
+                      setCursorHistory((history) => history.slice(0, -1))
+                      setActiveIndex(0)
+                    }}
+                  >
+                    Предыдущие варианты
+                  </button>
+                )}
+                {query.data?.next_after_id && (
+                  <button
+                    type="button"
+                    disabled={query.isFetching}
+                    onClick={() => {
+                      setCursorHistory((history) => [...history, afterId])
+                      setAfterId(query.data?.next_after_id ?? '')
+                      setActiveIndex(0)
+                    }}
+                  >
+                    {query.isFetching ? 'Загружаем…' : 'Следующие варианты'}
+                  </button>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -478,37 +557,27 @@ function GroupParticipantEditor({
   onChange: (selection: ParticipantSelection) => void
   onForbidden: () => void
 }) {
-  const query = useInfiniteQuery({
-    queryKey: ['staff-schedule', userId, 'subgroups', groupId],
-    initialPageParam: null as string | null,
-    queryFn: ({ signal, pageParam }) =>
+  const [search, setSearch] = useState('')
+  const [afterId, setAfterId] = useState('')
+  const [cursorHistory, setCursorHistory] = useState<string[]>([])
+  const [resolvedNames, setResolvedNames] = useState<Record<string, string>>({})
+  const listboxId = useId().replaceAll(':', '')
+  const query = useQuery({
+    queryKey: ['staff-schedule', userId, 'subgroups', groupId, search, afterId],
+    queryFn: ({ signal }) =>
       apiFetch<components['schemas']['CatalogPage']>(
-        catalogUrl('subgroups', '', pageParam, { group_id: groupId }),
+        catalogUrl('subgroups', search, afterId || null, { group_id: groupId }),
         { authenticated: true, signal },
       ),
-    getNextPageParam: (lastPage) => lastPage.next_after_id,
     retry: false,
+    enabled: !selection.wholeGroup,
   })
-  const subgroups = useMemo(
-    () => query.data?.pages.flatMap((page) => page.items) ?? [],
-    [query.data],
-  )
-  const hasNextPage = query.hasNextPage
-  const isFetchingNextPage = query.isFetchingNextPage
-  const fetchNextPage = query.fetchNextPage
+  const subgroups = query.data?.items ?? []
   useEffect(() => {
     if (query.error instanceof ApiClientError && query.error.status === 403) onForbidden()
   }, [query.error, onForbidden])
-  useEffect(() => {
-    if (
-      hasNextPage &&
-      !isFetchingNextPage &&
-      selection.subgroupIds.some((id) => !subgroups.some((item) => item.id === id))
-    )
-      void fetchNextPage()
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage, selection.subgroupIds, subgroups])
   const selectedLabels = selection.subgroupIds
-    .map((id) => knownSubgroupNames[id] ?? subgroups.find((item) => item.id === id)?.name)
+    .map((id) => knownSubgroupNames[id] ?? resolvedNames[id])
     .filter((name): name is string => !!name)
   return (
     <fieldset className="staff-schedule__participant-group">
@@ -530,7 +599,24 @@ function GroupParticipantEditor({
       {!selection.wholeGroup && selectedLabels.length > 0 && (
         <p>Выбраны подгруппы: {selectedLabels.join(', ')}</p>
       )}
-      {query.isPending ? (
+      {!selection.wholeGroup && (
+        <label className="staff-schedule__subgroup-search">
+          Поиск подгрупп
+          <input
+            role="combobox"
+            aria-label={`Поиск подгрупп: ${groupName}`}
+            aria-expanded="true"
+            aria-controls={`${listboxId}-options`}
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value)
+              setAfterId('')
+              setCursorHistory([])
+            }}
+          />
+        </label>
+      )}
+      {selection.wholeGroup ? null : query.isPending ? (
         <p>Загружаем подгруппы…</p>
       ) : query.isError ? (
         <p role="alert">
@@ -541,30 +627,50 @@ function GroupParticipantEditor({
         </p>
       ) : (
         <div className="staff-schedule__subgroup-options">
-          {subgroups.map((subgroup) => (
-            <label key={subgroup.id}>
-              <input
-                type="checkbox"
-                checked={selection.subgroupIds.includes(subgroup.id)}
-                disabled={selection.wholeGroup}
-                onChange={(event) => {
-                  const subgroupIds = event.target.checked
-                    ? [...selection.subgroupIds, subgroup.id]
-                    : selection.subgroupIds.filter((id) => id !== subgroup.id)
-                  onChange({ wholeGroup: false, subgroupIds })
-                }}
-              />
-              {subgroup.name}
-            </label>
-          ))}
-          {hasNextPage && (
+          {!selection.wholeGroup && (
+            <div id={`${listboxId}-options`} role="group" aria-label={`Результаты: ${groupName}`}>
+              {subgroups.map((subgroup) => (
+                <label key={subgroup.id}>
+                  <input
+                    type="checkbox"
+                    checked={selection.subgroupIds.includes(subgroup.id)}
+                    disabled={selection.wholeGroup}
+                    onChange={(event) => {
+                      setResolvedNames((names) => ({ ...names, [subgroup.id]: subgroup.name }))
+                      const subgroupIds = event.target.checked
+                        ? [...selection.subgroupIds, subgroup.id]
+                        : selection.subgroupIds.filter((id) => id !== subgroup.id)
+                      onChange({ wholeGroup: false, subgroupIds })
+                    }}
+                  />
+                  {subgroup.name}
+                </label>
+              ))}
+            </div>
+          )}
+          {!selection.wholeGroup && cursorHistory.length > 0 && (
             <button
               type="button"
               className="staff-schedule__text-button"
-              disabled={isFetchingNextPage}
-              onClick={() => void fetchNextPage()}
+              onClick={() => {
+                setAfterId(cursorHistory.at(-1) ?? '')
+                setCursorHistory((history) => history.slice(0, -1))
+              }}
             >
-              {isFetchingNextPage ? 'Загружаем…' : 'Показать ещё подгруппы'}
+              Предыдущие варианты
+            </button>
+          )}
+          {!selection.wholeGroup && query.data?.next_after_id && (
+            <button
+              type="button"
+              className="staff-schedule__text-button"
+              disabled={query.isFetching}
+              onClick={() => {
+                setCursorHistory((history) => [...history, afterId])
+                setAfterId(query.data?.next_after_id ?? '')
+              }}
+            >
+              {query.isFetching ? 'Загружаем…' : 'Следующие варианты'}
             </button>
           )}
           {!subgroups.length && <p>Формальных подгрупп нет.</p>}
@@ -1624,6 +1730,7 @@ function StaffSchedulePageContent() {
   }
   const prevWeek = () => updateDate(addDays(date, mode === 'day' ? -1 : -7))
   const nextWeek = () => updateDate(addDays(date, mode === 'day' ? 1 : 7))
+  const goToday = () => updateDate(getMoscowDate())
   const refetch = () => {
     void queryClient.resetQueries({
       queryKey: [
@@ -1656,6 +1763,9 @@ function StaffSchedulePageContent() {
         <div>
           <p className="section-eyebrow">Кабинет сотрудника</p>
           <h1 id="staff-schedule-title">Редактор расписания</h1>
+          <p className="staff-schedule__description">
+            Официальные занятия: просмотр, создание, перенос, изменение, отмена и восстановление.
+          </p>
         </div>
         <button
           className="staff-schedule__primary"
@@ -1666,76 +1776,63 @@ function StaffSchedulePageContent() {
         </button>
       </div>
       <section className="staff-schedule__filters" aria-label="Параметры расписания">
-        <div className="staff-schedule__tabs" role="tablist" aria-label="Представление расписания">
-          {(['group', 'teacher', 'room'] as Resource[]).map((item) => (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={resource === item}
-              className={resource === item ? 'is-active' : ''}
-              key={item}
-              onClick={() => changeResource(item)}
-            >
-              {resourceLabels[item]}
-            </button>
-          ))}
+        <div className="staff-schedule__resource-tabs">
+          <span>Просматривать по</span>
+          <div
+            className="staff-schedule__tabs"
+            role="tablist"
+            aria-label="Представление расписания"
+          >
+            {(['group', 'teacher', 'room'] as Resource[]).map((item) => (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={resource === item}
+                className={resource === item ? 'is-active' : ''}
+                key={item}
+                onClick={() => changeResource(item)}
+              >
+                {resourceLabels[item]}
+              </button>
+            ))}
+          </div>
         </div>
-        <label className="staff-schedule__resource">
-          {resourceSingular[resource]}
-          <input
-            role="combobox"
-            aria-label={`Поиск: ${resourceLabels[resource].toLowerCase()}`}
-            aria-expanded="true"
-            placeholder="Начните вводить название"
-            value={selectedResourceId ? selectedResourceName : resourceQuery}
-            onChange={(event) => {
+        <div className="staff-schedule__resource">
+          <CatalogPicker
+            kind={resourceKinds[resource]}
+            label={resourceSingular[resource]}
+            value={selectedResourceId ? [selectedResourceId] : []}
+            labelOverrides={
+              selectedResourceName ? { [selectedResourceId]: selectedResourceName } : {}
+            }
+            clearLabel="Очистить выбор"
+            onForbidden={denyAccess}
+            onChange={(ids) => {
+              if (ids.length) return
               const params = new URLSearchParams(searchParams)
-              params.set('q', event.target.value)
               params.delete('resource_id')
               params.delete('resource_name')
-              setSearchParams(params, { replace: true })
+              params.delete('q')
+              setSearchParams(params)
+            }}
+            onResolvedItem={(item) => {
+              const params = new URLSearchParams(searchParams)
+              params.set('resource', resource)
+              params.set('resource_id', item.id)
+              params.set('resource_name', getResourceLabel(resource, item))
+              params.set('q', item.name)
+              params.set('date', date)
+              params.set('view', mode)
+              setSearchParams(params)
             }}
           />
-          {resourceItems.length ? (
-            <select
-              aria-label={`Выберите: ${resourceLabels[resource].toLowerCase()}`}
-              value={selectedResourceId}
-              onChange={(event) => {
-                const selectedItem = resourceItems.find((item) => item.id === event.target.value)
-                const params = new URLSearchParams(searchParams)
-                params.set('resource', resource)
-                params.set('resource_id', event.target.value)
-                if (selectedItem) {
-                  params.set('resource_name', getResourceLabel(resource, selectedItem))
-                  params.set('q', selectedItem.name)
-                }
-                params.set('date', date)
-                params.set('view', mode)
-                setSearchParams(params)
-              }}
-            >
-              <option value="">Выберите объект</option>
-              {resourceItems.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {getResourceLabel(resource, item)}
-                </option>
-              ))}
-            </select>
-          ) : null}
-          {catalog.hasNextPage && (
-            <button
-              type="button"
-              className="staff-schedule__text-button"
-              disabled={catalog.isFetchingNextPage}
-              onClick={() => void catalog.fetchNextPage()}
-            >
-              {catalog.isFetchingNextPage ? 'Загружаем…' : 'Показать ещё объекты'}
-            </button>
-          )}
-        </label>
+        </div>
         <div className="staff-schedule__date-controls">
           <button type="button" aria-label="Предыдущий период" onClick={prevWeek}>
             ←
+          </button>
+          <button type="button" className="staff-schedule__today" onClick={goToday}>
+            Сегодня
           </button>
           <label>
             Дата

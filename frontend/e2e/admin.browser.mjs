@@ -28,6 +28,17 @@ const userDetailsLink = (page, loginName) =>
     .locator('.admin-users__table tbody tr')
     .filter({ hasText: loginName })
     .getByRole('link', { name: /Подробнее/ })
+async function chooseLookup(page, label, search) {
+  const input = page.getByRole('combobox', { name: label, exact: true })
+  await input.fill(search)
+  const option = page.getByRole('option').filter({ hasText: search }).first()
+  await option.waitFor({ state: 'visible' })
+  const id = await option.getAttribute('data-value')
+  assert.ok(id)
+  assert.match(await option.textContent(), new RegExp(`ID ${id}`))
+  await option.click()
+  return id
+}
 async function login(page, name, password) {
   await page.goto(base + '/login')
   await page.getByLabel('Логин', { exact: true }).fill(name)
@@ -68,7 +79,11 @@ try {
       let selectedTeacherId
       await page.getByRole('link', { name: 'Создать пользователя' }).click()
       await page.getByLabel('Логин', { exact: true }).fill(`browser-${role}-${width}-${suffix}`)
-      await page.getByLabel('ФИО', { exact: true }).fill('Вымышленный пользователь')
+      const fullName =
+        role === 'staff'
+          ? `Вымышленный сотрудник ${'Длинное имя '.repeat(18)}`
+          : 'Вымышленный пользователь'
+      await page.getByLabel('ФИО', { exact: true }).fill(fullName)
       await page.getByLabel('Роль', { exact: true }).selectOption(role)
       if (role !== 'admin') {
         const name =
@@ -77,24 +92,14 @@ try {
             : role === 'teacher'
               ? 'Admin Browser Free Teacher'
               : 'Admin Browser Dean'
-        await page.getByLabel('Поиск в справочнике').fill(name)
-        const select = page.locator('fieldset select')
-        await select
-          .locator('option')
-          .filter({ hasText: name })
-          .first()
-          .waitFor({ state: 'attached' })
-        const value = await select
-          .locator('option')
-          .filter({ hasText: name })
-          .first()
-          .getAttribute('value')
-        assert.match(
-          await select.locator(`option[value="${value}"]`).textContent(),
-          new RegExp(`ID ${value}`),
-        )
+        const pickerLabel =
+          role === 'student'
+            ? 'Учебная группа'
+            : role === 'teacher'
+              ? 'Свободный преподаватель'
+              : 'Подразделение'
+        const value = await chooseLookup(page, pickerLabel, name)
         if (role === 'teacher') selectedTeacherId = value
-        await select.selectOption(value)
       }
       await page.getByRole('button', { name: 'Создать', exact: true }).click()
       await page.getByRole('heading', { name: 'Пользователь создан', exact: true }).waitFor()
@@ -131,20 +136,7 @@ try {
         await page.getByText('Разрешений нет.', { exact: true }).waitFor()
         await page.getByRole('button', { name: 'Выдать разрешение' }).click()
         await page.getByRole('button', { name: 'Отозвать grades.edit' }).waitFor()
-        const field = page.getByRole('group', { name: 'Подразделение', exact: true })
-        await field.getByLabel('Поиск в справочнике').fill('Admin Browser Accounting')
-        await field
-          .locator('option')
-          .filter({ hasText: 'Admin Browser Accounting' })
-          .waitFor({ state: 'attached' })
-        await field
-          .locator('select')
-          .selectOption(
-            await field
-              .locator('option')
-              .filter({ hasText: 'Admin Browser Accounting' })
-              .getAttribute('value'),
-          )
+        await chooseLookup(page, 'Подразделение', 'Admin Browser Accounting')
         await page.getByRole('button', { name: 'Сменить подразделение и отозвать права' }).click()
         await page.getByText('Разрешений нет.', { exact: true }).waitFor()
         assert.equal(await page.getByRole('option', { name: /grades.edit/ }).count(), 0)
@@ -156,22 +148,21 @@ try {
           ['applications.review', 'news.publish'],
         )
         // Return to the dean office: academic options must reappear, without old grants.
-        await field.getByLabel('Поиск в справочнике').fill('Admin Browser Dean')
-        await field
-          .locator('option')
-          .filter({ hasText: 'Admin Browser Dean' })
-          .waitFor({ state: 'attached' })
-        await field
-          .locator('select')
-          .selectOption(
-            await field
-              .locator('option')
-              .filter({ hasText: 'Admin Browser Dean' })
-              .getAttribute('value'),
-          )
+        await chooseLookup(page, 'Подразделение', 'Admin Browser Dean')
         await page.getByRole('button', { name: 'Сменить подразделение и отозвать права' }).click()
         await page.getByRole('option', { name: /grades.edit/ }).waitFor({ state: 'attached' })
         assert.equal(await page.getByRole('button', { name: 'Отозвать grades.edit' }).count(), 0)
+        for (const permission of ['schedule.edit', 'grades.edit', 'attendance.edit']) {
+          await page.getByLabel('Разрешение', { exact: true }).selectOption(permission)
+          await page.getByRole('button', { name: 'Выдать разрешение' }).click()
+          await page.getByRole('button', { name: `Отозвать ${permission}` }).waitFor()
+        }
+        assert.equal(await page.locator('.admin-user-detail__grants > li').count(), 3)
+        for (const permission of ['schedule.edit', 'grades.edit', 'attendance.edit']) {
+          await page.getByRole('button', { name: `Отозвать ${permission}` }).click()
+        }
+        await page.getByText('Разрешений нет.', { exact: true }).waitFor()
+        await checkWidth()
       }
       await page.getByRole('button', { name: 'Заблокировать', exact: true }).click()
       await page.getByRole('button', { name: 'Разблокировать', exact: true }).waitFor()

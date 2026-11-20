@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
+import { Icon } from '../../shared/ui/Icon'
 import { CabinetLayout, UserMenu } from '../../app/CabinetLayout'
 import '../../app/mvp2-unified.css'
 import {
@@ -172,21 +173,33 @@ export function ModuleUnavailable({ title }: { title: string }) {
 
 export function StaffHome() {
   const context = useRoleContext()
-  const sections = staffSections.filter(({ permission }) => hasPermission(context, permission))
+  const sections = staffSections.filter(
+    ({ permission, disabled, visible }) =>
+      disabled || (visible !== false && hasPermission(context, permission)),
+  )
+  const hasWorkingSections = sections.some(({ disabled }) => !disabled)
   return (
     <section className="section-page staff-home">
       <p className="section-eyebrow">Кабинет сотрудника</p>
-      <h1>{sections.length ? 'Кабинет сотрудника' : 'Нет доступных разделов'}</h1>
+      <h1>{hasWorkingSections ? 'Кабинет сотрудника' : 'Нет доступных разделов'}</h1>
       <p className="service-subtitle">Рабочее пространство деканата и учебных подразделений.</p>
-      {!sections.length && (
-        <p>
-          Обратитесь к администратору для назначения полномочий. Вы можете выйти через меню
-          пользователя.
-        </p>
+      {!hasWorkingSections && (
+        <article className="staff-home__empty">
+          <span aria-hidden="true">
+            <Icon name="info" />
+          </span>
+          <div>
+            <h2>Разделы пока не назначены</h2>
+            <p>
+              Обратитесь к администратору, чтобы получить доступ к рабочим разделам. Вы можете
+              завершить сеанс через меню пользователя.
+            </p>
+          </div>
+        </article>
       )}
-      {sections.length > 0 && <h2 className="staff-home__section-title">Быстрый доступ</h2>}
+      {hasWorkingSections && <h2 className="staff-home__section-title">Быстрый доступ</h2>}
       <div className="staff-home__grid">
-        {sections.map(({ permission, label }) => {
+        {sections.map(({ permission, label, icon }) => {
           const href =
             permission === 'grades.edit' || permission === 'attendance.edit'
               ? getStaffJournalRoute(permission)
@@ -196,7 +209,9 @@ export function StaffHome() {
                   ? '/staff/applications'
                   : permission === 'schedule.edit'
                     ? '/staff/schedule'
-                    : null
+                    : permission === 'students.read'
+                      ? '/staff/students'
+                      : null
           const action =
             permission === 'grades.edit' || permission === 'attendance.edit'
               ? 'Открыть журнал'
@@ -206,7 +221,9 @@ export function StaffHome() {
                   ? 'Открыть очередь заявлений'
                   : permission === 'schedule.edit'
                     ? 'Открыть редактор расписания'
-                    : 'Модуль пока недоступен'
+                    : permission === 'students.read'
+                      ? 'Открыть поиск студентов'
+                      : 'Модуль пока недоступен'
           const description =
             permission === 'applications.review'
               ? 'Рассмотрение заявлений, возвраты и решения.'
@@ -218,26 +235,30 @@ export function StaffHome() {
                     ? 'Посещаемость и история изменений.'
                     : permission === 'news.publish'
                       ? 'Редактор объявлений для студенческой ленты.'
-                      : 'Раздел доступен согласно выданным полномочиям.'
+                      : permission === 'students.read'
+                        ? 'Поиск, просмотр и доступные действия в карточке студента.'
+                        : 'Раздел доступен согласно выданным полномочиям.'
           return (
-            <section key={permission} id={permission} className="staff-home__card">
+            <section
+              key={permission}
+              id={permission}
+              className={`staff-home__card${permission === 'groups.manage' ? ' is-disabled' : ''}`}
+              aria-disabled={permission === 'groups.manage' ? 'true' : undefined}
+            >
               <span className="staff-home__icon" aria-hidden="true">
-                {permission === 'applications.review'
-                  ? '▤'
-                  : permission === 'schedule.edit'
-                    ? '▦'
-                    : permission === 'grades.edit' || permission === 'attendance.edit'
-                      ? '◇'
-                      : permission === 'news.publish'
-                        ? '▧'
-                        : '○'}
+                <Icon name={icon} />
               </span>
               <div className="staff-home__card-content">
-                <h3>{label}</h3>
+                <h3>
+                  {label}
+                  {permission === 'groups.manage' && <span>В разработке</span>}
+                </h3>
                 <p>
-                  {href
-                    ? description
-                    : 'Функциональность будет подключена на следующем этапе MVP2.'}
+                  {permission === 'groups.manage'
+                    ? 'Управление учебными группами появится в следующем этапе.'
+                    : href
+                      ? description
+                      : 'Модуль пока недоступен.'}
                 </p>
                 {href && (
                   <Link aria-label={`${action}: ${label}`} to={href}>

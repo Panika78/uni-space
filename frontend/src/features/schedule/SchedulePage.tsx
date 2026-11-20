@@ -449,58 +449,6 @@ export function SchedulePage() {
           />
         </label>
       </div>
-      <label className="schedule-cancelled-toggle">
-        <input
-          type="checkbox"
-          ref={(input) => {
-            if (input) input.indeterminate = !preferences.isSuccess
-          }}
-          aria-describedby="schedule-preference-status"
-          checked={showCancelled}
-          disabled={!preferences.isSuccess || preferences.isFetching || savePreferences.isPending}
-          onChange={(event) => savePreferences.mutate(event.target.checked)}
-        />
-        Показывать отменённые
-      </label>
-      <p
-        id="schedule-preference-status"
-        aria-live="polite"
-        hidden={!savePreferences.isPending && preferences.isSuccess && !preferences.isFetching}
-      >
-        {savePreferences.isPending
-          ? 'Сохранение…'
-          : preferences.isPending
-            ? 'Загружаем настройку…'
-            : !preferences.isSuccess
-              ? 'Значение настройки неизвестно.'
-              : preferences.isFetching
-                ? 'Проверяем настройку…'
-                : ''}
-      </p>
-      {preferences.isError && (
-        <p role="alert">
-          Не удалось загрузить настройку.
-          <button onClick={() => void preferences.refetch()}>Повторить загрузку настройки</button>
-        </p>
-      )}
-      {hasExplicitSaveError && (
-        <p role="alert">
-          Не удалось сохранить настройку. Показано последнее подтверждённое значение.
-        </p>
-      )}
-      {hasUncertainSave && (
-        <p role="alert">
-          Не удалось подтвердить сохранение. Предыдущий запрос ещё может завершиться на сервере.
-          Показано последнее полученное значение. Проверяйте настройку повторно.
-          <button
-            disabled={preferences.isFetching || savePreferences.isPending}
-            onClick={() => void preferences.refetch()}
-          >
-            Проверить настройку
-          </button>
-        </p>
-      )}
-      <p className="schedule-timezone">Московское время · Europe/Moscow</p>
       <AnimatedRegion className="schedule-selectors" contentKey={mode}>
         {mode === 'day' ? (
           <div className="schedule-days" role="group" aria-label="Дни недели">
@@ -527,6 +475,64 @@ export function SchedulePage() {
           </div>
         )}
       </AnimatedRegion>
+      <div className="schedule-display-options">
+        <label className="schedule-cancelled-toggle">
+          <input
+            type="checkbox"
+            ref={(input) => {
+              if (input) input.indeterminate = !preferences.isSuccess
+            }}
+            aria-describedby="schedule-preference-status"
+            checked={showCancelled}
+            disabled={!preferences.isSuccess || preferences.isFetching || savePreferences.isPending}
+            onChange={(event) => savePreferences.mutate(event.target.checked)}
+          />
+          Показывать отменённые
+        </label>
+        <p
+          id="schedule-preference-status"
+          aria-live="polite"
+          className={
+            !savePreferences.isPending && preferences.isSuccess && !preferences.isFetching
+              ? 'is-visually-quiet'
+              : ''
+          }
+        >
+          {savePreferences.isPending
+            ? 'Сохранение…'
+            : preferences.isPending
+              ? 'Загружаем настройку…'
+              : !preferences.isSuccess
+                ? 'Значение настройки неизвестно.'
+                : preferences.isFetching
+                  ? 'Проверяем настройку…'
+                  : ''}
+        </p>
+        {preferences.isError && (
+          <p role="alert">
+            Не удалось загрузить настройку.
+            <button onClick={() => void preferences.refetch()}>Повторить загрузку настройки</button>
+          </p>
+        )}
+        {hasExplicitSaveError && (
+          <p role="alert">
+            Не удалось сохранить настройку. Показано последнее подтверждённое значение.
+          </p>
+        )}
+        {hasUncertainSave && (
+          <p role="alert">
+            Не удалось подтвердить сохранение. Предыдущий запрос ещё может завершиться на сервере.
+            Показано последнее полученное значение. Проверяйте настройку повторно.
+            <button
+              disabled={preferences.isFetching || savePreferences.isPending}
+              onClick={() => void preferences.refetch()}
+            >
+              Проверить настройку
+            </button>
+          </p>
+        )}
+        <p className="schedule-timezone">Московское время · Europe/Moscow</p>
+      </div>
       {isPositionUnavailable && (
         <p role="status" className="schedule-empty">
           Не удалось найти выбранную позицию в расписании. Возможно, расписание изменилось.

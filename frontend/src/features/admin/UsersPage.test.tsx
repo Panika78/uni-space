@@ -126,9 +126,10 @@ it('distinguishes namesake teachers by ID and department and submits the selecte
   await user.type(screen.getByLabelText('Логин'), 'selected-namesake')
   await user.type(screen.getByLabelText('ФИО'), 'Вымышленный')
   await user.selectOptions(screen.getByLabelText('Роль'), 'teacher')
-  const option = await screen.findByRole('option', { name: /Однофамилец · ID 12.*Математика/ })
-  expect(screen.getByRole('option', { name: /Однофамилец · ID 11.*Физика/ })).toBeInTheDocument()
-  await user.selectOptions(option.closest('select')!, '12')
+  await user.click(screen.getByRole('combobox', { name: 'Свободный преподаватель' }))
+  const option = await screen.findByRole('option', { name: /Однофамилец.*ID 12.*Математика/ })
+  expect(screen.getByRole('option', { name: /ОднофамилецID 11.*Физика/ })).toBeInTheDocument()
+  await user.click(option)
   await user.click(screen.getByRole('button', { name: 'Создать' }))
   const post = vi.mocked(apiFetch).mock.calls.find(([, init]) => init?.method === 'POST')
   expect(JSON.parse(String(post?.[1]?.body)).teacher_id).toBe('12')
@@ -138,9 +139,9 @@ it('distinguishes namesake teachers by ID and department and submits the selecte
   expect(console.error).not.toHaveBeenCalled()
 })
 
-it('uses the server permission catalogue and replaces an invalid selection after transfer', async () => {
+it('uses a single searchable lookup and updates ungranted permissions immediately', async () => {
   vi.spyOn(window, 'confirm').mockReturnValue(true)
-  let detail = {
+  let detail: components['schemas']['UserDetail'] = {
     id: '9',
     login: 'fictional-staff',
     full_name: 'Вымышленный сотрудник',
@@ -152,7 +153,13 @@ it('uses the server permission catalogue and replaces an invalid selection after
     group_id: null,
     org_unit_id: '3',
     permissions: [],
-    available_permission_codes: ['grades.edit', 'applications.review', 'news.publish'],
+    available_permission_codes: [
+      'grades.edit',
+      'applications.review',
+      'news.publish',
+      'students.status.edit',
+      'students.read',
+    ],
   }
   vi.mocked(apiFetch).mockImplementation(async (url, init) => {
     if (String(url).includes('/lookups'))
@@ -163,15 +170,33 @@ it('uses the server permission catalogue and replaces an invalid selection after
         ],
         next_after_id: null,
       }
+    if (String(url).endsWith('/permissions') && init?.method === 'PUT') {
+      detail = {
+        ...detail,
+        permissions: [...detail.permissions, JSON.parse(String(init.body))],
+      }
+      return detail
+    }
+    if (String(url).endsWith('/permissions') && init?.method === 'DELETE') {
+      const permission = JSON.parse(String(init.body))
+      detail = {
+        ...detail,
+        permissions: detail.permissions.filter(
+          (grant) => grant.permission_code !== permission.permission_code,
+        ),
+      }
+      return detail
+    }
     if (String(url).endsWith('/department') && init?.method === 'PUT') {
       const { org_unit_id } = JSON.parse(String(init.body))
       detail = {
         ...detail,
         org_unit_id,
+        permissions: [],
         available_permission_codes:
           org_unit_id === '4'
-            ? ['applications.review', 'news.publish']
-            : ['grades.edit', 'applications.review', 'news.publish'],
+            ? ['applications.review', 'news.publish', 'students.read']
+            : ['grades.edit', 'applications.review', 'news.publish', 'students.read'],
       }
     }
     return detail
@@ -187,27 +212,35 @@ it('uses the server permission catalogue and replaces an invalid selection after
       />
     </QueryClientProvider>,
   )
+  await screen.findByRole('heading', { name: 'Карточка пользователя' })
   const user = userEvent.setup()
-  await screen.findByRole('option', { name: /grades.edit/ })
-  await user.selectOptions(screen.getByLabelText('Разрешение'), 'grades.edit')
-  const accounting = await screen.findByRole('option', { name: /Бухгалтерия · ID 4/ })
-  const departments = accounting.closest('select')!
-  await user.selectOptions(departments, '4')
+  await user.click(screen.getByRole('combobox', { name: 'Подразделение' }))
+  const dean = await screen.findByRole('option', { name: /Деканат.*ID 3/ })
+  await user.click(dean)
+  await user.selectOptions(screen.getByLabelText('Разрешение'), 'students.status.edit')
+  await user.click(screen.getByRole('button', { name: 'Выдать разрешение' }))
+  expect(screen.queryByRole('option', { name: /students.read/ })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('combobox', { name: 'Подразделение' }))
+  const accounting = await screen.findByRole('option', { name: /Бухгалтерия.*ID 4/ })
+  await user.click(accounting)
   await user.click(screen.getByRole('button', { name: 'Сменить подразделение и отозвать права' }))
   await screen.findByText('Текущее подразделение: 4')
   expect(screen.queryByRole('option', { name: /grades.edit/ })).not.toBeInTheDocument()
   expect(screen.getByLabelText('Разрешение')).toHaveValue('applications.review')
   await user.click(screen.getByRole('button', { name: 'Выдать разрешение' }))
-  const grant = vi
-    .mocked(apiFetch)
-    .mock.calls.find(
-      ([url, init]) => String(url).endsWith('/permissions') && init?.method === 'PUT',
-    )
+  const grant = [...vi.mocked(apiFetch).mock.calls]
+    .reverse()
+    .find(([url, init]) => String(url).endsWith('/permissions') && init?.method === 'PUT')
   expect(JSON.parse(String(grant?.[1]?.body))).toEqual({
     permission_code: 'applications.review',
     scope_org_unit_id: '4',
   })
-  await user.selectOptions(departments, '3')
+  expect(screen.queryByRole('option', { name: /applications.review/ })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Отозвать applications.review' }))
+  expect(await screen.findByRole('option', { name: /applications.review/ })).toBeInTheDocument()
+  await user.click(screen.getByRole('combobox', { name: 'Подразделение' }))
+  const deanAgain = await screen.findByRole('option', { name: /Деканат.*ID 3/ })
+  await user.click(deanAgain)
   await user.click(screen.getByRole('button', { name: 'Сменить подразделение и отозвать права' }))
   await screen.findByRole('option', { name: /grades.edit/ })
 })
