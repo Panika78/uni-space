@@ -23,6 +23,11 @@ const browser = await chromium.launch({
 })
 const base = process.env.ADMIN_TEST_URL || 'http://localhost:5173'
 const suffix = Date.now().toString()
+const userDetailsLink = (page, loginName) =>
+  page
+    .locator('.admin-users__table tbody tr')
+    .filter({ hasText: loginName })
+    .getByRole('link', { name: /Подробнее/ })
 async function login(page, name, password) {
   await page.goto(base + '/login')
   await page.getByLabel('Логин', { exact: true }).fill(name)
@@ -189,7 +194,7 @@ try {
   await page.getByLabel('Роль', { exact: true }).selectOption('admin')
   await page.getByRole('button', { name: 'Создать', exact: true }).click()
   await page.getByRole('link', { name: 'Проверить список по логину' }).click()
-  await page.getByRole('link', { name: new RegExp(`lost-${suffix}`) }).waitFor()
+  await userDetailsLink(page, `lost-${suffix}`).waitFor()
   assert.equal(creates, 1)
   await page.unroute('**/api/v1/admin/users')
   // Independent browser session loses permissions and tokens immediately.
@@ -215,10 +220,7 @@ try {
   await page.getByLabel('Логин или ФИО').fill('browser-')
   await page.getByRole('button', { name: 'Найти', exact: true }).focus()
   await page.keyboard.press('Enter')
-  await page
-    .getByRole('link', { name: new RegExp('browser-') })
-    .first()
-    .waitFor()
+  await page.locator('.admin-users__table tbody tr').filter({ hasText: 'browser-' }).first().waitFor()
   await checkWidth()
   // Real keyset pagination, using only fictional accounts in the isolated fixture DB.
   for (let i = 0; i < 21; i++) {
@@ -231,10 +233,10 @@ try {
   await page.getByLabel('Логин или ФИО').fill(`pagination-${suffix}`)
   await page.getByRole('button', { name: 'Найти', exact: true }).click()
   await page.getByRole('button', { name: 'Следующая страница', exact: true }).click()
-  await page.getByRole('link', { name: new RegExp(`pagination-${suffix}-20`) }).waitFor()
+  await userDetailsLink(page, `pagination-${suffix}-20`).waitFor()
   await page.getByRole('button', { name: 'Начало списка', exact: true }).click()
   await page.getByRole('button', { name: 'Следующая страница', exact: true }).waitFor()
-  await page.getByRole('link', { name: new RegExp(`pagination-${suffix}-0$`) }).click()
+  await userDetailsLink(page, `pagination-${suffix}-0`).click()
   await page.getByRole('button', { name: 'Заблокировать', exact: true }).waitFor()
   await page.goBack()
   await page.getByRole('heading', { name: 'Пользователи', exact: true }).waitFor()
