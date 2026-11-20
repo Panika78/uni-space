@@ -358,9 +358,13 @@ try {
   assert.equal(await page.locator('.admin-secret').count(), 0)
   await page.unroute(`**/api/v1/admin/users/${teacherId}/password-reset`, handleCommittedReset)
   await page.unroute(`**/api/v1/admin/users/${teacherId}`)
-  await page.getByRole('link', { name: 'К списку', exact: true }).click()
+  await page.getByRole('link', { name: /К списку пользователей/ }).click()
   await page.getByRole('heading', { name: 'Пользователи' }).waitFor()
-  await page.getByRole('link', { name: new RegExp(teacherLogin) }).click()
+  await page
+    .getByRole('row')
+    .filter({ hasText: teacherLogin })
+    .getByRole('link', { name: /Подробнее/ })
+    .click()
   await page.getByRole('heading', { name: 'Fictional Password E2E teacher' }).waitFor()
   assert.equal(
     await page.locator('.admin-secret').count(),
@@ -387,7 +391,11 @@ try {
     await page.unroute(`**/api/v1/admin/users/${teacherId}/password-reset`)
     await page.getByRole('link', { name: 'К списку пользователей' }).click()
     await page.getByRole('heading', { name: 'Пользователи' }).waitFor()
-    await page.getByRole('link', { name: new RegExp(teacherLogin) }).click()
+    await page
+      .getByRole('row')
+      .filter({ hasText: teacherLogin })
+      .getByRole('link', { name: /Подробнее/ })
+      .click()
     await page.getByRole('heading', { name: 'Fictional Password E2E teacher' }).waitFor()
   }
 
