@@ -74,7 +74,7 @@ afterEach(() => {
   vi.resetAllMocks()
 })
 
-it('keeps every tab panel linked, hidden panels inert, keyboard navigation roving, and tab data lazy', async () => {
+it('keeps every tab panel linked, builds the reference overview, and loads tab data on demand', async () => {
   vi.mocked(getStudentRead).mockImplementation(async (path) => {
     if (path.endsWith('/assessments') || path.endsWith('/lessons')) {
       return { items: [], next_cursor: null } as never
@@ -97,7 +97,8 @@ it('keeps every tab panel linked, hidden panels inert, keyboard navigation rovin
   })
 
   expect(screen.getAllByRole('tabpanel')).toHaveLength(1)
-  expect(getStudentRead).toHaveBeenCalledTimes(1)
+  await screen.findByText('Отмеченных занятий')
+  expect(getStudentRead).toHaveBeenCalledTimes(2)
   expect(getStudentRead).toHaveBeenCalledWith(
     '/api/v1/academics/courses/course-101',
     expect.any(AbortSignal),
@@ -153,4 +154,22 @@ it('keeps every tab panel linked, hidden panels inert, keyboard navigation rovin
   expect(tabs[0]).toHaveFocus()
   expect(panels[0]).not.toHaveAttribute('hidden')
   expect(screen.getAllByRole('tabpanel')).toHaveLength(1)
+})
+
+it('shows marked attendance totals from the real lesson response in the overview', async () => {
+  vi.mocked(getStudentRead).mockImplementation(async (path) => {
+    if (path.endsWith('/lessons'))
+      return {
+        items: [{ attendance_status: 'attended' }, { attendance_status: 'unmarked' }],
+        next_cursor: null,
+      } as never
+    return course as never
+  })
+  show()
+  const overview = await screen.findByRole('tab', { name: 'Обзор' })
+  expect(
+    await within(document.getElementById(overview.getAttribute('aria-controls')!)!).findByText(
+      '1 / 2',
+    ),
+  ).toBeInTheDocument()
 })

@@ -182,9 +182,39 @@ export function StudentCoursePage() {
   const source: unknown = location.state?.courseSource
   const previous = source === '/schedule' || source === '/academics' ? source : null
   const course = !access?.isChecking && passport.isSuccess ? passport.data : undefined
+  const attendanceSummary = useQuery({
+    ...readings,
+    queryKey: [...rootKey, 'attendance-summary', course?.term.id],
+    enabled: Boolean(course && tab === 'overview'),
+    queryFn: async ({ signal }) => {
+      const lessons: Lesson[] = []
+      let cursor: string | null = null
+      do {
+        const query: string = cursor ? `?${new URLSearchParams({ cursor })}` : ''
+        const page: CoursePage<Lesson> = await getStudentRead<CoursePage<Lesson>>(
+          `${path}/lessons${query}`,
+          signal,
+          scope,
+          course!.term.id,
+        )
+        lessons.push(...page.items)
+        cursor = page.next_cursor
+      } while (cursor)
+      return lessons
+    },
+  })
 
   function renderPanelContent(panelTab: Tab) {
-    if (panelTab === 'overview') return <CourseOverview course={course!} />
+    if (panelTab === 'overview')
+      return (
+        <CourseOverview
+          course={course!}
+          lessons={attendanceSummary.data}
+          attendancePending={attendanceSummary.isPending}
+          attendanceError={attendanceSummary.isError}
+          onRetryAttendance={() => void attendanceSummary.refetch()}
+        />
+      )
     if (panelTab === 'announcements') {
       return <StudentAnnouncementFeed courseId={courseOfferingId} />
     }
@@ -251,6 +281,7 @@ export function StudentCoursePage() {
               )}
             </div>
             <button
+              className="student-course__refresh"
               type="button"
               aria-disabled={passport.isFetching}
               onClick={() => {
@@ -304,15 +335,25 @@ export function StudentCoursePage() {
   )
 }
 
-function CourseOverview({ course }: { course: Course }) {
+function CourseOverview({
+  course,
+  lessons,
+  attendancePending,
+  attendanceError,
+  onRetryAttendance,
+}: {
+  course: Course
+  lessons?: Lesson[]
+  attendancePending: boolean
+  attendanceError: boolean
+  onRetryAttendance: () => void
+}) {
+  const marked = lessons?.filter((lesson) => lesson.attendance_status !== 'unmarked').length ?? 0
+  const lessonCount = lessons?.length ?? 0
   return (
     <dl className="student-course__overview">
       <div>
-        <dt>Форма аттестации</dt>
-        <dd>{attestationLabels[course.attestation_type]}</dd>
-      </div>
-      <div>
-        <dt>Полученные баллы</dt>
+        <dt>Набрано баллов</dt>
         <dd>
           {course.assessment_count ? (
             <>
@@ -336,9 +377,29 @@ function CourseOverview({ course }: { course: Course }) {
         </dd>
       </div>
       <div>
-        <dt>Итог аттестации</dt>
+        <dt>Посещаемость</dt>
+        <dd>
+          <strong>
+            {attendanceError ? '—' : attendancePending ? '…' : `${marked} / ${lessonCount}`}
+          </strong>
+          <p>
+            {attendanceError ? (
+              <button type="button" onClick={onRetryAttendance}>
+                Повторить загрузку
+              </button>
+            ) : attendancePending ? (
+              'Загрузка занятий'
+            ) : (
+              'Отмеченных занятий'
+            )}
+          </p>
+        </dd>
+      </div>
+      <div>
+        <dt>Итоговая аттестация</dt>
         <dd>
           <SessionResult item={course} />
+          <p>{attestationLabels[course.attestation_type]}</p>
         </dd>
       </div>
     </dl>

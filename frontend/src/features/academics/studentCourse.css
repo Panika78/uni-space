@@ -20,6 +20,31 @@
   margin: 0.35rem 0;
   color: var(--muted);
 }
+.student-course__refresh {
+  min-height: 44px;
+  padding: 0.65rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+.student-course__refresh:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: #f8efeb;
+}
+.student-course__refresh:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+.student-course__refresh[aria-disabled='true'] {
+  cursor: wait;
+  opacity: 0.7;
+}
 .student-course__tabs {
   position: relative;
   isolation: isolate;

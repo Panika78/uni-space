@@ -14,8 +14,8 @@ export const staffSections: {
 }[] = [
   { permission: 'applications.review', label: 'Заявления', icon: 'clipboard' },
   { permission: 'schedule.edit', label: 'Редактор расписания', icon: 'calendar' },
-  { permission: 'grades.edit', label: 'Баллы', icon: 'chart' },
-  { permission: 'attendance.edit', label: 'Посещаемость', icon: 'checklist' },
+  { permission: 'grades.edit', label: 'Баллы', icon: 'chart', visible: false },
+  { permission: 'attendance.edit', label: 'Посещаемость', icon: 'checklist', visible: false },
   { permission: 'students.read', label: 'Поиск студентов', icon: 'users' },
   { permission: 'students.edit', label: 'Академические сведения', icon: 'book', visible: false },
   {
@@ -62,16 +62,26 @@ export function getRoleNavigation(context: AuthorizationContext): NavigationItem
           : permission === 'students.read'
             ? '/staff/students'
             : permission === 'news.publish'
-              ? '/staff/news'
+              ? '/staff/news/new'
               : permission === 'schedule.edit'
                 ? '/staff/schedule'
-                : permission === 'grades.edit' || permission === 'attendance.edit'
-                  ? getStaffJournalRoute(permission)
-                  : '/staff',
+                : '/staff',
       label,
       icon,
       disabled,
     }))
+    .concat(
+      hasPermission(context, 'grades.edit') || hasPermission(context, 'attendance.edit')
+        ? [
+            {
+              to: '/staff/journals',
+              label: 'Журнал деканата',
+              icon: 'graduation' as const,
+              disabled: false,
+            },
+          ]
+        : [],
+    )
 }
 
 export function getStartRoute(context: AuthorizationContext) {

@@ -291,11 +291,16 @@ export function UsersPage() {
               <tbody>
                 {query.data.items.map((user) => (
                   <tr key={user.id}>
-                    <th scope="row">{user.full_name}</th>
-                    <td>{user.login}</td>
-                    <td>{roles[user.role]}</td>
+                    <th scope="row" data-label="Пользователь">
+                      {user.full_name}
+                    </th>
+                    <td data-label="Логин">{user.login}</td>
+                    <td data-label="Роль">{roles[user.role]}</td>
                     <td>
-                      <span className={`admin-users__status${user.is_active ? '' : ' is-blocked'}`}>
+                      <span
+                        data-label="Состояние"
+                        className={`admin-users__status${user.is_active ? '' : ' is-blocked'}`}
+                      >
                         <i aria-hidden="true" />
                         {user.is_active ? 'Активен' : 'Заблокирован'}
                       </span>

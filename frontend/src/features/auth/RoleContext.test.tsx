@@ -124,6 +124,24 @@ it('merges status editors into student search and hides unimplemented staff modu
   expect(navigation.some((item) => item.to === '/staff#students.edit')).toBe(false)
   expect(getStartRoute(context)).toBe('/staff/students')
 })
+it.each(['grades.edit', 'attendance.edit'] as const)(
+  'shows one dean journal entry for %s',
+  (permission) => {
+    context = {
+      ...context,
+      role: 'staff',
+      permissions: [{ permission_code: permission, scope_org_unit_id: null }],
+    }
+    const journals = getRoleNavigation(context).filter((item) =>
+      item.to.startsWith('/staff/journals'),
+    )
+    expect(journals).toEqual([
+      { to: '/staff/journals', label: 'Журнал деканата', icon: 'graduation', disabled: false },
+    ])
+    expect(getRoleNavigation(context).some((item) => item.label === 'Баллы')).toBe(false)
+    expect(getRoleNavigation(context).some((item) => item.label === 'Посещаемость')).toBe(false)
+  },
+)
 it('shows other effective staff sections with honest module states', async () => {
   context = {
     ...context,
