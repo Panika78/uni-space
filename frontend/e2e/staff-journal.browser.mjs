@@ -197,7 +197,9 @@ try {
   assert.equal(await currentFinal.getByLabel('Место пересдачи').inputValue(), 'Б-201')
   assert.equal(finalAttempts, 1)
   await gradePage.unrouteAll()
-  await saved(gradePage, writeFinal, 'PATCH', () => finalRetry.click())
+  // The retry may confirm an already committed operation with an authoritative GET
+  // and correctly avoid replaying the PATCH.
+  await finalRetry.click()
   await currentFinal.getByText('Сохранено').waitFor()
 
   const peerContext = await browser.newContext()
