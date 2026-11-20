@@ -199,6 +199,18 @@ try {
   await gradePage.unrouteAll()
   // The retry may confirm an already committed operation with an authoritative GET
   // and correctly avoid replaying the PATCH.
+  await finalRetry.scrollIntoViewIfNeeded()
+  const retryBox = await finalRetry.boundingBox()
+  const viewport = gradePage.viewportSize()
+  assert.ok(
+    retryBox &&
+      viewport &&
+      retryBox.x >= 0 &&
+      retryBox.y >= 0 &&
+      retryBox.x + retryBox.width <= viewport.width &&
+      retryBox.y + retryBox.height <= viewport.height,
+    'mobile retry action stays inside the viewport after reload',
+  )
   await finalRetry.click()
   await currentFinal.getByText('Сохранено').waitFor()
 
