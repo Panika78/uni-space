@@ -305,7 +305,11 @@ try {
   await page.goto(`${baseURL}/admin/users`)
   await page.getByLabel('Логин или ФИО').fill(teacherLogin)
   await page.getByRole('button', { name: 'Найти' }).click()
-  await page.getByRole('link', { name: new RegExp(teacherLogin) }).click()
+  await page
+    .getByRole('row')
+    .filter({ hasText: teacherLogin })
+    .getByRole('link', { name: /Подробнее/ })
+    .click()
   await page.getByRole('heading', { name: 'Fictional Password E2E teacher' }).waitFor()
   assert.equal(new URL(page.url()).pathname, `/admin/users/${teacherId}`)
 

@@ -108,10 +108,13 @@ try {
       await page.getByRole('link', { name: 'Открыть учётную запись' }).click()
       await page.getByRole('button', { name: 'Заблокировать', exact: true }).waitFor()
       assert.equal(await page.getByText(secret, { exact: true }).count(), 0)
-      if (role === 'teacher')
-        await page
-          .getByText(`Профиль преподавателя: ${selectedTeacherId}`, { exact: true })
-          .waitFor()
+      if (role === 'teacher') {
+        const teacherProfile = page
+          .locator('.admin-user-detail__facts > div')
+          .filter({ has: page.getByText('Профиль преподавателя', { exact: true }) })
+        await teacherProfile.waitFor()
+        assert.equal(await teacherProfile.locator('dd').textContent(), `ID ${selectedTeacherId}`)
+      }
       await checkWidth()
       if (role === 'staff') {
         staffId = href.split('/').at(-1)

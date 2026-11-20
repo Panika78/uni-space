@@ -134,8 +134,19 @@
   .mvp2-student-surface .student-content {
     padding: 25px 18px 54px;
   }
+  .mvp2-student-surface .academics-table tr {
+    padding-inline: 10px;
+  }
   .mvp2-student-surface .student-topbar {
     padding-inline: 14px;
+  }
+}
+
+/* The fixed 252px sidebar leaves only a narrow content column well before the
+   phone breakpoint. Stack the service cards when that content column is tight. */
+@media (max-width: 900px) {
+  .mvp2-student-surface .service-catalog-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
