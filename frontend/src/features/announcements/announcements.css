@@ -56,6 +56,16 @@
   overflow-wrap: anywhere;
 }
 
+.student-course .announcement-feed,
+.student-course .announcement-feed li,
+.student-course .announcement-feed details,
+.student-course .announcement-feed summary,
+.student-course .announcement-feed p {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .announcement-feed li {
   padding: 0.75rem 0;
   border-block-end: 1px solid var(--border);
