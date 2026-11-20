@@ -191,8 +191,9 @@ async function submitAndRestore(page, account, password) {
   const detail = await (
     await page.request.get(`${baseURL}/api/v1/news/${announcement.id}`, { headers })
   ).json()
-  assert.match(detail.body, /23 ноября/)
-  assert.match(detail.body, /21 ноября/)
+  assert.match(detail.body, /проверкой защитных контуров/)
+  assert.match(detail.body, /указания администрации/)
+  assert.doesNotMatch(detail.body, /(?:20|21|23) ноября/)
   const previous = students.get(account === 'demo-pz101' ? 'demo-pm201' : 'demo-pz101')
   if (previous) {
     for (const path of Object.keys(snapshots))
@@ -285,7 +286,6 @@ async function inspectStudent(
   program,
   course,
   venue,
-  grade,
   weekday,
   width,
 ) {
@@ -323,8 +323,8 @@ async function inspectStudent(
   assert.deepEqual(
     profile.direction,
     isPz
-      ? { code: '04.03.01', name: 'Химия' }
-      : { code: '01.03.02', name: 'Прикладная математика и информатика' },
+      ? { code: 'MAG-01', name: 'Алхимия и технологии зельеварения' }
+      : { code: 'MAG-02', name: 'Мантика и вероятностная магия' },
   )
   const scope = page.locator('.profile-page')
   for (const [label, value] of Object.entries({
@@ -399,17 +399,22 @@ async function inspectStudent(
     assert.equal(await sessionRow.locator('.academics-label').innerText(), 'Не выставлено')
   }
   if (isPz) {
+    const assessmentPages = await Promise.all(
+      academics.items.map((item) =>
+        readApi(page, `academics/courses/${item.course_offering_id}/assessments`),
+      ),
+    )
+    const results = assessmentPages.flatMap((page) => page.items)
     assert.ok(
-      academics.items.some((item) => item.total_score === 0 && item.graded_assessment_count > 0),
+      results.some((item) => item.score === 0),
+      'An explicitly awarded zero stays visible',
     )
     assert.ok(
-      academics.items.some(
-        (item) => item.graded_assessment_count === 0 && item.assessment_count > 0,
-      ),
+      results.some((item) => item.score === null),
+      'An ungraded work stays distinct from zero',
     )
   } else assert.ok(academics.items.some((item) => item.total_score > 0))
   assert.equal(await page.locator('.academics-debt, .academics-retake').count(), 0)
-  await page.getByText(grade, { exact: true }).first().waitFor()
   await noOverflow(page, width)
 
   await navigate(page, 'Новости')
@@ -421,8 +426,9 @@ async function inspectStudent(
   await page.locator('.news-row__link').filter({ hasText: announcement.title }).click()
   await page.getByRole('heading', { name: detail.title, exact: true }).waitFor()
   assert.equal(await page.locator('.news-article__body').innerText(), detail.body)
-  assert.match(detail.body, /23 ноября/)
-  assert.match(detail.body, /21 ноября/)
+  assert.match(detail.body, /проверкой защитных контуров/)
+  assert.match(detail.body, /указания администрации/)
+  assert.doesNotMatch(detail.body, /(?:20|21|23) ноября/)
   await noOverflow(page, width)
   await page.getByRole('link', { name: /Назад к новостям/ }).click()
   await page.getByRole('heading', { name: 'Новости', exact: true }).waitFor()
@@ -467,7 +473,6 @@ try {
       'Прикладное зельеварение',
       'Введение в зельеварение',
       'Учебно-лабораторный корпус (УЛК) · Лаборатория № 3',
-      '0 / 20',
       'Чт',
       width,
     )
@@ -483,7 +488,6 @@ try {
       'Прикладная мантика и прогностика',
       'Теория вероятностей и математическая статистика',
       'Главный учебный корпус (ГУК) · 201',
-      '19 / 20',
       'Вт',
       width,
     )

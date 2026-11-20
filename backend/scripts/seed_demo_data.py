@@ -59,7 +59,9 @@ DEMO_NEWS = (
         "нестабильностью магического фона в учебно-лабораторном корпусе 19 ноября "
         "возможны отмены и переносы отдельных занятий. Студентам и преподавателям "
         "рекомендуется заранее проверять актуальное расписание в личном кабинете. "
-        "Информация об изменениях своевременно отображается в расписании конкретного студента.",
+        "Информация об изменениях времени и места проведения занятий будет "
+        "своевременно обновляться. Просим учитывать изменения при планировании "
+        "учебного дня и соблюдать указания администрации.",
         datetime(2026, 11, 10, 9, tzinfo=MOSCOW),
     ),
     (
@@ -256,6 +258,23 @@ def one_or_create(session, model, identity: dict, values: dict, *, mutable: dict
         session.add(instance)
     session.flush()
     return instance
+
+
+def has_deleted_seed_result(session, assessment_group_id: int, student_id: int) -> bool:
+    """Keep an API-deleted result absent on later idempotent seed runs."""
+    return (
+        session.scalar(
+            select(AuditEvent.id)
+            .where(
+                AuditEvent.entity_type == "assessment_result",
+                AuditEvent.action == "delete",
+                AuditEvent.before_data["assessment_group_id"].as_integer() == assessment_group_id,
+                AuditEvent.before_data["student_id"].as_integer() == student_id,
+            )
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def ensure_demo_user(
@@ -1249,6 +1268,8 @@ def seed_demo_data() -> None:
                 )
             )
             if existing_result is None:
+                if has_deleted_seed_result(db, assignment.id, student.id):
+                    continue
                 if (group_key == "pz" and lesson_date.day % 3 == 0) or (
                     group_key == "pm" and lesson_date.day % 4 == 0
                 ):
@@ -1338,24 +1359,17 @@ def seed_demo_data() -> None:
                         AssessmentResult.student_id == students[key].id,
                     )
                 )
-                if score is not None:
-                    if result is None:
-                        db.add(
-                            AssessmentResult(
-                                assessment_group_id=assignment.id,
-                                student_id=students[key].id,
-                                score=score,
-                                graded_at=datetime(2026, 11, 10, 12, tzinfo=UTC),
-                            )
+                if score is not None and result is None:
+                    if has_deleted_seed_result(db, assignment.id, students[key].id):
+                        continue
+                    db.add(
+                        AssessmentResult(
+                            assessment_group_id=assignment.id,
+                            student_id=students[key].id,
+                            score=score,
+                            graded_at=datetime(2026, 11, 10, 12, tzinfo=UTC),
                         )
-                    else:
-                        expected_graded_at = datetime(2026, 11, 10, 12, tzinfo=UTC)
-                        if result.score != score or result.graded_at != expected_graded_at:
-                            raise RuntimeError(
-                                "Existing assessment result differs from demonstration data"
-                            )
-                        result.score = score
-                        result.graded_at = expected_graded_at
+                    )
 
         for service_code in ("study_certificate", "academic_transcript", "academic_leave"):
             academic_service = db.scalar(

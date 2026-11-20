@@ -25,6 +25,7 @@ from app.models import (
     AcademicTerm,
     Application,
     AssessmentResult,
+    AuditEvent,
     CourseGroup,
     Lesson,
     LessonGroup,
@@ -84,7 +85,9 @@ def test_demo_data_documentation_matches_seed_date_constants():
     assert "GET /academics" in content
     assert seed.date(2026, 9, 1) == seed.TERM_START
     assert seed.date(2027, 1, 31) == seed.TERM_END
-    assert "19, 20, 21 и 23 ноября" in content
+    assert "не раскрывает конкретные" in content
+    assert "21 и 23 ноября" in content
+    assert "события 19, 20" in content
     assert "После 31 января 2027 года" in content
     assert "временной PostgreSQL-БД" in content
 
@@ -655,6 +658,64 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
             )
             assert linked_assignments.status_code == linked_schedule.status_code == 200
             assert linked_assignments.json()["items"] and linked_schedule.json()["items"]
+
+            # Every other seeded teacher must gain usable journals through the admin API.
+            linked_teacher_ids = {
+                int(viktor["id"]),
+                *db_session.scalars(
+                    select(seed.Teacher.id).where(seed.Teacher.user_id.is_not(None))
+                ).all(),
+            }
+            for teacher_record in teacher_lookup.json()["items"]:
+                teacher_id = int(teacher_record["id"])
+                if teacher_id in linked_teacher_ids:
+                    continue
+                created = client.post(
+                    "/api/v1/admin/users",
+                    headers={**origin, **admin_headers},
+                    json={
+                        "login": f"demo-smoke-teacher-{teacher_id}",
+                        "full_name": teacher_record["name"],
+                        "role": "teacher",
+                        "teacher_id": str(teacher_id),
+                    },
+                )
+                assert created.status_code == 201, (teacher_record, created.text)
+                logged_in = client.post(
+                    "/api/v1/auth/login",
+                    headers=origin,
+                    json={
+                        "login": f"demo-smoke-teacher-{teacher_id}",
+                        "password": created.json()["initial_password"],
+                    },
+                )
+                assert logged_in.status_code == 200, logged_in.text
+                teacher_auth = {"Authorization": f"Bearer {logged_in.json()['access_token']}"}
+                assignments = client.get(
+                    "/api/v1/teaching/assignments?limit=100", headers=teacher_auth
+                )
+                schedule = client.get(
+                    "/api/v1/teaching/schedule?date_from=2026-09-07&date_to=2026-09-11",
+                    headers=teacher_auth,
+                )
+                assert assignments.status_code == schedule.status_code == 200
+                assert assignments.json()["items"] and schedule.json()["items"]
+                has_assessment_journal = False
+                for assigned in assignments.json()["items"]:
+                    journal = (
+                        f"/api/v1/teaching/courses/{assigned['course_offering_id']}"
+                        f"/groups/{assigned['group']['id']}"
+                    )
+                    roster = client.get(f"{journal}/students?limit=100", headers=teacher_auth)
+                    assessments = client.get(
+                        f"{journal}/assessments?limit=100", headers=teacher_auth
+                    )
+                    assert roster.status_code == assessments.status_code == 200
+                    assert roster.json()["items"], teacher_record["name"]
+                    has_assessment_journal |= bool(assessments.json()["items"])
+                assert has_assessment_journal, teacher_record["name"]
+                linked_teacher_ids.add(teacher_id)
+            assert len(linked_teacher_ids) == 10
             attendance_lesson = db_session.scalar(
                 select(Lesson)
                 .join(seed.CourseOffering)
@@ -716,6 +777,17 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
                 for item in journal_assessments.json()["items"]
                 if item["type"] == "seminar" and item["max_score"] == 2
             )
+            for assignment_row in teacher_items:
+                if assignment_row["discipline"]["name"] != "Защита от тёмных искусств":
+                    continue
+                path = (
+                    f"/api/v1/teaching/courses/{assignment_row['course_offering_id']}"
+                    f"/groups/{assignment_row['group']['id']}"
+                )
+                for suffix in ("students?limit=100", "assessments?limit=100", "lessons?limit=100"):
+                    journal_response = client.get(f"{path}/{suffix}", headers=teacher_headers)
+                    assert journal_response.status_code == 200
+                    assert journal_response.json()["items"]
             student_id = db_session.scalar(
                 select(Student.id).where(Student.group_id == int(defense_assignment["group"]["id"]))
             )
@@ -735,7 +807,32 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
                 )
                 is None
             )
-
+            deleted_event_id = db_session.scalar(
+                select(AuditEvent.id)
+                .where(
+                    AuditEvent.entity_type == "assessment_result",
+                    AuditEvent.action == "delete",
+                    AuditEvent.before_data["assessment_group_id"].as_integer()
+                    == int(seminar_assessment["id"]),
+                    AuditEvent.before_data["student_id"].as_integer() == student_id,
+                )
+                .order_by(AuditEvent.id.desc())
+            )
+            assert deleted_event_id is not None
+            assert db_session.scalar(
+                select(AuditEvent.actor_user_id).where(AuditEvent.id == deleted_event_id)
+            ) == db_session.scalar(select(User.id).where(User.login == "demo-severin-voron"))
+            seed.seed_demo_data()
+            db_session.expire_all()
+            assert (
+                db_session.scalar(
+                    select(AssessmentResult.id).where(
+                        AssessmentResult.assessment_group_id == int(seminar_assessment["id"]),
+                        AssessmentResult.student_id == student_id,
+                    )
+                )
+                is None
+            )
             dean_login = client.post(
                 "/api/v1/auth/login",
                 headers=origin,
@@ -751,6 +848,12 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
             )
             assert dean_login.status_code == accounting_login.status_code == 200
             dean_headers = {"Authorization": f"Bearer {dean_login.json()['access_token']}"}
+            staff_history_path = score_path.replace("/api/v1/teaching/", "/api/v1/staff/journals/")
+            repeated_history = client.get(f"{staff_history_path}/history", headers=dean_headers)
+            assert repeated_history.status_code == 200
+            assert str(deleted_event_id) in {
+                event["event_id"] for event in repeated_history.json()["items"]
+            }
             accounting_headers = {
                 "Authorization": f"Bearer {accounting_login.json()['access_token']}"
             }
