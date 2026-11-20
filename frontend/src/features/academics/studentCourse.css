@@ -136,7 +136,8 @@
   margin: 0;
 }
 .student-course__group {
-  margin-bottom: 0.75rem;
+  margin: 0 8px 0.75rem;
+  overflow: hidden;
 }
 .student-course__group summary {
   padding: 0.8rem 1rem;

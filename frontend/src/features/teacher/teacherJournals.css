@@ -90,17 +90,23 @@
 
 .teacher-journal__tabs {
   display: flex;
-  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 4px;
   margin: 12px 0 18px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--line);
+  padding: 5px;
+  border: 1px solid #e8dad1;
+  border-radius: 13px;
+  background: #f2e7e2;
 }
 
 .teacher-journal__tabs button {
   min-height: 42px;
   padding: 9px 16px;
+  position: relative;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 9px;
   background: transparent;
   color: var(--muted);
   font-weight: 700;
@@ -108,9 +114,10 @@
 }
 
 .teacher-journal__tabs button[aria-selected='true'] {
-  border-color: #ead8cf;
-  background: #fff9f4;
-  color: var(--accent);
+  border-color: transparent;
+  background: #781f32;
+  color: #fff;
+  box-shadow: 0 3px 9px rgb(120 31 50 / 13%);
 }
 
 .teacher-journal__panel {

@@ -55,6 +55,16 @@
   list-style: none;
   overflow-wrap: anywhere;
 }
+.student-course .announcement-feed,
+.student-course .announcement-feed li,
+.student-course .announcement-feed details,
+.student-course .announcement-feed summary,
+.student-course .announcement-feed p {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 
 .student-course .announcement-feed,
 .student-course .announcement-feed li,

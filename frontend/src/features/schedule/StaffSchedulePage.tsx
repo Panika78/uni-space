@@ -1805,7 +1805,6 @@ function StaffSchedulePageContent() {
             labelOverrides={
               selectedResourceName ? { [selectedResourceId]: selectedResourceName } : {}
             }
-            clearLabel="Очистить выбор"
             onForbidden={denyAccess}
             onChange={(ids) => {
               if (ids.length) return

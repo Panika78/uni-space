@@ -1367,8 +1367,10 @@ function FinalResultsSection({
         : 'Экзамен'
   return (
     <section className="journal-finals" aria-labelledby="journal-finals-title">
-      <h2 id="journal-finals-title">Итоги аттестации · {title}</h2>
-      <p>Итог выставляется вручную; сумма баллов не преобразуется в оценку автоматически.</p>
+      <div className="journal-finals-intro">
+        <h2 id="journal-finals-title">Итоги аттестации · {title}</h2>
+        <p>Итог выставляется вручную; сумма баллов не преобразуется в оценку автоматически.</p>
+      </div>
       {loading ? (
         <LoadingState title="Загружаем итоги…" variant="compact" />
       ) : error ? (
@@ -1378,7 +1380,7 @@ function FinalResultsSection({
       ) : rosterError ? (
         <QueryError error={rosterError} retry={retryRoster} />
       ) : (
-        <div className="journal-student-list">
+        <div className="journal-student-list journal-student-list--final">
           {rows.map((row) => {
             const key = `${scope}:final:${row.student_id}`
             const value =

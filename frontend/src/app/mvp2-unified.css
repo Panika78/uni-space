@@ -705,6 +705,23 @@
   background: #fffefd;
   box-shadow: 0 8px 24px rgb(66 31 37 / 5%);
 }
+.mvp2-role-surface .teacher-journal .journal-finals-intro {
+  margin: 6px 0 14px;
+  padding: 22px 25px;
+  border: 1px solid #e8dad1;
+  border-radius: 17px;
+  background: #fffefd;
+  box-shadow: 0 8px 24px rgb(66 31 37 / 5%);
+}
+.mvp2-role-surface .teacher-journal .journal-finals-intro h2 {
+  margin: 0 0 7px;
+  font-size: 21px;
+}
+.mvp2-role-surface .teacher-journal .journal-finals-intro p {
+  margin: 0;
+  color: #71666a;
+  line-height: 1.5;
+}
 .mvp2-role-surface .staff-journal .journal-finals-intro h3 {
   margin: 0 0 7px;
   font-size: 21px;
@@ -736,6 +753,28 @@
 .mvp2-role-surface .staff-journal .journal-student-list--final {
   gap: 0;
   border-radius: 0 0 14px 14px;
+}
+.mvp2-role-surface .teacher-journal .journal-student-list--final {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid #eadbd3;
+  border-radius: 14px;
+  background: #fffefd;
+}
+.mvp2-role-surface .teacher-journal .journal-student-list--final .journal-student--final {
+  grid-template-columns: minmax(190px, 1fr) minmax(0, 2.3fr);
+  gap: 16px;
+  padding: 14px 16px;
+  border: 0;
+  border-bottom: 1px solid #eee3dd;
+  border-radius: 0;
+  box-shadow: none;
+}
+.mvp2-role-surface .teacher-journal .journal-student--final .journal-retake-fields {
+  grid-column: 2;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 12px;
 }
 .mvp2-role-surface .staff-journal .journal-student--final {
   grid-template-columns: minmax(190px, 1fr) minmax(0, 2.3fr);
@@ -1799,10 +1838,9 @@
 @media (min-width: 801px) {
   .mvp2-role-surface .staff-applications__filters {
     display: grid;
-    grid-template-columns: minmax(140px, 1.35fr) repeat(
-        4,
-        minmax(120px, 1fr)
-      ) max-content max-content;
+    grid-template-columns:
+      minmax(140px, 1.35fr) repeat(4, minmax(120px, 1fr))
+      max-content max-content;
     align-items: end;
   }
   .mvp2-role-surface .staff-applications__filters > label,
@@ -1824,7 +1862,7 @@
 .mvp2-role-surface .staff-news-workspace.is-creating {
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.95fr);
-  align-items: start;
+  align-items: stretch;
   gap: 18px;
   margin-top: 18px;
 }
@@ -1851,6 +1889,7 @@
 }
 .mvp2-role-surface .staff-news-publications {
   min-width: 0;
+  height: 100%;
   padding: 22px;
   border: 1px solid #e8dad1;
   border-radius: 19px;
@@ -2293,6 +2332,52 @@
   .mvp2-role-surface .staff-applications__dialog .staff-applications__actions {
     display: grid;
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .mvp2-role-surface .admin-users__toolbar {
+    display: block;
+  }
+  .mvp2-role-surface .admin-users a.admin-users__create {
+    width: 100%;
+  }
+  .mvp2-role-surface .admin-users__table-wrap {
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .mvp2-role-surface .admin-users__table tr {
+    margin: 0 0 14px;
+    padding: 15px 16px;
+    border: 1px solid #e1cec4;
+    border-radius: 17px;
+    background: #fffefd;
+    box-shadow: 0 7px 18px rgb(66 31 37 / 7%);
+  }
+  .mvp2-role-surface .admin-users__table td:last-child {
+    padding-top: 7px;
+  }
+  .mvp2-role-surface .admin-users__detail {
+    display: inline-flex;
+    min-height: 36px;
+    align-items: center;
+    padding: 5px 10px;
+    border: 1px solid #e2cbc2;
+    border-radius: 9px;
+    background: #fffefd;
+    text-decoration: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .mvp2-student-surface .academics-table tr {
+    margin-bottom: 14px;
+    border-color: #e1cec4;
+    border-radius: 19px;
+    box-shadow: 0 7px 18px rgb(66 31 37 / 7%);
   }
 }
 .mvp2-role-surface .admin-user-detail__grid:not(.has-permissions) {

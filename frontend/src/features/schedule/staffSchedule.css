@@ -61,6 +61,11 @@
   font-size: 13px;
   font-weight: 650;
 }
+.staff-schedule__resource-tabs > span,
+.staff-schedule__picker > label {
+  font-size: 15px;
+  font-weight: 700;
+}
 .staff-schedule__resource-tabs .staff-schedule__tabs {
   min-height: 44px;
   align-items: center;
