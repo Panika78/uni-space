@@ -220,7 +220,11 @@ try {
   await page.getByLabel('Логин или ФИО').fill('browser-')
   await page.getByRole('button', { name: 'Найти', exact: true }).focus()
   await page.keyboard.press('Enter')
-  await page.locator('.admin-users__table tbody tr').filter({ hasText: 'browser-' }).first().waitFor()
+  await page
+    .locator('.admin-users__table tbody tr')
+    .filter({ hasText: 'browser-' })
+    .first()
+    .waitFor()
   await checkWidth()
   // Real keyset pagination, using only fictional accounts in the isolated fixture DB.
   for (let i = 0; i < 21; i++) {
