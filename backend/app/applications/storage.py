@@ -24,6 +24,7 @@ from pypdf import PdfReader
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_FILES = 5
 MAX_TOTAL_BYTES = 50 * 1024 * 1024
+MAX_IMAGE_PIXELS = 20_000_000
 CHUNK_BYTES = 64 * 1024
 ALLOWED_TYPES = {"application/pdf", "image/jpeg", "image/png"}
 _SAFE_EXTENSION = {"application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png"}
@@ -73,6 +74,9 @@ def _valid_document(path: Path, mime_type: str) -> bool:
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(path) as image:
                 if image.format not in {"JPEG", "PNG"}:
+                    return False
+                width, height = image.size
+                if width <= 0 or height <= 0 or width * height > MAX_IMAGE_PIXELS:
                     return False
                 image.verify()
             with Image.open(path) as image:
