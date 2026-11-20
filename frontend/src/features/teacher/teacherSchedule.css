@@ -18,6 +18,8 @@
   width: auto;
   flex-basis: auto;
   min-width: 68px;
+  margin-inline: 3px;
+  padding-inline: 17px;
   white-space: nowrap;
 }
 .teacher-schedule-days {
