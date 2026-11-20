@@ -92,6 +92,27 @@ describe('staff news publishing', () => {
     expect(await screen.findByText('Новость опубликована.')).toBeInTheDocument()
   })
 
+  it('shows recent publications beside the new editor and opens them for editing', async () => {
+    const published = {
+      ...draft,
+      is_published: true,
+      published_at: '2026-11-15T12:00:00Z',
+    }
+    apiFetch.mockImplementation((path: string | URL | Request) => {
+      if (String(path) === '/api/v1/staff/news?limit=100')
+        return Promise.resolve({ items: [published], next_cursor: null })
+      if (String(path) === '/api/v1/staff/news/41') return Promise.resolve(published)
+      return Promise.resolve({ items: [], next_cursor: null })
+    })
+    const user = userEvent.setup()
+    renderPage('/staff/news/new')
+    expect(await screen.findByRole('heading', { name: 'Публикации' })).toBeInTheDocument()
+    expect(await screen.findByText(published.title)).toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: 'Редактировать' }))
+    expect(await screen.findByRole('heading', { name: published.title })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Снять с публикации' })).toBeInTheDocument()
+  })
+
   it('allows editing an existing university news item', async () => {
     const published = {
       ...draft,

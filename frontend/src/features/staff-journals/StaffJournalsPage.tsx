@@ -318,15 +318,27 @@ function GroupJournal({
     const readPath = `${path}/final-results`
     return (
       <>
-        <h3>
-          Итоги аттестации ·{' '}
-          {
-            { exam: 'Экзамен', graded_pass: 'Дифференцированный зачёт', pass_fail: 'Зачёт' }[
-              attestation
-            ]
-          }
-        </h3>
+        <div className="journal-finals-intro">
+          <h3>Итоговая аттестация</h3>
+          <p>Итоговая оценка выставляется вручную и не вычисляется автоматически из баллов.</p>
+        </div>
         <Search label="Поиск по студентам группы" onSearch={setSearch} />
+        <div className="journal-final-header" aria-hidden="true">
+          <span>Студент</span>
+          <div>
+            <span>
+              Результат ·{' '}
+              {
+                { exam: 'экзамен', graded_pass: 'дифференцированный зачёт', pass_fail: 'зачёт' }[
+                  attestation
+                ]
+              }
+            </span>
+            <span>Дата пересдачи</span>
+            <span>Место пересдачи</span>
+            <span>Действия</span>
+          </div>
+        </div>
         <Pager<Schema['StaffFinalRow']>
           key={search}
           access={access}
@@ -334,7 +346,7 @@ function GroupJournal({
           filters={{ q: search }}
         >
           {(items) => (
-            <div className="journal-student-list">
+            <div className="journal-student-list journal-student-list--final">
               {items.map((row) => (
                 <FinalRow
                   key={row.student_id}
@@ -546,7 +558,7 @@ function StaffJournal({ access }: { access: JournalAccess }) {
       if (value) next.set(key, value)
       else next.delete(key)
     }
-    setParams(next)
+    setParams(next, { preventScrollReset: true })
   }
   const historyScope = `${courseId}:${group}:${tab}:${resource}`
   const [openedScope, setOpenedScope] = useState('')

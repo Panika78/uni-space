@@ -1,6 +1,9 @@
 .student-course {
   overflow-wrap: anywhere;
 }
+.student-course #student-course-title:focus {
+  outline: none;
+}
 .student-course__back {
   display: inline-flex;
   align-items: center;
@@ -57,6 +60,7 @@
   border: 1px solid var(--line);
   border-radius: 13px;
   background: #f2e7e2;
+  background-color: #f2e7e2;
   scrollbar-width: none;
 }
 .student-course__tabs::before {
@@ -153,6 +157,22 @@
   display: grid;
   gap: 0.2rem;
 }
+.student-course__rows--attendance {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  border: 0;
+  background: transparent;
+}
+.student-course__rows--attendance li,
+.student-course__rows--attendance li + li {
+  min-height: 82px;
+  padding: 16px 18px;
+  border: 1px solid #e8dad1;
+  border-radius: 15px;
+  background: #fffefd;
+  box-shadow: 0 5px 16px rgb(66 31 37 / 4%);
+}
 .student-course__rows--attendance li,
 .student-course__rows--assessments li {
   grid-template-columns: minmax(0, 1fr) minmax(0, 12rem);
@@ -170,12 +190,21 @@
   font-weight: 600;
 }
 .attendance-mark[data-status='attended'] {
-  color: #285a3b;
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: #eaf4ec;
+  color: #286444;
 }
 .attendance-mark[data-status='absent'] {
-  color: #873d2a;
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: #fff0d7;
+  color: #925515;
 }
 .attendance-mark[data-status='unmarked'] {
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: #f2ece8;
   color: var(--muted);
 }
 .student-course__more {
@@ -187,6 +216,9 @@
   font-size: 0.875rem;
 }
 @media (max-width: 520px) {
+  .student-course__rows--attendance {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .student-course__rows--attendance li,
   .student-course__rows--assessments li {
     grid-template-columns: minmax(0, 1fr);

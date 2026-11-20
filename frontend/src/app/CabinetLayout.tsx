@@ -544,12 +544,12 @@ function CabinetShell({ children }: { children?: ReactNode }) {
           >
             <Icon name="menu" />
           </button>
-          <span className="topbar-spacer" />
           <span className="topbar-prototype-note" data-testid="prototype-disclaimer">
             Конкурсный прототип
             <br />
             Неофициальный сервис
           </span>
+          <span className="topbar-spacer" />
           {
             <button
               ref={notificationTriggerRef}

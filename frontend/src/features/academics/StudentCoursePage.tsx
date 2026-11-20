@@ -22,7 +22,6 @@ import {
   getMoscowDate,
   lessonKinds,
 } from '../schedule/calendar'
-import { attestationLabels, SessionResult } from './AcademicsPage'
 import { AttendanceMark } from './AttendanceMark'
 import './studentCourse.css'
 
@@ -32,8 +31,6 @@ type Assessment = components['schemas']['StudentCourseAssessment']
 type CoursePage<T> = { items: T[]; next_cursor: string | null }
 
 const tabs = [
-  ['overview', 'Обзор'],
-  ['lessons', 'Занятия'],
   ['assessments', 'Работы и баллы'],
   ['attendance', 'Посещаемость'],
   ['announcements', 'Объявления'],
@@ -55,12 +52,6 @@ const assessmentTypes: Record<Assessment['type'], string> = {
   exam: 'Экзамены',
   other: 'Другие работы',
 }
-const monthFormat = new Intl.DateTimeFormat('ru-RU', {
-  month: 'long',
-  year: 'numeric',
-  timeZone: 'Europe/Moscow',
-})
-
 function useRecoverStudentScope(error: unknown) {
   const client = useQueryClient()
   const changed = error instanceof ApiClientError && error.code === 'student_scope_changed'
@@ -99,7 +90,7 @@ function CourseError({ error, onRetry }: { error: unknown; onRetry: () => void }
 export function StudentCoursePage() {
   const { courseOfferingId = '' } = useParams()
   const [params, setParams] = useSearchParams()
-  const tab = tabs.find(([id]) => id === params.get('tab'))?.[0] ?? 'overview'
+  const tab = tabs.find(([id]) => id === params.get('tab'))?.[0] ?? 'assessments'
   const access = useStudentReadScope()
   const scope = access?.scope ?? null
   const location = useLocation()
@@ -131,20 +122,33 @@ export function StudentCoursePage() {
       tabsElement.style.setProperty('--tab-x', `${selectedButton.offsetLeft - 5}px`)
       tabsElement.style.setProperty('--tab-width', `${selectedButton.offsetWidth}px`)
     }
+    const restoreIndicator = () => {
+      if (document.visibilityState === 'visible') requestAnimationFrame(positionIndicator)
+    }
     positionIndicator()
+    document.addEventListener('visibilitychange', restoreIndicator)
+    window.addEventListener('pageshow', restoreIndicator)
     if (!indicatorReady) {
       const frame = requestAnimationFrame(() => setIndicatorReady(true))
-      return () => cancelAnimationFrame(frame)
+      return () => {
+        cancelAnimationFrame(frame)
+        document.removeEventListener('visibilitychange', restoreIndicator)
+        window.removeEventListener('pageshow', restoreIndicator)
+      }
     }
-    if (typeof ResizeObserver === 'undefined') return
-    const observer = new ResizeObserver(positionIndicator)
-    observer.observe(tabsElement)
-    observer.observe(selectedButton)
-    return () => observer.disconnect()
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(positionIndicator)
+    observer?.observe(tabsElement)
+    observer?.observe(selectedButton)
+    return () => {
+      observer?.disconnect()
+      document.removeEventListener('visibilitychange', restoreIndicator)
+      window.removeEventListener('pageshow', restoreIndicator)
+    }
   }, [indicatorReady, tab])
 
   function selectTab(next: Tab) {
-    setParams(next === 'overview' ? {} : { tab: next }, {
+    setParams(next === 'assessments' ? {} : { tab: next }, {
       state: location.state,
       replace: true,
       preventScrollReset: true,
@@ -182,39 +186,7 @@ export function StudentCoursePage() {
   const source: unknown = location.state?.courseSource
   const previous = source === '/schedule' || source === '/academics' ? source : null
   const course = !access?.isChecking && passport.isSuccess ? passport.data : undefined
-  const attendanceSummary = useQuery({
-    ...readings,
-    queryKey: [...rootKey, 'attendance-summary', course?.term.id],
-    enabled: Boolean(course && tab === 'overview'),
-    queryFn: async ({ signal }) => {
-      const lessons: Lesson[] = []
-      let cursor: string | null = null
-      do {
-        const query: string = cursor ? `?${new URLSearchParams({ cursor })}` : ''
-        const page: CoursePage<Lesson> = await getStudentRead<CoursePage<Lesson>>(
-          `${path}/lessons${query}`,
-          signal,
-          scope,
-          course!.term.id,
-        )
-        lessons.push(...page.items)
-        cursor = page.next_cursor
-      } while (cursor)
-      return lessons
-    },
-  })
-
   function renderPanelContent(panelTab: Tab) {
-    if (panelTab === 'overview')
-      return (
-        <CourseOverview
-          course={course!}
-          lessons={attendanceSummary.data}
-          attendancePending={attendanceSummary.isPending}
-          attendanceError={attendanceSummary.isError}
-          onRetryAttendance={() => void attendanceSummary.refetch()}
-        />
-      )
     if (panelTab === 'announcements') {
       return <StudentAnnouncementFeed courseId={courseOfferingId} />
     }
@@ -239,13 +211,7 @@ export function StudentCoursePage() {
         termId={course!.term.id}
         empty="Занятий нет"
       >
-        {(items) =>
-          panelTab === 'lessons' ? (
-            <CourseLessons items={items} />
-          ) : (
-            <CourseAttendance items={items} />
-          )
-        }
+        {(items) => <CourseAttendance items={items} />}
       </CourseList>
     )
   }
@@ -332,77 +298,6 @@ export function StudentCoursePage() {
         </>
       )}
     </section>
-  )
-}
-
-function CourseOverview({
-  course,
-  lessons,
-  attendancePending,
-  attendanceError,
-  onRetryAttendance,
-}: {
-  course: Course
-  lessons?: Lesson[]
-  attendancePending: boolean
-  attendanceError: boolean
-  onRetryAttendance: () => void
-}) {
-  const marked = lessons?.filter((lesson) => lesson.attendance_status !== 'unmarked').length ?? 0
-  const lessonCount = lessons?.length ?? 0
-  return (
-    <dl className="student-course__overview">
-      <div>
-        <dt>Набрано баллов</dt>
-        <dd>
-          {course.assessment_count ? (
-            <>
-              {course.graded_assessment_count ? (
-                <strong>
-                  {course.total_score} / {course.max_score}
-                </strong>
-              ) : (
-                <>
-                  <strong>Не выставлено</strong>
-                  <p>Максимум {course.max_score}</p>
-                </>
-              )}
-              <p>
-                Оценено {course.graded_assessment_count} из {course.assessment_count}
-              </p>
-            </>
-          ) : (
-            'Работ нет'
-          )}
-        </dd>
-      </div>
-      <div>
-        <dt>Посещаемость</dt>
-        <dd>
-          <strong>
-            {attendanceError ? '—' : attendancePending ? '…' : `${marked} / ${lessonCount}`}
-          </strong>
-          <p>
-            {attendanceError ? (
-              <button type="button" onClick={onRetryAttendance}>
-                Повторить загрузку
-              </button>
-            ) : attendancePending ? (
-              'Загрузка занятий'
-            ) : (
-              'Отмеченных занятий'
-            )}
-          </p>
-        </dd>
-      </div>
-      <div>
-        <dt>Итоговая аттестация</dt>
-        <dd>
-          <SessionResult item={course} />
-          <p>{attestationLabels[course.attestation_type]}</p>
-        </dd>
-      </div>
-    </dl>
   )
 }
 
@@ -515,36 +410,6 @@ function groupItems<T, K>(items: T[], key: (item: T) => K) {
     else groups.set(group, [item])
   }
   return groups
-}
-
-function CourseLessons({ items }: { items: Lesson[] }) {
-  const months = groupItems(items, (lesson) =>
-    getMoscowDate(new Date(lesson.starts_at)).slice(0, 7),
-  )
-  return Array.from(months, ([month, lessons]) => (
-    <details className="student-course__group" key={month} open>
-      <summary>{monthFormat.format(new Date(`${month}-15T12:00:00Z`))}</summary>
-      <ul className="student-course__rows">
-        {lessons.map((lesson) => (
-          <li key={lesson.id}>
-            <strong>
-              <LessonTime lesson={lesson} />
-            </strong>
-            <span>
-              {lessonKinds[lesson.kind]}
-              {lesson.teacher && ` · ${lesson.teacher.name}`}
-            </span>
-            {lesson.rooms.length > 0 && (
-              <span>
-                {lesson.rooms.map((room) => `${room.building.name} · ${room.name}`).join(', ')}
-              </span>
-            )}
-            <LessonStatus lesson={lesson} />
-          </li>
-        ))}
-      </ul>
-    </details>
-  ))
 }
 
 function CourseAttendance({ items }: { items: Lesson[] }) {

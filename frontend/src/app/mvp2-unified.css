@@ -681,6 +681,118 @@
   border-radius: 14px;
   background: #fffefd;
 }
+.mvp2-role-surface .staff-journal .journal-finals-intro {
+  margin: 6px 0 14px;
+  padding: 22px 25px;
+  border: 1px solid #e8dad1;
+  border-radius: 17px;
+  background: #fffefd;
+  box-shadow: 0 8px 24px rgb(66 31 37 / 5%);
+}
+.mvp2-role-surface .staff-journal .journal-finals-intro h3 {
+  margin: 0 0 7px;
+  font-size: 21px;
+}
+.mvp2-role-surface .staff-journal .journal-finals-intro p {
+  margin: 0;
+  color: #71666a;
+  line-height: 1.5;
+}
+.mvp2-role-surface .staff-journal .journal-final-header {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) minmax(0, 2.3fr);
+  gap: 16px;
+  padding: 12px 16px;
+  border: 1px solid #eadbd3;
+  border-bottom: 0;
+  border-radius: 14px 14px 0 0;
+  background: #faf6f3;
+  color: #71666a;
+  font-size: 12px;
+  font-weight: 700;
+}
+.mvp2-role-surface .staff-journal .journal-final-header > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(145px, 0.9fr);
+  align-items: center;
+  gap: 12px;
+}
+.mvp2-role-surface .staff-journal .journal-student-list--final {
+  gap: 0;
+  border-radius: 0 0 14px 14px;
+}
+.mvp2-role-surface .staff-journal .journal-student--final {
+  grid-template-columns: minmax(190px, 1fr) minmax(0, 2.3fr);
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: 0;
+  box-shadow: none;
+}
+.mvp2-role-surface .staff-journal .journal-student--final .journal-retake-fields {
+  display: grid;
+  grid-column: 2;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+}
+.mvp2-role-surface .staff-journal .journal-student--final .journal-retake-fields label {
+  min-width: 0;
+  gap: 6px;
+  color: #655b5e;
+  font-size: 12px;
+  font-weight: 650;
+}
+.mvp2-role-surface
+  .staff-journal
+  .journal-student--final
+  .journal-retake-fields
+  :is(input, select) {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 10px;
+  border: 1px solid #e5d1c8;
+  border-radius: 10px;
+  background: #fffefd;
+  color: #332a2d;
+}
+.mvp2-role-surface .staff-journal .journal-student--final .journal-retake-fields > div {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+.mvp2-role-surface .staff-journal .journal-student--final .journal-retake-fields > div button {
+  min-width: 130px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid #dfccc4;
+  border-radius: 9px;
+  background: #fffefd;
+  color: #781f32;
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.mvp2-role-surface
+  .staff-journal
+  .journal-student--final
+  .journal-retake-fields
+  > div
+  button[type='submit'] {
+  border-color: #781f32;
+  background: #781f32;
+  color: #fff;
+}
+.mvp2-role-surface .staff-journal .journal-student--final > [role='status'],
+.mvp2-role-surface .staff-journal .journal-student--final > .journal-save {
+  grid-column: 2;
+}
 .mvp2-role-surface .staff-journal .journal-student {
   display: grid;
   grid-template-columns: minmax(200px, 1.2fr) minmax(180px, 1fr) minmax(100px, auto);
@@ -1626,6 +1738,181 @@
   background: var(--accent, #781f32);
   color: #fff;
 }
+.mvp2-role-surface .staff-student-filters button[type='submit'] {
+  display: inline-flex;
+  min-height: 46px;
+  align-self: end;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 18px;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.mvp2-role-surface .staff-applications__filters .staff-applications__apply {
+  min-height: 44px;
+  padding: 10px 18px;
+  line-height: 1.2;
+  text-align: center;
+}
+.mvp2-role-surface .staff-applications__filters .staff-applications__reset {
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 1px solid #d8c4bc;
+  background: #fffefd;
+  color: #781f32;
+  line-height: 1.2;
+  text-align: center;
+}
+.mvp2-role-surface .staff-applications__filters .staff-applications__reset:hover {
+  border-color: #781f32;
+  background: #f8efeb;
+}
+.mvp2-role-surface .staff-applications__filters > label {
+  flex: 1 1 128px;
+}
+.mvp2-role-surface .staff-applications__filters > label:first-child {
+  flex: 1.35 1 172px;
+}
+.mvp2-role-surface
+  .staff-applications__filters
+  > :is(.staff-applications__apply, .staff-applications__reset) {
+  flex: 0 0 auto;
+  align-self: end;
+}
+@media (min-width: 801px) {
+  .mvp2-role-surface .staff-applications__filters {
+    display: grid;
+    grid-template-columns: minmax(140px, 1.35fr) repeat(
+        4,
+        minmax(120px, 1fr)
+      ) max-content max-content;
+    align-items: end;
+  }
+  .mvp2-role-surface .staff-applications__filters > label,
+  .mvp2-role-surface .staff-applications__filters > label:first-child {
+    flex: initial;
+  }
+}
+@media (max-width: 800px) {
+  .mvp2-role-surface .staff-applications__filters > label {
+    flex: 1 1 100%;
+  }
+  .mvp2-role-surface
+    .staff-applications__filters
+    > :is(.staff-applications__apply, .staff-applications__reset) {
+    flex: 1 1 calc(50% - 0.5rem);
+  }
+}
+
+.mvp2-role-surface .staff-news-workspace.is-creating {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.95fr);
+  align-items: start;
+  gap: 18px;
+  margin-top: 18px;
+}
+.mvp2-role-surface .staff-news-workspace.is-creating .staff-news-editor {
+  min-width: 0;
+  margin: 0;
+  border-color: #e8dad1;
+  border-radius: 19px;
+  background: #fffefd;
+  box-shadow: 0 8px 24px rgb(66 31 37 / 5%);
+}
+.mvp2-role-surface .staff-news-workspace.is-creating .staff-news-editor form {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.mvp2-role-surface .staff-news-page :is(input, textarea)::placeholder {
+  color: #a49698;
+  opacity: 1;
+}
+.mvp2-role-surface .staff-news-publications {
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid #e8dad1;
+  border-radius: 19px;
+  background: #fffefd;
+  box-shadow: 0 8px 24px rgb(66 31 37 / 5%);
+}
+.mvp2-role-surface .staff-news-publications > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.mvp2-role-surface .staff-news-publications h2 {
+  margin: 0;
+  font-size: 21px;
+}
+.mvp2-role-surface .staff-news-publications > header > span,
+.mvp2-role-surface .staff-news-publications li > p > span {
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: #f2ece8;
+  color: #71666a;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.mvp2-role-surface .staff-news-publications ul {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.mvp2-role-surface .staff-news-publications li {
+  display: grid;
+  gap: 10px;
+  padding: 16px 0;
+  border-bottom: 1px solid #eadbd3;
+}
+.mvp2-role-surface .staff-news-publications li:last-child {
+  border-bottom: 0;
+}
+.mvp2-role-surface .staff-news-publications li > p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #71666a;
+  font-size: 12px;
+}
+.mvp2-role-surface .staff-news-publications li > p > span.is-published {
+  background: #eaf4ec;
+  color: #286444;
+}
+.mvp2-role-surface .staff-news-publications li > strong {
+  font-size: 14px;
+  line-height: 1.4;
+}
+.mvp2-role-surface .staff-news-publications li > a {
+  justify-self: start;
+  padding: 8px 12px;
+  border: 1px solid #e2cbc2;
+  border-radius: 9px;
+  color: #781f32;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.mvp2-role-surface .staff-news-publications li > a:hover {
+  background: #f8efeb;
+}
+.mvp2-role-surface .staff-news-publications__more {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #dfccc4 !important;
+  background: #fffefd !important;
+  color: #781f32 !important;
+}
 
 .mvp2-role-surface .staff-status-link a {
   color: var(--accent, #781f32);
@@ -2225,6 +2512,10 @@
 }
 
 @media (max-width: 800px) {
+  .mvp2-role-surface .staff-news-workspace.is-creating {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .mvp2-role-surface .admin-user-detail__grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2238,6 +2529,25 @@
   }
   .mvp2-role-surface .staff-journal .journal-attendance-controls button {
     flex: 1 1 auto;
+  }
+  .mvp2-role-surface .staff-journal .journal-final-header {
+    display: none;
+  }
+  .mvp2-role-surface .staff-journal .journal-student--final {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .mvp2-role-surface .staff-journal .journal-student--final .journal-retake-fields {
+    grid-column: 1;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mvp2-role-surface .staff-journal .journal-student--final .journal-retake-fields > div {
+    grid-column: 1;
+    justify-content: flex-start;
+  }
+  .mvp2-role-surface .staff-journal .journal-student--final > [role='status'],
+  .mvp2-role-surface .staff-journal .journal-student--final > .journal-save {
+    grid-column: 1;
   }
 }
 
@@ -2312,6 +2622,10 @@
 }
 
 @media (max-width: 720px) {
+  .mvp2-role-surface .staff-student-filters button[type='submit'] {
+    width: 100%;
+  }
+
   .mvp2-role-surface :is(.teacher-journal__selectors, .journal-work-card) {
     grid-template-columns: minmax(0, 1fr);
   }

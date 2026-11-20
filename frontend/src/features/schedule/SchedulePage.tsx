@@ -538,7 +538,12 @@ export function SchedulePage() {
           Не удалось найти выбранную позицию в расписании. Возможно, расписание изменилось.
         </p>
       )}
-      <AnimatedRegion className="schedule-stage" contentKey={`${mode}-${date}-${query.status}`}>
+      <AnimatedRegion
+        className="schedule-stage"
+        contentKey={`${mode}-${date}-${query.status}`}
+        contentDuration={200}
+        heightDuration={255}
+      >
         {isLoading ? (
           <LoadingState title="Загружаем расписание…" />
         ) : query.isError ? (

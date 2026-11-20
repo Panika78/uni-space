@@ -245,7 +245,7 @@ export function TeacherJournalsPage() {
     }
     if (key === 'lesson' || key === 'assessment')
       next.set('tab', key === 'lesson' ? 'attendance' : 'work')
-    setParams(next)
+    setParams(next, { preventScrollReset: true })
   }
 
   function setSave(key: string, state: SaveState, revision?: number) {

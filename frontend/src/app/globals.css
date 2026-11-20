@@ -613,12 +613,12 @@ textarea {
   flex: 1;
 }
 .topbar-prototype-note {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   overflow-wrap: anywhere;
   color: #74696a;
   font-size: 12px;
   line-height: 1.25;
-  text-align: right;
+  text-align: left;
 }
 .icon-button,
 .avatar-button {
