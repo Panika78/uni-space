@@ -1,6 +1,9 @@
 import asyncio
 import importlib.metadata
+import subprocess
+import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -104,3 +107,27 @@ def test_upload_validation_is_concurrent_but_does_not_block_event_loop(monkeypat
         asyncio.run(exercise_concurrency())
     finally:
         release_workers.set()
+
+
+def test_document_worker_has_hard_cpu_and_address_space_limits():
+    from app.applications.storage import VALIDATION_CPU_SECONDS, VALIDATION_MEMORY_BYTES
+
+    result = subprocess.run(
+        [sys.executable, "-m", "app.applications.validation_worker", "--report-limits"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == f"{VALIDATION_MEMORY_BYTES} {VALIDATION_CPU_SECONDS + 1}"
+
+
+def test_document_validation_process_is_terminated_at_wall_clock_timeout():
+    from app.applications.storage import _run_validation_process
+
+    started = time.monotonic()
+    completed = _run_validation_process(
+        [sys.executable, "-c", "while True: pass"],
+        timeout_seconds=0.1,
+    )
+    assert completed is False
+    assert time.monotonic() - started < 2

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
+from PIL import Image
 
 from app.applications.storage import (
     cleanup_orphans,
@@ -98,6 +99,19 @@ def test_oversized_image_dimensions_are_rejected_before_decode(tmp_path, monkeyp
         stage_upload(BytesIO(b"\x89PNG\r\n\x1a\nvalid signature"), "large.png", tmp_path)
     assert invalid.value.status_code == 422
     assert decoded is False
+
+
+def test_regular_ten_megapixel_jpeg_is_validated_in_bounded_worker(tmp_path):
+    image_bytes = BytesIO()
+    Image.new("RGB", (3162, 3162), "white").save(image_bytes, format="JPEG")
+    image_bytes.seek(0)
+
+    staged = stage_upload(image_bytes, "photo.jpg", tmp_path)
+    try:
+        assert staged.mime_type == "image/jpeg"
+        assert staged.size_bytes == len(image_bytes.getvalue())
+    finally:
+        discard(staged)
 
 
 def test_cleanup_is_repeatable_concurrent_and_preserves_recent_or_referenced_objects(tmp_path):
