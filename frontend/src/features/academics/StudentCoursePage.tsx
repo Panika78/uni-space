@@ -145,7 +145,7 @@ export function StudentCoursePage() {
       document.removeEventListener('visibilitychange', restoreIndicator)
       window.removeEventListener('pageshow', restoreIndicator)
     }
-  }, [indicatorReady, tab])
+  }, [indicatorReady, passport.data, tab])
 
   function selectTab(next: Tab) {
     setParams(next === 'assessments' ? {} : { tab: next }, {
@@ -219,12 +219,16 @@ export function StudentCoursePage() {
   return (
     <section className="section-page student-course" aria-labelledby="student-course-title">
       {previous ? (
-        <button className="student-course__back" onClick={() => void navigate(-1)}>
+        <button
+          className="ui-back-link student-course__back"
+          type="button"
+          onClick={() => void navigate(-1)}
+        >
           <Icon name="left" />
           {previous === '/schedule' ? 'К расписанию' : 'К успеваемости'}
         </button>
       ) : (
-        <Link className="student-course__back" to="/academics">
+        <Link className="ui-back-link student-course__back" to="/academics">
           <Icon name="left" />К успеваемости
         </Link>
       )}
