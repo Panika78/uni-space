@@ -551,12 +551,37 @@
     font-size: 11.5px;
   }
   .staff-schedule__date-controls {
-    gap: 5px;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    grid-template-areas:
+      'previous date next'
+      'today today today'
+      'view view view';
+    align-items: end;
+    gap: 8px;
+    min-width: 0;
+  }
+  .staff-schedule__date-controls > button:first-child {
+    grid-area: previous;
+  }
+  .staff-schedule__date-controls > button[aria-label='Следующий период'] {
+    grid-area: next;
+  }
+  .staff-schedule__date-controls > .staff-schedule__today {
+    grid-area: today;
+    width: 100%;
+    min-height: 42px;
+  }
+  .staff-schedule__date-controls > label {
+    grid-area: date;
+    min-width: 0;
+    width: 100%;
   }
   .staff-schedule__date-controls label {
-    min-width: 120px;
+    min-width: 0;
   }
   .staff-schedule__view {
+    grid-area: view;
     width: 100%;
     justify-content: stretch;
   }
