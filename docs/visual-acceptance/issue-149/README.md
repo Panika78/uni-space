@@ -25,6 +25,7 @@ Further states:
 - The teacher schedule toolbar squeezed “Сегодня” into an arrow-sized button. The button now keeps its intrinsic width.
 - On narrow screens the date label/input wrapped into a narrow extra column and overlapped. The mobile teacher toolbar now uses full-width segmented day/week controls, a three-column previous/today/next row, and a full-width date row.
 - Teacher schedule heading size and lesson-card layout now follow the agreed schedule typography and time/details composition while keeping the teacher-specific lesson type, group, room, and time data.
+- The role cabinet content now uses the reference's 1550 px maximum canvas width, 252 px sidebar, 63 px topbar, v5 surfaces and reduced-motion-safe static ambient background; these overrides are scoped to role-based MVP2 pages, leaving student MVP1 pages unchanged.
 - Browser capture initially caught loading and in-progress transitions. Captures now wait for API-backed lesson cards and transition completion. The final screenshots show stable loaded states.
 - `prefers-reduced-motion: reduce` was exercised for the day/week switch. No transition was observed in the reduced-motion capture.
 

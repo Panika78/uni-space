@@ -4,6 +4,220 @@
   display: contents;
 }
 
+/* Reference v5 shell. These rules are deliberately limited to authenticated MVP2
+   routes so the approved student MVP1 surface is not altered. */
+.mvp2-role-surface .student-shell {
+  min-height: 100vh;
+  background: #f5ebdd;
+  color: #292326;
+}
+
+.mvp2-role-surface .desktop-sidebar {
+  width: 252px;
+  padding: 19px 14px 13px;
+  background: #241a1c;
+}
+
+.mvp2-role-surface .sidebar-brand-link {
+  margin-bottom: 25px;
+}
+.mvp2-role-surface .student-navigation {
+  gap: 4px;
+}
+.mvp2-role-surface .student-navigation__link {
+  min-height: 43px;
+  padding-inline: 11px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+.mvp2-role-surface .student-navigation__link.is-active {
+  background: #3b252a;
+  box-shadow: inset 3px 0 #e5ac56;
+}
+.mvp2-role-surface .sidebar-collapsed .desktop-sidebar {
+  width: 76px;
+}
+.mvp2-role-surface .student-main-column {
+  margin-left: 252px;
+}
+.mvp2-role-surface .sidebar-collapsed .student-main-column {
+  margin-left: 76px;
+}
+.mvp2-role-surface .ambient-canvas {
+  left: 252px;
+  background: #f5ebdd;
+}
+.mvp2-role-surface .sidebar-collapsed .ambient-canvas {
+  left: 76px;
+}
+.mvp2-role-surface .ambient-canvas::before {
+  inset: 0;
+  background:
+    radial-gradient(ellipse 53% 42% at 92% 0%, rgb(186 123 132 / 12%), transparent 72%),
+    radial-gradient(ellipse 54% 50% at 0% 100%, rgb(222 170 127 / 10%), transparent 75%);
+  animation: none;
+}
+.mvp2-role-surface .ambient-orbit {
+  top: -28%;
+  right: -27%;
+  width: min(88vw, 1180px);
+  border-color: rgb(120 31 50 / 4.8%);
+  box-shadow:
+    0 0 0 44px rgb(120 31 50 / 1.5%),
+    0 0 0 45px rgb(120 31 50 / 2.6%),
+    0 0 0 94px rgb(120 31 50 / 1.2%),
+    0 0 0 95px rgb(120 31 50 / 2.1%);
+}
+.mvp2-role-surface .student-topbar {
+  min-height: 63px;
+  padding-inline: 24px;
+  border-color: #e8dad1;
+  background: rgb(255 254 253 / 92%);
+}
+.mvp2-role-surface .student-content {
+  width: min(100%, 1550px);
+  min-height: calc(100vh - 63px);
+  padding: 35px 37px 88px;
+}
+.mvp2-role-surface .section-page,
+.mvp2-role-surface .welcome-card {
+  animation: none;
+}
+.mvp2-role-surface .section-page h1 {
+  margin: 0 0 12px;
+  color: #292326;
+  font-size: clamp(29px, 2.35vw, 36px);
+  font-weight: 760;
+  line-height: 1.13;
+  letter-spacing: -0.035em;
+}
+.mvp2-role-surface .section-page h2 {
+  color: #292326;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.mvp2-role-surface :is(.section-eyebrow, .section-page .section-eyebrow) {
+  margin: 0 0 8px;
+  color: #781f32;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.085em;
+  text-transform: uppercase;
+}
+.mvp2-role-surface :is(.service-subtitle, .teacher-journal__intro) {
+  max-width: 760px;
+  margin: 0 0 25px;
+  color: #71666a;
+  font-size: 15px;
+  line-height: 1.6;
+}
+.mvp2-role-surface
+  :is(
+    .section-page > section,
+    .section-page > article,
+    .staff-journal > section,
+    .teacher-journal__panel,
+    .staff-students-page .staff-student-filters,
+    .staff-news-page form,
+    .admin-users > section,
+    .application-detail-card
+  ) {
+  border: 1px solid #e8dad1;
+  border-radius: 19px;
+  background: #fffefd;
+  box-shadow: 0 8px 24px rgb(66 31 37 / 5%);
+}
+.mvp2-role-surface
+  :is(
+    .staff-journal,
+    .teacher-journal,
+    .staff-applications,
+    .staff-schedule,
+    .staff-students-page,
+    .staff-news-page,
+    .admin-users
+  ) {
+  max-width: 1550px;
+  margin-inline: auto;
+  color: #292326;
+}
+.mvp2-role-surface
+  :is(
+    .staff-journal > section,
+    .teacher-journal__panel,
+    .staff-applications__filters,
+    .staff-schedule__filters,
+    .staff-news-page form,
+    .admin-users > section,
+    .staff-student-filters
+  ) {
+  padding: 22px;
+}
+.mvp2-role-surface :is(.staff-applications__table, .applications-table) {
+  border: 1px solid #e8dad1;
+  border-radius: 15px;
+  background: #fffefd;
+}
+.mvp2-role-surface :is(.staff-applications__table th, .applications-table th) {
+  color: #71666a;
+  background: #f8efeb;
+  font-size: 12px;
+  font-weight: 700;
+}
+.mvp2-role-surface :is(.staff-applications__table td, .applications-table td) {
+  border-color: #eee3dd;
+}
+.mvp2-role-surface
+  :is(
+    .staff-schedule__lesson,
+    .staff-student-card,
+    .staff-news-row,
+    .admin-user-list li,
+    .journal-student,
+    .journal-work-card
+  ) {
+  border: 1px solid #e8dad1;
+  border-radius: 15px;
+  background: #fffefd;
+  box-shadow: 0 4px 14px rgb(66 31 37 / 4%);
+}
+.mvp2-role-surface
+  :is(
+    button.auth-submit,
+    .staff-schedule__primary,
+    .staff-student-filters button,
+    .student-form-actions button,
+    .admin-users button[type='submit']
+  ) {
+  min-height: 42px;
+  border-radius: 10px;
+  background: #781f32;
+  color: #fff;
+  font-weight: 650;
+}
+
+@media (max-width: 1100px) {
+  .mvp2-role-surface .student-content {
+    padding-inline: 25px;
+  }
+}
+@media (max-width: 720px) {
+  .mvp2-role-surface .student-main-column,
+  .mvp2-role-surface .sidebar-collapsed .student-main-column {
+    margin-left: 0;
+  }
+  .mvp2-role-surface .ambient-canvas,
+  .mvp2-role-surface .sidebar-collapsed .ambient-canvas {
+    left: 0;
+  }
+  .mvp2-role-surface .student-content {
+    padding: 25px 18px 54px;
+  }
+  .mvp2-role-surface .student-topbar {
+    padding-inline: 14px;
+  }
+}
 .mvp2-role-surface
   :is(
     .teacher-journal,
