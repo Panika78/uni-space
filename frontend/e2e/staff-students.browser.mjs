@@ -396,7 +396,7 @@ try {
   await heading(page, 'Поиск студентов')
   assert.equal(new URL(page.url()).searchParams.get('q'), 'Ревью27')
   await page.getByLabel('Курс').selectOption('1')
-  await page.getByText('Студенты не найдены. Измените запрос или фильтры.').waitFor()
+  await page.getByRole('heading', { name: 'Студенты не найдены', exact: true }).waitFor()
   assert.equal(new URL(page.url()).searchParams.has('cursor'), false)
   assert.equal(new URL(page.url()).searchParams.has('back'), false)
   await page.goto(`${baseURL}/staff/students/9223372036854775807`)
