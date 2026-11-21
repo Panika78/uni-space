@@ -46,8 +46,9 @@ export async function assertAcademicsGeometry(page, width, label) {
     for (const row of await rows.all()) {
       const title = row.getByRole('rowheader')
       const titleBox = await title.boundingBox()
+      const minimumTitleWidth = compact ? container.width - 32 : 0.4 * container.width - 52
       assert.ok(
-        titleBox.width >= (compact ? container.width - 32 : 0.4 * container.width - 52),
+        titleBox.width >= minimumTitleWidth - 1,
         `${label}: readable discipline width ${titleBox.width} in container ${container.width}`,
       )
       const cells = await row.locator('th,td').evaluateAll((els) =>

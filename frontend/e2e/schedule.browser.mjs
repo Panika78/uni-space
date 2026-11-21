@@ -443,7 +443,15 @@ async function checkPreferences(page, width) {
           document.querySelector('.student-main-column'),
         ).marginLeft
         const expected =
-          width <= 720 ? '0px' : width <= 1050 ? '230px' : width <= 1450 ? '252px' : '272px'
+          width <= 720
+            ? '0px'
+            : width <= 920
+              ? '76px'
+              : width <= 1050
+                ? '230px'
+                : width <= 1450
+                  ? '252px'
+                  : '272px'
         return margin === expected
       }, viewport)
       for (const direction of ['rtl', 'ltr']) {
