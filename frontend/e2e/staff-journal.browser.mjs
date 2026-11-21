@@ -416,7 +416,10 @@ try {
 
   async function logout(page) {
     await page.getByRole('button', { name: 'Меню пользователя' }).click()
-    await page.locator('#user-menu-panel').getByRole('button', { name: 'Выйти', exact: true }).click()
+    await page
+      .locator('#user-menu-panel')
+      .getByRole('button', { name: 'Выйти', exact: true })
+      .click()
     await page.getByRole('dialog').getByRole('button', { name: 'Выйти', exact: true }).click()
     await page.waitForURL('**/login')
   }
