@@ -143,11 +143,13 @@ def main() -> None:
     logins = [f"{name}-{suffix}" for name in names]
     moscow = ZoneInfo("Europe/Moscow")
     now = datetime.now(moscow)
-    starts_at = (now - timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
+    starts_at = (now - timedelta(days=2)).replace(
+        hour=12, minute=0, second=0, microsecond=0
+    )
     lesson_day = starts_at.date()
     today_starts_at = now.replace(minute=0, second=0, microsecond=0)
     # New roster rows still need to be editable for older lessons in the same group.
-    membership_changed_at = today_starts_at
+    membership_changed_at = starts_at - timedelta(minutes=30)
     future_starts_at = (now + timedelta(days=1)).replace(minute=0, second=0, microsecond=0)
 
     with SessionLocal.begin() as db:
@@ -318,7 +320,7 @@ def main() -> None:
         subgroup_lesson = Lesson(
             course_offering_id=courses[0].id,
             teacher_id=teachers[0].id,
-            starts_at=starts_at - timedelta(minutes=30),
+            starts_at=membership_changed_at,
             ends_at=starts_at + timedelta(minutes=60),
             kind="lab",
             created_by_user_id=users[0].id,

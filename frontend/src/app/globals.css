@@ -636,7 +636,8 @@ textarea {
   flex: 1;
 }
 .topbar-prototype-note {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
   overflow-wrap: anywhere;
   color: #74696a;
   font-size: 12px;

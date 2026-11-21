@@ -188,6 +188,17 @@ function useRowSave(access: JournalAccess, readPath: string, studentId: string, 
       }))
     },
     discardDraft: () => update(() => ({})),
+    discardRetakeDraft: (confirmedGrade: string) =>
+      update((old) => {
+        if (!old.draft) return old
+        const { grade } = old.draft
+        const hasGradeDraft = grade !== undefined && grade !== confirmedGrade
+        return {
+          ...old,
+          draft: hasGradeDraft ? { grade } : undefined,
+          baseline: hasGradeDraft ? old.baseline : undefined,
+        }
+      }),
     acceptBaseline: (baseline: string) => update((old) => ({ draft: old.draft, baseline })),
   }
 }
@@ -493,8 +504,7 @@ export function FinalRow({
   }
   function closeRetake() {
     if (save.busy) return
-    save.change('date', initial.date, baseline, initial)
-    save.change('location', initial.location, baseline, initial)
+    save.discardRetakeDraft(initial.grade)
     setRetakeOpen(false)
   }
   const resultControl = (
