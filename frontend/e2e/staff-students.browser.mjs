@@ -165,11 +165,14 @@ try {
   assert.equal(lostWrites, 1)
   await statusDialog.getByRole('button', { name: 'Проверить квитанцию операции' }).click()
   await statusDialog.getByText(/Операция подтверждена: Выпускник/).waitFor()
+  await statusDialog.getByText('Предыдущий статус: Выпускник', { exact: true }).waitFor()
   assert.equal(lostWrites, 1)
   assert.ok(studentReads >= 2, 'status.edit also allows scoped student search and detail reads')
   assert.equal(
-    await statusDialog.getByRole('button', { name: 'Сверить актуальное состояние' }).count(),
-    1,
+    await statusDialog
+      .getByRole('button', { name: 'Повторно проверить актуальное состояние' })
+      .count(),
+    0,
   )
   assert.equal(
     await statusDialog.getByRole('button', { name: 'Подтвердить изменение' }).isDisabled(),
