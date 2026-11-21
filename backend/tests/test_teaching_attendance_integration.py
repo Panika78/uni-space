@@ -375,7 +375,6 @@ def test_cancelled_and_moved_lessons_are_not_editable(teaching_attendance, state
 @pytest.mark.parametrize("when", ["past", "today", "future"])
 def test_teacher_can_mark_scheduled_lessons_regardless_of_date(teaching_attendance, when):
     s = teaching_attendance
-    assert s.write("attended").status_code == 200
     now = datetime.now(UTC)
     starts_at = {
         "past": now - timedelta(days=1),
@@ -387,7 +386,7 @@ def test_teacher_can_mark_scheduled_lessons_regardless_of_date(teaching_attendan
     s.db.flush()
 
     initial = {row["student_id"]: row for row in s.read().json()["items"]}
-    assert initial[str(s.students[0].id)]["can_edit"] is True
+    assert all(row["can_edit"] for row in initial.values())
     assert s.write("absent").status_code == 200
     assert s.read(student_id=str(s.students[0].id)).json()["items"][0]["status"] == "absent"
     if when != "past":

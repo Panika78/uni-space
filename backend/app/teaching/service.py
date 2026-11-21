@@ -396,7 +396,11 @@ def list_journal_attendance(db, course_id, group_id, lesson_id, params):
     can_edit = and_(
         Lesson.status == "scheduled",
         or_(Attendance.lesson_id.is_(None), membership_matches),
-        or_(Attendance.lesson_id.is_not(None), Lesson.starts_at >= Student.membership_changed_at),
+        or_(
+            Attendance.lesson_id.is_not(None),
+            Student.membership_version == 0,
+            Lesson.starts_at >= Student.membership_changed_at,
+        ),
     )
     query = (
         select(

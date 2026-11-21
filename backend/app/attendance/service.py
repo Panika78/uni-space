@@ -82,9 +82,13 @@ def update_attendance(db: Session, user: User, lesson_id: int, student_id: int, 
                 raise HTTPException(404, "not_found")
         elif not current and mark is None:
             raise HTTPException(404, "not_found")
-        # No roster history exists: only the latest membership boundary is kept.
-        # A shared lesson or returning to an old group cannot reopen old writes.
-        if mark is None and lesson.starts_at < student.membership_changed_at:
+        # Fresh roster rows can be backfilled. After a real group/subgroup transfer,
+        # the latest membership boundary still prevents reopening prior periods.
+        if (
+            mark is None
+            and (staff or student.membership_version > 0)
+            and lesson.starts_at < student.membership_changed_at
+        ):
             raise HTTPException(404, "not_found")
         if not staff and lesson.status != "scheduled":
             raise HTTPException(409, "invalid_transition")

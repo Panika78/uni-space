@@ -145,8 +145,9 @@ def main() -> None:
     now = datetime.now(moscow)
     starts_at = (now - timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
     lesson_day = starts_at.date()
-    membership_changed_at = starts_at - timedelta(days=10)
     today_starts_at = now.replace(minute=0, second=0, microsecond=0)
+    # New roster rows still need to be editable for older lessons in the same group.
+    membership_changed_at = today_starts_at
     future_starts_at = (now + timedelta(days=1)).replace(minute=0, second=0, microsecond=0)
 
     with SessionLocal.begin() as db:
