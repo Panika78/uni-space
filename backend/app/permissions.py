@@ -89,13 +89,14 @@ def get_authorization_context(db: Session, user: User) -> AuthorizationContext:
         grant.permission_code == PermissionCode.STUDENTS_STATUS_EDIT
         for grant in context.permissions
     ) and not any(
-        grant.permission_code == PermissionCode.STUDENTS_READ
-        for grant in context.permissions
+        grant.permission_code == PermissionCode.STUDENTS_READ for grant in context.permissions
     ):
         # Status editing is only exposed from a resolved student record, so it
         # carries the least read access needed for search and the student card.
         context.permissions.append(
-            EffectivePermission(permission_code=PermissionCode.STUDENTS_READ, scope_org_unit_id=None)
+            EffectivePermission(
+                permission_code=PermissionCode.STUDENTS_READ, scope_org_unit_id=None
+            )
         )
     return context
 

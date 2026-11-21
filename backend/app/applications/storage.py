@@ -7,6 +7,8 @@ import fcntl
 import hashlib
 import os
 import re
+import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -24,6 +26,10 @@ from pypdf import PdfReader
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_FILES = 5
 MAX_TOTAL_BYTES = 50 * 1024 * 1024
+MAX_IMAGE_PIXELS = 10_000_000
+VALIDATION_MEMORY_BYTES = 256 * 1024 * 1024
+VALIDATION_CPU_SECONDS = 8
+VALIDATION_TIMEOUT_SECONDS = 10
 CHUNK_BYTES = 64 * 1024
 ALLOWED_TYPES = {"application/pdf", "image/jpeg", "image/png"}
 _SAFE_EXTENSION = {"application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png"}
@@ -74,6 +80,9 @@ def _valid_document(path: Path, mime_type: str) -> bool:
             with Image.open(path) as image:
                 if image.format not in {"JPEG", "PNG"}:
                     return False
+                width, height = image.size
+                if width <= 0 or height <= 0 or width * height > MAX_IMAGE_PIXELS:
+                    return False
                 image.verify()
             with Image.open(path) as image:
                 image.load()
@@ -86,6 +95,28 @@ def _valid_document(path: Path, mime_type: str) -> bool:
         return False
     except Exception:
         return False
+
+
+def _run_validation_process(command: list[str], *, timeout_seconds: float) -> bool:
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout_seconds,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def _validate_document_isolated(path: Path, mime_type: str) -> bool:
+    """Validate in a killable process with hard CPU/address-space limits."""
+    return _run_validation_process(
+        [sys.executable, "-m", "app.applications.validation_worker", str(path), mime_type],
+        timeout_seconds=VALIDATION_TIMEOUT_SECONDS,
+    )
 
 
 def detect_mime(header: bytes, filename: str) -> str:
@@ -140,7 +171,7 @@ def stage_upload(source: BinaryIO, filename: str, root: Path) -> StagedAttachmen
         mime = detect_mime(prefix, filename)
         if mime not in ALLOWED_TYPES:
             raise HTTPException(422, "invalid_attachment")
-        if not _valid_document(path, mime):
+        if not _validate_document_isolated(path, mime):
             raise HTTPException(422, "invalid_attachment")
         extension = _SAFE_EXTENSION[mime]
         key = f"{uuid.uuid4().hex}{extension}"

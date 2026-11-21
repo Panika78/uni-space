@@ -917,3 +917,43 @@ it('hides the cancel dialog and schedule data immediately when the server revoke
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   expect(screen.queryByText('Алгоритмы')).not.toBeInTheDocument()
 })
+
+it('closes catalog pickers on outside click and Escape without closing the editor', async () => {
+  const user = userEvent.setup()
+  mount()
+  await selectGroup(user)
+  await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
+  const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
+  const groups = within(dialog).getByRole('combobox', { name: 'Группы' })
+
+  await user.click(groups)
+  await within(dialog).findByRole('listbox', { name: 'Группы: варианты' })
+  await user.click(within(dialog).getByRole('heading', { name: 'Добавить занятие' }))
+  expect(within(dialog).queryByRole('listbox', { name: 'Группы: варианты' })).toBeNull()
+
+  await user.click(groups)
+  const option = await within(dialog).findByRole('option', { name: /^ИВТ-21\s/ })
+  option.focus()
+  await user.keyboard('{Escape}')
+  expect(within(dialog).queryByRole('listbox', { name: 'Группы: варианты' })).toBeNull()
+  expect(dialog).toBeInTheDocument()
+})
+
+it('returns keyboard focus after selecting an option and resumes character search', async () => {
+  const user = userEvent.setup()
+  mount()
+  await selectGroup(user)
+  await user.click(screen.getByRole('button', { name: 'Добавить занятие' }))
+  const dialog = screen.getByRole('dialog', { name: 'Добавить занятие' })
+  const groups = within(dialog).getByRole('combobox', { name: 'Группы' })
+
+  await user.click(groups)
+  const option = await within(dialog).findByRole('option', { name: /^ИВТ-21\s/ })
+  await user.click(option)
+  expect(groups).toHaveFocus()
+  expect(within(dialog).queryByRole('listbox', { name: 'Группы: варианты' })).toBeNull()
+
+  await user.keyboard('И')
+  expect(groups).toHaveValue('И')
+  expect(await within(dialog).findByRole('listbox', { name: 'Группы: варианты' })).toBeVisible()
+})

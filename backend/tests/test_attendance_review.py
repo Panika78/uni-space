@@ -328,7 +328,7 @@ def test_permission_revocation_does_not_interrupt_already_authorized_request(
     assert len(events(s)) == 1
 
 
-def test_unknown_legacy_origin_is_staff_only_then_teacher_recreates_current_mark(attendance):
+def test_unknown_legacy_origin_is_staff_only_and_cannot_be_recreated(attendance):
     s = attendance
     # Emulate a preserved pre-review mark, whose group cannot be reconstructed.
     s.lesson.starts_at = datetime.now(UTC) - timedelta(days=1)
@@ -347,9 +347,6 @@ def test_unknown_legacy_origin_is_staff_only_then_teacher_recreates_current_mark
     mark = s.db.get(Attendance, (s.lesson.id, s.students[0].id))
     assert mark.origin_group_id is None and mark.membership_version is None
     assert s.write(method="delete", token=token).status_code == 200
-    assert s.write().status_code == 200
-    recreated = s.db.get(Attendance, (s.lesson.id, s.students[0].id))
-    assert recreated.origin_group_id == s.groups[0].id
-    assert recreated.membership_version == s.students[0].membership_version
-    assert s.write(token=token).status_code == 200
-    assert [event.action for event in events(s)] == ["update", "delete", "create"]
+    assert s.write().status_code == 404
+    assert s.write(token=token).status_code == 404
+    assert [event.action for event in events(s)] == ["update", "delete"]

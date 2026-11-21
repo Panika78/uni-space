@@ -3,12 +3,14 @@ import logging
 import os
 from contextlib import suppress
 from datetime import UTC, datetime, time
+from functools import partial
 from hashlib import sha256
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
+import anyio
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse
@@ -69,7 +71,19 @@ STAFF_TAB_STATUSES = {
     "completed": ("approved", "rejected"),
 }
 APPLICATION_DATE_ZONE = ZoneInfo("Europe/Moscow")
+_UPLOAD_PROCESSING_LIMITER: anyio.CapacityLimiter | None = None
 WORKFLOW_ERRORS = {code: {"model": ApiError} for code in (401, 403, 404, 409, 422, 413, 503)}
+
+
+async def stage_upload_async(source, filename: str, root: Path):
+    """Keep bounded, CPU-heavy file validation off the event loop."""
+    global _UPLOAD_PROCESSING_LIMITER
+    if _UPLOAD_PROCESSING_LIMITER is None:
+        _UPLOAD_PROCESSING_LIMITER = anyio.CapacityLimiter(2)
+    return await anyio.to_thread.run_sync(
+        partial(storage.stage_upload, source, filename, root),
+        limiter=_UPLOAD_PROCESSING_LIMITER,
+    )
 
 
 def validate_services_query(request: Request) -> None:
@@ -347,7 +361,7 @@ async def submit_application(
     staged = []
     try:
         for item in uploaded:
-            staged.append(storage.stage_upload(item.file, item.filename or "attachment", root))
+            staged.append(await stage_upload_async(item.file, item.filename or "attachment", root))
         if sum(item.size_bytes for item in staged) > storage.MAX_TOTAL_BYTES:
             raise HTTPException(422, "attachment_limit_exceeded")
     except OSError as exc:
@@ -1288,7 +1302,7 @@ async def resubmit_application(
     staged = []
     try:
         for item in uploaded:
-            staged.append(storage.stage_upload(item.file, item.filename or "attachment", root))
+            staged.append(await stage_upload_async(item.file, item.filename or "attachment", root))
         if sum(item.size_bytes for item in staged) > storage.MAX_TOTAL_BYTES:
             raise HTTPException(422, "attachment_limit_exceeded")
     except OSError as exc:

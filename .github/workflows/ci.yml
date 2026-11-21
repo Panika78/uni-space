@@ -958,6 +958,14 @@ jobs:
           mkdir -p work
           export DEMO_STUDENT_A_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
           export DEMO_STUDENT_B_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          export DEMO_TEACHER_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          export DEMO_DEAN_STAFF_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          export DEMO_ACCOUNTING_STAFF_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+          echo "::add-mask::$DEMO_STUDENT_A_PASSWORD"
+          echo "::add-mask::$DEMO_STUDENT_B_PASSWORD"
+          echo "::add-mask::$DEMO_TEACHER_PASSWORD"
+          echo "::add-mask::$DEMO_DEAN_STAFF_PASSWORD"
+          echo "::add-mask::$DEMO_ACCOUNTING_STAFF_PASSWORD"
           export DEMO_SEED_ALLOWED_DATABASE=uni_space_test
           export DEMO_SEED_ALLOWED_HOST=localhost
           export DEMO_SEED_ALLOWED_PORT=5432
@@ -968,7 +976,7 @@ jobs:
           api_pid=$!
           (cd frontend && exec node node_modules/vite/bin/vite.js --host 0.0.0.0) > work/vite.log 2>&1 &
           vite_pid=$!
-          trap 'kill "$api_pid" "$vite_pid" 2>/dev/null || true; wait "$api_pid" "$vite_pid" 2>/dev/null || true; unset DEMO_STUDENT_A_PASSWORD DEMO_STUDENT_B_PASSWORD' EXIT
+          trap 'kill "$api_pid" "$vite_pid" 2>/dev/null || true; wait "$api_pid" "$vite_pid" 2>/dev/null || true; unset DEMO_STUDENT_A_PASSWORD DEMO_STUDENT_B_PASSWORD DEMO_TEACHER_PASSWORD DEMO_DEAN_STAFF_PASSWORD DEMO_ACCOUNTING_STAFF_PASSWORD' EXIT
           for attempt in $(seq 1 60); do
             if curl -fsS http://localhost:8000/api/openapi.json >/dev/null && curl -fsS http://localhost:5173 >/dev/null; then break; fi
             sleep 1

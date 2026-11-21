@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from contextlib import suppress
 from io import BytesIO
@@ -6,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
+from PIL import Image
 
 from app.applications.storage import (
     cleanup_orphans,
@@ -48,6 +51,67 @@ def test_stages_pdf_with_private_permissions_and_rejects_spoofed_or_oversized_fi
         )
     assert oversized.value.status_code == 413
     assert list((tmp_path / ".staging").iterdir()) == []
+
+
+def test_malformed_pdf_xref_is_rejected_within_timeout(tmp_path):
+    malicious_pdf = b"%PDF-1.4\nstartxref\n28\n%%EOF\nxref\n1 0\naaa\n"
+    command = (
+        "from io import BytesIO; from pathlib import Path; "
+        "from app.applications.storage import stage_upload; "
+        f"stage_upload(BytesIO({malicious_pdf!r}), 'audit.pdf', Path({str(tmp_path)!r}))"
+    )
+    with pytest.raises(subprocess.CalledProcessError) as rejected:
+        subprocess.run(
+            [sys.executable, "-c", command],
+            cwd=Path(__file__).parents[1],
+            check=True,
+            capture_output=True,
+            timeout=5,
+        )
+    assert b"invalid_attachment" in rejected.value.stderr
+
+
+def test_oversized_image_dimensions_are_rejected_before_decode(tmp_path, monkeypatch):
+    import app.applications.storage as storage
+
+    decoded = False
+
+    class FakeImage:
+        format = "PNG"
+        size = (storage.MAX_IMAGE_PIXELS + 1, 1)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def verify(self):
+            nonlocal decoded
+            decoded = True
+
+        def load(self):
+            nonlocal decoded
+            decoded = True
+
+    monkeypatch.setattr(storage.Image, "open", lambda _path: FakeImage())
+    with pytest.raises(HTTPException) as invalid:
+        stage_upload(BytesIO(b"\x89PNG\r\n\x1a\nvalid signature"), "large.png", tmp_path)
+    assert invalid.value.status_code == 422
+    assert decoded is False
+
+
+def test_regular_ten_megapixel_jpeg_is_validated_in_bounded_worker(tmp_path):
+    image_bytes = BytesIO()
+    Image.new("RGB", (3162, 3162), "white").save(image_bytes, format="JPEG")
+    image_bytes.seek(0)
+
+    staged = stage_upload(image_bytes, "photo.jpg", tmp_path)
+    try:
+        assert staged.mime_type == "image/jpeg"
+        assert staged.size_bytes == len(image_bytes.getvalue())
+    finally:
+        discard(staged)
 
 
 def test_cleanup_is_repeatable_concurrent_and_preserves_recent_or_referenced_objects(tmp_path):

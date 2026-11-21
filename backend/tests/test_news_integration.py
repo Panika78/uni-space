@@ -1,6 +1,7 @@
 import base64
 import json
 from datetime import UTC, datetime, timedelta
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -24,13 +25,15 @@ def test_create_excerpt_normalizes_unicode_whitespace_and_limits_length() -> Non
     assert create_excerpt(" \n\t ") == ""
 
 
-def test_news_list_rejects_cursors_with_invalid_timestamp_or_id(db_session) -> None:
+def test_news_list_rejects_cursors_with_invalid_timestamp_or_id() -> None:
+    db_session = Mock(spec=Session)
     malformed_values = [("not-a-number", 1), (1, 0), (10**30, 1)]
     for key in malformed_values:
         raw = json.dumps({"v": 2, "direction": "desc", "key": key}, separators=(",", ":"))
         cursor = base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
         with pytest.raises(ValueError):
             list_published_news(db_session, limit=20, cursor=cursor)
+    db_session.scalars.assert_not_called()
 
 
 @pytest.mark.integration

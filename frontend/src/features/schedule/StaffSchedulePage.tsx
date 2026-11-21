@@ -347,6 +347,10 @@ function CatalogPicker({
   onForbidden?: () => void
   onResolvedItem?: (item: CatalogItem) => void
 }) {
+  const pickerRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const skipFocusOpenRef = useRef(false)
+  const selectInputAfterCloseRef = useRef(false)
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState(false)
   const [afterId, setAfterId] = useState('')
@@ -354,7 +358,6 @@ function CatalogPicker({
   const [activeIndex, setActiveIndex] = useState(0)
   const [resolvedLabels, setResolvedLabels] = useState<Record<string, string>>(labelOverrides)
   const listboxId = useId().replaceAll(':', '')
-  const pickerRef = useRef<HTMLDivElement>(null)
   const { user_id: userId } = useRoleContext()
   const query = useQuery({
     queryKey: ['staff-schedule', userId, 'catalog-picker', kind, search, afterId, filters],
@@ -381,14 +384,32 @@ function CatalogPicker({
   }, [query.error, onForbidden])
   useEffect(() => {
     if (!expanded) return
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (event.target instanceof Node && !pickerRef.current?.contains(event.target)) {
+    const closeWhenOutside = (event: Event) => {
+      if (event.target instanceof Node && !pickerRef.current?.contains(event.target))
         setExpanded(false)
-      }
     }
-    document.addEventListener('pointerdown', closeOnOutsidePointer)
-    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer)
+    document.addEventListener('pointerdown', closeWhenOutside)
+    document.addEventListener('focusin', closeWhenOutside)
+    return () => {
+      document.removeEventListener('pointerdown', closeWhenOutside)
+      document.removeEventListener('focusin', closeWhenOutside)
+    }
   }, [expanded])
+  const resetPage = () => {
+    setAfterId('')
+    setCursorHistory([])
+    setActiveIndex(0)
+  }
+  const closeAndRestoreFocus = () => {
+    setSearch('')
+    resetPage()
+    setExpanded(false)
+    selectInputAfterCloseRef.current = true
+    if (document.activeElement !== inputRef.current) {
+      skipFocusOpenRef.current = true
+      inputRef.current?.focus()
+    }
+  }
   const toggle = (id: string) => {
     const selected = items.find((item) => item.id === id)
     if (selected) {
@@ -397,23 +418,41 @@ function CatalogPicker({
     }
     if (!multiple) {
       onChange([id])
-      setSearch('')
-      setAfterId('')
-      setCursorHistory([])
-      setExpanded(false)
+      closeAndRestoreFocus()
       return
     }
     onChange(value.includes(id) ? value.filter((item) => item !== id) : [...value, id])
-    // Keep the multi-select searchable but close its popover after each pick,
-    // so the next form field is never covered by the option list.
-    setExpanded(false)
+    closeAndRestoreFocus()
   }
   const selectedNames = value.map((id) => selectedLabels[id] ?? 'Название недоступно')
+  const selectedValue = selectedNames.join(', ')
+  useLayoutEffect(() => {
+    if (
+      !expanded &&
+      selectInputAfterCloseRef.current &&
+      document.activeElement === inputRef.current
+    )
+      inputRef.current?.select()
+    selectInputAfterCloseRef.current = false
+  }, [expanded, selectedValue])
   return (
-    <div className="staff-schedule__picker" ref={pickerRef}>
+    <div
+      className="staff-schedule__picker"
+      ref={pickerRef}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && expanded) {
+          event.preventDefault()
+          event.stopPropagation()
+          setExpanded(false)
+          skipFocusOpenRef.current = true
+          inputRef.current?.focus()
+        }
+      }}
+    >
       <label>
         {label}
         <input
+          ref={inputRef}
           aria-label={label}
           role="combobox"
           aria-expanded={expanded}
@@ -425,24 +464,54 @@ function CatalogPicker({
               : undefined
           }
           aria-invalid={invalid || undefined}
-          value={expanded ? search : selectedNames.join(', ')}
+          value={expanded ? search : selectedValue}
           placeholder="Поиск по названию"
+          onClick={() => {
+            if (!expanded) {
+              setExpanded(true)
+              setSearch('')
+              resetPage()
+            }
+          }}
           onFocus={() => {
-            setExpanded(true)
-            setSearch('')
-            setAfterId('')
-            setCursorHistory([])
-            setActiveIndex(0)
+            if (skipFocusOpenRef.current) {
+              skipFocusOpenRef.current = false
+            } else {
+              setExpanded(true)
+              setSearch('')
+              resetPage()
+            }
           }}
           onChange={(event) => {
             setSearch(event.target.value)
-            setAfterId('')
-            setCursorHistory([])
-            setActiveIndex(0)
+            resetPage()
+            if (!expanded) setExpanded(true)
           }}
           onKeyDown={(event) => {
-            if (event.key === 'Escape') setExpanded(false)
-            else if (event.key === 'ArrowDown') {
+            if (event.key === 'Escape' && expanded) {
+              event.preventDefault()
+              event.stopPropagation()
+              setExpanded(false)
+              skipFocusOpenRef.current = true
+              inputRef.current?.focus()
+            } else if (event.key === 'ArrowDown' && !expanded) {
+              event.preventDefault()
+              setSearch('')
+              resetPage()
+              setExpanded(true)
+            } else if (
+              !expanded &&
+              event.key.length === 1 &&
+              !event.ctrlKey &&
+              !event.metaKey &&
+              !event.altKey &&
+              !event.nativeEvent.isComposing
+            ) {
+              event.preventDefault()
+              setSearch(event.key)
+              resetPage()
+              setExpanded(true)
+            } else if (event.key === 'ArrowDown') {
               event.preventDefault()
               setActiveIndex((index) => Math.min(index + 1, visibleItems.length - 1))
             } else if (event.key === 'ArrowUp') {
@@ -470,7 +539,7 @@ function CatalogPicker({
         </div>
       )}
       {expanded && (
-        <div className="staff-schedule__options">
+        <div className="staff-schedule__options" role="listbox" aria-label={`${label}: варианты`}>
           {query.isPending ? (
             <p role="status">Загрузка справочника…</p>
           ) : query.isError ? (
@@ -482,7 +551,7 @@ function CatalogPicker({
             </p>
           ) : (
             <>
-              <div id={`${listboxId}-options`} role="listbox" aria-label={`${label}: варианты`}>
+              <div id={`${listboxId}-options`}>
                 {visibleItems.map((item, index) => {
                   const primaryLabel = catalogOptionLabel(kind, item)
                   const secondaryLabel = item.term_name ?? item.building_name ?? `ID ${item.id}`
