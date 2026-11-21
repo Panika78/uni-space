@@ -122,6 +122,33 @@ const assessment = {
   lesson_id: null,
   date_needs_confirmation: true,
 }
+const secondAssessment = {
+  ...assessment,
+  id: '45',
+  assessment_id: '56',
+  title: 'Лабораторная',
+  type: 'laboratory',
+  max_score: 5,
+}
+const otherGroupAssignment = {
+  ...assignment,
+  id: '9',
+  group: { id: '22', name: 'М-102' },
+}
+const otherCourseAssignment = {
+  ...assignment,
+  id: '10',
+  course_offering_id: '12',
+  discipline: { id: '6', name: 'Геометрия' },
+  group: { id: '31', name: 'М-201' },
+}
+const otherCourseAssessment = {
+  ...assessment,
+  id: '46',
+  assessment_id: '57',
+  title: 'Работа другой дисциплины',
+  max_score: 7,
+}
 
 beforeEach(() => {
   fixtures.marks[0]!.status = 'attended'
@@ -412,6 +439,7 @@ it('separates an ungraded result from zero and supports scores and manual final 
     expect.objectContaining({ method: 'PUT', body: JSON.stringify({ score: 10 }) }),
   )
   const finals = await openFinals(user)
+  expect(await within(finals).findByText('10 / 10')).toBeInTheDocument()
   await user.selectOptions(within(finals).getByLabelText('Итог: Анна Иванова'), '4')
   await waitFor(() => expect(fixtures.final.grade_value).toBe(4))
   expect(
@@ -419,6 +447,116 @@ it('separates an ungraded result from zero and supports scores and manual final 
       'Итоговая оценка выставляется вручную и не вычисляется автоматически из баллов.',
     ),
   ).toBeInTheDocument()
+})
+
+it('waits for delayed work results and sums multiple works while keeping zero and null distinct', async () => {
+  let resolveSecondResults!: (value: ReturnType<typeof page>) => void
+  const delayedResults = new Promise<ReturnType<typeof page>>((resolve) => {
+    resolveSecondResults = resolve
+  })
+  const original = vi.mocked(apiFetch).getMockImplementation()!
+  vi.mocked(apiFetch).mockImplementation(async (input, init = {}) => {
+    const url = String(input)
+    if (url.endsWith('/assessments?limit=100')) return page([assessment, secondAssessment])
+    if (url.includes('/assessments/44/results?'))
+      return page([
+        { ...fixtures.scores[0]!, score: 0 },
+        { ...fixtures.scores[1]!, score: null },
+        { ...fixtures.scores[2]!, score: null },
+      ])
+    if (url.includes('/assessments/45/results?')) return delayedResults
+    if (url.endsWith('/final-results?limit=100'))
+      return page(['1', '2', '3'].map((student_id) => ({ ...fixtures.final, student_id })))
+    return original(input, init)
+  })
+  const user = userEvent.setup()
+  renderJournal('/teacher/journals?course=11&group=21&tab=finals')
+
+  const finals = await openFinals(user)
+  expect(await screen.findByText('Загружаем баллы за работы…')).toBeInTheDocument()
+  expect(within(finals).getAllByText('Загружается…')).toHaveLength(3)
+  expect(within(finals).queryByText('0 / 15')).not.toBeInTheDocument()
+
+  resolveSecondResults(
+    page([
+      { ...fixtures.scores[0]!, score: 2 },
+      { ...fixtures.scores[1]!, score: null },
+      { ...fixtures.scores[2]!, score: 0 },
+    ]),
+  )
+  expect(await within(finals).findByText('2 / 15')).toBeInTheDocument()
+  expect(within(finals).getByText('0 / 15 · не выставлено: 1')).toBeInTheDocument()
+  expect(within(finals).getByText('Не выставлено · максимум 15')).toBeInTheDocument()
+})
+
+it('does not show partial totals after a required results request fails and retries successfully', async () => {
+  let failed = false
+  const original = vi.mocked(apiFetch).getMockImplementation()!
+  vi.mocked(apiFetch).mockImplementation(async (input, init = {}) => {
+    const url = String(input)
+    if (url.endsWith('/assessments?limit=100')) return page([assessment, secondAssessment])
+    if (url.includes('/assessments/45/results?')) {
+      if (!failed) {
+        failed = true
+        throw new Error('simulated result read failure')
+      }
+      return page(
+        fixtures.scores.map((row) => ({ ...row, score: row.student_id === '1' ? 4 : null })),
+      )
+    }
+    return original(input, init)
+  })
+  const user = userEvent.setup()
+  renderJournal('/teacher/journals?course=11&group=21&tab=finals')
+
+  const finals = await openFinals(user)
+  const retry = await screen.findByRole('button', { name: 'Повторить' })
+  expect(within(finals).queryByText('Баллы за работы: 4 / 15')).not.toBeInTheDocument()
+  expect(within(finals).getByText('Недоступно')).toBeInTheDocument()
+  await user.click(retry)
+  expect(await within(finals).findByText('4 / 15 · не выставлено: 1')).toBeInTheDocument()
+})
+
+it('reloads totals when switching groups and courses without mixing previous results', async () => {
+  const original = vi.mocked(apiFetch).getMockImplementation()!
+  vi.mocked(apiFetch).mockImplementation(async (input, init = {}) => {
+    const url = String(input)
+    if (url.startsWith('/api/v1/teaching/assignments'))
+      return page([assignment, otherGroupAssignment, otherCourseAssignment])
+    if (url.includes('/courses/12/groups/31/assessments?limit=100'))
+      return page([otherCourseAssessment])
+    if (url.includes('/groups/21/assessments/44/results?'))
+      return page(
+        fixtures.scores.map((row) => ({ ...row, score: row.student_id === '1' ? 4 : null })),
+      )
+    if (url.includes('/groups/22/assessments/44/results?'))
+      return page(
+        fixtures.scores.map((row) => ({ ...row, score: row.student_id === '1' ? 9 : null })),
+      )
+    if (url.includes('/courses/12/groups/31/assessments/46/results?'))
+      return page(
+        fixtures.scores.map((row) => ({ ...row, score: row.student_id === '1' ? 6 : null })),
+      )
+    return original(input, init)
+  })
+  const user = userEvent.setup()
+  renderJournal('/teacher/journals?course=11&group=21&tab=finals')
+
+  const firstFinals = await openFinals(user)
+  expect(await within(firstFinals).findByText('4 / 10')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: /Алгебра · М-102/ }))
+  await user.click(await screen.findByRole('tab', { name: 'Итоги аттестации' }))
+  const secondFinals = await screen.findByRole('region', { name: 'Таблица итоговой аттестации' })
+  expect(await within(secondFinals).findByText('9 / 10')).toBeInTheDocument()
+  expect(within(secondFinals).queryByText('4 / 10')).not.toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: /Геометрия · М-201/ }))
+  await user.click(await screen.findByRole('tab', { name: 'Итоги аттестации' }))
+  const otherCourseFinals = await screen.findByRole('region', {
+    name: 'Таблица итоговой аттестации',
+  })
+  expect(await within(otherCourseFinals).findByText('6 / 7')).toBeInTheDocument()
+  expect(within(otherCourseFinals).queryByText('9 / 10')).not.toBeInTheDocument()
 })
 
 it('does not write an unchanged score on blur and displays a newer server score after refetch', async () => {

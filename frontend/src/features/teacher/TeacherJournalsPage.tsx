@@ -328,15 +328,49 @@ export function TeacherJournalsPage() {
   const workRows = [...workRowsByStudent.values()].filter((row) =>
     row.fullName.toLocaleLowerCase('ru-RU').includes(studentSearch.toLocaleLowerCase('ru-RU')),
   )
-  const workPointsByStudent = new Map(
-    [...workRowsByStudent.values()].map((row) => [
-      row.studentId,
-      {
-        score: assessments.reduce((sum, item) => sum + (row.results.get(item.id)?.score ?? 0), 0),
-        max: assessments.reduce((sum, item) => sum + item.max_score, 0),
-      },
-    ]),
-  )
+  const workPointsLoading =
+    (!assessmentsQuery.isSuccess && !assessmentsQuery.isError) ||
+    assessmentsQuery.isFetching ||
+    (!rosterQuery.isSuccess && !rosterQuery.isError) ||
+    rosterQuery.isFetching ||
+    resultQueries.some((query) => query.isPending || query.isFetching)
+  const workPointsError =
+    assessmentsQuery.error ??
+    rosterQuery.error ??
+    resultQueries.find((query) => query.isError)?.error ??
+    null
+  const rosterStudentIds = new Set((rosterQuery.data ?? []).map((student) => student.id))
+  const hasCompleteWorkResults =
+    resultQueries.length === assessments.length &&
+    resultQueries.every((query) => {
+      const resultStudentIds = new Set((query.data ?? []).map((result) => result.student_id))
+      return [...rosterStudentIds].every((studentId) => resultStudentIds.has(studentId))
+    })
+  const workPointsByStudent =
+    !workPointsLoading && !workPointsError && hasCompleteWorkResults
+      ? new Map(
+          (rosterQuery.data ?? []).map((student) => {
+            const studentResults = resultQueries.flatMap((query) =>
+              (query.data ?? []).filter((result) => result.student_id === student.id),
+            )
+            const gradedResults = studentResults.filter((result) => result.score !== null)
+            return [
+              student.id,
+              {
+                score: gradedResults.reduce((sum, result) => sum + result.score!, 0),
+                max: assessments.reduce((sum, item) => sum + item.max_score, 0),
+                gradedCount: gradedResults.length,
+                ungradedCount: studentResults.length - gradedResults.length,
+              },
+            ]
+          }),
+        )
+      : null
+  const retryWorkPoints = () => {
+    void assessmentsQuery.refetch()
+    void rosterQuery.refetch()
+    resultQueries.forEach((query) => void query.refetch())
+  }
 
   function setSelection(key: string, value: string) {
     const next = new URLSearchParams(params)
@@ -1653,6 +1687,10 @@ export function TeacherJournalsPage() {
                       rows={finalsQuery.data ?? []}
                       studentNames={studentNames}
                       pointsByStudent={workPointsByStudent}
+                      pointsCount={assessments.length}
+                      pointsLoading={workPointsLoading}
+                      pointsError={workPointsError}
+                      retryPoints={retryWorkPoints}
                       attestationType={chosen.attestation_type}
                       studentSearch={studentSearch}
                       onStudentSearch={setStudentSearch}
@@ -1698,6 +1736,10 @@ function FinalResultsSection({
   rows,
   studentNames,
   pointsByStudent,
+  pointsCount,
+  pointsLoading,
+  pointsError,
+  retryPoints,
   attestationType,
   studentSearch,
   onStudentSearch,
@@ -1717,7 +1759,14 @@ function FinalResultsSection({
 }: {
   rows: FinalResult[]
   studentNames: Map<string, string | undefined>
-  pointsByStudent: Map<string, { score: number; max: number }>
+  pointsByStudent: Map<
+    string,
+    { score: number; max: number; gradedCount: number; ungradedCount: number }
+  > | null
+  pointsCount: number
+  pointsLoading: boolean
+  pointsError: unknown
+  retryPoints: () => void
   attestationType: Assignment['attestation_type']
   studentSearch: string
   onStudentSearch: (query: string) => void
@@ -1778,6 +1827,17 @@ function FinalResultsSection({
         <h2 id="journal-finals-title">Итоговая аттестация</h2>
         <p>Итоговая оценка выставляется вручную и не вычисляется автоматически из баллов.</p>
       </div>
+      {pointsLoading ? (
+        <LoadingState title="Загружаем баллы за работы…" variant="compact" />
+      ) : pointsError ? (
+        <QueryError error={pointsError} retry={retryPoints} />
+      ) : !pointsByStudent ? (
+        <ErrorState
+          title="Не удалось подтвердить полноту результатов работ"
+          description="Обновите результаты перед просмотром сумм баллов."
+          onRetry={retryPoints}
+        />
+      ) : null}
       {loading ? (
         <LoadingState title="Загружаем итоги…" variant="compact" />
       ) : error ? (
@@ -1833,7 +1893,7 @@ function FinalResultsSection({
                   const retry = () => void save(row, patch, key, retry, revision)
                   void save(row, patch, key, retry, revision)
                 }
-                const points = pointsByStudent.get(row.student_id)
+                const points = pointsByStudent?.get(row.student_id)
                 const retakeSaveKey = `${scope}:final:${row.student_id}:retake-modal`
                 return (
                   <tr key={row.student_id}>
@@ -1841,7 +1901,21 @@ function FinalResultsSection({
                       {displayName}
                     </td>
                     <td className="journal-table-score" data-label="Баллы за работы">
-                      {points ? `${points.score} / ${points.max}` : '—'}
+                      {pointsLoading
+                        ? 'Загружается…'
+                        : pointsError || !pointsByStudent
+                          ? 'Недоступно'
+                          : pointsCount === 0
+                            ? 'Работ нет'
+                            : !points
+                              ? 'Недоступно'
+                              : points.gradedCount === 0
+                                ? `Не выставлено · максимум ${points.max}`
+                                : `${points.score} / ${points.max}${
+                                    points.ungradedCount > 0
+                                      ? ` · не выставлено: ${points.ungradedCount}`
+                                      : ''
+                                  }`}
                     </td>
                     <td data-label="Результат зачёта">
                       <select
