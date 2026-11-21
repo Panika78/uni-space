@@ -70,19 +70,23 @@ def test_scales_retake_clear_delete_and_audit(results, kind):
     wrong = {"grade_value": 2} if kind == "pass_fail" else {"passed": False}
     assert s.save(body=wrong).status_code == 422
     assert s.save("GET").json()["has_debt"] is False
+    assert s.save("POST", {"retake_date": "2027-01-10"}).status_code == 409
+    debt = {"passed": False} if kind == "pass_fail" else {"grade_value": 2}
+    assert s.save(body=debt).json()["has_debt"] is True
     data = s.save("POST", {"retake_date": "2027-01-10", "retake_location": "A-101"}).json()
-    assert data["grade_value"] is None and data["has_debt"] is False
-    assert s.db.query(Notification).filter_by(user_id=s.students[0].user_id).count() == 1
+    assert data["has_debt"] is True
+    assert s.db.query(Notification).filter_by(user_id=s.students[0].user_id).count() == 2
     result_id = data["result_id"]
     academics_response = s.request()
     assert academics_response.status_code == 200, academics_response.text
     student_item = next(
         i for i in s.request().json()["items"] if i["course_offering_id"] == str(s.courses[0].id)
     )
-    assert student_item["final_result"]["has_debt"] is False
-    assert s.events()[-1].action == "create"
+    assert student_item["final_result"]["has_debt"] is True
+    assert s.events()[-2].action == "create"
+    assert s.events()[-1].action == "update"
     assert s.save(body={"retake_location": "B-202"}).status_code == 200
-    assert s.db.query(Notification).filter_by(user_id=s.students[0].user_id).count() == 2
+    assert s.db.query(Notification).filter_by(user_id=s.students[0].user_id).count() == 3
     event = s.events()[-1]
     assert event.before_data["retake_location"] == "A-101"
     assert event.after_data["retake_location"] == "B-202"
@@ -90,7 +94,7 @@ def test_scales_retake_clear_delete_and_audit(results, kind):
     assert s.save(body={}).status_code == 200
     assert s.save(body={"retake_location": "B-202"}).status_code == 200
     assert len(s.events()) == count
-    assert s.db.query(Notification).filter_by(user_id=s.students[0].user_id).count() == 2
+    assert s.db.query(Notification).filter_by(user_id=s.students[0].user_id).count() == 3
     field = "passed" if kind == "pass_fail" else "grade_value"
     failure = False if kind == "pass_fail" else 2
     success = True if kind == "pass_fail" else 5
@@ -119,7 +123,7 @@ def test_scales_retake_clear_delete_and_audit(results, kind):
     assert s.save("DELETE").status_code == 200
     assert s.save(body={field: None}).status_code == 200
     assert len(s.events()) == count
-    assert s.save(body={"retake_location": "A-101"}).status_code == 200
+    assert s.save(body={"retake_location": "A-101"}).status_code == 409
     assert s.save("DELETE").json()["result_id"] is None
 
 
@@ -189,14 +193,15 @@ def verify_transfer_and_staff_scope(s):
 def test_student_academics_and_audit_rollback(results, monkeypatch):
     s = results
 
+    assert s.save(body={"grade_value": 2}).status_code == 200
     assert s.save(body={"retake_date": "2027-01-10"}).status_code == 200
-    # Read through the existing student API; no inferred debt for retake-only rows.
+    # Read through the existing student API; debt and resit remain server sourced.
     response = s.request()
     assert response.status_code == 200
     item = next(
         i for i in response.json()["items"] if i["course_offering_id"] == str(s.courses[0].id)
     )
-    assert item["final_result"]["has_debt"] is False
+    assert item["final_result"]["has_debt"] is True
     assert s.db.scalar(select(FinalResult)).retake_date == date(2027, 1, 10)
     before_count = len(s.events())
 
@@ -205,7 +210,7 @@ def test_student_academics_and_audit_rollback(results, monkeypatch):
 
     monkeypatch.setattr("app.final_results.write_audit_event", fail)
     assert s.save(body={"grade_value": 5}).status_code == 500
-    assert s.db.scalar(select(FinalResult)).grade_value is None
+    assert s.db.scalar(select(FinalResult)).grade_value == 2
     assert len(s.events()) == before_count
 
 
@@ -253,7 +258,7 @@ def test_writer_failure_rolls_back_creation(results, monkeypatch):
         raise ValueError("simulated failure after audit insert")
 
     monkeypatch.setattr("app.final_results.write_audit_event", fail)
-    assert s.save("POST", {"retake_location": "A-101"}).status_code == 500
+    assert s.save("POST", {"grade_value": 2, "retake_location": "A-101"}).status_code == 500
     assert s.save("GET").json()["result_id"] is None
     assert s.events() == []
 

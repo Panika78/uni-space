@@ -74,7 +74,7 @@ afterEach(() => {
   vi.resetAllMocks()
 })
 
-it('keeps every tab panel linked, hidden panels inert, keyboard navigation roving, and tab data lazy', async () => {
+it('starts with work and scores and omits overview and lesson tabs', async () => {
   vi.mocked(getStudentRead).mockImplementation(async (path) => {
     if (path.endsWith('/assessments') || path.endsWith('/lessons')) {
       return { items: [], next_cursor: null } as never
@@ -84,8 +84,10 @@ it('keeps every tab panel linked, hidden panels inert, keyboard navigation rovin
   const user = userEvent.setup()
   show()
 
-  const overview = await screen.findByRole('tab', { name: 'Обзор' })
-  const tabNames = ['Обзор', 'Занятия', 'Работы и баллы', 'Посещаемость', 'Объявления']
+  const work = await screen.findByRole('tab', { name: 'Работы и баллы' })
+  expect(screen.queryByRole('tab', { name: 'Обзор' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('tab', { name: 'Занятия' })).not.toBeInTheDocument()
+  const tabNames = ['Работы и баллы', 'Посещаемость', 'Объявления']
   const tabs = tabNames.map((name) => screen.getByRole('tab', { name }))
   const panels = tabNames.map((_, index) => {
     const id = tabs[index].getAttribute('aria-controls')
@@ -97,7 +99,8 @@ it('keeps every tab panel linked, hidden panels inert, keyboard navigation rovin
   })
 
   expect(screen.getAllByRole('tabpanel')).toHaveLength(1)
-  expect(getStudentRead).toHaveBeenCalledTimes(1)
+  expect(await within(panels[0]).findByText('Работ нет')).toBeInTheDocument()
+  expect(getStudentRead).toHaveBeenCalledTimes(2)
   expect(getStudentRead).toHaveBeenCalledWith(
     '/api/v1/academics/courses/course-101',
     expect.any(AbortSignal),
@@ -105,17 +108,17 @@ it('keeps every tab panel linked, hidden panels inert, keyboard navigation rovin
   )
   expect(panels[0]).not.toHaveAttribute('hidden')
   expect(panels[0]).toHaveAttribute('tabIndex', '0')
-  expect(within(panels[0]).getByText('Экзамен')).toBeInTheDocument()
-  for (const index of [1, 2, 3, 4]) {
+  for (const index of [1, 2]) {
     expect(panels[index]).toHaveAttribute('hidden')
     expect(panels[index]).toBeEmptyDOMElement()
     expect(tabs[index]).toHaveAttribute('aria-selected', 'false')
     expect(tabs[index]).toHaveAttribute('tabIndex', '-1')
   }
-  expect(overview).toHaveAttribute('aria-selected', 'true')
-  expect(overview).toHaveAttribute('tabIndex', '0')
+  expect(work).toHaveAttribute('aria-selected', 'true')
+  expect(work).toHaveAttribute('tabIndex', '0')
+  expect(document.querySelector('.student-course__tabs')).not.toHaveAttribute('style')
 
-  overview.focus()
+  work.focus()
   await user.keyboard('{ArrowRight}')
   expect(tabs[1]).toHaveFocus()
   expect(tabs[1]).toHaveAttribute('aria-selected', 'true')
@@ -128,29 +131,91 @@ it('keeps every tab panel linked, hidden panels inert, keyboard navigation rovin
     'term-1',
   )
 
-  await user.keyboard('{ArrowRight}')
+  await user.keyboard('{End}')
   expect(tabs[2]).toHaveFocus()
   expect(panels[2]).not.toHaveAttribute('hidden')
-  expect(await within(panels[2]).findByText('Работ нет')).toBeInTheDocument()
+  expect(within(panels[2]).getByText('Объявления по проведению course-101')).toBeInTheDocument()
+  expect(panels[0]).toHaveAttribute('hidden')
+
+  await user.keyboard('{ArrowLeft}')
+  expect(tabs[1]).toHaveFocus()
+  expect(panels[1]).not.toHaveAttribute('hidden')
+  await user.keyboard('{Home}')
+  expect(tabs[0]).toHaveFocus()
+  expect(panels[0]).not.toHaveAttribute('hidden')
+  expect(screen.getAllByRole('tabpanel')).toHaveLength(1)
   expect(getStudentRead).toHaveBeenCalledWith(
     '/api/v1/academics/courses/course-101/assessments',
     expect.any(AbortSignal),
     expect.objectContaining({ header: 'scope-1' }),
     'term-1',
   )
+})
 
-  await user.keyboard('{End}')
-  expect(tabs[4]).toHaveFocus()
-  expect(panels[4]).not.toHaveAttribute('hidden')
-  expect(within(panels[4]).getByText('Объявления по проведению course-101')).toBeInTheDocument()
-  expect(panels[2]).toHaveAttribute('hidden')
+it('shows attendance marks as styled lesson rows', async () => {
+  vi.mocked(getStudentRead).mockImplementation(async (path) => {
+    if (path.endsWith('/lessons'))
+      return {
+        items: ['attended', 'unmarked'].map((attendance_status, index) => ({
+          id: `lesson-${index}`,
+          attendance_status,
+          starts_at: `2026-11-${10 + index}T10:00:00+03:00`,
+          ends_at: `2026-11-${10 + index}T11:30:00+03:00`,
+          kind: 'seminar',
+          latest_lesson: null,
+          previous_lesson: null,
+          rooms: [],
+          status: 'scheduled',
+          teacher: null,
+        })),
+        next_cursor: null,
+      } as never
+    if (path.endsWith('/assessments')) return { items: [], next_cursor: null } as never
+    return course as never
+  })
+  show()
+  const attendance = await screen.findByRole('tab', { name: 'Посещаемость' })
+  await userEvent.click(attendance)
+  expect(await screen.findByText('Присутствие')).toBeInTheDocument()
+  expect(await screen.findByText('Не отмечено')).toBeInTheDocument()
+  expect(document.querySelector('.student-course__rows--attendance svg')).toBeInTheDocument()
+})
 
-  await user.keyboard('{ArrowLeft}')
-  expect(tabs[3]).toHaveFocus()
-  expect(panels[3]).not.toHaveAttribute('hidden')
-  expect(await within(panels[3]).findByText('Занятий нет')).toBeInTheDocument()
-  await user.keyboard('{Home}')
-  expect(tabs[0]).toHaveFocus()
-  expect(panels[0]).not.toHaveAttribute('hidden')
-  expect(screen.getAllByRole('tabpanel')).toHaveLength(1)
+it('renders work and scores in the reference table layout', async () => {
+  vi.mocked(getStudentRead).mockImplementation(async (path) => {
+    if (path.endsWith('/assessments'))
+      return {
+        items: [
+          {
+            assessment_group_id: 'work-1',
+            assessment_id: 'assessment-1',
+            date_needs_confirmation: false,
+            description: null,
+            graded_at: null,
+            lesson_id: null,
+            max_score: 10,
+            planned_date: '2026-09-10',
+            score: 8,
+            title: 'Лабораторная работа № 1',
+            type: 'laboratory',
+          },
+        ],
+        next_cursor: null,
+      } as never
+    if (path.endsWith('/lessons')) return { items: [], next_cursor: null } as never
+    return course as never
+  })
+  show()
+
+  const table = await screen.findByRole('table')
+  expect(
+    within(table)
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent),
+  ).toEqual(['Работа', 'Тип', 'Дата', 'Баллы'])
+  expect(within(table).getByText('Лабораторная работа № 1')).toBeInTheDocument()
+  expect(within(table).getByText('Лабораторная')).toBeInTheDocument()
+  expect(within(table).getByText('10.09.2026')).toBeInTheDocument()
+  expect(within(table).getByText('8 / 10')).toBeInTheDocument()
+  expect(within(table).queryByRole('button')).not.toBeInTheDocument()
 })

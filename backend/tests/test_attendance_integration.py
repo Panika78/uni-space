@@ -195,15 +195,11 @@ def test_history_after_transfer_only_staff_can_correct_existing(attendance, tran
     assert len(events(s)) == 3
 
 
-@pytest.mark.parametrize("status", ["cancelled", "moved", "future"])
+@pytest.mark.parametrize("status", ["cancelled", "moved"])
 def test_lesson_state_time_and_independent_replacement(attendance, status):
     s = attendance
     assert s.write().status_code == 200
-    if status == "future":
-        s.lesson.starts_at = datetime.now(UTC) + timedelta(hours=2)
-        s.lesson.ends_at = datetime.now(UTC) + timedelta(hours=3)
-    else:
-        s.lesson.status = status
+    s.lesson.status = status
     s.db.flush()
     assert s.write("absent").status_code == 409
     assert s.write(method="delete").status_code == 409
@@ -226,6 +222,22 @@ def test_lesson_state_time_and_independent_replacement(attendance, status):
     assert s.read(lesson=s.lesson.id).json()["status"] == "absent"
     assert s.write(method="delete", token=token).status_code == 200
     assert s.read(lesson=replacement.id).json()["status"] == "attended"
+
+
+def test_teacher_cannot_change_future_attendance_and_staff_cannot_create_future_mark(attendance):
+    s = attendance
+    assert s.write("attended").status_code == 200
+    s.lesson.starts_at = datetime.now(UTC) + timedelta(hours=2)
+    s.lesson.ends_at = s.lesson.starts_at + timedelta(hours=1)
+    s.db.flush()
+
+    assert s.write("absent").status_code == 409
+    assert s.read(lesson=s.lesson.id).json()["status"] == "attended"
+    assert s.write(method="delete").status_code == 409
+    assert s.write("attended", student=2).status_code == 409
+
+    token, _ = s.staff()
+    assert s.write("absent", student=0, token=token).status_code == 409
 
 
 def test_effective_staff_permissions_and_unsafe_requests(attendance):

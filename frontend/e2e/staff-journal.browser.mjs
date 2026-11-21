@@ -82,7 +82,7 @@ async function saved(page, path, method, action) {
 const row = (page) => page.locator('article.journal-student').filter({ hasText: studentName })
 const score = (page) => page.getByLabel(`Балл · ${studentName}`)
 const sectionButton = (page, name) =>
-  page.getByRole('navigation', { name: 'Разделы журнала' }).getByRole('button', { name })
+  page.getByRole('tablist', { name: 'Разделы журнала' }).getByRole('tab', { name })
 
 try {
   const mobile = await browser.newContext({ viewport: { width: 360, height: 800 } })
@@ -197,7 +197,21 @@ try {
   assert.equal(await currentFinal.getByLabel('Место пересдачи').inputValue(), 'Б-201')
   assert.equal(finalAttempts, 1)
   await gradePage.unrouteAll()
-  await saved(gradePage, writeFinal, 'PATCH', () => finalRetry.click())
+  // The retry may confirm an already committed operation with an authoritative GET
+  // and correctly avoid replaying the PATCH.
+  await finalRetry.scrollIntoViewIfNeeded()
+  const retryBox = await finalRetry.boundingBox()
+  const viewport = gradePage.viewportSize()
+  assert.ok(
+    retryBox &&
+      viewport &&
+      retryBox.x >= 0 &&
+      retryBox.y >= 0 &&
+      retryBox.x + retryBox.width <= viewport.width &&
+      retryBox.y + retryBox.height <= viewport.height,
+    'mobile retry action stays inside the viewport after reload',
+  )
+  await finalRetry.click()
   await currentFinal.getByText('Сохранено').waitFor()
 
   const peerContext = await browser.newContext()

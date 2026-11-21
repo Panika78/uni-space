@@ -1,20 +1,8 @@
-.teacher-journal {
-  width: min(1180px, 100%);
-  margin-inline: auto;
-}
-
-.teacher-journal__intro {
-  max-width: 680px;
-  margin: 8px 0 24px;
-  color: var(--muted);
-  line-height: 1.55;
-}
-
 .teacher-journal__selectors {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
-  margin: 20px 0 24px;
+  margin: 10px 0 0;
 }
 
 .teacher-journal__selectors details {
@@ -88,37 +76,6 @@
   opacity: 0.58;
 }
 
-.teacher-journal__tabs {
-  display: flex;
-  gap: 8px;
-  margin: 12px 0 18px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--line);
-}
-
-.teacher-journal__tabs button {
-  min-height: 42px;
-  padding: 9px 16px;
-  border: 1px solid transparent;
-  border-radius: 12px;
-  background: transparent;
-  color: var(--muted);
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.teacher-journal__tabs button[aria-selected='true'] {
-  border-color: #ead8cf;
-  background: #fff9f4;
-  color: var(--accent);
-}
-
-.teacher-journal__panel {
-  display: grid;
-  gap: 18px;
-  min-width: 0;
-}
-
 .teacher-journal__selection,
 .teacher-journal__count {
   margin: 0;
@@ -130,6 +87,92 @@
   flex-wrap: wrap;
   gap: 6px 14px;
   align-items: baseline;
+}
+
+.teacher-journal-calendar {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line, #e8dad1);
+  border-radius: 14px;
+  background: #fffefd;
+}
+
+.teacher-journal-calendar > header {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  text-align: center;
+  text-transform: capitalize;
+}
+
+.teacher-journal-calendar > header button,
+.teacher-journal-calendar__grid button {
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid #dfd0c9;
+  border-radius: 9px;
+  background: #fffefd;
+  color: #30282b;
+  font: inherit;
+}
+
+.teacher-journal-calendar__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+  text-align: center;
+}
+
+.teacher-journal-calendar__grid > span {
+  display: grid;
+  min-height: 28px;
+  place-items: center;
+  color: #71666a;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.teacher-journal-calendar__grid button {
+  position: relative;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.teacher-journal-calendar__grid button.has-lessons {
+  border-color: #caa2a8;
+  background: #fbf1ef;
+  color: #781f32;
+  font-weight: 700;
+}
+
+.teacher-journal-calendar__grid button[aria-pressed='true'] {
+  border-color: #781f32;
+  background: #781f32;
+  color: #fff;
+}
+
+.teacher-journal-calendar__grid button:disabled {
+  border-color: transparent;
+  background: transparent;
+  color: #b9adae;
+  cursor: default;
+}
+
+.teacher-journal-calendar__grid button small {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  font-size: 9px;
+}
+
+.teacher-journal-calendar > p,
+.journal-date-link-status {
+  display: block;
+  margin: 9px 0 0;
+  color: #71666a;
+  font-size: 13px;
 }
 
 .journal-student-list {
@@ -316,6 +359,10 @@
 
   .journal-student__identity {
     grid-column: 1 / -1;
+  }
+
+  .teacher-journal__selectors {
+    gap: 10px;
   }
 
   .journal-save {

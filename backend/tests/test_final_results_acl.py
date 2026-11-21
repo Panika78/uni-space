@@ -46,7 +46,8 @@ def test_runtime_acl_and_atomic_failure(committed_results, monkeypatch):
         return s.client.request(method, path, json=body, headers=headers)
 
     assert request("GET").status_code == 200
-    assert request("POST", {"retake_location": "A-101"}).status_code == 200
+    assert request("POST", {"retake_location": "A-101"}).status_code == 409
+    assert request("POST", {"grade_value": 2, "retake_location": "A-101"}).status_code == 200
     assert request("PATCH", {"retake_location": "B-202"}).status_code == 200
     assert request("PATCH", {"passed": False}).status_code == 422
     assert request("DELETE").status_code == 200

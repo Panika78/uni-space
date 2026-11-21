@@ -125,7 +125,11 @@ export function AcademicsPage() {
             <>
               <section aria-labelledby="disciplines-title">
                 <h2 id="disciplines-title">Текущие дисциплины</h2>
-                <table className="academics-table" role="table" aria-labelledby="disciplines-title">
+                <table
+                  className="academics-table academics-table--courses"
+                  role="table"
+                  aria-labelledby="disciplines-title"
+                >
                   <thead role="rowgroup">
                     <tr role="row">
                       <th scope="col" role="columnheader">
@@ -137,13 +141,21 @@ export function AcademicsPage() {
                       <th scope="col" role="columnheader">
                         Оценено работ
                       </th>
+                      <th scope="col" role="columnheader">
+                        Детали
+                      </th>
                     </tr>
                   </thead>
                   <tbody role="rowgroup">
                     {query.data.items.map((item) => (
                       <tr key={item.course_offering_id} role="row">
                         <th scope="row" role="rowheader">
+                          <span className="academics-desktop-course-name">
+                            {item.discipline.name}
+                          </span>
                           <CourseLink
+                            className="academics-mobile-course-link"
+                            aria-label={`Страница дисциплины «${item.discipline.name}»`}
                             courseId={item.course_offering_id}
                             data-course-id={item.course_offering_id}
                             returnSelector={`[data-course-id="${item.course_offering_id}"]`}
@@ -169,6 +181,20 @@ export function AcademicsPage() {
                             Оценено работ
                           </span>
                           {item.graded_assessment_count} из {item.assessment_count}
+                        </td>
+                        <td role="cell">
+                          <span className="academics-mobile-label" aria-hidden="true">
+                            Детали
+                          </span>
+                          <CourseLink
+                            className="academics-course-link"
+                            aria-label={`Открыть дисциплину «${item.discipline.name}»`}
+                            courseId={item.course_offering_id}
+                            data-course-id={item.course_offering_id}
+                            returnSelector={`[data-course-id="${item.course_offering_id}"]`}
+                          >
+                            Открыть дисциплину <span aria-hidden="true">→</span>
+                          </CourseLink>
                         </td>
                       </tr>
                     ))}

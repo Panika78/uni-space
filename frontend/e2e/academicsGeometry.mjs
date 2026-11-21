@@ -38,6 +38,7 @@ export async function assertAcademicsGeometry(page, width, label) {
   )
   const compact = container.width <= 48 * root
   for (const table of await tables.all()) {
+    const headerCount = await table.locator('thead th').count()
     const snapshot = await table.ariaSnapshot()
     assert.match(snapshot, /columnheader.*Дисциплина/, `${label}: table headers remain accessible`)
     const rows = table.locator('tbody tr')
@@ -45,8 +46,10 @@ export async function assertAcademicsGeometry(page, width, label) {
     for (const row of await rows.all()) {
       const title = row.getByRole('rowheader')
       const titleBox = await title.boundingBox()
+      // The desktop first column is 36% wide; leave one pixel for table subpixel rounding.
+      const minimumTitleWidth = compact ? container.width - 32 : 0.36 * container.width
       assert.ok(
-        titleBox.width >= (compact ? container.width - 32 : 0.4 * container.width - 52),
+        titleBox.width >= minimumTitleWidth - 1,
         `${label}: readable discipline width ${titleBox.width} in container ${container.width}`,
       )
       const cells = await row.locator('th,td').evaluateAll((els) =>
@@ -60,29 +63,38 @@ export async function assertAcademicsGeometry(page, width, label) {
             width: b.width,
             scroll: e.scrollWidth,
             client: e.clientWidth,
+            visible: getComputedStyle(e).display !== 'none',
             text: e.textContent.trim().slice(0, 100),
           }
         }),
       )
-      assert.equal(cells.length, 3, `${label}: all three fields must exist`)
-      for (const cell of cells)
+      assert.equal(
+        cells.length,
+        headerCount,
+        `${label}: every academic field must have a matching column header`,
+      )
+      for (const cell of cells.filter((item) => item.visible))
         assert.ok(
           cell.scroll <= cell.client + 1,
           `${label}: cell content is not clipped ${JSON.stringify(cell)}`,
         )
-      for (let i = 1; i < cells.length; i++) {
-        const a = cells[i - 1],
-          b = cells[i]
+      const visibleCells = cells.filter((item) => item.visible)
+      for (let i = 1; i < visibleCells.length; i++) {
+        const a = visibleCells[i - 1],
+          b = visibleCells[i]
         assert.ok(
           b.x >= a.right - 1 || b.y >= a.bottom - 1,
           `${label}: academic fields do not overlap`,
         )
       }
       if (compact)
-        assert.ok(cells[1].y >= cells[0].bottom - 1, `${label}: title spans the compact card`)
+        assert.ok(
+          visibleCells[1].y >= visibleCells[0].bottom - 1,
+          `${label}: title spans the compact card`,
+        )
       else
         assert.ok(
-          Math.abs(cells[1].y - cells[0].y) < 1,
+          Math.abs(visibleCells[1].y - visibleCells[0].y) < 1,
           `${label}: wide container retains table layout`,
         )
     }

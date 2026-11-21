@@ -1,9 +1,26 @@
 .teacher-schedule-page {
-  max-width: 1080px;
-  margin-inline: auto;
+  position: relative;
+}
+.teacher-schedule-page .schedule-heading h1 {
+  margin: 0;
+  font-size: clamp(27px, 4.4vw, 34px);
+  line-height: 1.12;
+  letter-spacing: -0.035em;
 }
 .teacher-schedule-page .schedule-day-arrows {
   display: flex;
+  flex: 0 0 auto;
+}
+.teacher-schedule-page .schedule-day-arrows button {
+  flex: 0 0 44px;
+}
+.teacher-schedule-page .schedule-day-arrows button:nth-child(2) {
+  width: auto;
+  flex-basis: auto;
+  min-width: 68px;
+  margin-inline: 3px;
+  padding-inline: 17px;
+  white-space: nowrap;
 }
 .teacher-schedule-days {
   display: grid;
@@ -21,44 +38,89 @@
   padding: 16px 0;
 }
 .teacher-lesson-card {
-  margin: 10px 0;
-  padding: 16px 18px;
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 22px;
+  row-gap: 2px;
+  margin: 12px 0;
+  padding: 18px 21px;
   border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface);
+  border-radius: 17px;
+  background: #fffefd;
   box-shadow: var(--shadow);
+  overflow-wrap: anywhere;
 }
 .teacher-lesson-card p {
-  margin: 6px 0 0;
+  margin: 3px 0;
 }
 .teacher-lesson-time {
+  grid-column: 1;
+  grid-row: 1 / span 8;
+  margin: 1px 0 0 !important;
   color: var(--accent);
-  font-weight: 700;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 760;
 }
 .teacher-lesson-title {
+  grid-column: 2;
   margin: 8px 0 0;
   font-size: 18px;
+  line-height: 1.35;
 }
 .teacher-lesson-title.is-inactive {
   text-decoration: line-through;
 }
 .teacher-lesson-meta,
+.teacher-lesson-groups,
+.teacher-lesson-rooms,
 .teacher-lesson-status {
+  grid-column: 2;
   color: var(--muted);
+  line-height: 1.5;
 }
 .teacher-lesson-groups {
   font-weight: 600;
 }
 .teacher-lesson-card.is-cancelled {
-  opacity: 0.78;
+  border-color: #e4c7c7;
+  background: #fff9f9;
 }
 .teacher-lesson-card.is-moved {
-  border-style: dashed;
+  border-color: #e8c998;
+  background: #fffaf2;
+}
+.teacher-lesson-card.is-cancelled .teacher-lesson-status,
+.teacher-lesson-card.is-moved .teacher-lesson-status {
+  width: fit-content;
+  margin-top: 5px;
+  padding: 5px 10px;
+  border-radius: 9px;
+  color: #873647;
+  background: #f7e9e5;
+  font-size: 13px;
+  font-weight: 700;
+}
+.teacher-lesson-card.is-moved .teacher-lesson-status {
+  color: #80521f;
+  background: #fff0d7;
+}
+.teacher-lesson-status a {
+  color: inherit;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
 }
 @media (max-width: 600px) {
   .teacher-schedule-page .schedule-toolbar {
-    align-items: stretch;
-    padding: 14px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+    padding: 12px;
+  }
+  .teacher-schedule-page .schedule-modes {
+    width: 100%;
+    min-width: 0;
   }
   .teacher-schedule-page .schedule-modes button {
     min-width: 0;
@@ -66,10 +128,57 @@
     padding-inline: 12px;
   }
   .teacher-schedule-page .schedule-day-arrows {
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: 44px minmax(78px, 1fr) 44px;
+    gap: 7px;
+  }
+  .teacher-schedule-page .schedule-day-arrows button {
+    width: 100%;
   }
   .teacher-schedule-page .schedule-date {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    width: 100%;
+    height: auto;
+    flex: initial;
+    place-items: center stretch;
     justify-content: space-between;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  .teacher-schedule-page .schedule-date input {
+    position: static;
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    height: 44px;
+    opacity: 1;
+    padding: 9px 10px;
+    font-size: 14px;
+  }
+  .teacher-schedule-page .schedule-date input::-webkit-calendar-picker-indicator {
+    position: static;
+    width: 16px;
+    height: 16px;
+  }
+  .teacher-lesson-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+    padding: 15px 16px;
+  }
+  .teacher-lesson-time,
+  .teacher-lesson-title,
+  .teacher-lesson-meta,
+  .teacher-lesson-groups,
+  .teacher-lesson-rooms,
+  .teacher-lesson-status {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .teacher-lesson-time {
+    margin-bottom: 5px !important;
   }
 }
 @media (prefers-reduced-motion: reduce) {

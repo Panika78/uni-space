@@ -8,15 +8,7 @@ import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStat
 import { StudentAnnouncementFeed } from '../announcements/AnnouncementFeed'
 import { useStudentReadScope } from '../profile/profileContext'
 import { getStudentRead, type StudentReadScope } from '../profile/studentReads'
-import {
-  formatDate,
-  formatLessonTimeRange,
-  formatTime,
-  getMoscowDate,
-  lessonKinds,
-} from '../schedule/calendar'
-import { attestationLabels, SessionResult } from './AcademicsPage'
-import { AttendanceMark } from './AttendanceMark'
+import { formatDate, formatTime, getMoscowDate } from '../schedule/calendar'
 import './studentCourse.css'
 
 type Course = components['schemas']['StudentCourse']
@@ -25,8 +17,6 @@ type Assessment = components['schemas']['StudentCourseAssessment']
 type CoursePage<T> = { items: T[]; next_cursor: string | null }
 
 const tabs = [
-  ['overview', 'Обзор'],
-  ['lessons', 'Занятия'],
   ['assessments', 'Работы и баллы'],
   ['attendance', 'Посещаемость'],
   ['announcements', 'Объявления'],
@@ -39,21 +29,41 @@ const readings = {
   gcTime: 0,
 } as const
 const assessmentTypes: Record<Assessment['type'], string> = {
-  test: 'Контрольные работы',
-  laboratory: 'Лабораторные работы',
-  practical: 'Практические работы',
-  seminar: 'Семинары',
-  independent: 'Самостоятельные работы',
-  extended_homework: 'Расширенные домашние задания',
-  exam: 'Экзамены',
-  other: 'Другие работы',
+  test: 'Контрольная',
+  laboratory: 'Лабораторная',
+  practical: 'Практическая',
+  seminar: 'Семинар',
+  independent: 'Самостоятельная',
+  extended_homework: 'Расширенное домашнее задание',
+  exam: 'Экзамен',
+  other: 'Другое',
 }
-const monthFormat = new Intl.DateTimeFormat('ru-RU', {
+const lessonTypes: Record<Lesson['kind'], string> = {
+  lecture: 'Лекция',
+  seminar: 'Семинар',
+  lab: 'Лабораторное занятие',
+  other: 'Занятие',
+}
+const longDate = new Intl.DateTimeFormat('ru-RU', {
+  day: 'numeric',
   month: 'long',
   year: 'numeric',
-  timeZone: 'Europe/Moscow',
+  timeZone: 'UTC',
+})
+const numericDate = new Intl.DateTimeFormat('ru-RU', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  timeZone: 'UTC',
 })
 
+function formatCourseDate(date: string) {
+  return longDate.format(new Date(`${date}T12:00:00Z`)).replace(/\sг\.$/, '')
+}
+
+function formatAssessmentDate(date: string) {
+  return numericDate.format(new Date(`${date}T12:00:00Z`))
+}
 function useRecoverStudentScope(error: unknown) {
   const client = useQueryClient()
   const changed = error instanceof ApiClientError && error.code === 'student_scope_changed'
@@ -92,7 +102,7 @@ function CourseError({ error, onRetry }: { error: unknown; onRetry: () => void }
 export function StudentCoursePage() {
   const { courseOfferingId = '' } = useParams()
   const [params, setParams] = useSearchParams()
-  const tab = tabs.find(([id]) => id === params.get('tab'))?.[0] ?? 'overview'
+  const tab = tabs.find(([id]) => id === params.get('tab'))?.[0] ?? 'assessments'
   const access = useStudentReadScope()
   const scope = access?.scope ?? null
   const location = useLocation()
@@ -113,7 +123,7 @@ export function StudentCoursePage() {
   }, [courseOfferingId])
 
   function selectTab(next: Tab) {
-    setParams(next === 'overview' ? {} : { tab: next }, {
+    setParams(next === 'assessments' ? {} : { tab: next }, {
       state: location.state,
       replace: true,
       preventScrollReset: true,
@@ -151,9 +161,7 @@ export function StudentCoursePage() {
   const source: unknown = location.state?.courseSource
   const previous = source === '/schedule' || source === '/academics' ? source : null
   const course = !access?.isChecking && passport.isSuccess ? passport.data : undefined
-
   function renderPanelContent(panelTab: Tab) {
-    if (panelTab === 'overview') return <CourseOverview course={course!} />
     if (panelTab === 'announcements') {
       return <StudentAnnouncementFeed courseId={courseOfferingId} />
     }
@@ -178,13 +186,7 @@ export function StudentCoursePage() {
         termId={course!.term.id}
         empty="Занятий нет"
       >
-        {(items) =>
-          panelTab === 'lessons' ? (
-            <CourseLessons items={items} />
-          ) : (
-            <CourseAttendance items={items} />
-          )
-        }
+        {(items) => <CourseAttendance items={items} />}
       </CourseList>
     )
   }
@@ -192,12 +194,16 @@ export function StudentCoursePage() {
   return (
     <section className="section-page student-course" aria-labelledby="student-course-title">
       {previous ? (
-        <button className="student-course__back" onClick={() => void navigate(-1)}>
+        <button
+          className="ui-back-link student-course__back"
+          type="button"
+          onClick={() => void navigate(-1)}
+        >
           <Icon name="left" />
           {previous === '/schedule' ? 'К расписанию' : 'К успеваемости'}
         </button>
       ) : (
-        <Link className="student-course__back" to="/academics">
+        <Link className="ui-back-link student-course__back" to="/academics">
           <Icon name="left" />К успеваемости
         </Link>
       )}
@@ -220,6 +226,7 @@ export function StudentCoursePage() {
               )}
             </div>
             <button
+              className="student-course__refresh"
               type="button"
               aria-disabled={passport.isFetching}
               onClick={() => {
@@ -229,6 +236,7 @@ export function StudentCoursePage() {
               {passport.isFetching ? 'Обновляем…' : 'Обновить'}
             </button>
           </header>
+          <h2 className="student-course__details-heading">Сведения по дисциплине</h2>
           <div className="student-course__tabs" role="tablist" aria-label="Дисциплина">
             {tabs.map(([id, label], index) => (
               <button
@@ -252,7 +260,7 @@ export function StudentCoursePage() {
           {tabs.map(([panelTab]) => (
             <section
               key={panelTab}
-              className="student-course__panel"
+              className={`student-course__panel student-course__panel--${panelTab}`}
               id={`course-panel-${panelTab}`}
               role="tabpanel"
               aria-labelledby={`course-tab-${panelTab}`}
@@ -265,47 +273,6 @@ export function StudentCoursePage() {
         </>
       )}
     </section>
-  )
-}
-
-function CourseOverview({ course }: { course: Course }) {
-  return (
-    <dl className="student-course__overview">
-      <div>
-        <dt>Форма аттестации</dt>
-        <dd>{attestationLabels[course.attestation_type]}</dd>
-      </div>
-      <div>
-        <dt>Полученные баллы</dt>
-        <dd>
-          {course.assessment_count ? (
-            <>
-              {course.graded_assessment_count ? (
-                <strong>
-                  {course.total_score} / {course.max_score}
-                </strong>
-              ) : (
-                <>
-                  <strong>Не выставлено</strong>
-                  <p>Максимум {course.max_score}</p>
-                </>
-              )}
-              <p>
-                Оценено {course.graded_assessment_count} из {course.assessment_count}
-              </p>
-            </>
-          ) : (
-            'Работ нет'
-          )}
-        </dd>
-      </div>
-      <div>
-        <dt>Итог аттестации</dt>
-        <dd>
-          <SessionResult item={course} />
-        </dd>
-      </div>
-    </dl>
   )
 }
 
@@ -372,18 +339,6 @@ function CourseList<T>({
   )
 }
 
-function LessonTime({ lesson }: { lesson: Lesson }) {
-  return (
-    <>
-      <time dateTime={lesson.starts_at}>
-        {formatDate(getMoscowDate(new Date(lesson.starts_at)))}
-      </time>
-      {' · '}
-      {formatLessonTimeRange(lesson.starts_at, lesson.ends_at)}
-    </>
-  )
-}
-
 function LessonStatus({ lesson }: { lesson: Lesson }) {
   const location = lesson.latest_lesson?.starts_at
   const previous = lesson.previous_lesson?.starts_at
@@ -409,66 +364,37 @@ function LessonStatus({ lesson }: { lesson: Lesson }) {
   )
 }
 
-function groupItems<T, K>(items: T[], key: (item: T) => K) {
-  const groups = new Map<K, T[]>()
-  for (const item of items) {
-    const group = key(item)
-    const list = groups.get(group)
-    if (list) list.push(item)
-    else groups.set(group, [item])
-  }
-  return groups
-}
-
-function CourseLessons({ items }: { items: Lesson[] }) {
-  const months = groupItems(items, (lesson) =>
-    getMoscowDate(new Date(lesson.starts_at)).slice(0, 7),
-  )
-  return Array.from(months, ([month, lessons]) => (
-    <details className="student-course__group" key={month} open>
-      <summary>{monthFormat.format(new Date(`${month}-15T12:00:00Z`))}</summary>
-      <ul className="student-course__rows">
-        {lessons.map((lesson) => (
-          <li key={lesson.id}>
-            <strong>
-              <LessonTime lesson={lesson} />
-            </strong>
-            <span>
-              {lessonKinds[lesson.kind]}
-              {lesson.teacher && ` · ${lesson.teacher.name}`}
-            </span>
-            {lesson.rooms.length > 0 && (
-              <span>
-                {lesson.rooms.map((room) => `${room.building.name} · ${room.name}`).join(', ')}
-              </span>
-            )}
-            <LessonStatus lesson={lesson} />
-          </li>
-        ))}
-      </ul>
-    </details>
-  ))
-}
-
 function CourseAttendance({ items }: { items: Lesson[] }) {
   return (
     <ul className="student-course__rows student-course__rows--attendance">
       {items.map((lesson) => (
         <li key={lesson.id}>
-          <div>
+          <Icon name="calendar" />
+          <div className="student-course__lesson-info">
             <strong>
-              <LessonTime lesson={lesson} />
+              <time dateTime={lesson.starts_at}>
+                {formatCourseDate(getMoscowDate(new Date(lesson.starts_at)))}
+              </time>
             </strong>
-            <span>{lessonKinds[lesson.kind]}</span>
+            <span>{lessonTypes[lesson.kind]}</span>
             <LessonStatus lesson={lesson} />
           </div>
-          {lesson.status === 'scheduled' ? (
-            <AttendanceMark status={lesson.attendance_status} />
-          ) : lesson.attendance_status !== 'unmarked' ? (
-            <AttendanceMark status={lesson.attendance_status} historical />
-          ) : (
-            <AttendanceMark status="unmarked" />
-          )}
+          <span
+            className="student-course__attendance-status"
+            data-status={lesson.attendance_status}
+          >
+            {lesson.attendance_status !== 'unmarked' && (
+              <span className="student-course__status-dot" aria-hidden="true" />
+            )}
+            {lesson.attendance_status === 'attended'
+              ? 'Присутствие'
+              : lesson.attendance_status === 'absent'
+                ? 'Отсутствие'
+                : 'Не отмечено'}
+            {lesson.status !== 'scheduled' && lesson.attendance_status !== 'unmarked' && (
+              <span className="student-course__historical-mark"> · Историческая отметка</span>
+            )}
+          </span>
         </li>
       ))}
     </ul>
@@ -476,37 +402,60 @@ function CourseAttendance({ items }: { items: Lesson[] }) {
 }
 
 function CourseAssessments({ items }: { items: Assessment[] }) {
-  const groups = groupItems(items, (item) => item.type)
-  return Array.from(groups, ([type, assessments]) => (
-    <details className="student-course__group" key={type} open>
-      <summary>{assessmentTypes[type]}</summary>
-      <ul className="student-course__rows student-course__rows--assessments">
-        {assessments.map((work) => (
-          <li key={work.assessment_group_id}>
-            <div>
-              <strong>{work.title}</strong>
-              {work.date_needs_confirmation && <span>Дата требует подтверждения</span>}
-              <span>
-                {work.planned_date ? (
-                  <>
-                    {work.date_needs_confirmation && 'Последняя известная дата · '}
-                    <time dateTime={work.planned_date}>{formatDate(work.planned_date, true)}</time>
-                  </>
-                ) : (
-                  'Дата не назначена'
-                )}
-              </span>
-              {work.description && <span>{work.description}</span>}
-            </div>
-            <div className="student-course__score">
-              <strong>
-                {work.score === null ? 'Не выставлено' : `${work.score} / ${work.max_score}`}
-              </strong>
-              {work.score === null && <span>Максимум {work.max_score}</span>}
-            </div>
-          </li>
+  return (
+    <table className="student-course__assessment-table">
+      <thead>
+        <tr>
+          <th scope="col">Работа</th>
+          <th scope="col">Тип</th>
+          <th scope="col">Дата</th>
+          <th scope="col">Баллы</th>
+        </tr>
+      </thead>
+      <tbody>
+        {items.map((work) => (
+          <tr key={work.assessment_group_id}>
+            <th scope="row">
+              <span className="student-course__assessment-title">{work.title}</span>
+              {work.description && (
+                <small className="student-course__assessment-description">{work.description}</small>
+              )}
+            </th>
+            <td data-label="Тип">{assessmentTypes[work.type]}</td>
+            <td data-label="Дата">
+              {work.planned_date ? (
+                <>
+                  <time dateTime={work.planned_date}>
+                    {formatAssessmentDate(work.planned_date)}
+                  </time>
+                  {work.date_needs_confirmation && (
+                    <small className="student-course__assessment-note">
+                      Дата требует подтверждения
+                    </small>
+                  )}
+                </>
+              ) : (
+                <>
+                  <span>—</span>
+                  {work.date_needs_confirmation && (
+                    <small className="student-course__assessment-note">
+                      Дата требует подтверждения
+                    </small>
+                  )}
+                </>
+              )}
+            </td>
+            <td data-label="Баллы" className="student-course__assessment-score">
+              <strong>{work.score === null ? '—' : `${work.score} / ${work.max_score}`}</strong>
+              {work.score === null && (
+                <span className="sr-only">
+                  Не выставлено. <span>Максимум {work.max_score}</span>
+                </span>
+              )}
+            </td>
+          </tr>
         ))}
-      </ul>
-    </details>
-  ))
+      </tbody>
+    </table>
+  )
 }

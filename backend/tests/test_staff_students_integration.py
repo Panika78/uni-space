@@ -146,9 +146,11 @@ def request(s, method, path, token=None, **kwargs):
     return s["client"].request(method, "/api/v1/staff/students" + path, headers=headers, **kwargs)
 
 
-def test_independent_permissions_and_minimal_status_write_response(staff_students):
+def test_status_edit_permission_also_grants_student_search_and_view(staff_students):
     s = staff_students
-    assert request(s, "GET", "", s["editor_token"]).status_code == 403
+    assert request(s, "GET", "", s["editor_token"]).status_code == 200
+    assert request(s, "GET", "/filters", s["editor_token"]).status_code == 200
+    assert request(s, "GET", f"/{s['students'][0].id}", s["editor_token"]).status_code == 200
     assert request(s, "GET", "", s["reader_token"]).status_code == 200
     assert (
         request(
@@ -248,16 +250,19 @@ def test_staff_search_filters_and_russian_ё_order_with_cursor(staff_students):
     assert (
         request(s, "GET", "", s["reader_token"], params={"faculty_id": "9" * 20}).status_code == 422
     )
-    assert request(s, "GET", f"/{s['students'][0].id}", s["editor_token"]).status_code == 403
+    assert request(s, "GET", f"/{s['students'][0].id}", s["editor_token"]).status_code == 200
 
 
-def test_status_only_preview_and_operation_receipt_do_not_expose_profile(staff_students):
+def test_status_editor_can_resolve_student_before_update_and_reconcile(staff_students):
     s = staff_students
     student = s["students"][0]
     preview = request(s, "GET", f"/{student.id}/academic-status", s["editor_token"])
     assert preview.status_code == 200
     assert preview.json() == {"id": str(student.id), "academic_status": "enrolled"}
-    assert request(s, "GET", f"/{student.id}", s["editor_token"]).status_code == 403
+    profile = request(s, "GET", f"/{student.id}", s["editor_token"])
+    assert profile.status_code == 200
+    assert profile.json()["id"] == str(student.id)
+    assert profile.json()["full_name"] == "Елена Поиск27"
 
     operation_id = str(uuid4())
     payload = {

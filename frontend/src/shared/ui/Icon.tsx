@@ -13,6 +13,13 @@ const paths = {
   user: 'M19 21v-2a7 7 0 0 0-14 0v2M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
   graduation: 'M2 9l10-5 10 5-10 5-10-5zm4 3v6c4 3 8 3 12 0v-6M22 10v7',
   info: 'M12 17v-5M12 8h.01M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20z',
+  clipboard: 'M9 4h6l1 2h4v15H4V6h4l1-2zM9 4v4h6V4M8 12h8M8 16h8',
+  chart: 'M4 20V11h4v9M10 20V4h4v16M16 20v-7h4v7M3 20h18',
+  checklist: 'M9 6h11M9 12h11M9 18h11M4 6l1.2 1.2L7 5.5M4 12l1.2 1.2L7 11.5M4 18l1.2 1.2L7 17.5',
+  users:
+    'M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM17 11a4 4 0 0 0 0-7.7M21 21v-2a4 4 0 0 0-3-3.9',
+  groups:
+    'M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM17 11a4 4 0 0 0 0-7.7M21 21v-2a4 4 0 0 0-3-3.9',
 } as const
 
 export function Icon({ name }: { name: keyof typeof paths }) {

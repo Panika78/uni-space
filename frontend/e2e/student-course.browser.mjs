@@ -1,4 +1,4 @@
-/* global process, console, document, window, AbortSignal */
+/* global process, console, document, window, AbortSignal, getComputedStyle */
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -88,7 +88,7 @@ async function loadAll(count, itemSelector = 'li') {
 try {
   await login('course-alpha')
   await page.goto(baseURL + scheduleUrl)
-  await card('single').getByText('0 / 10', { exact: true }).waitFor()
+  await card('single').getByText('Семинар', { exact: true }).waitFor()
   await card('multiple').getByText('2 работы', { exact: true }).waitFor()
   assert.equal(
     await card('unlinked').locator('.lesson-card__academic').innerText(),
@@ -106,10 +106,10 @@ try {
   await original.click()
   await heading().waitFor()
   await page.getByText('Анна Тестовая, Борис Тестовый', { exact: true }).waitFor()
-  await tab('Обзор').focus()
+  await tab('Работы и баллы').focus()
   await page.keyboard.press('ArrowRight')
-  await page.getByRole('tab', { name: 'Занятия', exact: true, selected: true }).waitFor()
-  assert.ok(await tab('Занятия').evaluate((element) => element === document.activeElement))
+  await page.getByRole('tab', { name: 'Посещаемость', exact: true, selected: true }).waitFor()
+  assert.ok(await tab('Посещаемость').evaluate((element) => element === document.activeElement))
   await panel().locator('li').first().waitFor()
   const firstPage = await panel().locator('li').count()
   assert.equal(firstPage, 20)
@@ -124,9 +124,6 @@ try {
     2,
   )
   await panel().getByText('Отменено', { exact: true }).waitFor()
-  assert.ok((await panel().locator('details').count()) >= 2)
-  await panel().locator('summary').first().click()
-  assert.equal(await panel().locator('details').first().getAttribute('open'), null)
   await page.goBack()
   await original.waitFor()
   await page.waitForFunction((target) => Math.abs(window.scrollY - target) <= 3, scroll)
@@ -149,27 +146,26 @@ try {
   await page.getByRole('tab', { name: 'Работы и баллы', exact: true, selected: true }).waitFor()
   await panel().getByText('0 / 10', { exact: true }).waitFor()
   await panel().getByText('Максимум 0', { exact: true }).waitFor()
-  assert.equal(await panel().getByText('Дата требует подтверждения', { exact: true }).count(), 2)
-  await loadAll(26)
-  await panel().getByText('Задание без даты 20', { exact: true }).waitFor()
-  check(
-    'desktop links, Moscow time, whole semester and stable pagination, collapsed months, Back/Forward and scroll',
+  assert.equal(
+    await panel()
+      .locator('.student-course__assessment-note')
+      .filter({ hasText: 'Дата требует подтверждения' })
+      .count(),
+    2,
   )
+  await loadAll(26, 'tbody tr')
+  await panel().getByText('Задание без даты 20', { exact: true }).waitFor()
+  check('desktop links, Moscow time, real assessment table, pagination, Back/Forward and scroll')
 
   await writeTeacherData()
   await page.getByRole('button', { name: 'Обновить', exact: true }).click()
   await panel().getByText('7 / 10', { exact: true }).waitFor()
   await openTab('Посещаемость')
   await loadAll(34)
-  await panel().getByText('Не был', { exact: false }).waitFor()
-  await panel().getByText('✓ Был', { exact: true }).waitFor()
-  await openTab('Обзор')
-  await panel().getByText('Неудовлетворительно', { exact: true }).waitFor()
-  await panel()
-    .getByText(/Тестовая аудитория 37/)
-    .waitFor()
+  await panel().getByText('Отсутствие', { exact: true }).waitFor()
+  await panel().getByText('Присутствие', { exact: true }).waitFor()
   await openTab('Объявления')
-  await panel().getByText('Объявление для первой группы', { exact: true }).click()
+  await panel().getByText('Объявление для первой группы', { exact: true }).waitFor()
   await panel()
     .getByText('Безопасный текст <strong>как есть</strong>.', { exact: true })
     .last()
@@ -203,7 +199,11 @@ try {
     return bounds && bounds.width >= 44 && bounds.height >= 44
   }, arrowSelector)
   const bounds = await arrow.boundingBox()
-  assert.ok(bounds.width >= 44 && bounds.height >= 44)
+  const arrowSize = await arrow.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return { width: Number.parseFloat(style.width), height: Number.parseFloat(style.height) }
+  })
+  assert.ok(arrowSize.width >= 44 && arrowSize.height >= 44)
   const nameBounds = await card('single').locator('h3').boundingBox()
   const badgeBounds = await card('single').locator('.lesson-card__academic').boundingBox()
   assert.ok(nameBounds.x + nameBounds.width <= bounds.x)
@@ -215,7 +215,7 @@ try {
   await arrow.click()
   await heading().waitFor()
   await page.waitForFunction(() => document.documentElement.scrollWidth <= 360)
-  await tab('Обзор').focus()
+  await tab('Работы и баллы').focus()
   await page.keyboard.press('End')
   assert.ok(await tab('Объявления').evaluate((element) => element === document.activeElement))
   await openTab('Работы и баллы')
@@ -223,16 +223,16 @@ try {
   await page.waitForFunction(() => document.documentElement.scrollWidth <= 360)
   await page.goto(`${baseURL}/academics/courses/${fixture.parallel}?tab=unknown`)
   await heading().waitFor()
-  await panel().getByText('Зачёт', { exact: true }).waitFor()
+  await page.getByRole('tab', { name: 'Работы и баллы', exact: true, selected: true }).waitFor()
   await openTab('Работы и баллы')
   await panel().getByText('Работа второго проведения', { exact: true }).waitFor()
   assert.equal(await panel().getByText('Личный результат первой группы').count(), 0)
   await page.getByRole('link', { name: 'К успеваемости', exact: true }).click()
   await page.getByRole('heading', { name: 'Успеваемость', exact: true }).waitFor()
-  await page.locator(`.academics-page a[href="${courseUrl}"]`).click()
+  await page.locator(`.academics-page a.academics-mobile-course-link[href="${courseUrl}"]`).click()
   await heading().waitFor()
   check(
-    '360px long names and score geometry, 44px arrow, direct URL and distinct same-name offering',
+    '360px course tabs, assessment table, 44px schedule arrow, direct URL and distinct same-name offering',
   )
 
   // Interrupt only transport; retries read the original live endpoints.

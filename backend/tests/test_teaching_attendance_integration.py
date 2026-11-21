@@ -28,7 +28,7 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def teaching_attendance(db_session):
-    s = journal_fixture.__wrapped__(db_session)
+    s = journal_fixture.__wrapped__(db_session, datetime.now(UTC) - timedelta(days=30))
     s.client = TestClient(s.app)
     s.app.include_router(attendance_router)
     extra_user = s.add(
@@ -45,6 +45,7 @@ def teaching_attendance(db_session):
             user_id=extra_user.id,
             group_id=s.groups[0].id,
             academic_status="enrolled",
+            membership_changed_at=datetime.now(UTC) - timedelta(days=30),
         )
     )
     s.lesson = s.add(
@@ -353,17 +354,13 @@ def test_current_role_and_session_are_checked_with_old_jwt(teaching_attendance):
     assert s.read().status_code == 401
 
 
-@pytest.mark.parametrize("state", ["future", "cancelled", "moved"])
-def test_can_edit_is_false_for_future_cancelled_and_moved_lessons(teaching_attendance, state):
+@pytest.mark.parametrize("state", ["cancelled", "moved"])
+def test_cancelled_and_moved_lessons_are_not_editable(teaching_attendance, state):
     s = teaching_attendance
     assert s.write("attended").status_code == 200
     original = s.db.get(Attendance, (s.lesson.id, s.students[0].id))
     original_state = (original.status, original.updated_at)
-    if state == "future":
-        s.lesson.starts_at = datetime.now(UTC) + timedelta(hours=1)
-        s.lesson.ends_at = s.lesson.starts_at + timedelta(hours=1)
-    else:
-        s.lesson.status = state
+    s.lesson.status = state
     s.db.flush()
     rows = {row["student_id"]: row for row in s.read().json()["items"]}
     assert all(not row["can_edit"] for row in rows.values())
@@ -374,6 +371,33 @@ def test_can_edit_is_false_for_future_cancelled_and_moved_lessons(teaching_atten
     )
     current = s.db.get(Attendance, (s.lesson.id, s.students[0].id))
     assert (current.status, current.updated_at) == original_state
+
+
+@pytest.mark.parametrize("when", ["past", "today", "future"])
+def test_teacher_can_mark_past_and_started_lessons_but_not_future(teaching_attendance, when):
+    s = teaching_attendance
+    now = datetime.now(UTC)
+    starts_at = {
+        "past": now - timedelta(days=1),
+        "today": now - timedelta(minutes=5),
+        "future": now + timedelta(days=1),
+    }[when]
+    s.lesson.starts_at = starts_at
+    s.lesson.ends_at = starts_at + timedelta(minutes=60)
+    s.db.flush()
+
+    initial = {row["student_id"]: row for row in s.read().json()["items"]}
+    editable = when != "future"
+    assert all(row["can_edit"] is editable for row in initial.values())
+    if when == "future":
+        assert s.write("absent").status_code == 409
+        return
+    assert s.write("absent").status_code == 200
+    assert s.read(student_id=str(s.students[0].id)).json()["items"][0]["status"] == "absent"
+    assert s.write("attended", student=3).status_code == 200
+    assert s.read(student_id=str(s.students[3].id)).json()["items"][0]["status"] == "attended"
+    assert s.write(None, method="delete").status_code == 200
+    assert s.read(student_id=str(s.students[0].id)).json()["items"][0]["status"] == "unmarked"
 
 
 def test_attendance_journal_uses_constant_sql_count_and_russian_keyset(teaching_attendance):

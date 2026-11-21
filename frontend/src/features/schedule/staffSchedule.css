@@ -11,6 +11,11 @@
 .staff-schedule__heading h1 {
   margin: 0;
 }
+.staff-schedule__description {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 16px;
+}
 .staff-schedule__primary,
 .staff-schedule__secondary,
 .staff-schedule__danger {
@@ -40,13 +45,39 @@
 }
 .staff-schedule__filters {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(220px, 0.8fr) auto;
+  grid-template-columns: minmax(300px, 1fr) minmax(210px, 0.8fr) auto;
   align-items: end;
   gap: 14px;
-  padding: 16px;
+  padding: 18px 22px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface);
+}
+.staff-schedule__resource-tabs {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: #554c4e;
+  font-size: 13px;
+  font-weight: 650;
+}
+.staff-schedule__resource-tabs > span,
+.staff-schedule__picker > label {
+  font-size: 15px;
+  font-weight: 700;
+}
+.staff-schedule__resource-tabs .staff-schedule__tabs {
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+}
+.mvp2-role-surface .staff-schedule__resource-tabs .staff-schedule__tabs button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-inline: 6px;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.1;
 }
 .staff-schedule__tabs {
   display: flex;
@@ -110,6 +141,12 @@
   background: white;
   font-size: 19px;
   cursor: pointer;
+}
+.staff-schedule__date-controls > .staff-schedule__today {
+  width: auto;
+  padding-inline: 12px;
+  color: var(--accent);
+  font-size: 13px;
 }
 .staff-schedule__date-controls label {
   min-width: 150px;
@@ -314,6 +351,39 @@
 .staff-schedule__options button[aria-selected='true'] {
   background: #f5ebdd;
 }
+.staff-schedule__options [role='listbox'] {
+  display: grid;
+  gap: 3px;
+}
+.staff-schedule__options [role='option'] {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+}
+.staff-schedule__options [role='option'] span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 450;
+}
+.staff-schedule__options [role='option'].is-active,
+.staff-schedule__options [role='option']:hover {
+  outline: 2px solid #781f32;
+  outline-offset: -2px;
+  background: #f5ebdd;
+}
+.staff-schedule__catalog-pages {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+}
+.staff-schedule__catalog-pages button {
+  width: auto;
+  min-height: 34px;
+  color: #781f32;
+  font-size: 12px;
+}
 .staff-schedule__chips {
   display: flex;
   flex-wrap: wrap;
@@ -392,6 +462,23 @@
   gap: 6px;
   padding-inline-start: 22px;
 }
+.staff-schedule__subgroup-search {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.staff-schedule__subgroup-options > div[role='group'] {
+  display: grid;
+  gap: 4px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fffefd;
+}
 .staff-schedule__snapshot {
   display: grid;
   gap: 8px;
@@ -429,9 +516,9 @@
 }
 @media (max-width: 900px) {
   .staff-schedule__filters {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
-  .staff-schedule__tabs:first-child {
+  .staff-schedule__resource-tabs {
     grid-column: span 2;
   }
   .staff-schedule__date-controls {
@@ -461,22 +548,47 @@
     grid-template-columns: minmax(0, 1fr);
     padding: 12px;
   }
-  .staff-schedule__tabs:first-child,
+  .staff-schedule__resource-tabs,
   .staff-schedule__date-controls {
     grid-column: auto;
   }
-  .staff-schedule__tabs:first-child button {
+  .mvp2-role-surface .staff-schedule__resource-tabs .staff-schedule__tabs button {
     flex: 1;
     padding-inline: 7px;
-    font-size: 13px;
+    font-size: 11.5px;
   }
   .staff-schedule__date-controls {
-    gap: 5px;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    grid-template-areas:
+      'previous date next'
+      'today today today'
+      'view view view';
+    align-items: end;
+    gap: 8px;
+    min-width: 0;
+  }
+  .staff-schedule__date-controls > button:first-child {
+    grid-area: previous;
+  }
+  .staff-schedule__date-controls > button[aria-label='Следующий период'] {
+    grid-area: next;
+  }
+  .staff-schedule__date-controls > .staff-schedule__today {
+    grid-area: today;
+    width: 100%;
+    min-height: 42px;
+  }
+  .staff-schedule__date-controls > label {
+    grid-area: date;
+    min-width: 0;
+    width: 100%;
   }
   .staff-schedule__date-controls label {
-    min-width: 120px;
+    min-width: 0;
   }
   .staff-schedule__view {
+    grid-area: view;
     width: 100%;
     justify-content: stretch;
   }
@@ -515,5 +627,12 @@
   .staff-schedule__snapshot > div {
     grid-template-columns: 1fr;
     gap: 4px;
+  }
+}
+@media (max-width: 380px) {
+  .mvp2-role-surface .staff-schedule__resource-tabs .staff-schedule__tabs button {
+    padding-inline: 3px;
+    font-size: 10.5px;
+    letter-spacing: -0.15px;
   }
 }

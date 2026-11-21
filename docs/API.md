@@ -11,15 +11,15 @@
 
 ## 1. Общие правила
 
-| Параметр | Контракт |
-|---|---|
-| Формат | JSON, поля `snake_case` |
-| ID | Строки с положительным целым: `"123"` |
-| Даты / время | `YYYY-MM-DD` / ISO 8601 UTC; расписание отображается в `Europe/Moscow` |
-| Пустые значения | `null`; пустые коллекции — `[]` |
-| Авторизация | Bearer access; refresh — cookie; logout — cookie с необязательным Bearer fallback |
-| Личные данные | Определяются по авторизации; `student_id` от клиента не принимается |
-| Совместимость | Клиент игнорирует новые поля ответа; сервер отклоняет неизвестные поля запроса |
+| Параметр        | Контракт                                                                          |
+| --------------- | --------------------------------------------------------------------------------- |
+| Формат          | JSON, поля `snake_case`                                                           |
+| ID              | Строки с положительным целым: `"123"`                                             |
+| Даты / время    | `YYYY-MM-DD` / ISO 8601 UTC; расписание отображается в `Europe/Moscow`            |
+| Пустые значения | `null`; пустые коллекции — `[]`                                                   |
+| Авторизация     | Bearer access; refresh — cookie; logout — cookie с необязательным Bearer fallback |
+| Личные данные   | Определяются по авторизации; `student_id` от клиента не принимается               |
+| Совместимость   | Клиент игнорирует новые поля ответа; сервер отклоняет неизвестные поля запроса    |
 
 Все поля ответа присутствуют. Nullable-поля явно обозначены через `| null`. TypeScript ниже — компактная запись схем JSON, а не код реализации; `Date` и `DateTime` означают строки, не JavaScript Date.
 
@@ -27,24 +27,24 @@
 
 Пути относительно `/api/v1`.
 
-| Метод | Путь | Вход | Успешный ответ |
-|---|---|---|---|
-| POST | `/auth/login` | `LoginRequest` | `200 TokenResponse` + cookie |
-| POST | `/auth/refresh` | Refresh cookie, без тела | `200 TokenResponse` + новая cookie |
-| POST | `/auth/logout` | Refresh cookie, необязательный Bearer fallback, без тела | `200 LogoutResponse`, cookie удалена |
-| POST | `/auth/password` | `ChangePasswordRequest`, активная сессия | `204`, cookie удалена, все сессии отозваны |
-| GET | `/users/me` | — | `200 StudentProfile` |
-| GET | `/schedule` | `date_from`, `date_to` | `200 ScheduleResponse` |
-| GET | `/academics` | — | `200 AcademicsResponse` |
-| GET | `/services` | — | `200 {items: Service[]}` |
-| POST | `/applications` | `CreateApplicationRequest` | `201 Application` |
-| GET | `/applications` | `limit`, `cursor` | `200 Page<Application>` |
-| GET | `/applications/{id}` | ID | `200 Application` |
-| GET | `/applications/{id}/document` | ID заявки | готовый PDF владельцу |
-| POST | `/applications/{id}/document/retry` | ID заявки | `200 Application` и метаданные документа |
-| POST | `/applications/{id}/document/process` | ID старой automatic заявки | `200 Application` и метаданные документа |
-| GET | `/staff/applications/{id}/document` | ID + `applications.review` scope | готовый PDF |
-| POST | `/staff/applications/{id}/document/retry` | ID + `applications.review` scope | `200 StaffApplicationResponse` |
+| Метод | Путь                                      | Вход                                                     | Успешный ответ                             |
+| ----- | ----------------------------------------- | -------------------------------------------------------- | ------------------------------------------ |
+| POST  | `/auth/login`                             | `LoginRequest`                                           | `200 TokenResponse` + cookie               |
+| POST  | `/auth/refresh`                           | Refresh cookie, без тела                                 | `200 TokenResponse` + новая cookie         |
+| POST  | `/auth/logout`                            | Refresh cookie, необязательный Bearer fallback, без тела | `200 LogoutResponse`, cookie удалена       |
+| POST  | `/auth/password`                          | `ChangePasswordRequest`, активная сессия                 | `204`, cookie удалена, все сессии отозваны |
+| GET   | `/users/me`                               | —                                                        | `200 StudentProfile`                       |
+| GET   | `/schedule`                               | `date_from`, `date_to`                                   | `200 ScheduleResponse`                     |
+| GET   | `/academics`                              | —                                                        | `200 AcademicsResponse`                    |
+| GET   | `/services`                               | —                                                        | `200 {items: Service[]}`                   |
+| POST  | `/applications`                           | `CreateApplicationRequest`                               | `201 Application`                          |
+| GET   | `/applications`                           | `limit`, `cursor`                                        | `200 Page<Application>`                    |
+| GET   | `/applications/{id}`                      | ID                                                       | `200 Application`                          |
+| GET   | `/applications/{id}/document`             | ID заявки                                                | готовый PDF владельцу                      |
+| POST  | `/applications/{id}/document/retry`       | ID заявки                                                | `200 Application` и метаданные документа   |
+| POST  | `/applications/{id}/document/process`     | ID старой automatic заявки                               | `200 Application` и метаданные документа   |
+| GET   | `/staff/applications/{id}/document`       | ID + `applications.review` scope                         | готовый PDF                                |
+| POST  | `/staff/applications/{id}/document/retry` | ID + `applications.review` scope                         | `200 StaffApplicationResponse`             |
 
 Автоматические `study_certificate` и `academic_transcript` фиксируются как
 `approved` с историей до синхронной генерации. При ошибке выдачи заявка остаётся
@@ -84,8 +84,8 @@
 
 ```ts
 type Id = string;
-type Date = string;      // YYYY-MM-DD
-type DateTime = string;  // ISO 8601 UTC
+type Date = string; // YYYY-MM-DD
+type DateTime = string; // ISO 8601 UTC
 type Ref = { id: Id; name: string };
 
 type Page<T> = {
@@ -214,7 +214,11 @@ type AcademicsResponse = {
 ```ts
 type Service = {
   id: Id;
-  code: "study_certificate" | "academic_transcript" | "academic_leave" | "accounting_certificate";
+  code:
+    | "study_certificate"
+    | "academic_transcript"
+    | "academic_leave"
+    | "accounting_certificate";
   title: string;
   description: string;
   processing_mode: "automatic" | "manual";
@@ -234,19 +238,33 @@ type CreateAcademicTranscriptRequest = {
 };
 type CreateAcademicLeaveRequest = {
   service_code: "academic_leave";
-  form_data: { basis: "medical" | "family" | "other"; starts_on: Date; ends_on: Date; explanation?: string | null };
+  form_data: {
+    basis: "medical" | "family" | "other";
+    starts_on: Date;
+    ends_on: Date;
+    explanation?: string | null;
+  };
 };
 type CreateAccountingCertificateRequest = {
   service_code: "accounting_certificate";
   form_data: { purpose?: string | null };
 };
-type CreateApplicationRequest = CreateStudyCertificateRequest | CreateAcademicTranscriptRequest
-  | CreateAcademicLeaveRequest | CreateAccountingCertificateRequest; // discriminator: service_code
+type CreateApplicationRequest =
+  | CreateStudyCertificateRequest
+  | CreateAcademicTranscriptRequest
+  | CreateAcademicLeaveRequest
+  | CreateAccountingCertificateRequest; // discriminator: service_code
 type AcademicTranscriptFormData = {
-  academic_term_id: Id; academic_term_name: string; starts_on: Date; ends_on: Date;
+  academic_term_id: Id;
+  academic_term_name: string;
+  starts_on: Date;
+  ends_on: Date;
 }; // только сохранённая форма ответа; период выбирается сервером по группе студента
 type AcademicLeaveFormData = {
-  basis: "medical" | "family" | "other"; starts_on: Date; ends_on: Date; explanation: string | null;
+  basis: "medical" | "family" | "other";
+  starts_on: Date;
+  ends_on: Date;
+  explanation: string | null;
 };
 type AccountingCertificateFormData = { purpose: string | null };
 type AttachmentMetadata = {
@@ -260,11 +278,18 @@ type Application = {
   id: Id;
   version: number; // версия для изменяющих запросов MVP2
   service: Service;
-  form_data: { place_of_submission: string } | AcademicTranscriptFormData
-    | AcademicLeaveFormData | AccountingCertificateFormData;
+  form_data:
+    | { place_of_submission: string }
+    | AcademicTranscriptFormData
+    | AcademicLeaveFormData
+    | AccountingCertificateFormData;
   review_status:
-    | "submitted" | "in_review" | "needs_correction"
-    | "resubmitted" | "approved" | "rejected";
+    | "submitted"
+    | "in_review"
+    | "needs_correction"
+    | "resubmitted"
+    | "approved"
+    | "rejected";
   document_status: "not_required" | "pending" | "ready" | "failed";
   feedback: string | null;
   attachments: AttachmentMetadata[]; // только текущие вложения академического отпуска
@@ -330,12 +355,12 @@ Resolver принимает только существующие типы `appl
 `lesson` и проверяет владельца уведомления, существование объекта и текущее право
 чтения через доменные проверки. Разрешённые серверные относительные пути:
 
-| Цель и доступ | Путь |
-|---|---|
-| Своё заявление студента | `/applications/:id` |
-| Заявление сотрудника с `applications.review` в актуальном org scope | `/staff/applications/:id` |
-| Доступное студенту проведение дисциплины | `/academics/courses/:courseOfferingId` |
-| Занятие текущей группы/подгруппы студента | `/schedule?date=YYYY-MM-DD&mode=day&lesson_id=:id` |
+| Цель и доступ                                                       | Путь                                               |
+| ------------------------------------------------------------------- | -------------------------------------------------- |
+| Своё заявление студента                                             | `/applications/:id`                                |
+| Заявление сотрудника с `applications.review` в актуальном org scope | `/staff/applications/:id`                          |
+| Доступное студенту проведение дисциплины                            | `/academics/courses/:courseOfferingId`             |
+| Занятие текущей группы/подгруппы студента                           | `/schedule?date=YYYY-MM-DD&mode=day&lesson_id=:id` |
 
 Перед сериализацией списка resolver повторно проверяет каждый target. При утрате
 доступа возвращаются только собственные `id`, `created_at`, `read_at` и нейтральные
@@ -372,16 +397,16 @@ Logout, смена аккаунта/роли и утрата доступа оч
 
 ## 4. Выборки и ограничения
 
-| Область | Правило |
-|---|---|
-| Пагинация | `limit`: 20 по умолчанию, 1–100; `cursor` непрозрачный |
-| Конец списка | `next_cursor: null` |
-| Порядок | Заявки/уведомления: `created_at DESC, id DESC`; новости: `published_at DESC, id DESC` |
-| Расписание | Обе даты обязательны и включены; диапазон 1–31 день; выбираются пересекающие его занятия |
-| Порядок занятий | `starts_at ASC, id ASC`; отменённые и перенесённые включены |
-| Успеваемость | Текущий период по московской дате; если его нет — `term: null, items: []`; пересечение периодов — ошибка конфигурации |
-| Каталог | Только доступные услуги; сортировка по `code` |
-| Новости | Только опубликованные, с `published_at` не позже текущего момента |
+| Область         | Правило                                                                                                               |
+| --------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Пагинация       | `limit`: 20 по умолчанию, 1–100; `cursor` непрозрачный                                                                |
+| Конец списка    | `next_cursor: null`                                                                                                   |
+| Порядок         | Заявки/уведомления: `created_at DESC, id DESC`; новости: `published_at DESC, id DESC`                                 |
+| Расписание      | Обе даты обязательны и включены; диапазон 1–31 день; выбираются пересекающие его занятия                              |
+| Порядок занятий | `starts_at ASC, id ASC`; отменённые и перенесённые включены                                                           |
+| Успеваемость    | Текущий период по московской дате; если его нет — `term: null, items: []`; пересечение периодов — ошибка конфигурации |
+| Каталог         | Только доступные услуги; сортировка по `code`                                                                         |
+| Новости         | Только опубликованные, с `published_at` не позже текущего момента                                                     |
 
 ## 5. Ошибки
 
@@ -402,15 +427,15 @@ Logout, смена аккаунта/роли и утрата доступа оч
 }
 ```
 
-| HTTP | Коды |
-|---|---|
-| 401 | `invalid_credentials`, `access_expired`, `invalid_access`, `session_invalid`, `invalid_refresh` |
-| 403 | `forbidden`, `origin_not_allowed` |
-| 404 | `not_found` — одинаково для отсутствующей и чужой записи |
-| 413 | `request_too_large` — тело auth-запроса превышает 16384 байта |
-| 422 | `validation_error` — поля, даты, параметры, cursor |
-| 429 | `rate_limited` + `Retry-After` |
-| 500 | `internal_error`, без внутренних подробностей |
+| HTTP | Коды                                                                                            |
+| ---- | ----------------------------------------------------------------------------------------------- |
+| 401  | `invalid_credentials`, `access_expired`, `invalid_access`, `session_invalid`, `invalid_refresh` |
+| 403  | `forbidden`, `origin_not_allowed`                                                               |
+| 404  | `not_found` — одинаково для отсутствующей и чужой записи                                        |
+| 413  | `request_too_large` — тело auth-запроса превышает 16384 байта                                   |
+| 422  | `validation_error` — поля, даты, параметры, cursor                                              |
+| 429  | `rate_limited` + `Retry-After`                                                                  |
+| 500  | `internal_error`, без внутренних подробностей                                                   |
 
 `details` всегда массив; клиент принимает решения по `code`, не по тексту. Каждый ответ содержит `X-Request-ID`.
 Для форм заявлений `details[].field` указывает путь `form_data.<поле>`; проверка
@@ -509,16 +534,16 @@ scope — только `teaching_assignments` через `teachers.user_id` де
 
 Базовый путь журнала `J = /courses/{course_offering_id}/groups/{group_id}`:
 
-| Путь после `/teaching` | Ответ | Дополнительные фильтры |
-|---|---|---|
-| `/assignments` | `Page<TeachingAssignmentResponse>` | `course_offering_id`, `group_id`, `term_id` |
-| `J/students` | `Page<JournalStudent>` | `student_id` |
-| `J/assessments` | `Page<JournalAssessment>` | `assessment_group_id` |
-| `J/assessments/{assessment_group_id}/results` | `Page<JournalResult>` | `student_id` |
-| `PUT J/assessments/{assessment_group_id}/results/{student_id}` | `ScoreWriteResponse` | JSON `{"score": number \| null}` |
-| `J/lessons` | `Page<JournalLesson>` | `lesson_id`, `starts_from`, `starts_before`, `status` |
-| `J/lessons/{lesson_id}/students` | `Page<JournalStudent>` | `student_id` |
-| `J/lessons/{lesson_id}/attendance` | `Page<JournalAttendanceRow>` | `student_id` |
+| Путь после `/teaching`                                         | Ответ                              | Дополнительные фильтры                                |
+| -------------------------------------------------------------- | ---------------------------------- | ----------------------------------------------------- |
+| `/assignments`                                                 | `Page<TeachingAssignmentResponse>` | `course_offering_id`, `group_id`, `term_id`           |
+| `J/students`                                                   | `Page<JournalStudent>`             | `student_id`                                          |
+| `J/assessments`                                                | `Page<JournalAssessment>`          | `assessment_group_id`                                 |
+| `J/assessments/{assessment_group_id}/results`                  | `Page<JournalResult>`              | `student_id`                                          |
+| `PUT J/assessments/{assessment_group_id}/results/{student_id}` | `ScoreWriteResponse`               | JSON `{"score": number \| null}`                      |
+| `J/lessons`                                                    | `Page<JournalLesson>`              | `lesson_id`, `starts_from`, `starts_before`, `status` |
+| `J/lessons/{lesson_id}/students`                               | `Page<JournalStudent>`             | `student_id`                                          |
+| `J/lessons/{lesson_id}/attendance`                             | `Page<JournalAttendanceRow>`       | `student_id`                                          |
 
 Все списки принимают `limit=20` (1–100), непрозрачный `cursor` и возвращают
 `items`, `next_cursor` без общего количества. Назначения и работы сортируются
@@ -578,6 +603,7 @@ no-op, без смены автора/времени и audit event. Все фа
 Если PostgreSQL lock timeout не позволяет безопасно дождаться блокировки,
 endpoint возвращает `503 temporarily_unavailable` с `Retry-After: 1`; повторный
 запрос заново проверяет полномочия и актуальное состояние.
+
 - Занятие: `id`, `starts_at`, `ends_at`, `kind`, `status`, `is_additional`,
   `version`. Список дедуплицирован через `EXISTS lesson_groups`. Не выдаёт
   остальные группы совместной пары, ссылки на переносы или чужие журналы.
@@ -612,6 +638,7 @@ endpoint возвращает `503 temporarily_unavailable` с `Retry-After: 1`;
 `require_teaching_assignment`; новые write-сценарии должны дополнительно
 проверять свою предметную целостность и использовать аудит #87. Этот контракт
 не предоставляет права записи, не создаёт attendance и не меняет расчёт MVP1.
+
 ## Workflow заявлений MVP2-15
 
 Маршруты относительно `/api/v1`; все требуют Bearer. Студенческие маршруты
@@ -620,19 +647,19 @@ MVP1 сохранены, в ответы создания/списка/дета�
 реальное событие `null → submitted` вместе с заявлением. Для существовавших
 заявлений история начинается с первого реального действия после обновления.
 
-| Метод | Путь | Вход | Ответ 200 |
-|---|---|---|---|
-| GET | `/staff/applications` | `limit`, `cursor` | `Page<StaffApplicationResponse>` |
-| GET | `/staff/applications/{id}` | ID | `StaffApplicationResponse` |
-| POST | `/staff/applications/{id}/review` | `ReviewApplicationRequest` | `StaffApplicationResponse` |
-| GET | `/staff/applications/{id}/history` | `limit`, `cursor` | `Page<ApplicationHistoryEvent>` |
-| POST | `/applications/{id}/resubmit` | `ResubmitApplicationRequest` | `Application` |
-| GET | `/applications/{id}/history` | `limit`, `cursor` | `Page<ApplicationHistoryEvent>` |
-| GET | `/applications/{id}/document` | ID владельца | готовый PDF |
-| POST | `/applications/{id}/document/retry` | ID владельца | `Application` |
-| POST | `/applications/{id}/document/process` | ID старой automatic заявки | `Application` |
-| GET | `/staff/applications/{id}/document` | ID + доступный scope | готовый PDF |
-| POST | `/staff/applications/{id}/document/retry` | ID + доступный scope | `StaffApplicationResponse` |
+| Метод | Путь                                      | Вход                         | Ответ 200                        |
+| ----- | ----------------------------------------- | ---------------------------- | -------------------------------- |
+| GET   | `/staff/applications`                     | `limit`, `cursor`            | `Page<StaffApplicationResponse>` |
+| GET   | `/staff/applications/{id}`                | ID                           | `StaffApplicationResponse`       |
+| POST  | `/staff/applications/{id}/review`         | `ReviewApplicationRequest`   | `StaffApplicationResponse`       |
+| GET   | `/staff/applications/{id}/history`        | `limit`, `cursor`            | `Page<ApplicationHistoryEvent>`  |
+| POST  | `/applications/{id}/resubmit`             | `ResubmitApplicationRequest` | `Application`                    |
+| GET   | `/applications/{id}/history`              | `limit`, `cursor`            | `Page<ApplicationHistoryEvent>`  |
+| GET   | `/applications/{id}/document`             | ID владельца                 | готовый PDF                      |
+| POST  | `/applications/{id}/document/retry`       | ID владельца                 | `Application`                    |
+| POST  | `/applications/{id}/document/process`     | ID старой automatic заявки   | `Application`                    |
+| GET   | `/staff/applications/{id}/document`       | ID + доступный scope         | готовый PDF                      |
+| POST  | `/staff/applications/{id}/document/retry` | ID + доступный scope         | `StaffApplicationResponse`       |
 
 Для академического отпуска `POST /applications/{id}/resubmit` принимает JSON или
 `multipart/form-data`: `expected_version`, JSON-строку `form_data`, JSON-строку
@@ -670,7 +697,6 @@ multipart для академического отпуска. При перво�
 и файлы. Архив использует страницы `GET /applications` и защищённый бинарный
 запрос для выданного PDF.
 
-
 `StaffApplicationResponse` расширяет `Application` полями `student_id: Id` и
 `reviewer_user_id: Id | null`. Список и деталь сотрудника возвращают
 `StaffApplicationReadResponse` с полем `applicant_display_name: string`. Имя берётся
@@ -679,12 +705,12 @@ multipart для академического отпуска. При перво�
 
 `GET /staff/applications` поддерживает следующие параметры поверх `limit` и `cursor`.
 
-| Параметр | Значение |
-| --- | --- |
-| `tab` | `new` — `submitted/resubmitted`, `in_review` — `in_review`, `completed` — `approved/rejected`, `all` — все статусы (по умолчанию) |
-| `q` | До 200 символов. Сопоставляет целый номер заявления (с необязательным «№») либо подстроку имени без учёта регистра |
-| `service_code` | Точный код услуги, до 100 символов |
-| `review_status` | Точный статус рассмотрения, пересекается со статусами вкладки |
+| Параметр                     | Значение                                                                                                                                  |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `tab`                        | `new` — `submitted/resubmitted`, `in_review` — `in_review`, `completed` — `approved/rejected`, `all` — все статусы (по умолчанию)         |
+| `q`                          | До 200 символов. Сопоставляет целый номер заявления (с необязательным «№») либо подстроку имени без учёта регистра                        |
+| `service_code`               | Точный код услуги, до 100 символов                                                                                                        |
+| `review_status`              | Точный статус рассмотрения, пересекается со статусами вкладки                                                                             |
 | `created_from`, `created_to` | Календарные даты `YYYY-MM-DD` по Москве (`Europe/Moscow`). Каждый указанный день включается полностью. Обратный диапазон возвращает `422` |
 
 Все фильтры применяются в SQL внутри разрешённой области до пагинации.
@@ -705,7 +731,11 @@ type ReviewApplicationRequest = {
 // Академический отпуск передаёт form_data и вложения как multipart/form-data.
 type ResubmitApplicationRequest = {
   expected_version: number;
-  form_data: { place_of_submission: string } | Record<string, never> | AcademicLeaveFormData | AccountingCertificateFormData;
+  form_data:
+    | { place_of_submission: string }
+    | Record<string, never>
+    | AcademicLeaveFormData
+    | AccountingCertificateFormData;
 };
 type ApplicationHistoryEvent = {
   id: Id;
@@ -780,14 +810,14 @@ ID заявления. Автоматические услуги (включая
 Управление выполняется отдельным API только активным сотрудником с текущим
 эффективным `news.publish` в его текущем подразделении.
 
-| Метод | Путь | Вход | Успешный ответ |
-|---|---|---|---|
-| GET | `/staff/news` | `limit`, `cursor` | `Page<StaffNews>` |
-| GET | `/staff/news/{id}` | — | `StaffNews` |
-| POST | `/staff/news` | `NewsContent`, `Idempotency-Key` | `201 StaffNews`; точный повтор возвращает сохранённый результат с `200` |
-| PATCH | `/staff/news/{id}` | `NewsUpdate` (`NewsContent` + `version`) | `StaffNews`; устаревшая версия — `409` |
-| POST | `/staff/news/{id}/publish` | — | `StaffNews` |
-| POST | `/staff/news/{id}/unpublish` | — | `StaffNews` |
+| Метод | Путь                         | Вход                                     | Успешный ответ                                                          |
+| ----- | ---------------------------- | ---------------------------------------- | ----------------------------------------------------------------------- |
+| GET   | `/staff/news`                | `limit`, `cursor`                        | `Page<StaffNews>`                                                       |
+| GET   | `/staff/news/{id}`           | —                                        | `StaffNews`                                                             |
+| POST  | `/staff/news`                | `NewsContent`, `Idempotency-Key`         | `201 StaffNews`; точный повтор возвращает сохранённый результат с `200` |
+| PATCH | `/staff/news/{id}`           | `NewsUpdate` (`NewsContent` + `version`) | `StaffNews`; устаревшая версия — `409`                                  |
+| POST  | `/staff/news/{id}/publish`   | —                                        | `StaffNews`                                                             |
+| POST  | `/staff/news/{id}/unpublish` | —                                        | `StaffNews`                                                             |
 
 `StaffNews` возвращает `id`, `title`, `body`, `author_user_id: Id | null`,
 `published_at: DateTime | null`, `is_published` и положительную `version`. Null автора сохраняется для
@@ -829,7 +859,15 @@ PATCH принимает ровно одно обязательное поле `
 `assessment_id` — общая работа, элементы используют `assessment_groups.id` из чтения.
 
 ```json
-{"items":[{"assessment_group_id":"123","planned_date":"2026-09-02","lesson_id":null}]}
+{
+  "items": [
+    {
+      "assessment_group_id": "123",
+      "planned_date": "2026-09-02",
+      "lesson_id": null
+    }
+  ]
+}
 ```
 
 От 1 до 100 уникальных назначений одной работы, все поля элемента обязательны.
@@ -849,7 +887,6 @@ PATCH принимает ровно одно обязательное поле `
 `409 version_conflict` (перечитать и повторить всё действие), без частичного успеха.
 Отдельных версий дат нет; действует последнее успешно сохранённое изменение.
 Официальные занятия, структура работ, максимумы и результаты не изменяются.
-
 
 ## Ручные итоги аттестации MVP2 (#72)
 
@@ -895,16 +932,16 @@ Admin учебных прав не получает. Недоступные об
 ID — положительные BIGINT-строки. Неизвестные поля тела/параметров списка запрещены.
 Ответы `Cache-Control: no-store`. Публичного bootstrap/reset/set_role endpoint нет.
 
-| Метод и путь | Вход / результат |
-|---|---|
-| GET `/admin/users` | `q` (логин/ФИО, буквальный регистронезависимый поиск), `limit=20` (1–100), `after_id`; `{items,next_after_id}` в порядке ID |
-| GET `/admin/lookups` | `kind=groups|teachers|org_units`, `q`, `limit`, `after_id`; ограниченный список вариантов профиля, teachers только свободные |
-| GET `/admin/users/{id}` | логин, ФИО, роль, активность, ID профиля/группы/подразделения, permissions; никаких секретов |
-| POST `/admin/users` | `login`, `full_name`, `role`, ровно соответствующий роли `group_id` / `teacher_id` / `org_unit_id`; admin без профиля. 201 `{user,initial_password}` |
-| POST `/admin/users/{id}/password-reset` | только другой пользователь; `{password}` с `Cache-Control: no-store`; 192 случайных бита, выдать один раз |
-| PUT `/admin/users/{id}/active` | `{is_active:boolean}`; блокировка отзывает все сессии/refresh, разблокировка требует нового входа |
-| PUT `/admin/users/{id}/department` | `{org_unit_id}`; все прежние grants удаляются атомарно |
-| PUT / DELETE `/admin/users/{id}/permissions` | `{permission_code,scope_org_unit_id}`; grant/revoke отдельного разрешения, результат — деталь пользователя |
+| Метод и путь                                 | Вход / результат                                                                                                                                     |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET `/admin/users`                           | `q` (логин/ФИО, буквальный регистронезависимый поиск), `limit=20` (1–100), `after_id`; `{items,next_after_id}` в порядке ID                          |
+| GET `/admin/lookups`                         | `kind=groups                                                                                                                                         | teachers | org_units`, `q`, `limit`, `after_id`; ограниченный список вариантов профиля, teachers только свободные |
+| GET `/admin/users/{id}`                      | логин, ФИО, роль, активность, ID профиля/группы/подразделения, permissions; никаких секретов                                                         |
+| POST `/admin/users`                          | `login`, `full_name`, `role`, ровно соответствующий роли `group_id` / `teacher_id` / `org_unit_id`; admin без профиля. 201 `{user,initial_password}` |
+| POST `/admin/users/{id}/password-reset`      | только другой пользователь; `{password}` с `Cache-Control: no-store`; 192 случайных бита, выдать один раз                                            |
+| PUT `/admin/users/{id}/active`               | `{is_active:boolean}`; блокировка отзывает все сессии/refresh, разблокировка требует нового входа                                                    |
+| PUT `/admin/users/{id}/department`           | `{org_unit_id}`; все прежние grants удаляются атомарно                                                                                               |
+| PUT / DELETE `/admin/users/{id}/permissions` | `{permission_code,scope_org_unit_id}`; grant/revoke отдельного разрешения, результат — деталь пользователя                                           |
 
 Password reset дополнительно требует ровно один разрешённый `Origin`, действующую
 Bearer-сессию и актуальную серверную роль `admin`; пользовательский plaintext во
@@ -939,6 +976,7 @@ UI не помещает его в query cache/storage/history и удаляет
 Деталь пользователя дополнена `available_permission_codes`: серверный перечень
 допустимых кодов для текущего подразделения staff (для прочих ролей пустой).
 Он обновляется при переводе; сервер по-прежнему проверяет код и scope каждого grant.
+
 ### Посещаемость MVP2-05 (#70)
 
 - `GET /api/v1/attendance`: только студент, свои текущие занятия по предикату
@@ -1055,17 +1093,16 @@ cancelled/moved запрещено PostgreSQL-проверкой; teacher API п
 После commit предусмотрена точка подключения доменного события #86, рассылки нет.
 Точные схемы: `backend/openapi.json` → generated TS.
 
-
 ## Поиск студентов и академический статус MVP2-27
 
-| Метод | Путь | Доступ | Вход / ответ |
-|---|---|---|---|
-| GET | `/staff/students` | `students.read` | `q`, `faculty_id`, `program_id`, `course_number`, `limit`, `cursor` → страница студентов |
-| GET | `/staff/students/filters` | `students.read` | справочники факультетов, программ и курсов |
-| GET | `/staff/students/{student_id}` | `students.read` | минимальный профиль студента |
-| GET | `/staff/students/{student_id}/academic-status` | `students.status.edit` | узкое status-only исключение: только ID и текущий статус, без профиля/поиска |
-| GET | `/staff/students/status-operations/{operation_id}` | `students.status.edit` | `student_id`, `academic_status`, `reason` → receipt с `completed` и сохранённым результатом |
-| PATCH | `/staff/students/{student_id}/academic-status` | `students.status.edit` | `{ academic_status, reason, operation_id }` → сохранённый статус и результат операции |
+| Метод | Путь                                               | Доступ                                     | Вход / ответ                                                                                                |
+| ----- | -------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| GET   | `/staff/students`                                  | `students.read` или `students.status.edit` | `q`, `faculty_id`, `program_id`, `course_number`, `limit`, `cursor` → страница студентов                    |
+| GET   | `/staff/students/filters`                          | `students.read` или `students.status.edit` | справочники факультетов, программ и курсов                                                                  |
+| GET   | `/staff/students/{student_id}`                     | `students.read` или `students.status.edit` | минимальный профиль студента                                                                                |
+| GET   | `/staff/students/{student_id}/academic-status`     | `students.status.edit`                     | узкий ответ только с ID и текущим статусом; интерфейс использует разрешённый профиль для подтверждения цели |
+| GET   | `/staff/students/status-operations/{operation_id}` | `students.status.edit`                     | `student_id`, `academic_status`, `reason` → receipt с `completed` и сохранённым результатом                 |
+| PATCH | `/staff/students/{student_id}/academic-status`     | `students.status.edit`                     | `{ academic_status, reason, operation_id }` → сохранённый статус и результат операции                       |
 
 Поиск по `q` ищет подстроку в ФИО или текущей группе. Результат содержит ID,
 ФИО, группу, курс, программу, факультет и академический статус; запросы к страницам
@@ -1073,10 +1110,11 @@ cancelled/moved запрещено PostgreSQL-проверкой; teacher API п
 использует общий ключ `get_student_name_key` (`Е < Ё < Ж`) и ID для устойчивого
 keyset-cursor. Учебный доступ сотрудника деканата действует на все факультеты.
 
-`students.read` и `students.status.edit` независимы. Сотрудник с одним правом
-изменения может установить статус для известного ID, но получает только поле
-статуса и не может выполнять поиск/чтение профиля. Доступ пересчитывается сервером
-на каждом запросе. Допустимы `enrolled`, `academic_leave`, `expelled`, `graduated`;
+`students.status.edit` также разрешает `students.read` только для поиска, фильтров и
+минимальной карточки, чтобы уполномоченный сотрудник мог найти цель и проверить её
+личность. Это не даёт права редактировать другие учебные данные, оценки,
+посещаемость или группы. Доступ пересчитывается сервером на каждом запросе.
+Допустимы `enrolled`, `academic_leave`, `expelled`, `graduated`;
 переходы и исправления не ограничены. Причина аудита — `administrative_change` или
 `correction`. Статус блокируется `FOR UPDATE`, before-status читается после получения
 блокировки; последнее успешно сохранённое изменение побеждает. No-op не создаёт
@@ -1086,7 +1124,7 @@ keyset-cursor. Учебный доступ сотрудника деканата
 иной payload с тем же UUID даёт 409 `operation_id_conflict`. Изменение не переключает
 `users.is_active` и не меняет другие данные. UI перед отправкой требует подтверждения
 оформленного внешнего основания. При неопределённом результате запись автоматически не
-повторяется. Сотрудник с `students.read` отдельно перечитывает карточку для актуального состояния.
+повторяется. Сотрудник с `students.read` или `students.status.edit` отдельно перечитывает карточку для актуального состояния.
 
 Для staff-поиска `%`, `_` и `\` в `q` — буквальные символы (явный SQL ESCAPE),
 кириллица ищется без учёта регистра, включая `Ё/ё`. Курсор привязан к нормализованным
@@ -1095,14 +1133,15 @@ q/faculty_id/program_id/course_number и версии/направлению о�
 
 Статус изменяется исключительно PATCH (PUT отсутствует). UI требует явного выбора
 целевого статуса и подтверждения основания, показывает идентификатор и выбранный
-статус; ФИО, группа и прежний статус доступны только при students.read.
+статус; ФИО, группа и прежний статус доступны при `students.read` или `students.status.edit`.
 Ожидание PATCH ограничено 15 секундами только в этом сценарии. Потеря ответа,
 таймаут, неразбираемый ответ или 5xx означают неопределённый результат, а не обещание
 rollback. Повторной записи автоматически нет. С правом чтения доступна явная GET-сверка;
-status-only сотрудник сверяет UUID квитанцией или проверяет результат внешне. Узкий GET
-`/academic-status` требует актуальное `students.status.edit` на каждом запросе и возвращает
-только ID и статус. Это одобренное исключение к запрету profile-read для status-only;
-оно не даёт общего поиска или карточки. Сверка не отменяет ещё выполняющийся запрос
+status-only сотрудник сверяет UUID квитанцией. Узкий GET `/academic-status` требует
+актуальное `students.status.edit` на каждом запросе и возвращает только ID и статус.
+Этот endpoint сохраняется для минимальной API-совместимости; обычный интерфейс
+изменяет статус только из найденной записи и не принимает неизвестный ID вручную.
+Сверка не отменяет ещё выполняющийся запрос
 и не доказывает его исход. Новая запись требует нового осознанного подтверждения.
 Модель PostgreSQL row-level lock / last-successful-write-wins не меняется.
 
@@ -1132,8 +1171,7 @@ UI-карточка `/staff/students/:id` использует существу�
   `X-Announcement-Group-Id`. Клиент сравнивает её с группой из актуального
   `/api/v1/users/me` и использует обе проверки перед показом данных.
 
-Списки используют `Page<Announcement>`, `limit` от 1 до 100 (по умолчанию
-20) и непрозрачный `cursor` для порядка `created_at DESC, id DESC`.
+Списки используют `Page<Announcement>`, `limit` от 1 до 100 (по умолчанию 20) и непрозрачный `cursor` для порядка `created_at DESC, id DESC`.
 `Announcement` содержит `id`, `course_offering_id`, `group_id`,
 `teacher: {id, full_name}`, `title`, `body`, `excerpt`, `is_important`,
 `created_at`. ID передаются строками положительного BIGINT. Сервер берёт
@@ -1154,7 +1192,6 @@ UI-карточка `/staff/students/:id` использует существу�
 Общая публикация без полного набора назначений возвращает `403`, в том числе
 при отсутствии групп. Все ответы с содержимым ленты
 используют `Cache-Control: no-store`.
-
 
 **Известное ограничение R-03 — повтор после отзыва назначения.**
 Идемпотентный ключ не сохраняет право на публикацию. Если первый POST
@@ -1184,18 +1221,18 @@ grants сотрудника деканата на каждом запросе. `
 Студенты сортируются по русскому алфавиту с `student_id` для совпадающих имён.
 Курсор применим к исходному пользователю, маршруту и фильтрам.
 
-| GET | Grant | Выборка |
-| --- | --- | --- |
-| `/catalog` | любой учебный grant журнала | Пары проведения и группы, названия дисциплины, периода и группы. Фильтры `course_offering_id`, `group_id`, `term_id`, поиск `q`. Тип аттестации доступен при `grades.edit`. |
-| `J/students` | любой учебный grant журнала | Текущие `student_id`, `full_name`. |
-| `J/assessments` | `grades.edit` | Назначенные работы, фильтр `assessment_group_id`. |
-| `J/assessments/{assessment_group_id}/results` | `grades.edit` | Текущий состав, сохранённые результаты и подтверждённая история переведённых студентов. Для удалённой оценки бывшего участника `history_only=true`, `result_id=null`, `score=null`, `can_edit=false`. |
-| `J/final-results` | `grades.edit` | Текущие студенты выбранной группы, ручные итоги и сведения о пересдаче. |
-| `C/historical-final-students` | `grades.edit` | Студенты с подтверждёнными событиями итогов по проведению. `history_only` означает, что итог удалён. |
-| `J/lessons` | `attendance.edit` | Занятия выбранной группы, фильтры `lesson_id`, `starts_from`, `starts_before`, `status`. |
-| `J/lessons/{lesson_id}/attendance` | `attendance.edit` | Текущие участники и сохранённые отметки с исходной группой. Историческая отметка имеет `is_historical=true`. `can_edit` учитывает возможность исправить сохранённую отметку или создать текущую. |
-| `J/assessments/{assessment_group_id}/results/{student_id}/history` | `grades.edit` | История по паре `(assessment_group_id, student_id)`. |
-| `C/students/{student_id}/final-result/history` | `grades.edit` | История по паре `(course_offering_id, student_id)`. |
+| GET                                                                | Grant                       | Выборка                                                                                                                                                                                               |
+| ------------------------------------------------------------------ | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/catalog`                                                         | любой учебный grant журнала | Пары проведения и группы, названия дисциплины, периода и группы. Фильтры `course_offering_id`, `group_id`, `term_id`, поиск `q`. Тип аттестации доступен при `grades.edit`.                           |
+| `J/students`                                                       | любой учебный grant журнала | Текущие `student_id`, `full_name`.                                                                                                                                                                    |
+| `J/assessments`                                                    | `grades.edit`               | Назначенные работы, фильтр `assessment_group_id`.                                                                                                                                                     |
+| `J/assessments/{assessment_group_id}/results`                      | `grades.edit`               | Текущий состав, сохранённые результаты и подтверждённая история переведённых студентов. Для удалённой оценки бывшего участника `history_only=true`, `result_id=null`, `score=null`, `can_edit=false`. |
+| `J/final-results`                                                  | `grades.edit`               | Текущие студенты выбранной группы, ручные итоги и сведения о пересдаче.                                                                                                                               |
+| `C/historical-final-students`                                      | `grades.edit`               | Студенты с подтверждёнными событиями итогов по проведению. `history_only` означает, что итог удалён.                                                                                                  |
+| `J/lessons`                                                        | `attendance.edit`           | Занятия выбранной группы, фильтры `lesson_id`, `starts_from`, `starts_before`, `status`.                                                                                                              |
+| `J/lessons/{lesson_id}/attendance`                                 | `attendance.edit`           | Текущие участники и сохранённые отметки с исходной группой. Историческая отметка имеет `is_historical=true`. `can_edit` учитывает возможность исправить сохранённую отметку или создать текущую.      |
+| `J/assessments/{assessment_group_id}/results/{student_id}/history` | `grades.edit`               | История по паре `(assessment_group_id, student_id)`.                                                                                                                                                  |
+| `C/students/{student_id}/final-result/history`                     | `grades.edit`               | История по паре `(course_offering_id, student_id)`.                                                                                                                                                   |
 
 Списки студентов, результатов, итогов и отметок принимают `student_id` и поиск
 `q` по имени. В историческом списке итогов принадлежность к группе не
@@ -1221,11 +1258,11 @@ grants сотрудника деканата на каждом запросе. `
 принадлежность проведения актуальной группе студента. Параметры
 `student_id`, `group_id`, `subgroup_id` и неизвестные параметры запрещены.
 
-| GET под `/api/v1/academics/courses/{course_offering_id}` | Ответ |
-|---|---|
-| Без суффикса | `StudentCourse`. Поля строки `GET /academics`, текущий `term`, своя `group`, `teachers` по назначениям этой группы. |
-| `/lessons` | `Page<StudentCourseLesson>`. Занятия текущего семестра в области группы и подгруппы. Поля `id`, `starts_at`, `ends_at`, `status`, `kind`, `teacher`, `rooms`, `previous_lesson`, `latest_lesson`, `attendance_status`. |
-| `/assessments` | `Page<StudentCourseAssessment>`. Строка назначения своей группы с полями `assessment_group_id`, `assessment_id`, `title`, `type`, `description`, `max_score`, `planned_date`, `date_needs_confirmation`, `lesson_id`, `score`, `graded_at`. |
+| GET под `/api/v1/academics/courses/{course_offering_id}` | Ответ                                                                                                                                                                                                                                       |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Без суффикса                                             | `StudentCourse`. Поля строки `GET /academics`, текущий `term`, своя `group`, `teachers` по назначениям этой группы.                                                                                                                         |
+| `/lessons`                                               | `Page<StudentCourseLesson>`. Занятия текущего семестра в области группы и подгруппы. Поля `id`, `starts_at`, `ends_at`, `status`, `kind`, `teacher`, `rooms`, `previous_lesson`, `latest_lesson`, `attendance_status`.                      |
+| `/assessments`                                           | `Page<StudentCourseAssessment>`. Строка назначения своей группы с полями `assessment_group_id`, `assessment_id`, `title`, `type`, `description`, `max_score`, `planned_date`, `date_needs_confirmation`, `lesson_id`, `score`, `graded_at`. |
 
 Оба списка принимают `limit` от 1 до 100, по умолчанию 20, и непрозрачный
 `cursor` из `next_cursor` предыдущего ответа. Конец списка — `next_cursor: null`.

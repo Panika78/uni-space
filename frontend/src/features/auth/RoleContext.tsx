@@ -6,7 +6,9 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
+import { Icon } from '../../shared/ui/Icon'
 import { CabinetLayout, UserMenu } from '../../app/CabinetLayout'
+import '../../app/mvp2-unified.css'
 import {
   getRoleNavigation,
   getStartRoute,
@@ -149,12 +151,14 @@ function AccessDenied() {
 export function RoleLayout() {
   const context = useRoleContext()
   return (
-    <CabinetLayout
-      student={false}
-      notificationScope={`${context.user_id}:${context.role}`}
-      navigation={getRoleNavigation(context)}
-      home={getStartRoute(context)}
-    />
+    <div className="mvp2-role-surface">
+      <CabinetLayout
+        student={false}
+        notificationScope={`${context.user_id}:${context.role}`}
+        navigation={getRoleNavigation(context)}
+        home={getStartRoute(context)}
+      />
+    </div>
   )
 }
 
@@ -169,43 +173,109 @@ export function ModuleUnavailable({ title }: { title: string }) {
 
 export function StaffHome() {
   const context = useRoleContext()
-  const sections = staffSections.filter(({ permission }) => hasPermission(context, permission))
+  const sections = staffSections.filter(
+    ({ permission, disabled, visible }) =>
+      disabled || (visible !== false && hasPermission(context, permission)),
+  )
+  const hasWorkingSections = sections.some(({ disabled }) => !disabled)
   return (
-    <section className="section-page">
-      <h1>{sections.length ? 'Кабинет сотрудника' : 'Нет доступных разделов'}</h1>
-      {!sections.length && (
-        <p>
-          Обратитесь к администратору для назначения полномочий. Вы можете выйти через меню
-          пользователя.
-        </p>
+    <section className="section-page staff-home">
+      <p className="section-eyebrow">Кабинет сотрудника</p>
+      <h1>{hasWorkingSections ? 'Кабинет сотрудника' : 'Нет доступных разделов'}</h1>
+      <p className="service-subtitle">Рабочее пространство деканата и учебных подразделений.</p>
+      {!hasWorkingSections && (
+        <article className="staff-home__empty">
+          <span aria-hidden="true">
+            <Icon name="info" />
+          </span>
+          <div>
+            <h2>Разделы пока не назначены</h2>
+            <p>
+              Обратитесь к администратору, чтобы получить доступ к рабочим разделам. Вы можете
+              завершить сеанс через меню пользователя.
+            </p>
+          </div>
+        </article>
       )}
-      {sections.map(({ permission, label }) => (
-        <section key={permission} id={permission}>
-          <h2>{label}</h2>
-          {permission === 'grades.edit' || permission === 'attendance.edit' ? (
-            <p>
-              <Link to={getStaffJournalRoute(permission)}>Открыть журнал</Link>
-            </p>
-          ) : permission === 'news.publish' ? (
-            <p>
-              <Link to="/staff/news">Открыть редактор новостей</Link>
-            </p>
-          ) : permission === 'applications.review' ? (
-            <p>
-              <Link to="/staff/applications">Открыть очередь заявлений</Link>
-            </p>
-          ) : permission === 'schedule.edit' ? (
-            <p>
-              <Link to="/staff/schedule">Открыть редактор расписания</Link>
-            </p>
-          ) : (
-            <p>
-              Модуль пока недоступен. Полномочие предоставлено, функциональность будет подключена на
-              следующем этапе MVP2.
-            </p>
-          )}
-        </section>
-      ))}
+      {hasWorkingSections && <h2 className="staff-home__section-title">Быстрый доступ</h2>}
+      <div className="staff-home__grid">
+        {sections.map(({ permission, label, icon }) => {
+          const href =
+            permission === 'grades.edit' || permission === 'attendance.edit'
+              ? getStaffJournalRoute(permission)
+              : permission === 'news.publish'
+                ? '/staff/news'
+                : permission === 'applications.review'
+                  ? '/staff/applications'
+                  : permission === 'schedule.edit'
+                    ? '/staff/schedule'
+                    : permission === 'students.read'
+                      ? '/staff/students'
+                      : permission === 'students.status.edit'
+                        ? '/staff/students/status'
+                        : null
+          const action =
+            permission === 'grades.edit' || permission === 'attendance.edit'
+              ? 'Открыть журнал'
+              : permission === 'news.publish'
+                ? 'Открыть редактор новостей'
+                : permission === 'applications.review'
+                  ? 'Открыть очередь заявлений'
+                  : permission === 'schedule.edit'
+                    ? 'Открыть редактор расписания'
+                    : permission === 'students.read'
+                      ? 'Открыть поиск студентов'
+                      : permission === 'students.status.edit'
+                        ? 'Открыть академические статусы'
+                        : 'Модуль пока недоступен'
+          const description =
+            permission === 'applications.review'
+              ? 'Рассмотрение заявлений, возвраты и решения.'
+              : permission === 'schedule.edit'
+                ? 'Создание, перенос и отмена официальных занятий.'
+                : permission === 'grades.edit'
+                  ? 'Баллы, посещаемость и история изменений.'
+                  : permission === 'attendance.edit'
+                    ? 'Посещаемость и история изменений.'
+                    : permission === 'news.publish'
+                      ? 'Редактор объявлений для студенческой ленты.'
+                      : permission === 'students.read'
+                        ? 'Поиск, просмотр и доступные действия в карточке студента.'
+                        : permission === 'students.status.edit'
+                          ? 'Просмотр и изменение академических статусов студентов.'
+                          : 'Раздел доступен согласно выданным полномочиям.'
+          return (
+            <section
+              key={permission}
+              id={permission}
+              className={`staff-home__card${permission === 'groups.manage' ? ' is-disabled' : ''}`}
+              aria-disabled={permission === 'groups.manage' ? 'true' : undefined}
+            >
+              <span className="staff-home__icon" aria-hidden="true">
+                <Icon name={icon} />
+              </span>
+              <div className="staff-home__card-content">
+                <h3>
+                  {label}
+                  {permission === 'groups.manage' && <span>В разработке</span>}
+                </h3>
+                <p>
+                  {permission === 'groups.manage'
+                    ? 'Управление учебными группами появится в следующем этапе.'
+                    : href
+                      ? description
+                      : 'Модуль пока недоступен.'}
+                </p>
+                {href && (
+                  <Link aria-label={`${action}: ${label}`} to={href}>
+                    {action} <span aria-hidden="true">→</span>
+                  </Link>
+                )}
+              </div>
+            </section>
+          )
+        })}
+      </div>
     </section>
   )
 }

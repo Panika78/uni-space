@@ -20,9 +20,25 @@ def upgrade():
         sa.Column(
             "membership_changed_at",
             sa.DateTime(timezone=True),
-            server_default=sa.func.clock_timestamp(),
-            nullable=False,
+            nullable=True,
         ),
+    )
+    # The column is introduced after historical lessons already exist. Using
+    # clock_timestamp() as the ADD COLUMN default would make every existing
+    # student appear to have joined today, incorrectly blocking old lessons.
+    # users.created_at is the durable initial-membership boundary available in
+    # this schema. New students still receive the current timestamp below.
+    op.execute("""
+        UPDATE students s
+        SET membership_changed_at = u.created_at
+        FROM users u
+        WHERE u.id = s.user_id
+    """)
+    op.alter_column(
+        "students",
+        "membership_changed_at",
+        nullable=False,
+        server_default=sa.func.clock_timestamp(),
     )
     op.create_check_constraint(
         "ck_students_membership_version", "students", "membership_version >= 0"
