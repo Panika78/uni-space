@@ -221,19 +221,25 @@
   }
   .mvp2-student-surface .academics-table,
   .mvp2-student-surface .academics-table tbody {
+    display: block;
     background: transparent;
   }
   .mvp2-student-surface .academics-table {
+    width: 100%;
     border: 0;
     border-radius: 0;
     box-shadow: none;
   }
   .mvp2-student-surface .academics-table tr {
-    margin: 0 0 12px;
-    border: 1px solid #e8dad1;
-    border-radius: 17px;
+    display: grid;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0 0 16px;
+    border: 1px solid #dfc9be;
+    border-radius: 20px;
     background: #fffefd;
-    box-shadow: 0 5px 16px rgb(66 31 37 / 4%);
+    box-shadow: 0 8px 20px rgb(66 31 37 / 8%);
+    clip-path: inset(0 round 20px);
   }
   .mvp2-student-surface .academics-table tr {
     padding-inline: 10px;
@@ -2374,10 +2380,11 @@
 
 @media (max-width: 720px) {
   .mvp2-student-surface .academics-table tr {
-    margin-bottom: 14px;
-    border-color: #e1cec4;
-    border-radius: 19px;
-    box-shadow: 0 7px 18px rgb(66 31 37 / 7%);
+    margin-bottom: 16px;
+    border-color: #dfc9be;
+    border-radius: 20px;
+    box-shadow: 0 8px 20px rgb(66 31 37 / 8%);
+    clip-path: inset(0 round 20px);
   }
 }
 .mvp2-role-surface .admin-user-detail__grid:not(.has-permissions) {

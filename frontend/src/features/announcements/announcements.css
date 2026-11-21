@@ -62,19 +62,20 @@
 .student-course .announcement-feed p {
   min-width: 0;
   max-width: 100%;
+  box-sizing: border-box;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-
-.student-course .announcement-feed,
-.student-course .announcement-feed li,
-.student-course .announcement-feed details,
-.student-course .announcement-feed summary,
-.student-course .announcement-feed p {
-  min-width: 0;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+.student-course .announcement-feed {
+  width: 100%;
+  margin-inline: 0;
+  padding-inline: 8px;
+}
+.student-course .announcement-feed details {
+  width: 100%;
+}
+.student-course .announcement-feed li {
+  padding-inline: 4px;
 }
 .announcement-feed li {
   padding: 0.75rem 0;

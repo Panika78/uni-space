@@ -104,6 +104,7 @@
 }
 .student-course__panel {
   min-width: 0;
+  width: 100%;
   margin-top: 1rem;
   min-height: 270px;
 }
@@ -216,7 +217,8 @@
   background: #f2ece8;
   color: var(--muted);
 }
-.student-course__more {
+.student-course__more,
+.student-course__panel > button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -234,11 +236,13 @@
     background-color 160ms ease,
     border-color 160ms ease;
 }
-.student-course__more:hover:not(:disabled) {
+.student-course__more:hover:not(:disabled),
+.student-course__panel > button:hover:not(:disabled) {
   border-color: #781f32;
   background: #f8efeb;
 }
-.student-course__more:focus-visible {
+.student-course__more:focus-visible,
+.student-course__panel > button:focus-visible {
   outline: 3px solid #781f32;
   outline-offset: 2px;
 }
@@ -251,11 +255,23 @@
   font-size: 0.875rem;
 }
 @media (max-width: 520px) {
+  .student-course {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .student-course__panel {
+    overflow-x: clip;
+  }
   .student-course__group {
-    margin-inline: 4px;
+    margin: 0 8px 12px;
+    border-radius: 16px;
   }
   .student-course__more {
     max-width: calc(100% - 8px);
+  }
+  .student-course__panel > button {
+    max-width: calc(100% - 16px);
+    margin-inline: 8px;
   }
   .student-course__rows--attendance {
     grid-template-columns: minmax(0, 1fr);
