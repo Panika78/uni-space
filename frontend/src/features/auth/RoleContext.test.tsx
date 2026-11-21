@@ -87,7 +87,7 @@ it('opens the staff applications start only with its own effective permission', 
     screen.queryByRole('button', { name: /Создать|Принять|Отклонить|Удалить/ }),
   ).not.toBeInTheDocument()
 })
-it.each(staffSections)(
+it.each(staffSections.filter(({ visible, disabled }) => visible !== false && !disabled))(
   'keeps $permission independent from other staff grants',
   ({ permission, label }) => {
     context = {
@@ -95,16 +95,52 @@ it.each(staffSections)(
       role: 'staff',
       permissions: [{ permission_code: permission, scope_org_unit_id: null }],
     }
-    expect(getRoleNavigation(context).map((section) => section.label)).toEqual([label])
+    const navigation = getRoleNavigation(context)
+    expect(
+      navigation.filter((section) => !section.disabled).map((section) => section.label),
+    ).toEqual(permission === 'students.status.edit' ? ['Поиск студентов', label] : [label])
+    expect(navigation.find((section) => section.label === 'Учебные группы')).toMatchObject({
+      disabled: true,
+    })
     expect(getStartRoute(context)).toBe(
       permission === 'applications.review'
         ? '/staff/applications'
-        : permission === 'students.read'
+        : permission === 'students.read' || permission === 'students.status.edit'
           ? '/staff/students'
-          : permission === 'students.status.edit'
-            ? '/staff/students/status'
-            : '/staff',
+          : '/staff',
     )
+  },
+)
+it('keeps the status editor route alongside the implied student search permission', () => {
+  context = {
+    ...context,
+    role: 'staff',
+    permissions: [{ permission_code: 'students.status.edit', scope_org_unit_id: null }],
+  }
+  const navigation = getRoleNavigation(context)
+  expect(navigation.some((item) => item.label === 'Поиск студентов')).toBe(true)
+  expect(navigation.some((item) => item.to === '/staff/students/status')).toBe(true)
+  expect(navigation.some((item) => item.label === 'Академические сведения')).toBe(false)
+  expect(navigation.some((item) => item.label === 'Академические статусы')).toBe(true)
+  expect(navigation.some((item) => item.to === '/staff#students.edit')).toBe(false)
+  expect(getStartRoute(context)).toBe('/staff/students')
+})
+it.each(['grades.edit', 'attendance.edit'] as const)(
+  'shows one dean journal entry for %s',
+  (permission) => {
+    context = {
+      ...context,
+      role: 'staff',
+      permissions: [{ permission_code: permission, scope_org_unit_id: null }],
+    }
+    const journals = getRoleNavigation(context).filter((item) =>
+      item.to.startsWith('/staff/journals'),
+    )
+    expect(journals).toEqual([
+      { to: '/staff/journals', label: 'Журнал деканата', icon: 'graduation', disabled: false },
+    ])
+    expect(getRoleNavigation(context).some((item) => item.label === 'Баллы')).toBe(false)
+    expect(getRoleNavigation(context).some((item) => item.label === 'Посещаемость')).toBe(false)
   },
 )
 it('shows other effective staff sections with honest module states', async () => {

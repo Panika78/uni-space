@@ -122,7 +122,8 @@ def _update_final_result(db, user, course_id, student_id, patch, *, delete=False
         course, result = require_result_scope(db, user, course_id, student_id)
         before = {name: getattr(result, name) for name in SNAPSHOT_FIELDS} if result else None
         values = {name: getattr(result, name) if result else None for name in FIELDS}
-        values.update(patch.model_dump(exclude_unset=True))
+        requested = patch.model_dump(exclude_unset=True)
+        values.update(requested)
         if delete:
             values = dict.fromkeys(FIELDS)
         if (course.attestation_type == "pass_fail" and values["grade_value"] is not None) or (
@@ -133,6 +134,12 @@ def _update_final_result(db, user, course_id, student_id, patch, *, delete=False
             "passed"
         ] is True:
             values.update(retake_date=None, retake_location=None)
+        debt_exists = values["grade_value"] == 2 or values["passed"] is False
+        assigns_retake = any(
+            requested.get(field) is not None for field in ("retake_date", "retake_location")
+        )
+        if assigns_retake and not debt_exists:
+            raise HTTPException(409, "retake_requires_debt")
         after = dict(course_offering_id=course_id, student_id=student_id, **values)
         if not any(value is not None for value in values.values()):
             after = None

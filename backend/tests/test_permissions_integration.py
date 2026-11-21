@@ -102,21 +102,36 @@ def rbac(db_session):
 
 
 @pytest.mark.parametrize("code", sorted(ACADEMIC_PERMISSIONS))
-def test_academic_permissions_are_independent_and_explicit(rbac, code):
+def test_academic_permissions_are_explicit_with_status_read_implication(rbac, code):
     db, dean, accounting, create, grant, client = rbac
     user, profile, token = create()
     assert client.request("GET", "/test/" + code, access=token).status_code == 403
     grant(profile, code)
     for action in ACADEMIC_PERMISSIONS:
         response = client.request("GET", "/test/" + action, access=token)
-        assert response.status_code == (200 if action == code else 403)
+        implied_read = (
+            code == PermissionCode.STUDENTS_STATUS_EDIT and action == PermissionCode.STUDENTS_READ
+        )
+        assert response.status_code == (200 if action == code or implied_read else 403)
     for other in (PermissionCode.APPLICATIONS_REVIEW, PermissionCode.NEWS_PUBLISH):
         with pytest.raises(HTTPException) as exc:
             require_staff_permission(db, user, other, org_unit_id=dean.id)
         assert exc.value.status_code == 403
-    assert (
-        len(client.request("GET", "/api/v1/auth/context", access=token).json()["permissions"]) == 1
-    )
+    context = client.request("GET", "/api/v1/auth/context", access=token).json()
+    assert len(context["permissions"]) == (2 if code == PermissionCode.STUDENTS_STATUS_EDIT else 1)
+
+
+def test_student_status_permission_exposes_only_search_and_read(rbac):
+    db, dean, _, create, grant, client = rbac
+    user, profile, token = create()
+    grant(profile, PermissionCode.STUDENTS_STATUS_EDIT)
+    context = client.request("GET", "/api/v1/auth/context", access=token).json()
+    permissions = {grant["permission_code"] for grant in context["permissions"]}
+    assert permissions == {"students.read", "students.status.edit"}
+    require_staff_permission(db, user, PermissionCode.STUDENTS_READ)
+    with pytest.raises(HTTPException) as exc:
+        require_staff_permission(db, user, PermissionCode.STUDENTS_EDIT)
+    assert exc.value.status_code == 403
 
 
 @pytest.mark.parametrize("role", ["student", "teacher", "admin"])

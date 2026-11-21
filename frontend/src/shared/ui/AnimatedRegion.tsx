@@ -5,10 +5,14 @@ export function AnimatedRegion({
   children,
   className = '',
   contentKey,
+  contentDuration = 220,
+  heightDuration = 280,
 }: {
   children: ReactNode
   className?: string
   contentKey: string
+  contentDuration?: number
+  heightDuration?: number
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -32,7 +36,7 @@ export function AnimatedRegion({
       animation?.cancel()
       if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
       animation = container.animate([{ height: `${current}px` }, { height: `${next}px` }], {
-        duration: 280,
+        duration: heightDuration,
         easing: 'cubic-bezier(.22,1,.36,1)',
       })
     })
@@ -42,12 +46,12 @@ export function AnimatedRegion({
       media.removeEventListener('change', handleMotionChange)
       animation?.cancel()
     }
-  }, [])
+  }, [heightDuration])
   useLayoutEffect(() => {
     const content = contentRef.current
     if (!content?.animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
     const animation = content.animate([{ opacity: 0.35 }, { opacity: 1 }], {
-      duration: 220,
+      duration: contentDuration,
       easing: 'ease-out',
     })
     const media = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -59,7 +63,7 @@ export function AnimatedRegion({
       media.removeEventListener('change', handleMotionChange)
       animation.cancel()
     }
-  }, [contentKey])
+  }, [contentDuration, contentKey])
   return (
     <div ref={containerRef} className={`animated-region ${className}`}>
       <div ref={contentRef}>{children}</div>

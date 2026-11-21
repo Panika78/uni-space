@@ -21,11 +21,7 @@ import { StudentLayout } from './StudentLayout'
 import { ApplicationDetailPage } from '../features/services/ApplicationsPages'
 import { ApplicationFormPage, ServicesPage } from '../features/services/ServicesPages'
 import { NewsDetailPage, NewsFeedPage } from '../features/news/NewsPages'
-import {
-  StaffStudentStatusPage,
-  StaffStudentsPage,
-  StaffStudentDetailPage,
-} from '../features/students/StaffStudentsPage'
+import { StaffStudentsPage, StaffStudentDetailPage } from '../features/students/StaffStudentsPage'
 import { StaffNewsPage } from '../features/news/StaffNewsPage'
 import {
   StaffApplicationSessionLayout,
@@ -252,13 +248,8 @@ export const appRoutes: RouteObject[] = [
                             ],
                           },
                           {
-                            element: <RoleGuard role="staff" permission="students.status.edit" />,
-                            children: [
-                              {
-                                path: '/staff/students/status',
-                                element: <StaffStudentStatusPage />,
-                              },
-                            ],
+                            path: '/staff/students/status',
+                            element: <Navigate to="/staff/students" replace />,
                           },
                         ],
                       },

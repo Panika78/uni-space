@@ -85,6 +85,19 @@ def get_authorization_context(db: Session, user: User) -> AuthorizationContext:
                     scope_org_unit_id=str(scope) if scope is not None else None,
                 )
             )
+    if any(
+        grant.permission_code == PermissionCode.STUDENTS_STATUS_EDIT
+        for grant in context.permissions
+    ) and not any(
+        grant.permission_code == PermissionCode.STUDENTS_READ for grant in context.permissions
+    ):
+        # Status editing is only exposed from a resolved student record, so it
+        # carries the least read access needed for search and the student card.
+        context.permissions.append(
+            EffectivePermission(
+                permission_code=PermissionCode.STUDENTS_READ, scope_org_unit_id=None
+            )
+        )
     return context
 
 
@@ -93,8 +106,11 @@ def require_staff_permission(
 ) -> AuthorizationContext:
     code = PermissionCode(code)
     context = get_authorization_context(db, user)
+    accepted_codes = {code}
+    if code == PermissionCode.STUDENTS_READ:
+        accepted_codes.add(PermissionCode.STUDENTS_STATUS_EDIT)
     if not any(
-        grant.permission_code == code
+        grant.permission_code in accepted_codes
         and (
             (code in ACADEMIC_PERMISSIONS and grant.scope_org_unit_id is None)
             or (org_unit_id is not None and grant.scope_org_unit_id == str(org_unit_id))

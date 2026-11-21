@@ -181,6 +181,15 @@ def test_deleted_final_discoverable_at_course_scope(staff_journal, kind, value):
     student = s.students[0]
     write = f"/api/v1/final-results/courses/{course.id}/students/{student.id}"
     course_path = f"{BASE}/courses/{course.id}"
+    s.db.commit()
+    assert (
+        s.client.patch(
+            write,
+            json={"retake_date": "2027-01-10", "retake_location": "А-102"},
+            headers=headers,
+        ).status_code
+        == 409
+    )
     assert (
         s.client.patch(
             write,

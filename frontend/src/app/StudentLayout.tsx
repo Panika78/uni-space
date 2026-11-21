@@ -1,5 +1,5 @@
 import { useRoleContext } from '../features/auth/RoleContext'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useStudentProfile, getStudentInitials } from '../features/profile/profileContext'
 import { CabinetLayout } from './CabinetLayout'
 import { Icon } from '../shared/ui/Icon'
@@ -15,14 +15,18 @@ export const studentNavigation = [
 export function StudentLayout() {
   const profile = useStudentProfile()
   const context = useRoleContext()
+  const { pathname } = useLocation()
+  const useUnifiedSurface = pathname !== '/schedule'
   return (
-    <CabinetLayout
-      navigation={studentNavigation}
-      student
-      notificationScope={`${context.user_id}:${context.role}`}
-      home="/schedule"
-      initials={getStudentInitials(profile?.full_name)}
-    />
+    <div className={useUnifiedSurface ? 'mvp2-student-surface' : undefined}>
+      <CabinetLayout
+        navigation={studentNavigation}
+        student
+        notificationScope={`${context.user_id}:${context.role}`}
+        home="/schedule"
+        initials={getStudentInitials(profile?.full_name)}
+      />
+    </div>
   )
 }
 

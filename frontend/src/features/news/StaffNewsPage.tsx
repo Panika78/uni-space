@@ -72,8 +72,10 @@ export function StaffNewsPage() {
     error instanceof ApiClientError && (error.status === 401 || error.status === 403)
   function handleAccessDenied(error: unknown, deniedNewsId = newsId) {
     if (!isAccessDenied(error)) return
-    if (isNew) {
+    if (isNew && deniedNewsId === 'new') {
       setCreateAccessDenied(true)
+      setListAccessDenied(true)
+    } else if (isNew) {
       setListAccessDenied(true)
     } else if (deniedNewsId) {
       setItemAccessDenied(deniedNewsId)
@@ -101,7 +103,7 @@ export function StaffNewsPage() {
     },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
-    enabled: !newsId && !isNew && !listAccessDenied,
+    enabled: !newsId && !listAccessDenied,
     staleTime: 0,
   })
   const itemQuery = useQuery({
@@ -162,7 +164,7 @@ export function StaffNewsPage() {
           ),
         },
       ),
-    onError: (error) => handleAccessDenied(error),
+    onError: (error) => handleAccessDenied(error, isNew ? 'new' : newsId),
     onSuccess: async (news, variables) => {
       if (!newsId) createRequest.current = null
       if (newsId) {
@@ -334,133 +336,189 @@ export function StaffNewsPage() {
       )}
 
       {(newsId || isNew) && (
-        <div className="staff-news-editor">
-          {newsId && (
-            <Link to="/staff/news" className="news-back-link">
-              ← К списку новостей
-            </Link>
-          )}
-          <h2>{isNew ? 'Новая новость' : item?.title}</h2>
-          {item && (
-            <p className="staff-news-editor__meta">
-              {item.is_published
-                ? `${getNewsStatus(item)} · ${formatDate(item.published_at)}`
-                : getNewsStatus(item)}
-            </p>
-          )}
-          <form onSubmit={handleSave}>
-            <label htmlFor="staff-news-title-input">Заголовок</label>
-            <input
-              id="staff-news-title-input"
-              name="title"
-              autoComplete="off"
-              required
-              minLength={1}
-              maxLength={400}
-              disabled={isSaving}
-              readOnly={createAccessDenied}
-              value={editorTitle}
-              onChange={(event) => {
-                if (codePointLength(event.target.value) > 200) return
-                setTitleDraft({ id: newsId, value: event.target.value })
-                if (newsId && item && !hasUnsavedChanges)
-                  setBaseVersion({ id: newsId, version: item.version })
-                clearMutationMessages()
-              }}
-            />
-            <div className="staff-news-editor__counter" aria-live="polite">
-              {codePointLength(editorTitle)}/200
-            </div>
-            <label htmlFor="staff-news-body-input">Текст новости</label>
-            <textarea
-              id="staff-news-body-input"
-              name="body"
-              required
-              minLength={1}
-              maxLength={40_000}
-              disabled={isSaving}
-              readOnly={createAccessDenied}
-              rows={12}
-              value={editorBody}
-              onChange={(event) => {
-                if (codePointLength(event.target.value) > 20_000) return
-                setBodyDraft({ id: newsId, value: event.target.value })
-                if (newsId && item && !hasUnsavedChanges)
-                  setBaseVersion({ id: newsId, version: item.version })
-                clearMutationMessages()
-              }}
-            />
-            <div className="staff-news-editor__counter" aria-live="polite">
-              {codePointLength(editorBody)}/20 000
-            </div>
-            {isSaving && (
-              <p className="staff-news-feedback" role="status">
-                Сохранение выполняется. Поля временно недоступны.
+        <div className={`staff-news-workspace${isNew ? ' is-creating' : ''}`}>
+          <div className="staff-news-editor">
+            {newsId && (
+              <Link to="/staff/news" className="news-back-link">
+                ← К списку новостей
+              </Link>
+            )}
+            <h2>{isNew ? 'Новая новость' : item?.title}</h2>
+            {item && (
+              <p className="staff-news-editor__meta">
+                {item.is_published
+                  ? `${getNewsStatus(item)} · ${formatDate(item.published_at)}`
+                  : getNewsStatus(item)}
               </p>
             )}
-            {(feedback || saveMutation.error || publishMutation.error) && (
-              <p className="staff-news-feedback staff-news-feedback--error" role="alert">
-                {feedback ?? messageForError(publishMutation.error ?? saveMutation.error)}
-              </p>
-            )}
-            {success && (
-              <p className="staff-news-feedback" role="status">
-                {success}
-              </p>
-            )}
-            {!createAccessDenied && (
-              <div className="staff-news-actions">
-                <button type="submit" disabled={isSaving}>
-                  {isSaving
-                    ? 'Сохраняем…'
-                    : item?.is_published
-                      ? 'Сохранить изменения'
-                      : 'Сохранить черновик'}
-                </button>
-                {newsId && !item?.is_published && (
-                  <button
-                    type="button"
-                    disabled={isSaving}
-                    onClick={async () => {
-                      clearMutationMessages()
-                      const content = { title: editorTitle, body: editorBody }
-                      try {
-                        await saveMutation.mutateAsync({
-                          content,
-                          idempotencyKey: getCreateKey(content),
-                          suppressSuccess: true,
-                        })
-                      } catch {
-                        return
-                      }
-                      try {
-                        await publishMutation.mutateAsync(true)
-                      } catch (error) {
-                        if (!isAccessDenied(error))
-                          setFeedback(
-                            `Изменения сохранены, но опубликовать новость не удалось: ${messageForError(error)}`,
-                          )
-                      }
-                    }}
-                  >
-                    {isSaving ? 'Сохраняем…' : 'Опубликовать'}
-                  </button>
-                )}
-                {newsId && item?.is_published && (
-                  <button
-                    type="button"
-                    disabled={isSaving}
-                    onClick={() => {
-                      clearMutationMessages()
-                      publishMutation.mutate(false)
-                    }}
-                  >
-                    Снять с публикации
-                  </button>
-                )}
+            <form onSubmit={handleSave}>
+              <label htmlFor="staff-news-title-input">Заголовок</label>
+              <input
+                id="staff-news-title-input"
+                name="title"
+                autoComplete="off"
+                required
+                minLength={1}
+                maxLength={400}
+                disabled={isSaving}
+                readOnly={createAccessDenied}
+                placeholder="Введите заголовок"
+                value={editorTitle}
+                onChange={(event) => {
+                  if (codePointLength(event.target.value) > 200) return
+                  setTitleDraft({ id: newsId, value: event.target.value })
+                  if (newsId && item && !hasUnsavedChanges)
+                    setBaseVersion({ id: newsId, version: item.version })
+                  clearMutationMessages()
+                }}
+              />
+              <div className="staff-news-editor__counter" aria-live="polite">
+                {codePointLength(editorTitle)}/200
               </div>
-            )}
-          </form>
+              <label htmlFor="staff-news-body-input">Текст новости</label>
+              <textarea
+                id="staff-news-body-input"
+                name="body"
+                required
+                minLength={1}
+                maxLength={40_000}
+                disabled={isSaving}
+                readOnly={createAccessDenied}
+                placeholder="Напишите новость для университетской ленты"
+                rows={12}
+                value={editorBody}
+                onChange={(event) => {
+                  if (codePointLength(event.target.value) > 20_000) return
+                  setBodyDraft({ id: newsId, value: event.target.value })
+                  if (newsId && item && !hasUnsavedChanges)
+                    setBaseVersion({ id: newsId, version: item.version })
+                  clearMutationMessages()
+                }}
+              />
+              <div className="staff-news-editor__counter" aria-live="polite">
+                {codePointLength(editorBody)}/20 000
+              </div>
+              {isSaving && (
+                <p className="staff-news-feedback" role="status">
+                  Сохранение выполняется. Поля временно недоступны.
+                </p>
+              )}
+              {(feedback || saveMutation.error || publishMutation.error) && (
+                <p className="staff-news-feedback staff-news-feedback--error" role="alert">
+                  {feedback ?? messageForError(publishMutation.error ?? saveMutation.error)}
+                </p>
+              )}
+              {success && (
+                <p className="staff-news-feedback" role="status">
+                  {success}
+                </p>
+              )}
+              {!createAccessDenied && (
+                <div className="staff-news-actions">
+                  <button type="submit" disabled={isSaving}>
+                    {isSaving
+                      ? 'Сохраняем…'
+                      : item?.is_published
+                        ? 'Сохранить изменения'
+                        : 'Сохранить черновик'}
+                  </button>
+                  {newsId && !item?.is_published && (
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={async () => {
+                        clearMutationMessages()
+                        const content = { title: editorTitle, body: editorBody }
+                        try {
+                          await saveMutation.mutateAsync({
+                            content,
+                            idempotencyKey: getCreateKey(content),
+                            suppressSuccess: true,
+                          })
+                        } catch {
+                          return
+                        }
+                        try {
+                          await publishMutation.mutateAsync(true)
+                        } catch (error) {
+                          if (!isAccessDenied(error))
+                            setFeedback(
+                              `Изменения сохранены, но опубликовать новость не удалось: ${messageForError(error)}`,
+                            )
+                        }
+                      }}
+                    >
+                      {isSaving ? 'Сохраняем…' : 'Опубликовать'}
+                    </button>
+                  )}
+                  {newsId && item?.is_published && (
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => {
+                        clearMutationMessages()
+                        publishMutation.mutate(false)
+                      }}
+                    >
+                      Снять с публикации
+                    </button>
+                  )}
+                </div>
+              )}
+            </form>
+          </div>
+          {isNew && (
+            <aside className="staff-news-publications" aria-labelledby="staff-news-recent-title">
+              <header>
+                <h2 id="staff-news-recent-title">Публикации</h2>
+                <span>{listQuery.data?.pages[0]?.items.length ?? 0} записей</span>
+              </header>
+              {listQuery.isPending ? (
+                <LoadingState title="Загружаем публикации…" variant="compact" />
+              ) : listQuery.isError ? (
+                <ErrorState
+                  title="Не удалось загрузить публикации"
+                  description={messageForError(listQuery.error)}
+                  onRetry={() => void listQuery.refetch()}
+                />
+              ) : (listQuery.data?.pages.flatMap((page) => page.items).slice(0, 5) ?? []).length ? (
+                <ul>
+                  {listQuery.data?.pages
+                    .flatMap((page) => page.items)
+                    .slice(0, 5)
+                    .map((news) => (
+                      <li key={news.id}>
+                        <p>
+                          <time dateTime={news.published_at ?? undefined}>
+                            {formatDate(news.published_at)}
+                          </time>
+                          <span className={news.is_published ? 'is-published' : ''}>
+                            {getNewsStatus(news)}
+                          </span>
+                        </p>
+                        <strong>{news.title}</strong>
+                        <Link to={`/staff/news/${news.id}`}>Редактировать</Link>
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <EmptyState
+                  title="Публикаций пока нет"
+                  description="Здесь появятся черновики и последние новости университета."
+                />
+              )}
+              {listQuery.hasNextPage && (
+                <button
+                  type="button"
+                  className="staff-news-publications__more"
+                  disabled={listQuery.isFetchingNextPage}
+                  onClick={() => void listQuery.fetchNextPage()}
+                >
+                  {listQuery.isFetchingNextPage ? 'Загружаем…' : 'Показать ещё'}
+                </button>
+              )}
+            </aside>
+          )}
         </div>
       )}
     </section>

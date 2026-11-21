@@ -5,16 +5,26 @@ export type AuthorizationContext = components['schemas']['AuthorizationContext']
 export type PermissionCode = components['schemas']['PermissionCode']
 
 // Presentation metadata only: the server supplies effective grants and enforces access.
-export const staffSections: { permission: PermissionCode; label: string }[] = [
-  { permission: 'applications.review', label: 'Заявления' },
-  { permission: 'schedule.edit', label: 'Редактор расписания' },
-  { permission: 'grades.edit', label: 'Баллы' },
-  { permission: 'attendance.edit', label: 'Посещаемость' },
-  { permission: 'students.read', label: 'Поиск студентов' },
-  { permission: 'students.edit', label: 'Академические сведения' },
-  { permission: 'students.status.edit', label: 'Академические статусы' },
-  { permission: 'groups.manage', label: 'Учебные группы' },
-  { permission: 'news.publish', label: 'Публикация новостей' },
+export const staffSections: {
+  permission: PermissionCode
+  label: string
+  icon: NavigationItem['icon']
+  disabled?: boolean
+  visible?: boolean
+}[] = [
+  { permission: 'applications.review', label: 'Заявления', icon: 'clipboard' },
+  { permission: 'schedule.edit', label: 'Редактор расписания', icon: 'calendar' },
+  { permission: 'grades.edit', label: 'Баллы', icon: 'chart', visible: false },
+  { permission: 'attendance.edit', label: 'Посещаемость', icon: 'checklist', visible: false },
+  { permission: 'students.read', label: 'Поиск студентов', icon: 'users' },
+  { permission: 'students.edit', label: 'Академические сведения', icon: 'book', visible: false },
+  {
+    permission: 'students.status.edit',
+    label: 'Академические статусы',
+    icon: 'chart',
+  },
+  { permission: 'groups.manage', label: 'Учебные группы', icon: 'groups', disabled: true },
+  { permission: 'news.publish', label: 'Публикация новостей', icon: 'news' },
 ]
 
 export function getStaffJournalRoute(permission: 'grades.edit' | 'attendance.edit') {
@@ -24,7 +34,11 @@ export function getStaffJournalRoute(permission: 'grades.edit' | 'attendance.edi
 }
 
 export function hasPermission(context: AuthorizationContext, code: PermissionCode) {
-  return context.permissions.some((grant) => grant.permission_code === code)
+  return (
+    context.permissions.some((grant) => grant.permission_code === code) ||
+    (code === 'students.read' &&
+      context.permissions.some((grant) => grant.permission_code === 'students.status.edit'))
+  )
 }
 
 export function getRoleNavigation(context: AuthorizationContext): NavigationItem[] {
@@ -36,8 +50,11 @@ export function getRoleNavigation(context: AuthorizationContext): NavigationItem
   if (context.role === 'admin') return [{ to: '/admin/users', label: 'Пользователи', icon: 'user' }]
   if (context.role !== 'staff') return []
   return staffSections
-    .filter(({ permission }) => hasPermission(context, permission))
-    .map(({ permission, label }) => ({
+    .filter(
+      ({ permission, disabled, visible }) =>
+        disabled || (visible !== false && hasPermission(context, permission)),
+    )
+    .map(({ permission, label, icon, disabled }) => ({
       to:
         permission === 'applications.review'
           ? '/staff/applications'
@@ -46,15 +63,26 @@ export function getRoleNavigation(context: AuthorizationContext): NavigationItem
             : permission === 'students.status.edit'
               ? '/staff/students/status'
               : permission === 'news.publish'
-                ? '/staff/news'
+                ? '/staff/news/new'
                 : permission === 'schedule.edit'
                   ? '/staff/schedule'
-                  : permission === 'grades.edit' || permission === 'attendance.edit'
-                    ? getStaffJournalRoute(permission)
-                    : `/staff#${permission}`,
+                  : '/staff',
       label,
-      icon: permission === 'schedule.edit' ? 'calendar' : 'file',
+      icon,
+      disabled,
     }))
+    .concat(
+      hasPermission(context, 'grades.edit') || hasPermission(context, 'attendance.edit')
+        ? [
+            {
+              to: '/staff/journals',
+              label: 'Журнал деканата',
+              icon: 'graduation' as const,
+              disabled: false,
+            },
+          ]
+        : [],
+    )
 }
 
 export function getStartRoute(context: AuthorizationContext) {
@@ -63,6 +91,5 @@ export function getStartRoute(context: AuthorizationContext) {
   if (context.role === 'admin') return '/admin/users'
   if (hasPermission(context, 'applications.review')) return '/staff/applications'
   if (hasPermission(context, 'students.read')) return '/staff/students'
-  if (hasPermission(context, 'students.status.edit')) return '/staff/students/status'
   return '/staff'
 }

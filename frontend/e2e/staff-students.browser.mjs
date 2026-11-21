@@ -118,33 +118,36 @@ try {
 
   const statusContext = await browser.newContext({ viewport: { width: 360, height: 900 } })
   const statusPage = await statusContext.newPage()
-  let hiddenReads = 0
+  let studentReads = 0
   statusPage.on('request', (request) => {
     if (
-      /\/api\/v1\/staff\/students(?:\?|\/filters|\/[0-9]+$)/.test(
-        new URL(request.url()).pathname + new URL(request.url()).search,
-      ) &&
+      new URL(request.url()).pathname.startsWith('/api/v1/staff/students') &&
       request.method() === 'GET'
     )
-      hiddenReads++
+      studentReads++
   })
   await login(statusPage, 'status-only')
   await statusPage.goto(`${baseURL}/staff/students/status`)
-  await heading(statusPage, 'Изменение академического статуса')
-  await statusPage.getByLabel('ID студента').fill(studentId)
-  assert.equal(await statusPage.getByLabel('Новый статус').inputValue(), '')
-  await statusPage.getByLabel('Подтверждаю, что внешнее основание оформлено').check()
-  assert.equal(
-    await statusPage.getByRole('button', { name: 'Подтвердить изменение' }).isDisabled(),
-    true,
-  )
-  assert.equal(await statusPage.getByText('Ёжова Елена E2E').count(), 0)
-  await statusPage.getByLabel('Основание изменения').selectOption('correction')
+  await statusPage.waitForURL('**/staff/students')
+  await heading(statusPage, 'Поиск студентов')
+  await statusPage.getByRole('heading', { name: 'Ёжова Елена E2E' }).waitFor()
+  const targetStudentCard = statusPage
+    .locator('.staff-student-card')
+    .filter({ has: statusPage.getByRole('heading', { name: 'Ёжова Елена E2E', exact: true }) })
+  const statusTrigger = targetStudentCard.getByRole('button', { name: 'Изменить статус' })
+  await statusTrigger.click()
+  let statusDialog = statusPage.getByRole('dialog', { name: 'Изменение статуса' })
+  await statusDialog.getByText('Ёжова Елена E2E · E2E-27', { exact: true }).waitFor()
+  await statusDialog.getByText('Предыдущий статус: Отчислен', { exact: true }).waitFor()
+  await statusDialog.getByLabel('Основание изменения').selectOption('correction')
   await submit(statusPage, 'enrolled')
-  await statusPage.getByText(/Статус сохранён: Обучается/).waitFor()
+  await statusDialog.waitFor({ state: 'hidden' })
   verify('check:enrolled:3')
-  await statusPage.getByLabel('Новый статус').selectOption('graduated')
-  assert.equal(await statusPage.getByText(/Статус сохранён:/).count(), 0)
+  await statusTrigger.click()
+  statusDialog = statusPage.getByRole('dialog', { name: 'Изменение статуса' })
+  await statusDialog.getByText('Предыдущий статус: Обучается', { exact: true }).waitFor()
+  await statusDialog.getByLabel('Новый статус').selectOption('graduated')
+  await statusDialog.getByLabel('Основание изменения').selectOption('correction')
 
   // Real PostgreSQL COMMIT, then abort only delivery. No mock write response.
   let lostWrites = 0
@@ -155,27 +158,30 @@ try {
     assert.equal(response.status(), 200)
     await route.abort('failed')
   })
-  await statusPage.getByLabel('Подтверждаю, что внешнее основание оформлено').check()
-  await statusPage.getByRole('button', { name: 'Подтвердить изменение' }).click()
-  await statusPage.getByText(/Результат изменения неизвестен/).waitFor()
+  await statusDialog.getByLabel('Подтверждаю, что внешнее основание оформлено').check()
+  await statusDialog.getByRole('button', { name: 'Подтвердить изменение' }).click()
+  await statusDialog.getByText(/Результат изменения неизвестен/).waitFor()
   verify('check:graduated:4')
   assert.equal(lostWrites, 1)
-  await statusPage.getByRole('button', { name: 'Проверить квитанцию операции' }).click()
-  await statusPage.getByText(/Операция подтверждена: Выпускник/).waitFor()
+  await statusDialog.getByRole('button', { name: 'Проверить квитанцию операции' }).click()
+  await statusDialog.getByText(/Операция подтверждена: Выпускник/).waitFor()
+  await statusDialog.getByText('Предыдущий статус: Выпускник', { exact: true }).waitFor()
   assert.equal(lostWrites, 1)
-  assert.equal(hiddenReads, 0)
+  assert.ok(studentReads >= 2, 'status.edit also allows scoped student search and detail reads')
   assert.equal(
-    await statusPage.getByRole('button', { name: 'Сверить актуальное состояние' }).count(),
+    await statusDialog
+      .getByRole('button', { name: 'Повторно проверить актуальное состояние' })
+      .count(),
     0,
   )
   assert.equal(
-    await statusPage.getByRole('button', { name: 'Подтвердить изменение' }).isDisabled(),
+    await statusDialog.getByRole('button', { name: 'Подтвердить изменение' }).isDisabled(),
     true,
   )
   await checkWidth(statusPage)
   await statusContext.close()
   console.log(
-    'PASS status-only expelled → enrolled requires explicit choice; committed/lost response stays uncertain, private and single-write',
+    'PASS status.edit actor can search/read resolved students; uncertain writes remain single-write and auditable',
   )
 
   const readerContext = await browser.newContext({ viewport: { width: 1440, height: 900 } })
@@ -390,7 +396,7 @@ try {
   await heading(page, 'Поиск студентов')
   assert.equal(new URL(page.url()).searchParams.get('q'), 'Ревью27')
   await page.getByLabel('Курс').selectOption('1')
-  await page.getByText('Студенты не найдены. Измените запрос или фильтры.').waitFor()
+  await page.getByRole('heading', { name: 'Студенты не найдены', exact: true }).waitFor()
   assert.equal(new URL(page.url()).searchParams.has('cursor'), false)
   assert.equal(new URL(page.url()).searchParams.has('back'), false)
   await page.goto(`${baseURL}/staff/students/9223372036854775807`)

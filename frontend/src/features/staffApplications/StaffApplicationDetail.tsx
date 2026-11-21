@@ -17,6 +17,7 @@ import {
   queuePath,
   reviewLabels,
 } from './staffApplications'
+import { Icon } from '../../shared/ui/Icon'
 import { useApplicationQueueSession } from './StaffApplicationQueue'
 import type { HistoryPage, ReviewRequest, StaffApplication } from './staffApplications'
 
@@ -72,7 +73,9 @@ export function StaffApplicationDetail() {
   if (!id || !/^[1-9][0-9]{0,18}$/.test(id))
     return (
       <ErrorState title="Заявление недоступно" description="Проверьте номер заявления.">
-        <Link to={queuePath}>К заявлениям</Link>
+        <Link className="ui-back-link" to={queuePath}>
+          <Icon name="left" />К заявлениям
+        </Link>
       </ErrorState>
     )
   return <ApplicationDetail key={`${scope}:${id}`} id={id} />
@@ -287,6 +290,7 @@ function ApplicationDetail({ id }: { id: string }) {
   return (
     <section className="section-page application-detail staff-applications">
       <Link
+        className="ui-back-link"
         to={{ pathname: queuePath, search: location.search }}
         state={{ searchKey: location.state?.searchKey }}
         onClick={(event) => {
@@ -302,7 +306,7 @@ function ApplicationDetail({ id }: { id: string }) {
           void navigate(-1)
         }}
       >
-        К заявлениям
+        <Icon name="left" />К заявлениям
       </Link>
       {accessError ? (
         <ErrorState

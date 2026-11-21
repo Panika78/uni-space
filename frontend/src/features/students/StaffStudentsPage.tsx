@@ -5,7 +5,7 @@ import { ApiClientError, apiFetch } from '../../shared/api/client'
 import { ErrorState, LoadingState } from '../../shared/ui/StatusStates'
 import { useRoleContext } from '../auth/RoleContext'
 import { hasPermission } from '../auth/roleNavigation'
-import { checkStatusOperation, readAcademicStatus, updateAcademicStatus } from './statusApi'
+import { checkStatusOperation, updateAcademicStatus } from './statusApi'
 import type { AcademicStatus, StatusReason } from './statusApi'
 import './staffStudents.css'
 
@@ -66,11 +66,9 @@ function StatusEditor({
   onClose,
   onReadDenied,
   onCriticalChange,
-  canRead = !!student,
 }: {
   studentId: string
-  student?: Student
-  canRead?: boolean
+  student: Student
   onClose?: () => void
   onReadDenied?: () => void
   onCriticalChange?: (critical: boolean) => void
@@ -128,17 +126,12 @@ function StatusEditor({
   useEffect(() => {
     if (!mustReadOnMount) return
     const controller = new AbortController()
-    const readCurrent = canRead
-      ? readStudent(studentId, controller.signal)
-      : readAcademicStatus(studentId, controller.signal)
-    readCurrent
+    readStudent(studentId, controller.signal)
       .then((result) => {
         if (alive.current) {
-          if (canRead) {
-            const actual = result as Student
-            if (actual.id !== studentId) throw new Error('invalid_student_response')
-            setKnown(actual)
-          } else setKnown(undefined)
+          const actual = result
+          if (actual.id !== studentId) throw new Error('invalid_student_response')
+          setKnown(actual)
           setLoadedStatus({ studentId, academicStatus: result.academic_status })
           setCurrentStateVerified(true)
           setNeedsRefresh(false)
@@ -154,11 +147,9 @@ function StatusEditor({
           setKnown(undefined)
           setLoadedStatus(null)
           setCurrentStateVerified(false)
-          if (canRead) {
-            setError('Разрешение на чтение отозвано. Персональные данные скрыты.')
-            onReadDeniedRef.current?.()
-            void queryClient.invalidateQueries({ queryKey: ['authorization-context'] })
-          } else setError('Доступ к чтению текущего статуса отозван.')
+          setError('Разрешение на чтение отозвано. Персональные данные скрыты.')
+          onReadDeniedRef.current?.()
+          void queryClient.invalidateQueries({ queryKey: ['authorization-context'] })
         } else if (cause instanceof ApiClientError && cause.status === 404) {
           setError('Студент с таким ID не найден.')
         } else {
@@ -173,7 +164,7 @@ function StatusEditor({
         if (alive.current) setStatusLoading(false)
       })
     return () => controller.abort()
-  }, [actorId, canRead, mustReadOnMount, queryClient, requireFreshStatus, studentId])
+  }, [actorId, mustReadOnMount, queryClient, requireFreshStatus, studentId])
 
   function resetSuccess() {
     setSaved(null)
@@ -297,18 +288,11 @@ function StatusEditor({
     setReconciling(true)
     setError('')
     try {
-      if (canRead) {
-        const actual = await readStudent(studentId, controller.signal)
-        if (!alive.current) return
-        if (actual.id !== studentId) throw new Error('invalid_student_response')
-        setKnown(actual)
-        setLoadedStatus({ studentId, academicStatus: actual.academic_status })
-      } else {
-        const actual = await readAcademicStatus(studentId, controller.signal)
-        if (!alive.current) return
-        setKnown(undefined)
-        setLoadedStatus({ studentId, academicStatus: actual.academic_status })
-      }
+      const actual = await readStudent(studentId, controller.signal)
+      if (!alive.current) return
+      if (actual.id !== studentId) throw new Error('invalid_student_response')
+      setKnown(actual)
+      setLoadedStatus({ studentId, academicStatus: actual.academic_status })
       setCurrentStateVerified(true)
       setNeedsRefresh(false)
       setReconciled(true)
@@ -322,11 +306,7 @@ function StatusEditor({
         setKnown(undefined)
         setLoadedStatus(null)
         setCurrentStateVerified(false)
-        setError(
-          canRead
-            ? 'Разрешение на чтение отозвано. Персональные данные скрыты.'
-            : 'Право читать текущий статус отозвано. Обратитесь к уполномоченному сотруднику.',
-        )
+        setError('Разрешение на чтение отозвано. Персональные данные скрыты.')
         onReadDenied?.()
         void queryClient.invalidateQueries({ queryKey: ['authorization-context'] })
       } else {
@@ -342,7 +322,7 @@ function StatusEditor({
   }
 
   async function reconcile() {
-    if (!canRead || readRevoked || reconciling) return
+    if (readRevoked || reconciling) return
     const controller = new AbortController()
     request.current = controller
     setReconciling(true)
@@ -390,7 +370,7 @@ function StatusEditor({
         void submit()
       }}
     >
-      <h2>{student ? 'Изменить академический статус' : 'Изменение статуса по ID'}</h2>
+      <h2>Изменить академический статус</h2>
       <p>Студент ID {studentId}</p>
       {known && (
         <>
@@ -494,7 +474,7 @@ function StatusEditor({
           <button type="button" disabled={reconciling} onClick={() => void reconcileOperation()}>
             Проверить квитанцию операции
           </button>
-          {canRead && !readRevoked ? (
+          {!readRevoked ? (
             <>
               <button type="button" disabled={reconciling} onClick={() => void reconcile()}>
                 Сверить актуальное состояние
@@ -639,74 +619,6 @@ function StatusDialog({
   )
 }
 
-function StatusByIdEditor({ id, canRead }: { id: string; canRead: boolean }) {
-  const queryClient = useQueryClient()
-  const preview = useQuery({
-    queryKey: ['staff-students', 'detail', id],
-    queryFn: ({ signal }) => readStudent(id, signal),
-    enabled: canRead,
-    gcTime: 0,
-  })
-  const forbidden = preview.error instanceof ApiClientError && preview.error.status === 403
-  useEffect(() => {
-    if (forbidden) void queryClient.invalidateQueries({ queryKey: ['authorization-context'] })
-  }, [forbidden, queryClient])
-  if (canRead && preview.isPending) return <LoadingState title="Проверяем сведения студента…" />
-  const snapshot = canRead && !preview.isError ? preview.data : undefined
-  return (
-    <>
-      {canRead && preview.isError && (
-        <p role="alert">
-          Сведения для просмотра недоступны. Независимое изменение по известному ID требует внешней
-          проверки.
-        </p>
-      )}
-      <StatusEditor
-        key={`${id}:${snapshot ? 'known' : 'unknown'}`}
-        studentId={id}
-        student={snapshot}
-        canRead={canRead && !forbidden}
-      />
-    </>
-  )
-}
-
-export function StaffStudentStatusPage() {
-  const context = useRoleContext()
-  const [studentId, setStudentId] = useState('')
-  if (!hasPermission(context, 'students.status.edit'))
-    return (
-      <ErrorState
-        title="Доступ запрещён"
-        description="Нет разрешения на изменение академического статуса."
-      />
-    )
-  return (
-    <section className="section-page staff-students-page">
-      <h1>Изменение академического статуса</h1>
-      <p>
-        Укажите известный ID студента. Поиск не выполняется; сведения и сверка доступны только с
-        отдельным правом students.read.
-      </p>
-      <label className="student-id-field">
-        ID студента
-        <input
-          inputMode="numeric"
-          value={studentId}
-          onChange={(e) => setStudentId(e.target.value.replace(/\D/g, ''))}
-        />
-      </label>
-      {/^[1-9][0-9]*$/.test(studentId) && (
-        <StatusByIdEditor
-          key={studentId}
-          id={studentId}
-          canRead={hasPermission(context, 'students.read')}
-        />
-      )}
-    </section>
-  )
-}
-
 function StudentIdentity({ student }: { student: Student }) {
   return (
     <>
@@ -716,7 +628,11 @@ function StudentIdentity({ student }: { student: Student }) {
       <p>
         {student.program.name} · {student.faculty.name}
       </p>
-      <p>Академический статус: {statusLabels[student.academic_status]}</p>
+      <p className="staff-student-card__status-line">
+        <span className={`staff-student-card__status is-${student.academic_status}`}>
+          {statusLabels[student.academic_status]}
+        </span>
+      </p>
     </>
   )
 }
@@ -847,11 +763,13 @@ export function StaffStudentsPage() {
         ))}
         <button type="submit">Найти</button>
       </form>
-      {canEdit && <Link to="/staff/students/status">Изменить статус по известному ID</Link>}
       {students.isPending ? (
         <LoadingState title="Загружаем студентов…" />
       ) : !students.data?.items.length ? (
-        <p>Студенты не найдены. Измените запрос или фильтры.</p>
+        <article className="staff-student-empty">
+          <h2>Студенты не найдены</h2>
+          <p>Измените запрос или фильтры, чтобы увидеть результаты.</p>
+        </article>
       ) : (
         <div className="staff-students-list">
           {students.data?.items.map((student) => (
@@ -967,14 +885,50 @@ function StaffStudentDetailContent({ id }: { id: string }) {
   const student = query.data
   return (
     <section className="section-page staff-students-page">
-      <h1 tabIndex={-1}>{student.full_name}</h1>
-      <StudentIdentity student={student} />
-      <Link to={`/staff/students?${params.toString()}`}>К результатам поиска</Link>
-      {canEdit && (
-        <button type="button" onClick={(e) => setEditing(e.currentTarget)}>
-          Изменить статус
-        </button>
-      )}
+      <div className="staff-student-detail__heading">
+        <Link aria-label="К результатам поиска" to={`/staff/students?${params.toString()}`}>
+          ‹ К результатам поиска
+        </Link>
+        <p className="section-eyebrow">Работа со студентами</p>
+        <h1 tabIndex={-1}>{student.full_name}</h1>
+        <p className="staff-student-detail__subtitle">Карточка студента</p>
+      </div>
+      <article className="staff-student-detail__card">
+        <h2>Учебные сведения</h2>
+        <dl className="staff-student-detail__facts">
+          <div>
+            <dt>Учебная группа</dt>
+            <dd>{student.group.name}</dd>
+          </div>
+          <div>
+            <dt>Курс</dt>
+            <dd>{student.course_number}</dd>
+          </div>
+          <div>
+            <dt>Образовательная программа</dt>
+            <dd>{student.program.name}</dd>
+          </div>
+          <div>
+            <dt>Факультет</dt>
+            <dd>{student.faculty.name}</dd>
+          </div>
+          <div>
+            <dt>Академический статус</dt>
+            <dd>
+              <span className="staff-student-detail__status">
+                {statusLabels[student.academic_status]}
+              </span>
+            </dd>
+          </div>
+        </dl>
+        {canEdit && (
+          <div className="staff-student-detail__actions">
+            <button type="button" onClick={(e) => setEditing(e.currentTarget)}>
+              Изменить статус
+            </button>
+          </div>
+        )}
+      </article>
       {editing && canEdit && (
         <StatusDialog
           key={student.id}

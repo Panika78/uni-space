@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiClientError } from '../../shared/api/client'
 import { JournalEdits } from './JournalEdits'
 import { useSearchParams } from 'react-router-dom'
@@ -12,12 +12,24 @@ import { AttendanceRow, FinalRow, ScoreRow, type Final } from './StaffJournalRow
 import {
   isAccessError,
   journalError,
+  journalRequest,
   pageUrl,
   staffJournal,
   useJournalQuery,
   type JournalAccess,
   type Page,
 } from './journalQueries'
+import {
+  JournalCatalog,
+  JournalCard,
+  JournalCourseSection,
+  JournalPageHeader,
+  JournalResourcePicker,
+  JournalSearch as Search,
+  JournalTable,
+  JournalTabPanel,
+  JournalTabs,
+} from './JournalWorkspace'
 import '../teacher/teacherJournals.css'
 import './staffJournals.css'
 
@@ -27,6 +39,35 @@ type HistoryTarget = { name: string; path: string }
 type HistoryEvent = Schema['JournalEvent_ScoreSnapshot_'] | Schema['JournalEvent_FinalSnapshot_']
 type Snapshot = HistoryEvent['before']
 type Tab = 'work' | 'attendance' | 'finals'
+type Lesson = Schema['JournalLesson']
+
+function moscowDay(value: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Moscow',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(value))
+  const fields = Object.fromEntries(parts.map(({ type, value: part }) => [type, part]))
+  return `${fields.year}-${fields.month}-${fields.day}`
+}
+
+function dayFromKey(value: string) {
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(Date.UTC(year!, month! - 1, day!))
+}
+
+function dayKey(value: Date) {
+  return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`
+}
+
+function monthName(value: Date) {
+  return new Intl.DateTimeFormat('ru-RU', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(value)
+}
 
 function Pager<T>({
   access,
@@ -76,40 +117,6 @@ function Pager<T>({
         </nav>
       )}
     </>
-  )
-}
-
-function Search({
-  label,
-  onSearch,
-  initial = '',
-}: {
-  label: string
-  onSearch: (query: string) => void
-  initial?: string
-}) {
-  const [draft, setDraft] = useState(initial)
-  return (
-    <form
-      className="staff-journal-actions"
-      role="search"
-      aria-label={label}
-      onSubmit={(event) => {
-        event.preventDefault()
-        onSearch(draft.trim())
-      }}
-    >
-      <label>
-        {label}
-        <input
-          type="search"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          maxLength={100}
-        />
-      </label>
-      <button type="submit">Найти</button>
-    </form>
   )
 }
 
@@ -293,6 +300,9 @@ function GroupJournal({
 }) {
   const [search, setSearch] = useState('')
   const [historicalSearch, setHistoricalSearch] = useState('')
+  const [calendarSelection, setCalendarSelection] = useState<{ day: string; month: Date } | null>(
+    null,
+  )
   const coursePath = `${staffJournal}/courses/${course.course_offering_id}`
   const group = `${course.course_offering_id}/groups/${course.group.id}`
   const path = `${staffJournal}/courses/${group}`
@@ -302,12 +312,28 @@ function GroupJournal({
       ? pageUrl(`${path}/assessments`, null, { assessment_group_id: resource })
       : null,
   )
-  const lessons = useJournalQuery<Page<Schema['JournalLesson']>>(
-    access,
-    tab === 'attendance' && resource
-      ? pageUrl(`${path}/lessons`, null, { lesson_id: resource })
-      : null,
-  )
+  const lessons = useQuery({
+    queryKey: ['staff-journal-lessons-calendar', ...access, tab === 'attendance' ? path : null],
+    enabled: tab === 'attendance',
+    retry: false,
+    gcTime: 0,
+    refetchOnWindowFocus: 'always',
+    queryFn: async ({ signal }) => {
+      const items: Lesson[] = []
+      const seen = new Set<string>()
+      let cursor: string | null = null
+      do {
+        const params = new URLSearchParams({ limit: '100' })
+        if (cursor) params.set('cursor', cursor)
+        const page = await journalRequest<Page<Lesson>>(`${path}/lessons?${params}`, { signal })
+        items.push(...page.items)
+        cursor = page.next_cursor
+        if (cursor && seen.has(cursor)) throw new Error('Invalid repeated journal cursor')
+        if (cursor) seen.add(cursor)
+      } while (cursor)
+      return { items, next_cursor: null }
+    },
+  })
   const finalHistory = (studentId: string, name: string) =>
     onHistory({
       name,
@@ -318,14 +344,10 @@ function GroupJournal({
     const readPath = `${path}/final-results`
     return (
       <>
-        <h3>
-          Итоги аттестации ·{' '}
-          {
-            { exam: 'Экзамен', graded_pass: 'Дифференцированный зачёт', pass_fail: 'Зачёт' }[
-              attestation
-            ]
-          }
-        </h3>
+        <div className="journal-finals-intro">
+          <h3>Итоговая аттестация</h3>
+          <p>Итоговая оценка выставляется вручную и не вычисляется автоматически из баллов.</p>
+        </div>
         <Search label="Поиск по студентам группы" onSearch={setSearch} />
         <Pager<Schema['StaffFinalRow']>
           key={search}
@@ -334,7 +356,25 @@ function GroupJournal({
           filters={{ q: search }}
         >
           {(items) => (
-            <div className="journal-student-list">
+            <JournalTable
+              label="Итоговая аттестация группы"
+              className="journal-table-scroll--mobile-cards"
+              columns={[
+                { id: 'student', label: 'Студент' },
+                {
+                  id: 'result',
+                  label: 'Результат',
+                  hint: {
+                    exam: 'Экзамен',
+                    graded_pass: 'Дифференцированный зачёт',
+                    pass_fail: 'Зачёт',
+                  }[attestation],
+                },
+                { id: 'date', label: 'Дата пересдачи' },
+                { id: 'location', label: 'Место пересдачи' },
+                { id: 'actions', label: 'Действия' },
+              ]}
+            >
               {items.map((row) => (
                 <FinalRow
                   key={row.student_id}
@@ -344,9 +384,10 @@ function GroupJournal({
                   access={access}
                   readPath={readPath}
                   onHistory={() => finalHistory(row.student_id, row.full_name)}
+                  display="table-row"
                 />
               ))}
-            </div>
+            </JournalTable>
           )}
         </Pager>
         <section className="journal-finals">
@@ -382,21 +423,14 @@ function GroupJournal({
     const readPath = `${path}/assessments/${resource}/results`
     return (
       <>
-        <h3>Выбор работы</h3>
         <Pager<Schema['JournalAssessment']> access={access} path={`${path}/assessments`}>
           {(items) => (
-            <div className="staff-journal-actions">
-              {items.map((item) => (
-                <button
-                  type="button"
-                  key={item.id}
-                  aria-pressed={resource === item.id}
-                  onClick={() => onResource(item.id)}
-                >
-                  {item.title}
-                </button>
-              ))}
-            </div>
+            <JournalResourcePicker
+              heading="Выбор работы"
+              resources={items.map((item) => ({ id: item.id, label: item.title }))}
+              selected={resource}
+              onSelect={onResource}
+            />
           )}
         </Pager>
         {assessments.isError && (
@@ -421,7 +455,16 @@ function GroupJournal({
               filters={{ q: search }}
             >
               {(items) => (
-                <div className="journal-student-list">
+                <JournalTable
+                  label="Таблица оценок"
+                  className="journal-table-scroll--mobile-cards"
+                  columns={[
+                    { id: 'student', label: 'Студент' },
+                    { id: 'work', label: 'Работа' },
+                    { id: 'date', label: 'Дата' },
+                    { id: 'score', label: 'Баллы' },
+                  ]}
+                >
                   {items.map((row) => (
                     <ScoreRow
                       key={row.student_id}
@@ -436,9 +479,10 @@ function GroupJournal({
                           path: `${readPath}/${row.student_id}/history`,
                         })
                       }
+                      display="table-row"
                     />
                   ))}
-                </div>
+                </JournalTable>
               )}
             </Pager>
           </>
@@ -447,27 +491,128 @@ function GroupJournal({
     )
   }
 
-  const lesson = lessons.data?.items[0]
+  const availableLessons = lessons.data?.items ?? []
+  const lesson = availableLessons.find((item) => item.id === resource)
+  const selectedDay = lesson
+    ? moscowDay(lesson.starts_at)
+    : (calendarSelection?.day ??
+      (availableLessons[0] ? moscowDay(availableLessons[0].starts_at) : ''))
+  const calendarMonth =
+    calendarSelection?.day === selectedDay
+      ? calendarSelection.month
+      : selectedDay
+        ? dayFromKey(selectedDay)
+        : dayFromKey(moscowDay(new Date().toISOString()))
+  const lessonsByDay = new Map<string, Lesson[]>()
+  for (const item of availableLessons) {
+    const key = moscowDay(item.starts_at)
+    lessonsByDay.set(key, [...(lessonsByDay.get(key) ?? []), item])
+  }
+  const monthStart = new Date(
+    Date.UTC(calendarMonth.getUTCFullYear(), calendarMonth.getUTCMonth(), 1),
+  )
+  const monthOffset = (monthStart.getUTCDay() + 6) % 7
+  const monthDays = new Date(
+    Date.UTC(calendarMonth.getUTCFullYear(), calendarMonth.getUTCMonth() + 1, 0),
+  ).getUTCDate()
+  const calendarCells: (string | null)[] = [
+    ...Array.from({ length: monthOffset }, () => null),
+    ...Array.from({ length: monthDays }, (_, index) =>
+      dayKey(
+        new Date(Date.UTC(calendarMonth.getUTCFullYear(), calendarMonth.getUTCMonth(), index + 1)),
+      ),
+    ),
+  ]
   const readPath = `${path}/lessons/${resource}/attendance`
+  const shiftMonth = (amount: number) => {
+    const month = new Date(
+      Date.UTC(calendarMonth.getUTCFullYear(), calendarMonth.getUTCMonth() + amount, 1),
+    )
+    setCalendarSelection({ day: selectedDay, month })
+  }
   return (
     <>
-      <h3>Выбор занятия</h3>
-      <Pager<Schema['JournalLesson']> access={access} path={`${path}/lessons`}>
-        {(items) => (
-          <div className="staff-journal-actions">
-            {items.map((item) => (
-              <button
-                type="button"
-                key={item.id}
-                aria-pressed={resource === item.id}
-                onClick={() => onResource(item.id)}
-              >
-                {formatDateTime(item.starts_at)}
-              </button>
-            ))}
+      <JournalCard
+        heading="Посещаемость"
+        description="Даты с доступными занятиями выделены календарём."
+      >
+        {lessons.isPending ? (
+          <LoadingState title="Загружаем календарь занятий…" />
+        ) : (
+          <div className="journal-attendance-toolbar">
+            <section className="teacher-journal-calendar" aria-label="Календарь занятий">
+              <header>
+                <button type="button" aria-label="Предыдущий месяц" onClick={() => shiftMonth(-1)}>
+                  ‹
+                </button>
+                <strong>{monthName(calendarMonth)}</strong>
+                <button type="button" aria-label="Следующий месяц" onClick={() => shiftMonth(1)}>
+                  ›
+                </button>
+              </header>
+              <div className="teacher-journal-calendar__grid" aria-label={monthName(calendarMonth)}>
+                {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day) => (
+                  <span key={day}>{day}</span>
+                ))}
+                {calendarCells.map((value, index) => {
+                  if (!value) return <span key={`empty-${index}`} aria-hidden="true" />
+                  const count = lessonsByDay.get(value)?.length ?? 0
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-label={`${Number(value.slice(-2))} ${monthName(calendarMonth)}${count ? `, занятий: ${count}` : ', занятий нет'}`}
+                      aria-pressed={value === selectedDay}
+                      disabled={!count}
+                      className={count ? 'has-lessons' : undefined}
+                      onClick={() => {
+                        const dayLessons = lessonsByDay.get(value) ?? []
+                        setCalendarSelection({ day: value, month: calendarMonth })
+                        if (dayLessons[0]) onResource(dayLessons[0].id)
+                      }}
+                    >
+                      {Number(value.slice(-2))}
+                      {count > 1 && <small>{count}</small>}
+                    </button>
+                  )
+                })}
+              </div>
+              <p>Выберите выделенную дату, чтобы увидеть занятие.</p>
+            </section>
+            <section
+              className="teacher-journal__lesson-options"
+              aria-label="Занятия на выбранную дату"
+            >
+              <h3>
+                {selectedDay
+                  ? formatDateTime(`${selectedDay}T09:00:00+03:00`).split(' · ')[0]
+                  : 'Выберите дату'}
+              </h3>
+              {(lessonsByDay.get(selectedDay) ?? []).length > 1 ? (
+                <div role="group" aria-label="Выбор занятия">
+                  {(lessonsByDay.get(selectedDay) ?? []).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      aria-pressed={item.id === resource}
+                      onClick={() => onResource(item.id)}
+                    >
+                      <strong>{formatDateTime(item.starts_at)}</strong>
+                      <span>{item.kind}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : lesson ? (
+                <p>
+                  {formatDateTime(lesson.starts_at)} · {lesson.kind}
+                </p>
+              ) : (
+                <p>Для выбранной даты занятий нет.</p>
+              )}
+            </section>
           </div>
         )}
-      </Pager>
+      </JournalCard>
       {lessons.isError && (
         <ErrorState
           title="Занятие недоступно"
@@ -487,7 +632,15 @@ function GroupJournal({
             filters={{ q: search }}
           >
             {(items) => (
-              <div className="journal-student-list">
+              <JournalTable
+                label="Таблица посещаемости"
+                className="journal-table-scroll--mobile-cards"
+                columns={[
+                  { id: 'student', label: 'Студент' },
+                  { id: 'attendance', label: 'Посещаемость' },
+                  { id: 'updated', label: 'Последнее изменение' },
+                ]}
+              >
                 {items.map((row) => (
                   <AttendanceRow
                     key={row.student_id}
@@ -495,9 +648,10 @@ function GroupJournal({
                     lessonId={resource}
                     access={access}
                     readPath={readPath}
+                    display="table-row"
                   />
                 ))}
-              </div>
+              </JournalTable>
             )}
           </Pager>
         </>
@@ -546,15 +700,21 @@ function StaffJournal({ access }: { access: JournalAccess }) {
       if (value) next.set(key, value)
       else next.delete(key)
     }
-    setParams(next)
+    setParams(next, { preventScrollReset: true })
   }
   const historyScope = `${courseId}:${group}:${tab}:${resource}`
   const [openedScope, setOpenedScope] = useState('')
   return (
     <div className="staff-journal">
-      <h1>Журнал деканата</h1>
-      <section aria-labelledby="staff-journal-catalog">
-        <h2 id="staff-journal-catalog">Дисциплины и группы</h2>
+      <JournalPageHeader
+        eyebrow="Кабинет сотрудника"
+        title="Журнал деканата"
+        description="Дисциплины, группы, успеваемость и история изменений."
+      />
+      <JournalCard
+        heading="Дисциплины и группы"
+        description="Каталог сгруппирован по учебным периодам и группам."
+      >
         <Search
           key={q}
           label="Поиск дисциплины, группы или семестра"
@@ -568,24 +728,20 @@ function StaffJournal({ access }: { access: JournalAccess }) {
           filters={{ q }}
         >
           {(items) => (
-            <ul className="staff-journal-catalog">
-              {items.map((item) => (
-                <li key={`${item.course_offering_id}:${item.group.id}`}>
-                  <button
-                    type="button"
-                    aria-pressed={courseId === item.course_offering_id && group === item.group.id}
-                    onClick={() =>
-                      set({ course: item.course_offering_id, group: item.group.id, resource: '' })
-                    }
-                  >
-                    {item.discipline.name} · {item.group.name} · {item.term.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <JournalCatalog
+              entries={items.map((item) => ({
+                id: `${item.course_offering_id}:${item.group.id}`,
+                label: `${item.discipline.name} · ${item.group.name} · ${item.term.name}`,
+              }))}
+              selected={`${courseId}:${group}`}
+              onSelect={(value) => {
+                const [course, selectedGroup] = value.split(':')
+                if (course && selectedGroup) set({ course, group: selectedGroup, resource: '' })
+              }}
+            />
           )}
         </Pager>
-      </section>
+      </JournalCard>
       {selected.isError && (
         <ErrorState
           title="Журнал недоступен"
@@ -597,43 +753,40 @@ function StaffJournal({ access }: { access: JournalAccess }) {
         <EmptyState title="Журнал не найден" />
       )}
       {course && !selected.isError && (
-        <section>
-          <h2>
-            {course.discipline.name} · {course.group.name}
-          </h2>
-          <nav className="staff-journal-actions" aria-label="Разделы журнала">
-            {(
+        <JournalCourseSection
+          heading={`${course.discipline.name} · ${course.group.name}`}
+          status="Журнал открыт"
+        >
+          <JournalTabs
+            ariaLabel="Разделы журнала"
+            idPrefix="staff-journal"
+            selected={tab}
+            onSelect={(value) => set({ tab: value, resource: '' })}
+            options={(
               [
-                ['attendance', 'Посещаемость', attendance],
                 ['work', 'Работы и баллы', grades],
+                ['attendance', 'Посещаемость', attendance],
                 ['finals', 'Итоги аттестации', grades],
               ] as const
             )
               .filter(([, , allowed]) => allowed)
-              .map(([value, label]) => (
-                <button
-                  type="button"
-                  key={value}
-                  aria-pressed={tab === value}
-                  onClick={() => set({ tab: value, resource: '' })}
-                >
-                  {label}
-                </button>
-              ))}
-          </nav>
-          <GroupJournal
-            key={`${courseId}:${group}:${tab}`}
-            course={course}
-            tab={tab}
-            resource={resource}
-            access={access}
-            onResource={(value) => set({ tab, resource: value })}
-            onHistory={(target) => {
-              setOpenedScope(historyScope)
-              setHistory(target)
-            }}
+              .map(([id, label]) => ({ id, label }))}
           />
-        </section>
+          <JournalTabPanel idPrefix="staff-journal" tabId={tab}>
+            <GroupJournal
+              key={`${courseId}:${group}:${tab}`}
+              course={course}
+              tab={tab}
+              resource={resource}
+              access={access}
+              onResource={(value) => set({ tab, resource: value })}
+              onHistory={(target) => {
+                setOpenedScope(historyScope)
+                setHistory(target)
+              }}
+            />
+          </JournalTabPanel>
+        </JournalCourseSection>
       )}
       {grades && history && openedScope === historyScope && (
         <HistoryDialog

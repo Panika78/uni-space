@@ -65,9 +65,14 @@ it('loads the Moscow week, renders known details once and links the discipline t
   expect(screen.getByRole('article')).toHaveTextContent('Корпус А · 101')
   expect(screen.getByRole('article')).toHaveTextContent('Корпус Б · 202')
   expect(screen.getByRole('article')).toHaveTextContent('Вымышленный преподаватель')
-  expect(
-    within(card).getByRole('link', { name: createLesson().course_offering.discipline.name }),
-  ).toHaveAttribute('href', `/academics/courses/${createLesson().course_offering.id}`)
+  const courseLink = within(card).getByRole('link', {
+    name: createLesson().course_offering.discipline.name,
+  })
+  expect(courseLink).toHaveAttribute(
+    'href',
+    `/academics/courses/${createLesson().course_offering.id}`,
+  )
+  expect(courseLink.querySelector('svg')).toBeInTheDocument()
   expect(request).toHaveBeenCalledWith('/api/v1/schedule?date_from=2026-11-09&date_to=2026-11-15', {
     authenticated: true,
     signal: expect.any(AbortSignal),

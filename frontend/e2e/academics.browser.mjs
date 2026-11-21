@@ -86,7 +86,11 @@ try {
     await page.setViewportSize({ width, height: 1000 })
     for (const factor of [1, 1.5, 2]) {
       await page.reload()
-      await page.getByText(longCopy.items[0].discipline.name, { exact: true }).first().waitFor()
+      await page
+        .locator('.academics-mobile-course-link:visible, .academics-desktop-course-name:visible')
+        .filter({ hasText: longCopy.items[0].discipline.name })
+        .first()
+        .waitFor()
       await scaleVisibleText(page, factor)
       await page.screenshot({
         path: `work/academics-long-copy-${width}-${factor}.png`,
@@ -108,7 +112,15 @@ try {
   )
   await page.waitForFunction(() => document.documentElement.scrollWidth <= 360)
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 360))
-  assert.ok((await page.locator('.academics-table tbody th').first().boundingBox()).width >= 300)
+  const mobileNameWidth = (await page.locator('.academics-table tbody th').first().boundingBox())
+    .width
+  const mobileContentWidth = await page
+    .locator('.academics-page')
+    .evaluate((node) => node.getBoundingClientRect().width)
+  assert.ok(
+    mobileNameWidth >= mobileContentWidth - 42,
+    `Mobile discipline name uses the available width (${mobileNameWidth}/${mobileContentWidth}px)`,
+  )
   await page.screenshot({ path: 'work/academics-mobile.png', fullPage: true })
   check('360px without horizontal overflow')
 

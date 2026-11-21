@@ -1,4 +1,4 @@
-import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useLayoutEffect, useMemo, useRef } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { Link, Outlet, useLocation, useNavigationType, useSearchParams } from 'react-router-dom'
 import { useRoleContext } from '../auth/RoleContext'
@@ -52,9 +52,8 @@ export function useApplicationQueueSession() {
 const filterNames = ['service_code', 'review_status', 'created_from', 'created_to'] as const
 
 export function StaffApplicationQueue() {
-  const { key } = useLocation()
   const { scope } = useApplicationQueueSession()
-  return <ApplicationQueue key={`${scope}:${key}`} />
+  return <ApplicationQueue key={scope} />
 }
 
 function ApplicationQueue() {
@@ -75,9 +74,7 @@ function ApplicationQueue() {
   if (queryText) apiFilters.set('q', queryText)
   const search = filters.toString()
   const requestFilters = apiFilters.toString()
-  const [restore] = useState(() =>
-    navigationType === 'POP' ? positions.get(location.key) : undefined,
-  )
+  const restore = navigationType === 'POP' ? positions.get(location.key) : undefined
   const list = useInfiniteQuery({
     queryKey: ['staff-applications', scope, location.key],
     initialPageParam: '',
@@ -108,13 +105,14 @@ function ApplicationQueue() {
   })
   const table = useRef<HTMLTableElement>(null)
   const heading = useRef<HTMLHeadingElement>(null)
-  const didRestore = useRef(false)
+  const restoredVisit = useRef('')
   const pages = list.data?.pages.reduce((total, page) => total + page.pages, 0) ?? 0
   useLayoutEffect(() => {
     if (!list.isSuccess || !list.isFetchedAfterMount || list.isFetching) return
     const key = location.key
-    if (restore && !didRestore.current) {
-      didRestore.current = true
+    const visit = `${location.key}:${navigationType}`
+    if (restore && restoredVisit.current !== visit) {
+      restoredVisit.current = visit
       const rowLink = restore.id
         ? table.current?.querySelector<HTMLElement>(`[data-application-id="${restore.id}"]`)
         : null
@@ -137,6 +135,7 @@ function ApplicationQueue() {
     list.isFetchedAfterMount,
     list.isFetching,
     location.key,
+    navigationType,
     pages,
     positions,
     restore,
@@ -162,6 +161,7 @@ function ApplicationQueue() {
               className="staff-applications__tab"
               key={value}
               aria-current={tab === value ? 'page' : undefined}
+              preventScrollReset
               to={`?${query}`}
               state={{ searchKey }}
             >
@@ -227,10 +227,12 @@ function ApplicationQueue() {
           Дата создания по{' '}
           <input type="date" name="created_to" defaultValue={filters.get('created_to') ?? ''} />
         </label>
-        <button className="auth-submit" type="submit">
+        <button className="staff-applications__apply" type="submit">
           Применить
         </button>
-        <Link to={`?tab=${tab}`}>Сбросить фильтры</Link>
+        <Link className="staff-applications__reset" to={`?tab=${tab}`}>
+          Сбросить фильтры
+        </Link>
       </form>
       {list.isPending || (!list.isFetchedAfterMount && !list.isError) ? (
         <LoadingState title="Загружаем заявления…" />

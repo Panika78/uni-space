@@ -30,33 +30,32 @@
 
 ## 2. Обзор сущностей
 
-| Область | Основные связи |
-|---|---|
-| Пользователи | `users` → профили студента, преподавателя или сотрудника; одна основная роль |
-| Обучение | `disciplines` + `academic_terms` → `course_offerings` ↔ группы через `course_groups` |
-| Расписание | `course_offerings` → `lessons` ↔ группы и аудитории |
-| Оценивание | `assessments` → `assessment_groups` → `assessment_results`; итог — `final_results` |
-| Услуги | `service_types` → `applications` → не более одного `issued_documents` |
-| Информация | Новости, объявления преподавателей и персональные уведомления — отдельные сущности |
-
+| Область      | Основные связи                                                                       |
+| ------------ | ------------------------------------------------------------------------------------ |
+| Пользователи | `users` → профили студента, преподавателя или сотрудника; одна основная роль         |
+| Обучение     | `disciplines` + `academic_terms` → `course_offerings` ↔ группы через `course_groups` |
+| Расписание   | `course_offerings` → `lessons` ↔ группы и аудитории                                  |
+| Оценивание   | `assessments` → `assessment_groups` → `assessment_results`; итог — `final_results`   |
+| Услуги       | `service_types` → `applications` → не более одного `issued_documents`                |
+| Информация   | Новости, объявления преподавателей и персональные уведомления — отдельные сущности   |
 
 Таблица `assessment_groups` — **не просто список групп**. Это отдельное назначение работы группе, содержащее дату и, при необходимости, ссылку на конкретное занятие.
 
 ## 3. Пользователи и университет
 
-| Таблица | Ключевые поля | Назначение | Когда |
-|---|---|---|---|
-| `users` | `id PK`, `login UQ`, `password_hash`, `full_name`, `avatar_storage_key NULL`, `role`, `is_active`, `created_at` | Учётная запись и вход | MVP 1 |
-| `auth_sessions` | `id PK`, `user_id FK`, `created_at`, `expires_at`, `last_used_at NULL`, `revoked_at NULL`, `revocation_reason NULL` | Независимая сессия входа в браузере / на устройстве; абсолютный срок и отзыв | MVP 1 |
-| `refresh_tokens` | `id PK`, `session_id FK`, `token_hash UQ`, `parent_token_id FK NULL`, `created_at`, `expires_at`, `used_at NULL`, `revoked_at NULL` | История ротации непрозрачных refresh-токенов для одной сессии | MVP 1 |
-| `org_units` | `id PK`, `name`, `type`, `parent_id FK NULL` | Факультеты, кафедры, деканаты, бухгалтерия | MVP 1 (справочник) |
-| `programs` | `id PK`, `code`, `name`, `direction_code`, `direction_name`, `faculty_id FK` | Образовательная программа и отдельные реквизиты направления | MVP 1 |
-| `study_groups` | `id PK`, `name`, `program_id FK`, `course_number` | Учебные группы | MVP 1 |
-| `students` | `id PK`, `user_id FK UQ`, `group_id FK`, `academic_status`, `membership_version`, `membership_changed_at` | Учебные сведения студента | MVP 1 |
-| `teachers` | `id PK`, `full_name`, `user_id FK NULL UQ`, `department_id FK NULL` | Преподаватель как запись справочника; аккаунт необязателен | MVP 1 (справочник) |
-| `staff_profiles` | `id PK`, `user_id FK UQ`, `org_unit_id FK` | Принадлежность сотрудника к подразделению | MVP 2 |
-| `staff_permissions` | `id PK`, `staff_profile_id FK`, `permission_code`, `scope_org_unit_id FK NULL` | Конкретное разрешённое действие и организационная область | MVP 2 |
-| `subgroups` | `id PK`, `group_id FK`, `name` | Формальные подгруппы | MVP 2 |
+| Таблица             | Ключевые поля                                                                                                                       | Назначение                                                                   | Когда              |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------ |
+| `users`             | `id PK`, `login UQ`, `password_hash`, `full_name`, `avatar_storage_key NULL`, `role`, `is_active`, `created_at`                     | Учётная запись и вход                                                        | MVP 1              |
+| `auth_sessions`     | `id PK`, `user_id FK`, `created_at`, `expires_at`, `last_used_at NULL`, `revoked_at NULL`, `revocation_reason NULL`                 | Независимая сессия входа в браузере / на устройстве; абсолютный срок и отзыв | MVP 1              |
+| `refresh_tokens`    | `id PK`, `session_id FK`, `token_hash UQ`, `parent_token_id FK NULL`, `created_at`, `expires_at`, `used_at NULL`, `revoked_at NULL` | История ротации непрозрачных refresh-токенов для одной сессии                | MVP 1              |
+| `org_units`         | `id PK`, `name`, `type`, `parent_id FK NULL`                                                                                        | Факультеты, кафедры, деканаты, бухгалтерия                                   | MVP 1 (справочник) |
+| `programs`          | `id PK`, `code`, `name`, `direction_code`, `direction_name`, `faculty_id FK`                                                        | Образовательная программа и отдельные реквизиты направления                  | MVP 1              |
+| `study_groups`      | `id PK`, `name`, `program_id FK`, `course_number`                                                                                   | Учебные группы                                                               | MVP 1              |
+| `students`          | `id PK`, `user_id FK UQ`, `group_id FK`, `academic_status`, `membership_version`, `membership_changed_at`                           | Учебные сведения студента                                                    | MVP 1              |
+| `teachers`          | `id PK`, `full_name`, `user_id FK NULL UQ`, `department_id FK NULL`                                                                 | Преподаватель как запись справочника; аккаунт необязателен                   | MVP 1 (справочник) |
+| `staff_profiles`    | `id PK`, `user_id FK UQ`, `org_unit_id FK`                                                                                          | Принадлежность сотрудника к подразделению                                    | MVP 2              |
+| `staff_permissions` | `id PK`, `staff_profile_id FK`, `permission_code`, `scope_org_unit_id FK NULL`                                                      | Конкретное разрешённое действие и организационная область                    | MVP 2              |
+| `subgroups`         | `id PK`, `group_id FK`, `name`                                                                                                      | Формальные подгруппы                                                         | MVP 2              |
 
 **Роли `users.role`:** `student`, `teacher`, `staff`, `admin`. У одного аккаунта одна роль.
 
@@ -74,32 +73,31 @@
 
 **Настройки (по мере выпуска функций):** `user_preferences(user_id PK/FK, preferences JSONB, updated_at)`. Сохраняются только настройки реализованных функций: например, скрытие отменённых занятий в MVP 2, темы и другие параметры оформления в Extended. Ключи и значения проверяются сервером. Это не переносит персонализацию в ранний релиз.
 
-**Границы прав MVP:** сотрудник деканата с соответствующим учебным разрешением может создавать и изменять данные всех групп независимо от факультета. Право проверяется отдельно для каждого действия; `schedule.edit` не предоставляет право менять оценки, академические статусы или обрабатывать заявки. Общую пару сотрудник меняет целиком без дополнительных согласований по факультетам. Заявки доступны ответственному подразделению и уполномоченным сотрудникам.
+**Границы прав MVP:** сотрудник деканата с соответствующим учебным разрешением может создавать и изменять данные всех групп независимо от факультета. Право проверяется отдельно для каждого действия; `students.status.edit` предоставляет только чтение списка, фильтров и карточки студентов, чтобы выбрать цель и подтвердить личность, но не предоставляет `students.edit`, `grades.edit`, `attendance.edit` или `groups.manage`. `schedule.edit` не предоставляет право менять оценки, академические статусы или обрабатывать заявки. Общую пару сотрудник меняет целиком без дополнительных согласований по факультетам. Заявки доступны ответственному подразделению и уполномоченным сотрудникам.
 
 **Академический статус (MVP 2):** одобрение заявления на академический отпуск не изменяет `students.academic_status`. После оформления приказа вне системы сотрудник деканата с `students.status.edit` вручную меняет статус. Изменение и `audit_events` с автором, временем и прежним/новым значением сохраняются одной транзакцией. Системный администратор не получает это право по умолчанию.
 
 ### 3.1. Сессии и refresh-токены (MVP 1)
 
-
 **Выбранная схема:** access-токен — короткоживущий **подписанный JWT** (предварительно 10 минут), а refresh-токен — **случайный opaque token** (не JWT), который вращается при каждом успешном обновлении авторизации. Access-токены не хранятся в БД; их `sid` ссылается на `auth_sessions.id`. Подробности проверки JWT, cookie и API — в [ARCHITECTURE.md](ARCHITECTURE.md#6-авторизация-и-права).
 
-| Таблица | Поле | Тип / ограничение | Значение |
-|---|---|---|---|
-| `auth_sessions` | `id` | BIGINT identity, PK | Уникальная сессия; значение помещается в claim `sid` |
-| `auth_sessions` | `user_id` | FK → `users.id`, NOT NULL | Владелец сессии |
-| `auth_sessions` | `created_at` | `TIMESTAMPTZ`, NOT NULL | Момент входа |
-| `auth_sessions` | `expires_at` | `TIMESTAMPTZ`, NOT NULL | **Абсолютный** срок действия сессии |
-| `auth_sessions` | `last_used_at` | `TIMESTAMPTZ NULL` | Последний успешный refresh; не обновляется на каждом чтении расписания |
-| `auth_sessions` | `revoked_at` | `TIMESTAMPTZ NULL` | Момент отзыва сессии |
-| `auth_sessions` | `revocation_reason` | `TEXT NULL` либо ограниченный код | Причина отзыва: `logout`, `login_replaced`, `reuse_detected`, `user_blocked`, `admin_revoked` и др. |
-| `refresh_tokens` | `id` | PK | Идентификатор записи токена |
-| `refresh_tokens` | `session_id` | FK → `auth_sessions.id`, NOT NULL | Сессия/семейство токенов |
-| `refresh_tokens` | `token_hash` | `BYTEA` (SHA-256), NOT NULL, UNIQUE | Хеш криптографически случайного токена; не исходное значение |
-| `refresh_tokens` | `parent_token_id` | FK → `refresh_tokens.id`, UNIQUE для ненулевых значений; NULL для первого токена | Предыдущий токен в цепочке ротации |
-| `refresh_tokens` | `created_at` | `TIMESTAMPTZ`, NOT NULL | Выдача refresh-токена |
-| `refresh_tokens` | `expires_at` | `TIMESTAMPTZ`, NOT NULL | Не позже `auth_sessions.expires_at` |
-| `refresh_tokens` | `used_at` | `TIMESTAMPTZ NULL` | Токен был однократно обменян; после этого неактивен |
-| `refresh_tokens` | `revoked_at` | `TIMESTAMPTZ NULL` | Явный отзыв токена или семейства |
+| Таблица          | Поле                | Тип / ограничение                                                                | Значение                                                                                            |
+| ---------------- | ------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `auth_sessions`  | `id`                | BIGINT identity, PK                                                              | Уникальная сессия; значение помещается в claim `sid`                                                |
+| `auth_sessions`  | `user_id`           | FK → `users.id`, NOT NULL                                                        | Владелец сессии                                                                                     |
+| `auth_sessions`  | `created_at`        | `TIMESTAMPTZ`, NOT NULL                                                          | Момент входа                                                                                        |
+| `auth_sessions`  | `expires_at`        | `TIMESTAMPTZ`, NOT NULL                                                          | **Абсолютный** срок действия сессии                                                                 |
+| `auth_sessions`  | `last_used_at`      | `TIMESTAMPTZ NULL`                                                               | Последний успешный refresh; не обновляется на каждом чтении расписания                              |
+| `auth_sessions`  | `revoked_at`        | `TIMESTAMPTZ NULL`                                                               | Момент отзыва сессии                                                                                |
+| `auth_sessions`  | `revocation_reason` | `TEXT NULL` либо ограниченный код                                                | Причина отзыва: `logout`, `login_replaced`, `reuse_detected`, `user_blocked`, `admin_revoked` и др. |
+| `refresh_tokens` | `id`                | PK                                                                               | Идентификатор записи токена                                                                         |
+| `refresh_tokens` | `session_id`        | FK → `auth_sessions.id`, NOT NULL                                                | Сессия/семейство токенов                                                                            |
+| `refresh_tokens` | `token_hash`        | `BYTEA` (SHA-256), NOT NULL, UNIQUE                                              | Хеш криптографически случайного токена; не исходное значение                                        |
+| `refresh_tokens` | `parent_token_id`   | FK → `refresh_tokens.id`, UNIQUE для ненулевых значений; NULL для первого токена | Предыдущий токен в цепочке ротации                                                                  |
+| `refresh_tokens` | `created_at`        | `TIMESTAMPTZ`, NOT NULL                                                          | Выдача refresh-токена                                                                               |
+| `refresh_tokens` | `expires_at`        | `TIMESTAMPTZ`, NOT NULL                                                          | Не позже `auth_sessions.expires_at`                                                                 |
+| `refresh_tokens` | `used_at`           | `TIMESTAMPTZ NULL`                                                               | Токен был однократно обменян; после этого неактивен                                                 |
+| `refresh_tokens` | `revoked_at`        | `TIMESTAMPTZ NULL`                                                               | Явный отзыв токена или семейства                                                                    |
 
 **Дополнительные ограничения и индексы:**
 
@@ -124,18 +122,17 @@
 
 **Cookies и доступ:** production refresh-токен доступен по `__Host-uni_space_refresh` с `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/` и без `Domain`. В development/test с `COOKIE_SECURE=false` применяется отдельная `uni_space_refresh_dev` cookie с `Path=/api/v1/auth`. Legacy cookie `uni_space_refresh` не принимается после перехода; старые клиенты проходят login заново, а старые записи сессий истекают по TTL. В БД не хранятся cookie, access JWT или их исходные значения. Наличие записи о сессии **не предоставляет права на учебные данные**: роль, актуальная принадлежность и объектные полномочия проверяются сервисами.
 
-
 ## 4. Дисциплины и учебные периоды
 
 Справочник дисциплин следует отделить от её **конкретного проведения** в определённом семестре.
 
-| Таблица | Ключевые поля | Назначение | Когда |
-|---|---|---|---|
-| `academic_terms` | `id PK`, `name`, `starts_on`, `ends_on` | Учебный семестр / период | MVP 1 |
-| `disciplines` | `id PK`, `code NULL`, `name` | Название предмета, например «Математический анализ» | MVP 1 |
-| `course_offerings` | `id PK`, `discipline_id FK`, `term_id FK`, `attestation_type` | Преподавание дисциплины в конкретном периоде | MVP 1 |
-| `course_groups` | `course_offering_id FK`, `group_id FK`, `PK(оба)` | Какие группы изучают конкретное проведение дисциплины | MVP 1 |
-| `teaching_assignments` | `id PK`, `course_offering_id FK`, `group_id FK`, `teacher_id FK`, `UQ(course_offering_id, group_id, teacher_id)` | Кто ведёт дисциплину у какой группы | MVP 2 |
+| Таблица                | Ключевые поля                                                                                                    | Назначение                                            | Когда |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ----- |
+| `academic_terms`       | `id PK`, `name`, `starts_on`, `ends_on`                                                                          | Учебный семестр / период                              | MVP 1 |
+| `disciplines`          | `id PK`, `code NULL`, `name`                                                                                     | Название предмета, например «Математический анализ»   | MVP 1 |
+| `course_offerings`     | `id PK`, `discipline_id FK`, `term_id FK`, `attestation_type`                                                    | Преподавание дисциплины в конкретном периоде          | MVP 1 |
+| `course_groups`        | `course_offering_id FK`, `group_id FK`, `PK(оба)`                                                                | Какие группы изучают конкретное проведение дисциплины | MVP 1 |
+| `teaching_assignments` | `id PK`, `course_offering_id FK`, `group_id FK`, `teacher_id FK`, `UQ(course_offering_id, group_id, teacher_id)` | Кто ведёт дисциплину у какой группы                   | MVP 2 |
 
 **Пример:** «Математический анализ» — одна запись в `disciplines`, а «Матанализ, осень 2026» — запись `course_offerings`. К ней могут относиться несколько групп и преподавателей.
 
@@ -145,14 +142,14 @@
 
 ## 5. Расписание
 
-| Таблица | Ключевые поля | Назначение | Когда |
-|---|---|---|---|
-| `buildings` | `id PK`, `name`, `address NULL` | Учебные корпуса | MVP 1 |
-| `rooms` | `id PK`, `building_id FK`, `name` | Аудитории; `UQ(building_id, name)` | MVP 1 |
-| `lessons` | `id PK`, `course_offering_id FK`, `teacher_id FK NULL`, `starts_at`, `ends_at`, `kind`, `status`, `previous_lesson_id FK NULL UQ`, `is_additional`, `created_by_user_id FK NULL`, `series_id FK NULL` (Extended), `version` | Конкретное занятие | MVP 1; редактирование MVP 2 |
-| `lesson_groups` | `id PK`, `lesson_id FK`, `group_id FK`, `subgroup_id FK NULL` | Группы/подгруппы, участвующие в занятии | MVP 1 |
-| `lesson_rooms` | `lesson_id FK`, `room_id FK`, `PK(оба)` | Одна пара может иметь несколько аудиторий | MVP 1 |
-| `lesson_series` | `id PK`, `course_offering_id FK`, `recurrence_rule`, `starts_on`, `ends_on` | Повторяющиеся занятия; в том числе чётность недель | Extended / P2 для чётности |
+| Таблица         | Ключевые поля                                                                                                                                                                                                               | Назначение                                         | Когда                       |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | --------------------------- |
+| `buildings`     | `id PK`, `name`, `address NULL`                                                                                                                                                                                             | Учебные корпуса                                    | MVP 1                       |
+| `rooms`         | `id PK`, `building_id FK`, `name`                                                                                                                                                                                           | Аудитории; `UQ(building_id, name)`                 | MVP 1                       |
+| `lessons`       | `id PK`, `course_offering_id FK`, `teacher_id FK NULL`, `starts_at`, `ends_at`, `kind`, `status`, `previous_lesson_id FK NULL UQ`, `is_additional`, `created_by_user_id FK NULL`, `series_id FK NULL` (Extended), `version` | Конкретное занятие                                 | MVP 1; редактирование MVP 2 |
+| `lesson_groups` | `id PK`, `lesson_id FK`, `group_id FK`, `subgroup_id FK NULL`                                                                                                                                                               | Группы/подгруппы, участвующие в занятии            | MVP 1                       |
+| `lesson_rooms`  | `lesson_id FK`, `room_id FK`, `PK(оба)`                                                                                                                                                                                     | Одна пара может иметь несколько аудиторий          | MVP 1                       |
+| `lesson_series` | `id PK`, `course_offering_id FK`, `recurrence_rule`, `starts_on`, `ends_on`                                                                                                                                                 | Повторяющиеся занятия; в том числе чётность недель | Extended / P2 для чётности  |
 
 ### `lessons`
 
@@ -215,13 +212,13 @@ A.starts_at < B.ends_at AND B.starts_at < A.ends_at
 - **Контрольная** — тоже `assessments`, но с `type = 'test'` (или аналогичным согласованным кодом).
 - Оцениваемая работа **не обязана** быть привязана к занятию.
 
-| Таблица | Ключевые поля | Назначение | Когда |
-|---|---|---|---|
-| `assessments` | `id PK`, `course_offering_id FK`, `title`, `type`, `max_score`, `description NULL`, `created_by_user_id FK NULL` | Что это за работа; без единой даты для всех групп | MVP 1 |
-| `assessment_groups` | `id PK`, `assessment_id FK`, `group_id FK`, `planned_date DATE NULL`, `lesson_id FK NULL`, `date_needs_confirmation` | **Назначение работы группе**, её отдельная дата и связь с парой | MVP 1 |
-| `assessment_results` | `id PK`, `assessment_group_id FK`, `student_id FK`, `score`, `graded_by_user_id FK NULL`, `graded_at`, `UQ(assessment_group_id, student_id)` | Индивидуальные баллы | MVP 1 |
-| `attendance` | `lesson_id FK`, `student_id FK`, `status`, `marked_by_user_id FK`, `updated_at`, `origin_group_id FK NULL`, `origin_subgroup_id NULL`, `membership_version NULL`, `PK(lesson_id, student_id)` | Индивидуальная посещаемость | MVP 2 |
-| `final_results` | `id PK`, `course_offering_id FK`, `student_id FK`, `grade_value NULL`, `passed NULL`, `retake_date NULL`, `retake_location NULL`, `UQ(course_offering_id, student_id)` | Итог экзамена или зачёта | MVP 1 (просмотр) / MVP 2 (ввод) |
+| Таблица              | Ключевые поля                                                                                                                                                                                 | Назначение                                                      | Когда                           |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------- |
+| `assessments`        | `id PK`, `course_offering_id FK`, `title`, `type`, `max_score`, `description NULL`, `created_by_user_id FK NULL`                                                                              | Что это за работа; без единой даты для всех групп               | MVP 1                           |
+| `assessment_groups`  | `id PK`, `assessment_id FK`, `group_id FK`, `planned_date DATE NULL`, `lesson_id FK NULL`, `date_needs_confirmation`                                                                          | **Назначение работы группе**, её отдельная дата и связь с парой | MVP 1                           |
+| `assessment_results` | `id PK`, `assessment_group_id FK`, `student_id FK`, `score`, `graded_by_user_id FK NULL`, `graded_at`, `UQ(assessment_group_id, student_id)`                                                  | Индивидуальные баллы                                            | MVP 1                           |
+| `attendance`         | `lesson_id FK`, `student_id FK`, `status`, `marked_by_user_id FK`, `updated_at`, `origin_group_id FK NULL`, `origin_subgroup_id NULL`, `membership_version NULL`, `PK(lesson_id, student_id)` | Индивидуальная посещаемость                                     | MVP 2                           |
+| `final_results`      | `id PK`, `course_offering_id FK`, `student_id FK`, `grade_value NULL`, `passed NULL`, `retake_date NULL`, `retake_location NULL`, `UQ(course_offering_id, student_id)`                        | Итог экзамена или зачёта                                        | MVP 1 (просмотр) / MVP 2 (ввод) |
 
 **Утверждённые типы работ MVP 2:** `test` (контрольная/тест, сохраняет код MVP 1), `laboratory` (лабораторная), `practical` (практическая), `seminar` (оцениваемая семинарская), `independent` (самостоятельная), `extended_homework` (крупное длительное домашнее задание), `exam` (балльный компонент экзамена, если предусмотрен планом), `other` (другое). Редактируемый справочник не нужен.
 
@@ -229,24 +226,24 @@ A.starts_at < B.ends_at AND B.starts_at < A.ends_at
 
 **`assessments`**
 
-| id | course_offering_id | title | type | max_score |
-|---|---|---|---|---|
-| 101 | 15 | Контрольная №2 | test | 15 |
+| id  | course_offering_id | title          | type | max_score |
+| --- | ------------------ | -------------- | ---- | --------- |
+| 101 | 15                 | Контрольная №2 | test | 15        |
 
 **`assessment_groups`**
 
-| id | assessment_id | group_id | planned_date | lesson_id |
-|---|---|---|---|---|
-| 201 | 101 | 10 | 2026-11-12 | 501 |
-| 202 | 101 | 11 | 2026-11-14 | 509 |
+| id  | assessment_id | group_id | planned_date | lesson_id |
+| --- | ------------- | -------- | ------------ | --------- |
+| 201 | 101           | 10       | 2026-11-12   | 501       |
+| 202 | 101           | 11       | 2026-11-14   | 509       |
 
 **`assessment_results`**
 
 | assessment_group_id | student_id | score |
-|---|---|---|
-| 201 | 1 | 12 |
-| 201 | 2 | 0 |
-| 202 | 3 | 14 |
+| ------------------- | ---------- | ----- |
+| 201                 | 1          | 12    |
+| 201                 | 2          | 0     |
+| 202                 | 3          | 14    |
 
 Итак, **работа одна, назначения и даты разные, результаты индивидуальные**. Если контрольную перенесли только для группы 10, обновляется строка 201, а строка 202 остаётся прежней.
 
@@ -292,16 +289,19 @@ MVP2-05: отметка сохраняет исходные группу/под�
 право на историческую запись. Деканат с `attendance.edit` может исправить/снять её.
 
 В `students` хранится только текущий номер периода и `membership_changed_at`:
-начальная граница создаётся миграцией `20261116_03` либо при создании студента;
-триггер PostgreSQL увеличивает номер и обновляет время при фактической смене
-группы или подгруппы, включая прямой SQL. No-op и rollback не создают перевод.
+начальная граница создаётся миграцией `20261116_03` либо при создании студента.
+Миграция `20261121_01` исправляет начальную границу существовавших студентов с
+`membership_version = 0`, используя `users.created_at`, если прежнее значение было
+позже. Это приближение по времени создания аккаунта, а не достоверная дата вступления
+в группу: система не хранит историю членства и не может восстановить её задним числом.
+Триггер PostgreSQL увеличивает номер и обновляет время при фактической смене группы
+или подгруппы, включая прямой SQL. No-op и rollback не создают перевод.
 Это служебная граница доступа, не история членства и не optimistic locking отметок.
 Новые отметки нельзя создавать для занятий, начавшихся раньше этой границы,
 в том числе после удаления старой отметки и повторного перевода. Правило одинаково
 для преподавателя и деканата: неизвестную прежнюю принадлежность не угадываем.
 У существовавших до миграции отметок снимок остаётся NULL; они сохраняются и
 корректируются только деканатом. Новые отметки за период до начала учёта не создаются.
-
 
 ### Отмена занятия со связанной контрольной
 
@@ -332,13 +332,13 @@ MVP2-05: отметка сохраняет исходные группу/под�
 
 ## 7. Заявки и документы
 
-| Таблица | Ключевые поля | Назначение | Когда |
-|---|---|---|---|
-| `service_types` | `id PK`, `code UQ`, `title`, `processing_mode`, `responsible_org_unit_id FK NULL`, `produces_document` | Каталог услуг | MVP 1 |
-| `applications` | `id PK`, `student_id FK`, `service_type_id FK`, `review_status`, `document_status`, `form_data JSONB`, `assigned_org_unit_id FK NULL`, `reviewer_user_id FK NULL`, `feedback NULL`, `created_at`, `updated_at`, `version` | Конкретное заявление и его актуальное состояние | MVP 1 |
-| `application_history` | `id PK`, `application_id FK`, `actor_user_id FK NULL`, `from_status NULL`, `to_status`, `comment NULL`, `created_at` | Хронология рассмотрения и возвратов | MVP 2 |
-| `application_attachments` | `id PK`, `application_id FK`, `storage_key`, `original_filename`, `mime_type`, `size_bytes`, `is_current`, `uploaded_at` | Вложения; заменяемые при доработке | MVP 2 |
-| `issued_documents` | `id PK`, `application_id FK UQ`, `storage_key`, `filename`, `issued_at`, `snapshot_data JSONB` | Выданный, неизменяемый PDF | MVP 2 |
+| Таблица                   | Ключевые поля                                                                                                                                                                                                             | Назначение                                      | Когда |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ----- |
+| `service_types`           | `id PK`, `code UQ`, `title`, `processing_mode`, `responsible_org_unit_id FK NULL`, `produces_document`                                                                                                                    | Каталог услуг                                   | MVP 1 |
+| `applications`            | `id PK`, `student_id FK`, `service_type_id FK`, `review_status`, `document_status`, `form_data JSONB`, `assigned_org_unit_id FK NULL`, `reviewer_user_id FK NULL`, `feedback NULL`, `created_at`, `updated_at`, `version` | Конкретное заявление и его актуальное состояние | MVP 1 |
+| `application_history`     | `id PK`, `application_id FK`, `actor_user_id FK NULL`, `from_status NULL`, `to_status`, `comment NULL`, `created_at`                                                                                                      | Хронология рассмотрения и возвратов             | MVP 2 |
+| `application_attachments` | `id PK`, `application_id FK`, `storage_key`, `original_filename`, `mime_type`, `size_bytes`, `is_current`, `uploaded_at`                                                                                                  | Вложения; заменяемые при доработке              | MVP 2 |
+| `issued_documents`        | `id PK`, `application_id FK UQ`, `storage_key`, `filename`, `issued_at`, `snapshot_data JSONB`                                                                                                                            | Выданный, неизменяемый PDF                      | MVP 2 |
 
 ### Зачем `JSONB` в `applications`?
 
@@ -419,6 +419,7 @@ MVP2-05: отметка сохраняет исходные группу/под�
 `backend/scripts/cleanup_application_attachments.py` с учётом ключей текущих строк.
 Независимый volume `application_attachments` монтируется в API в dev и production.
 Согласованный backup/restore базы и volume описан в `docs/PRODUCTION.md`.
+
 - MVP 2: приватный постоянный Docker volume, выдача файлов только через авторизованный backend. Минимальный интерфейс save/read/delete допускает позднее подключение S3, без реализации S3-адаптера сейчас. Если хостинг без постоянного диска, выбрать backend хранения перед деплоем.
 - Backup/restore охватывает БД и файлы; обязательны конечные тайм-ауты и очистка незавершённых/осиротевших объектов.
 
@@ -428,12 +429,12 @@ MVP2-05: отметка сохраняет исходные группу/под�
 
 ## 8. Новости, объявления, уведомления
 
-| Таблица | Ключевые поля | Назначение | Когда |
-|---|---|---|---|
-| `news` | `id PK`, `title`, `body`, `author_user_id FK NULL`, `published_at`, `is_published` | Официальные университетские новости | MVP 1 |
-| `notifications` | `id PK`, `user_id FK`, `logical_event_key NULL`, `audience_group_id NULL`, `type`, `title`, `body`, `entity_type NULL`, `entity_id NULL`, `read_at NULL`, `created_at` | Персональные системные оповещения и доменные события | MVP 1 / MVP 2 |
-| `teacher_announcements` | `id PK`, `course_offering_id FK`, `teacher_id FK`, `group_id FK NULL`, `title`, `body`, `is_important`, `created_at` | Объявления по проведению дисциплины; `group_id NULL` — все актуальные группы проведения | MVP 2 |
-| `news_targets` | `id PK`, `news_id FK`, `target_type`, `target_id` | Адресная публикация для факультета/программы/группы и т. д. | Extended |
+| Таблица                 | Ключевые поля                                                                                                                                                          | Назначение                                                                              | Когда         |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------- |
+| `news`                  | `id PK`, `title`, `body`, `author_user_id FK NULL`, `published_at`, `is_published`                                                                                     | Официальные университетские новости                                                     | MVP 1         |
+| `notifications`         | `id PK`, `user_id FK`, `logical_event_key NULL`, `audience_group_id NULL`, `type`, `title`, `body`, `entity_type NULL`, `entity_id NULL`, `read_at NULL`, `created_at` | Персональные системные оповещения и доменные события                                    | MVP 1 / MVP 2 |
+| `teacher_announcements` | `id PK`, `course_offering_id FK`, `teacher_id FK`, `group_id FK NULL`, `title`, `body`, `is_important`, `created_at`                                                   | Объявления по проведению дисциплины; `group_id NULL` — все актуальные группы проведения | MVP 2         |
+| `news_targets`          | `id PK`, `news_id FK`, `target_type`, `target_id`                                                                                                                      | Адресная публикация для факультета/программы/группы и т. д.                             | Extended      |
 
 **Не смешивать:**
 
@@ -468,7 +469,6 @@ MVP2-05: отметка сохраняет исходные группу/под�
 цепочки. При наличии данных для сохранения нужен перенос с учётом фактической
 схемы: номер `20261118_01` в актуальном main обозначает миграцию журнала деканата.
 
-
 Не каждое обновление оценки создаёт уведомление. Массовые отмены должны создавать агрегированные уведомления, а не сообщение на каждую отменённую пару.
 
 Для ссылок `notifications.entity_type/entity_id` обязательно проверяется право получателя открыть целевой объект. При необходимости позднее можно заменить эту пару на более строгую модель ссылок; она не должна служить способом обхода авторизации.
@@ -479,10 +479,10 @@ MVP2-05: отметка сохраняет исходные группу/под�
 
 ## 9. История изменений и конкурентное сохранение
 
-| Таблица | Ключевые поля | Назначение | Когда |
-|---|---|---|---|
-| `audit_events` | `id PK`, `actor_user_id FK NULL`, `entity_type`, `entity_id`, `action`, `before_data JSONB NULL`, `after_data JSONB NULL`, `reason NULL`, `created_at` | История важных изменений | MVP 2 |
-| `student_status_operations` | `operation_id UUID PK`, `actor_user_id FK`, `student_id FK`, `target_status`, `previous_status`, `reason`, `changed`, `created_at` | Неизменяемая квитанция успешной команды для точного повтора, включая no-op; не является историей изменений | MVP 2 |
+| Таблица                     | Ключевые поля                                                                                                                                          | Назначение                                                                                                 | Когда |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- | ----- |
+| `audit_events`              | `id PK`, `actor_user_id FK NULL`, `entity_type`, `entity_id`, `action`, `before_data JSONB NULL`, `after_data JSONB NULL`, `reason NULL`, `created_at` | История важных изменений                                                                                   | MVP 2 |
+| `student_status_operations` | `operation_id UUID PK`, `actor_user_id FK`, `student_id FK`, `target_status`, `previous_status`, `reason`, `changed`, `created_at`                     | Неизменяемая квитанция успешной команды для точного повтора, включая no-op; не является историей изменений | MVP 2 |
 
 Обязательно аудировать изменения баллов, итоговых оценок, официального расписания и значимых административных данных. Для жизненного цикла заявления отдельно используется `application_history`.
 
@@ -502,23 +502,23 @@ nullable `reason TEXT`, `created_at TIMESTAMPTZ NOT NULL DEFAULT statement_times
 
 ## 10. Основные связи и ограничения
 
-| Связь | Кардинальность / правило |
-|---|---|
-| `users` → `students` | Один студенческий аккаунт — один профиль студента |
-| `users` → `auth_sessions` | Несколько независимых сессий входа пользователя |
-| `auth_sessions` → `refresh_tokens` | Цепочка использованных и текущего refresh-токенов |
-| `study_groups` → `students` | У студента ровно одна **актуальная** группа |
-| `academic_terms` → `course_offerings` | Одно проведение дисциплины принадлежит одному периоду |
-| `course_offerings` ↔ `study_groups` | Многие-ко-многим через `course_groups` |
-| `lessons` ↔ `study_groups` | Многие-ко-многим через `lesson_groups` |
-| `lessons` ↔ `rooms` | Многие-ко-многим через `lesson_rooms` |
-| `assessments` → `assessment_groups` | Одна работа — несколько назначений разным группам |
-| `assessment_groups` → `assessment_results` | Одно назначение — баллы многих студентов |
-| `lessons` → `attendance` | Одна пара — отметки посещаемости студентов |
-| `course_offerings` → `final_results` | Итоги аттестации студентов по проведению дисциплины |
-| `students` → `applications` | У одного студента много заявлений |
-| `applications` → `issued_documents` | У обращения не более одного выданного PDF; владелец определяется по заявке |
-| `users` → `notifications` | У каждого уведомления один получатель |
+| Связь                                      | Кардинальность / правило                                                   |
+| ------------------------------------------ | -------------------------------------------------------------------------- |
+| `users` → `students`                       | Один студенческий аккаунт — один профиль студента                          |
+| `users` → `auth_sessions`                  | Несколько независимых сессий входа пользователя                            |
+| `auth_sessions` → `refresh_tokens`         | Цепочка использованных и текущего refresh-токенов                          |
+| `study_groups` → `students`                | У студента ровно одна **актуальная** группа                                |
+| `academic_terms` → `course_offerings`      | Одно проведение дисциплины принадлежит одному периоду                      |
+| `course_offerings` ↔ `study_groups`        | Многие-ко-многим через `course_groups`                                     |
+| `lessons` ↔ `study_groups`                 | Многие-ко-многим через `lesson_groups`                                     |
+| `lessons` ↔ `rooms`                        | Многие-ко-многим через `lesson_rooms`                                      |
+| `assessments` → `assessment_groups`        | Одна работа — несколько назначений разным группам                          |
+| `assessment_groups` → `assessment_results` | Одно назначение — баллы многих студентов                                   |
+| `lessons` → `attendance`                   | Одна пара — отметки посещаемости студентов                                 |
+| `course_offerings` → `final_results`       | Итоги аттестации студентов по проведению дисциплины                        |
+| `students` → `applications`                | У одного студента много заявлений                                          |
+| `applications` → `issued_documents`        | У обращения не более одного выданного PDF; владелец определяется по заявке |
+| `users` → `notifications`                  | У каждого уведомления один получатель                                      |
 
 ### Ограничения БД
 
@@ -591,7 +591,6 @@ SHARE-блокировок дочерних строк, чтобы не созд
 не означает право на занятия всех подгрупп; NULL в контракте пересечения означает
 всю группу и не позволяет объявить её непересекающейся с подгруппой.
 
-
 Миграция `20261116_05` дополняет защиту редактора:
 
 - DELETE/смена ключа course_groups запрещены, пока связь используется lesson_groups,
@@ -634,22 +633,22 @@ SHARE-блокировок дочерних строк, чтобы не созд
 
 Помимо индексов PK/UQ, индексы на внешние ключи и под пользовательские запросы назначаются явно; само обозначение FK не означает готовый индекс:
 
-| Индекс (логически) | Для чего |
-|---|---|
-| `lessons(starts_at, ends_at)` | Расписание за день/неделю и проверка пересечений |
-| `lesson_groups(group_id, lesson_id)` | Расписание конкретной группы |
-| `lesson_rooms(room_id, lesson_id)` | Занятость аудитории |
-| `lessons(teacher_id, starts_at)` | Занятость преподавателя |
-| `assessment_groups(group_id, planned_date)` | Работы конкретной группы по датам |
-| `assessment_results(student_id, assessment_group_id)` | Успеваемость студента |
-| `attendance(student_id, lesson_id)` | Посещаемость студента |
-| `applications(student_id, created_at)` | Заявления студента |
-| `applications(assigned_org_unit_id, review_status)` | Очередь сотрудника |
-| `notifications(user_id, read_at, created_at)` | Лента и непрочитанные уведомления |
-| `news(published_at, id)` | Актуальные публикации и стабильная keyset-сортировка |
-| `auth_sessions(user_id, revoked_at, expires_at)` | Поиск и отзыв сессий |
-| `refresh_tokens(token_hash)` (UQ) | Поиск предъявленного токена |
-| `refresh_tokens(session_id, created_at)` | Цепочка и очистка после срока сессии |
+| Индекс (логически)                                    | Для чего                                             |
+| ----------------------------------------------------- | ---------------------------------------------------- |
+| `lessons(starts_at, ends_at)`                         | Расписание за день/неделю и проверка пересечений     |
+| `lesson_groups(group_id, lesson_id)`                  | Расписание конкретной группы                         |
+| `lesson_rooms(room_id, lesson_id)`                    | Занятость аудитории                                  |
+| `lessons(teacher_id, starts_at)`                      | Занятость преподавателя                              |
+| `assessment_groups(group_id, planned_date)`           | Работы конкретной группы по датам                    |
+| `assessment_results(student_id, assessment_group_id)` | Успеваемость студента                                |
+| `attendance(student_id, lesson_id)`                   | Посещаемость студента                                |
+| `applications(student_id, created_at)`                | Заявления студента                                   |
+| `applications(assigned_org_unit_id, review_status)`   | Очередь сотрудника                                   |
+| `notifications(user_id, read_at, created_at)`         | Лента и непрочитанные уведомления                    |
+| `news(published_at, id)`                              | Актуальные публикации и стабильная keyset-сортировка |
+| `auth_sessions(user_id, revoked_at, expires_at)`      | Поиск и отзыв сессий                                 |
+| `refresh_tokens(token_hash)` (UQ)                     | Поиск предъявленного токена                          |
+| `refresh_tokens(session_id, created_at)`              | Цепочка и очистка после срока сессии                 |
 
 Не создавать индексы «на всякий случай»: окончательный список проверить по фактическим запросам и планам выполнения.
 

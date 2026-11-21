@@ -357,7 +357,7 @@ async function inspectStudent(
       .locator('.academics-page section')
       .filter({ has: page.getByRole('heading', { name: 'Текущие дисциплины', exact: true }) })
       .getByRole('row')
-      .filter({ has: page.getByRole('rowheader', { name: item.discipline.name, exact: true }) })
+      .filter({ has: page.locator(`[data-course-id="${item.course_offering_id}"]`) })
     assert.equal(await row.locator('strong').innerText(), `${item.total_score} / ${item.max_score}`)
     assert.ok(
       (await row.innerText()).includes(

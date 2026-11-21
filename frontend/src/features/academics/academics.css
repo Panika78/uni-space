@@ -14,14 +14,13 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
-  box-shadow: var(--shadow);
   table-layout: fixed;
-  font-size: 16px;
+  font-size: 15px;
 }
 .academics-table th,
 .academics-table td {
   text-align: left;
-  padding: 21px 25px;
+  padding: 15px 18px;
   border-bottom: 1px solid var(--line);
   overflow-wrap: break-word;
   vertical-align: middle;
@@ -29,14 +28,23 @@
 .academics-table thead th {
   background: #faf5f0;
   color: #71656a;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 650;
 }
 .academics-table th:first-child {
-  width: 44%;
+  width: 36%;
+}
+.academics-table--courses th:nth-child(2) {
+  width: 18%;
+}
+.academics-table--courses th:nth-child(3) {
+  width: 18%;
+}
+.academics-table--courses th:nth-child(4) {
+  width: 28%;
 }
 .academics-table tbody th {
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 650;
 }
 .academics-table small {
@@ -77,6 +85,12 @@
 .academics-mobile-label {
   display: none;
 }
+.academics-mobile-course-link {
+  display: none;
+  color: inherit !important;
+  text-decoration: none !important;
+}
+
 @container (max-width: 48rem) {
   .academics-table,
   .academics-table tbody {
@@ -118,11 +132,21 @@
   .academics-session td {
     grid-column: 1 / -1;
   }
+  .academics-table--courses tr td:last-child {
+    display: none;
+  }
   .academics-mobile-label {
     display: block;
     color: #71656a;
     font-size: 0.75rem;
     margin-bottom: 0.3rem;
+  }
+  .academics-desktop-course-name {
+    display: none;
+  }
+  .academics-mobile-course-link {
+    display: inline;
+    font-weight: inherit !important;
   }
 }
 
@@ -134,6 +158,10 @@
 }
 
 .academics-table a {
-  color: inherit;
+  color: var(--accent);
+  font-weight: 700;
   text-underline-offset: 3px;
+}
+.academics-course-link {
+  white-space: nowrap;
 }
