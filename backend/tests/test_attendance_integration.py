@@ -224,19 +224,17 @@ def test_lesson_state_time_and_independent_replacement(attendance, status):
     assert s.read(lesson=replacement.id).json()["status"] == "attended"
 
 
-def test_teacher_can_change_future_attendance_but_staff_cannot_create_a_future_mark(attendance):
+def test_teacher_cannot_change_future_attendance_and_staff_cannot_create_future_mark(attendance):
     s = attendance
     assert s.write("attended").status_code == 200
     s.lesson.starts_at = datetime.now(UTC) + timedelta(hours=2)
     s.lesson.ends_at = s.lesson.starts_at + timedelta(hours=1)
     s.db.flush()
 
-    assert s.write("absent").status_code == 200
-    assert s.read(lesson=s.lesson.id).json()["status"] == "absent"
-    assert s.write(method="delete").status_code == 200
-    assert s.read(lesson=s.lesson.id).json()["status"] == "unmarked"
-    assert s.write("attended", student=2).status_code == 200
-    assert s.read(lesson=s.lesson.id, student=2).json()["status"] == "attended"
+    assert s.write("absent").status_code == 409
+    assert s.read(lesson=s.lesson.id).json()["status"] == "attended"
+    assert s.write(method="delete").status_code == 409
+    assert s.write("attended", student=2).status_code == 409
 
     token, _ = s.staff()
     assert s.write("absent", student=0, token=token).status_code == 409

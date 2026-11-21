@@ -84,12 +84,10 @@ def update_attendance(db: Session, user: User, lesson_id: int, student_id: int, 
             raise HTTPException(404, "not_found")
         # Fresh roster rows can be backfilled. After a real group/subgroup transfer,
         # the latest membership boundary still prevents reopening prior periods.
-        if (
-            mark is None
-            and (staff or student.membership_version > 0)
-            and lesson.starts_at < student.membership_changed_at
-        ):
+        if mark is None and lesson.starts_at < student.membership_changed_at:
             raise HTTPException(404, "not_found")
+        if lesson.starts_at > datetime.now(UTC):
+            raise HTTPException(409, "invalid_transition")
         if not staff and lesson.status != "scheduled":
             raise HTTPException(409, "invalid_transition")
         if (

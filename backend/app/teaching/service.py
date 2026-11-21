@@ -7,7 +7,7 @@ within the authorized course/group pair, before pagination or serialization.
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import and_, case, exists, or_, select, tuple_
+from sqlalchemy import and_, case, exists, func, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
@@ -395,10 +395,10 @@ def list_journal_attendance(db, course_id, group_id, lesson_id, params):
     student_sort_id = Student.id.label("student_sort_id")
     can_edit = and_(
         Lesson.status == "scheduled",
+        Lesson.starts_at <= func.clock_timestamp(),
         or_(Attendance.lesson_id.is_(None), membership_matches),
         or_(
             Attendance.lesson_id.is_not(None),
-            Student.membership_version == 0,
             Lesson.starts_at >= Student.membership_changed_at,
         ),
     )
