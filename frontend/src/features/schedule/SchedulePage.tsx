@@ -115,7 +115,8 @@ function LessonCard({
                 tab={linked.length > 1 ? 'assessments' : undefined}
                 returnSelector={returnSelector}
               >
-                {name}
+                <span>{name}</span>
+                <Icon name="right" />
               </CourseLink>
             )}
           </h3>

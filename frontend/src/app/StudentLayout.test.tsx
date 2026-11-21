@@ -109,6 +109,15 @@ describe('student dashboard navigation', () => {
     expect(screen.getByRole('heading', { name: 'Успеваемость' })).toBeInTheDocument()
   })
 
+  it('marks the student shell consistently on schedule and unified routes', () => {
+    const { unmount } = renderStudentLayout('/schedule')
+    expect(document.querySelector('.student-shell')).toHaveClass('student-shell--student')
+    unmount()
+
+    renderStudentLayout('/academics')
+    expect(document.querySelector('.student-shell')).toHaveClass('student-shell--student')
+  })
+
   it('keeps the unofficial prototype notice visible when the desktop sidebar is collapsed', async () => {
     const user = userEvent.setup()
     renderStudentLayout()

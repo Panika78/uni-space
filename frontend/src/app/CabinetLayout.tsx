@@ -513,7 +513,9 @@ function CabinetShell({ children }: { children?: ReactNode }) {
   }, [isDrawerOpen, isSuspended])
 
   return (
-    <div className={`student-shell${isCollapsed ? ' sidebar-collapsed' : ''}`}>
+    <div
+      className={`student-shell${student ? ' student-shell--student' : ''}${isCollapsed ? ' sidebar-collapsed' : ''}`}
+    >
       <aside className="desktop-sidebar" aria-label="Боковая панель">
         <Link className="sidebar-brand-link" to={home} aria-label="РГУЧВ — кабинет">
           <UniversityBrand compact={isCollapsed} />

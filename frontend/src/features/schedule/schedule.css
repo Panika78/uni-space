@@ -733,8 +733,26 @@
 }
 
 .lesson-course-link--title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   color: inherit;
   text-underline-offset: 3px;
+}
+.lesson-course-link--title > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.lesson-course-link--title svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  color: var(--accent);
+  transition: transform 140ms ease;
+}
+.lesson-course-link--title:hover svg {
+  transform: translateX(2px);
 }
 .lesson-card__academic {
   display: flex;

@@ -367,6 +367,29 @@ a {
   background: var(--sidebar);
   transition: width 180ms ease;
 }
+.student-shell--student .desktop-sidebar {
+  width: 252px;
+  padding: 19px 14px 13px;
+  transition: none;
+}
+.student-shell--student .student-main-column {
+  margin-left: 252px;
+  transition: none;
+}
+.student-shell--student .ambient-canvas {
+  left: 252px;
+  transition: none;
+}
+.student-shell--student.sidebar-collapsed .desktop-sidebar {
+  width: 76px;
+  padding-inline: 12px;
+}
+.student-shell--student.sidebar-collapsed .student-main-column {
+  margin-left: 76px;
+}
+.student-shell--student.sidebar-collapsed .ambient-canvas {
+  left: 76px;
+}
 .sidebar-brand-link {
   display: block;
   margin: 0 0 38px;
@@ -1377,6 +1400,18 @@ textarea {
   .sidebar-collapsed .student-main-column {
     margin-left: 0;
   }
+  .student-shell--student .student-main-column {
+    margin-left: 0;
+  }
+  .student-shell--student .ambient-canvas {
+    left: 0;
+  }
+  .student-shell--student.sidebar-collapsed .student-main-column {
+    margin-left: 0;
+  }
+  .student-shell--student.sidebar-collapsed .ambient-canvas {
+    left: 0;
+  }
   .student-topbar {
     min-height: 60px;
     justify-content: flex-end;
@@ -1735,6 +1770,34 @@ textarea {
   }
   .ambient-canvas {
     left: 230px;
+  }
+}
+@media (min-width: 721px) and (max-width: 920px) {
+  .student-shell--student .desktop-sidebar {
+    width: 76px;
+    padding-inline: 12px;
+  }
+  .student-shell--student .university-brand__copy,
+  .student-shell--student .desktop-sidebar .navigation-label,
+  .student-shell--student .navigation-status {
+    display: none;
+  }
+  .student-shell--student .university-brand {
+    justify-content: center;
+  }
+  .student-shell--student .sidebar-brand-link {
+    margin-bottom: 38px;
+  }
+  .student-shell--student .student-navigation__link,
+  .student-shell--student .sidebar-collapse {
+    justify-content: center;
+    padding-inline: 0;
+  }
+  .student-shell--student .student-main-column {
+    margin-left: 76px;
+  }
+  .student-shell--student .ambient-canvas {
+    left: 76px;
   }
 }
 .mobile-drawer-layer[inert],

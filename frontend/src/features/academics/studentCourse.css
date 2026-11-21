@@ -57,8 +57,6 @@
   opacity: 0.7;
 }
 .student-course__tabs {
-  position: relative;
-  isolation: isolate;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   width: min(100%, 26.25rem);
@@ -71,29 +69,7 @@
   background-color: #f2e7e2;
   scrollbar-width: none;
 }
-.student-course__tabs::before {
-  content: '';
-  position: absolute;
-  z-index: 0;
-  top: 4px;
-  bottom: 4px;
-  left: 4px;
-  width: var(--tab-width, 0px);
-  border-radius: 9px;
-  background: #781f32;
-  box-shadow: 0 3px 9px rgb(120 31 50 / 13%);
-  transform: translateX(var(--tab-x, 0));
-  transition: none;
-  pointer-events: none;
-}
-.student-course__tabs.indicator-ready::before {
-  transition:
-    transform 280ms var(--ease),
-    width 280ms var(--ease);
-}
 .student-course__tabs button {
-  position: relative;
-  z-index: 1;
   min-width: 0;
   min-height: 43px;
   padding: 7px 9px;
@@ -105,10 +81,15 @@
   font-weight: 700;
   line-height: 1.2;
   overflow-wrap: anywhere;
-  transition: color 160ms ease;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
 }
 .student-course__tabs button[aria-selected='true'] {
+  background: #781f32;
   color: #fff;
+  box-shadow: 0 3px 9px rgb(120 31 50 / 13%);
 }
 .student-course__panel {
   box-sizing: border-box;
@@ -437,7 +418,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .student-course__tabs::before,
   .student-course__tabs button {
     transition: none !important;
   }
