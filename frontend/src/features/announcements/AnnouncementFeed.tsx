@@ -67,6 +67,16 @@ const dateFormat = new Intl.DateTimeFormat('ru-RU', {
   timeStyle: 'short',
   timeZone: 'Europe/Moscow',
 })
+const courseDateFormat = new Intl.DateTimeFormat('ru-RU', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'Europe/Moscow',
+})
+
+function formatCourseAnnouncementDate(value: string) {
+  return courseDateFormat.format(new Date(value)).replace(/\sг\.$/, '')
+}
 
 export function StudentAnnouncementFeed({ courseId }: { courseId: string }) {
   const profile = useStudentProfile()
@@ -119,24 +129,43 @@ export function AnnouncementFeed({ scope }: { scope: AnnouncementScope }) {
   if (items.length === 0) return <EmptyState title="Объявлений пока нет" />
   return (
     <>
-      <ul className="announcement-feed">
+      <ul
+        className={`announcement-feed${scope.role === 'student' ? ' announcement-feed--cards' : ''}`}
+      >
         {items.map((item) => (
           <li key={item.id}>
-            <details>
-              <summary>
-                <strong>{item.title}</strong>
-                {item.is_important && <span className="announcement-important">Важное</span>}
-                <span className="announcement-byline">
-                  <time dateTime={item.created_at}>
-                    {dateFormat.format(new Date(item.created_at))}
-                  </time>
-                  {' · '}
-                  {item.teacher.full_name}
-                </span>
-                <span className="announcement-excerpt">{item.excerpt}</span>
-              </summary>
-              <p className="announcement-body">{item.body}</p>
-            </details>
+            {scope.role === 'student' ? (
+              <article className="announcement-card">
+                <div className="announcement-card__meta">
+                  <span className="announcement-byline">
+                    <time dateTime={item.created_at}>
+                      {formatCourseAnnouncementDate(item.created_at)}
+                    </time>
+                    {' · '}
+                    {item.teacher.full_name}
+                  </span>
+                  {item.is_important && <span className="announcement-important">Важное</span>}
+                </div>
+                <h3>{item.title}</h3>
+                <p className="announcement-body">{item.body}</p>
+              </article>
+            ) : (
+              <details>
+                <summary>
+                  <strong>{item.title}</strong>
+                  {item.is_important && <span className="announcement-important">Важное</span>}
+                  <span className="announcement-byline">
+                    <time dateTime={item.created_at}>
+                      {dateFormat.format(new Date(item.created_at))}
+                    </time>
+                    {' · '}
+                    {item.teacher.full_name}
+                  </span>
+                  <span className="announcement-excerpt">{item.excerpt}</span>
+                </summary>
+                <p className="announcement-body">{item.body}</p>
+              </details>
+            )}
           </li>
         ))}
       </ul>

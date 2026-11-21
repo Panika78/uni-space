@@ -178,6 +178,46 @@ it('shows attendance marks as styled lesson rows', async () => {
   show()
   const attendance = await screen.findByRole('tab', { name: 'Посещаемость' })
   await userEvent.click(attendance)
-  expect(await screen.findByText('Был')).toBeInTheDocument()
+  expect(await screen.findByText('Присутствие')).toBeInTheDocument()
   expect(await screen.findByText('Не отмечено')).toBeInTheDocument()
+  expect(document.querySelector('.student-course__rows--attendance svg')).toBeInTheDocument()
+})
+
+it('renders work and scores in the reference table layout', async () => {
+  vi.mocked(getStudentRead).mockImplementation(async (path) => {
+    if (path.endsWith('/assessments'))
+      return {
+        items: [
+          {
+            assessment_group_id: 'work-1',
+            assessment_id: 'assessment-1',
+            date_needs_confirmation: false,
+            description: null,
+            graded_at: null,
+            lesson_id: null,
+            max_score: 10,
+            planned_date: '2026-09-10',
+            score: 8,
+            title: 'Лабораторная работа № 1',
+            type: 'laboratory',
+          },
+        ],
+        next_cursor: null,
+      } as never
+    if (path.endsWith('/lessons')) return { items: [], next_cursor: null } as never
+    return course as never
+  })
+  show()
+
+  const table = await screen.findByRole('table')
+  expect(
+    within(table)
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent),
+  ).toEqual(['Работа', 'Тип', 'Дата', 'Баллы'])
+  expect(within(table).getByText('Лабораторная работа № 1')).toBeInTheDocument()
+  expect(within(table).getByText('Лабораторная')).toBeInTheDocument()
+  expect(within(table).getByText('10.09.2026')).toBeInTheDocument()
+  expect(within(table).getByText('8 / 10')).toBeInTheDocument()
+  expect(within(table).queryByRole('button')).not.toBeInTheDocument()
 })

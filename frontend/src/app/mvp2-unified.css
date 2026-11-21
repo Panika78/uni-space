@@ -100,8 +100,7 @@
 .mvp2-student-surface .application-detail-card,
 .mvp2-student-surface .news-feed,
 .mvp2-student-surface .news-article,
-.mvp2-student-surface .profile-card,
-.mvp2-student-surface .student-course__panel {
+.mvp2-student-surface .profile-card {
   border-color: #e8dad1;
   border-radius: 19px;
   background: #fffefd;
@@ -150,12 +149,6 @@
 .mvp2-student-surface .student-course__panel {
   margin-top: 18px;
   min-height: 0;
-}
-.mvp2-student-surface .student-course__group,
-.mvp2-student-surface .student-course__rows--attendance {
-  border-color: #e8dad1;
-  border-radius: 18px;
-  background: #fffefd;
 }
 .mvp2-student-surface .academics-page h2 {
   font-size: 20px;

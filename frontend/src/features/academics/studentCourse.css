@@ -24,6 +24,13 @@
   margin: 0.35rem 0;
   color: var(--muted);
 }
+.student-course__details-heading {
+  margin: 0 0 12px;
+  color: #292326;
+  font-size: 20px;
+  font-weight: 740;
+  letter-spacing: -0.028em;
+}
 .student-course__refresh {
   min-height: 44px;
   padding: 0.65rem 1rem;
@@ -54,10 +61,10 @@
   isolation: isolate;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  width: min(100%, 27rem);
+  width: min(100%, 26.25rem);
   max-width: 100%;
   gap: 4px;
-  padding: 5px;
+  padding: 4px;
   border: 1px solid var(--line);
   border-radius: 13px;
   background: #f2e7e2;
@@ -68,13 +75,13 @@
   content: '';
   position: absolute;
   z-index: 0;
-  top: 5px;
-  bottom: 5px;
-  left: 5px;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
   width: var(--tab-width, 0px);
   border-radius: 9px;
-  background: #fffefd;
-  box-shadow: 0 2px 7px rgb(66 31 37 / 9%);
+  background: #781f32;
+  box-shadow: 0 3px 9px rgb(120 31 50 / 13%);
   transform: translateX(var(--tab-x, 0));
   transition: none;
   pointer-events: none;
@@ -88,7 +95,7 @@
   position: relative;
   z-index: 1;
   min-width: 0;
-  min-height: 48px;
+  min-height: 43px;
   padding: 7px 9px;
   border: 0;
   border-radius: 9px;
@@ -101,7 +108,7 @@
   transition: color 160ms ease;
 }
 .student-course__tabs button[aria-selected='true'] {
-  color: #781f32;
+  color: #fff;
 }
 .student-course__panel {
   box-sizing: border-box;
@@ -110,8 +117,8 @@
   min-width: 0;
   width: 100%;
   margin-top: 1rem;
-  padding: 12px;
-  min-height: 270px;
+  padding: 0;
+  min-height: 0;
 }
 .student-course__panel > * {
   min-width: 0;
@@ -123,9 +130,7 @@
   gap: 0.75rem;
   margin: 0;
 }
-.student-course__overview > div,
-.student-course__group,
-.student-course__rows--attendance {
+.student-course__overview > div {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -141,63 +146,151 @@
 .student-course__overview dd p {
   margin: 0;
 }
-.student-course__group {
-  margin: 0 0 0.75rem;
-  overflow: hidden;
-}
-.student-course__group summary {
-  padding: 0.8rem 1rem;
-  min-height: 44px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.student-course__group summary::first-letter {
-  text-transform: uppercase;
-}
-.student-course__rows {
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-.student-course__rows li {
-  display: grid;
-  gap: 0.2rem;
-  padding: 0.75rem 1rem;
-}
-.student-course__group .student-course__rows li,
-.student-course__rows li + li {
-  border-top: 1px solid var(--line);
-}
-.student-course__rows li > div {
-  display: grid;
-  gap: 0.2rem;
-}
 .student-course__rows--attendance {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
-  margin-inline: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
   border: 0;
   background: transparent;
 }
-.student-course__rows--attendance li,
-.student-course__rows--attendance li + li {
+.student-course__rows--attendance li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
   min-height: 82px;
-  padding: 16px 18px;
+  min-width: 0;
+  padding: 18px 20px;
   border: 1px solid #e8dad1;
-  border-radius: 15px;
+  border-radius: 16px;
   background: #fffefd;
   box-shadow: 0 5px 16px rgb(66 31 37 / 4%);
 }
-.student-course__rows--attendance li,
-.student-course__rows--assessments li {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 12rem);
-  align-items: start;
-  gap: 0.75rem;
+.student-course__rows--attendance li + li {
+  border-top: 1px solid #e8dad1;
 }
-.student-course__score,
-.student-course__rows--attendance li > .attendance-mark {
-  text-align: end;
+.student-course__rows--attendance li > svg {
+  width: 20px;
+  height: 20px;
+  color: #292326;
+}
+.student-course__lesson-info {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+.student-course__lesson-info strong {
+  color: #292326;
+  font-size: 16px;
+}
+.student-course__lesson-info > span {
+  color: #71666a;
+  font-size: 13px;
+}
+.student-course__lesson-info .student-course__lesson-status {
+  color: #781f32;
+}
+.student-course__attendance-status {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  gap: 6px;
+  max-width: 100%;
+  padding: 7px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.student-course__attendance-status[data-status='attended'] {
+  background: #eaf4ec;
+  color: #286444;
+}
+.student-course__attendance-status[data-status='absent'] {
+  background: #fff0d7;
+  color: #925515;
+}
+.student-course__attendance-status[data-status='unmarked'] {
+  background: #f2ece8;
+  color: #71666a;
+}
+.student-course__status-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.student-course__historical-mark {
+  white-space: normal;
+}
+.student-course__assessment-table {
+  width: 100%;
+  border: 1px solid #e8dad1;
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: 16px;
+  background: #fffefd;
+  color: #292326;
+  font-size: 14px;
+  table-layout: fixed;
+}
+.student-course__assessment-table th,
+.student-course__assessment-table td {
+  padding: 14px 18px;
+  border-bottom: 1px solid #eee3dd;
+  text-align: start;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+.student-course__assessment-table thead th {
+  background: #faf7f5;
+  color: #71666a;
+  font-size: 12px;
+  font-weight: 650;
+}
+.student-course__assessment-table thead th:first-child {
+  border-top-left-radius: 15px;
+}
+.student-course__assessment-table thead th:last-child {
+  border-top-right-radius: 15px;
+}
+.student-course__assessment-table tbody th {
+  font-size: 14px;
+  font-weight: 700;
+}
+.student-course__assessment-table th:first-child {
+  width: 42%;
+}
+.student-course__assessment-table th:nth-child(2) {
+  width: 25%;
+}
+.student-course__assessment-table th:nth-child(3) {
+  width: 20%;
+}
+.student-course__assessment-table th:nth-child(4) {
+  width: 13%;
+}
+.student-course__assessment-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+.student-course__assessment-title,
+.student-course__assessment-description,
+.student-course__assessment-note {
+  display: block;
+}
+.student-course__assessment-description,
+.student-course__assessment-note {
+  margin-top: 4px;
+  color: #71666a;
+  font-size: 12px;
+  font-weight: 400;
+}
+.student-course__assessment-score strong {
+  white-space: nowrap;
 }
 .student-course__lesson-status {
   color: var(--accent);
@@ -260,28 +353,61 @@
   display: block;
   font-size: 0.875rem;
 }
-@container student-course-panel (max-width: 680px) {
+@container student-course-panel (max-width: 520px) {
   .student-course__rows--attendance {
     grid-template-columns: minmax(0, 1fr);
   }
-}
-@container student-course-panel (max-width: 520px) {
-  .student-course__rows--attendance li {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.35rem;
+  .student-course__assessment-table,
+  .student-course__assessment-table tbody {
+    display: block;
+    width: 100%;
   }
-  .student-course__rows--attendance li > .attendance-mark {
-    text-align: start;
+  .student-course__assessment-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .student-course__assessment-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 16px;
+    padding: 14px 16px;
+    border-bottom: 1px solid #eee3dd;
+  }
+  .student-course__assessment-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+  .student-course__assessment-table tbody th,
+  .student-course__assessment-table tbody td {
+    display: block;
+    width: auto;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+  .student-course__assessment-table tbody th {
+    grid-column: 1 / -1;
+  }
+  .student-course__assessment-table td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 4px;
+    color: #71666a;
+    font-size: 11px;
+    font-weight: 650;
+  }
+  .student-course__assessment-table .student-course__assessment-score strong {
+    white-space: normal;
   }
 }
 @media (max-width: 520px) {
   .student-course {
     min-width: 0;
     max-width: 100%;
-  }
-  .student-course__group {
-    margin: 0 0 12px;
-    border-radius: 16px;
   }
   .student-course__more {
     max-width: 100%;
@@ -299,17 +425,14 @@
     padding: 6px 4px;
     font-size: 11px;
   }
-  .student-course__rows--attendance {
-    grid-template-columns: minmax(0, 1fr);
+  .student-course__rows--attendance li {
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 8px 12px;
+    padding: 16px;
   }
-  .student-course__rows--attendance li,
-  .student-course__rows--assessments li {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.35rem;
-  }
-  .student-course__score,
-  .student-course__rows--attendance li > .attendance-mark {
-    text-align: start;
+  .student-course__attendance-status {
+    grid-column: 2;
+    justify-self: start;
   }
 }
 
