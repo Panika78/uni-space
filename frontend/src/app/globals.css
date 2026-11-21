@@ -1514,8 +1514,6 @@ textarea {
 }
 
 .services-tabs {
-  position: relative;
-  isolation: isolate;
   display: flex;
   width: min(100%, 530px);
   gap: 5px;
@@ -1524,22 +1522,6 @@ textarea {
   background: #f2e7e2;
   border: 1px solid var(--line);
   border-radius: 12px;
-}
-.services-tabs::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  left: 5px;
-  top: 5px;
-  bottom: 5px;
-  width: calc((100% - 15px) / 2);
-  border-radius: 10px;
-  background: var(--accent);
-  box-shadow: 0 4px 10px #781f3220;
-  transition: transform 280ms var(--ease);
-}
-.services-tabs[data-selected='applications']::before {
-  transform: translateX(calc(100% + 5px));
 }
 .services-tabs a {
   flex: 1;
@@ -1552,7 +1534,10 @@ textarea {
   color: #594950;
 }
 .services-tabs a[aria-current] {
+  border-radius: 9px;
+  background: var(--accent);
   color: white;
+  box-shadow: 0 4px 10px #781f3220;
 }
 .services-stage {
   min-height: 270px;

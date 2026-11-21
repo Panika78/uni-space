@@ -41,29 +41,10 @@
   cursor: default;
 }
 .schedule-modes {
-  position: relative;
-  isolation: isolate;
   display: flex;
   background: #f2e7e2;
   padding: 5px;
   border-radius: 12px;
-}
-.schedule-modes::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  inset-block: 5px;
-  inset-inline-start: 5px;
-  width: calc((100% - 10px) / 2);
-  background: var(--accent);
-  border-radius: 9px;
-  transition: transform 280ms var(--ease);
-}
-.schedule-modes[data-mode='week']::before {
-  transform: translateX(100%);
-}
-.schedule-modes:dir(rtl)[data-mode='week']::before {
-  transform: translateX(-100%);
 }
 .schedule-modes button {
   background: transparent;
@@ -72,10 +53,15 @@
   padding: 10px 20px;
 }
 .schedule-modes button[aria-pressed='true'] {
+  border-radius: 9px;
+  background: var(--accent);
   color: white;
 }
 .schedule-modes button:hover:not(:disabled) {
-  background: transparent;
+  background: #f7ece8;
+}
+.schedule-modes button[aria-pressed='true']:hover:not(:disabled) {
+  background: var(--accent);
 }
 .schedule-day-arrows,
 .schedule-week-arrows {

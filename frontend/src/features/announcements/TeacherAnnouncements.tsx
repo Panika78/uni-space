@@ -16,10 +16,17 @@ type Attempt = { draft: Draft; key: string }
 
 const publicationTimeoutMs = 15_000
 
-type JournalContext = { userId: string; courseId: string; groupId: string }
+type JournalContext = { userId: string; courseId: string; groupId: string; expanded?: boolean }
 
-export function TeacherAnnouncements(context: JournalContext) {
+export function TeacherAnnouncements({ expanded = false, ...context }: JournalContext) {
   const [hasOpened, setHasOpened] = useState(false)
+  if (expanded)
+    return (
+      <section className="journal-announcements journal-announcements--workspace">
+        <h2>Опубликовать объявление</h2>
+        <TeacherAnnouncementPanel {...context} />
+      </section>
+    )
   return (
     <details
       className="journal-announcements"
@@ -166,7 +173,10 @@ function TeacherAnnouncementPanel({ userId, courseId, groupId }: JournalContext)
           </button>
         )}
       </form>
-      <AnnouncementFeed scope={scope} />
+      <section className="announcement-feed-panel">
+        <h2>Недавние объявления</h2>
+        <AnnouncementFeed scope={scope} />
+      </section>
     </>
   )
 }

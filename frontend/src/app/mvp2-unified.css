@@ -650,6 +650,206 @@
   outline-offset: 3px;
   border-radius: 10px;
 }
+.mvp2-role-surface .journal-table-scroll {
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid #eadbd3;
+  border-radius: 14px;
+  background: #fffefd;
+  scrollbar-gutter: stable;
+}
+.mvp2-role-surface .journal-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: #30282b;
+  font-size: 13px;
+}
+.mvp2-role-surface .journal-data-table th {
+  padding: 13px 16px;
+  background: #faf6f3;
+  color: #71666a;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  vertical-align: middle;
+}
+.mvp2-role-surface .journal-data-table th small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.mvp2-role-surface .journal-data-table td {
+  min-width: 0;
+  padding: 14px 16px;
+  border-top: 1px solid #eee3dd;
+  vertical-align: middle;
+}
+.mvp2-role-surface .journal-data-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.mvp2-role-surface .journal-data-table .journal-table-student {
+  min-width: 180px;
+  font-weight: 700;
+}
+.mvp2-role-surface .journal-data-table .journal-table-student small {
+  display: block;
+  margin-top: 4px;
+  color: #71666a;
+  font-size: 12px;
+  font-weight: 450;
+}
+.mvp2-role-surface .journal-data-table .journal-table-score {
+  font-weight: 750;
+  white-space: nowrap;
+}
+.mvp2-role-surface .journal-data-table :is(input, select) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 92px;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid #dfd0c9;
+  border-radius: 9px;
+  background: #fffefd;
+  color: #30282b;
+  font: inherit;
+}
+.mvp2-role-surface .journal-data-table .journal-table-label {
+  display: grid;
+  gap: 5px;
+  min-width: 150px;
+  color: #71666a;
+  font-size: 11px;
+  font-weight: 650;
+}
+.mvp2-role-surface .journal-data-table .journal-table-input {
+  min-width: 150px;
+}
+.mvp2-role-surface .journal-data-table .journal-final-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mvp2-role-surface .journal-data-table .journal-final-actions button {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid #e2cec5;
+  border-radius: 8px;
+  background: #fffefd;
+  color: #781f32;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.mvp2-role-surface .journal-data-table .journal-final-actions button[type='submit'] {
+  border-color: #781f32;
+  background: #781f32;
+  color: #fff;
+}
+.mvp2-role-surface .journal-data-table .journal-inline-action {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+}
+.mvp2-role-surface .journal-data-table input[type='number'] {
+  width: 68px;
+  min-height: 40px;
+  padding: 7px 9px;
+  border: 1px solid #dfd0c9;
+  border-radius: 9px;
+  background: #fffefd;
+  color: #30282b;
+  font: inherit;
+  font-weight: 700;
+  text-align: center;
+}
+.mvp2-role-surface .journal-data-table .journal-attendance-controls {
+  width: max-content;
+}
+.mvp2-role-surface .journal-attendance-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+.mvp2-role-surface .journal-attendance-toolbar > label {
+  display: grid;
+  gap: 7px;
+  color: #554b4e;
+  font-size: 13px;
+  font-weight: 650;
+}
+.mvp2-role-surface .journal-attendance-note {
+  display: grid;
+  gap: 5px;
+  padding: 13px 15px;
+  border: 1px solid #eadbd3;
+  border-radius: 12px;
+  background: #fffaf7;
+  color: #51464a;
+}
+.mvp2-role-surface .journal-attendance-note span {
+  padding-left: 21px;
+  color: #71666a;
+  font-size: 12px;
+}
+.mvp2-role-surface .journal-score-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.mvp2-role-surface .journal-score-cell > span {
+  color: #71666a;
+  font-size: 12px;
+}
+.mvp2-role-surface .journal-score-cell .journal-save {
+  flex-basis: 100%;
+  font-size: 11px;
+  white-space: normal;
+}
+.mvp2-role-surface .journal-table-save {
+  min-height: 42px;
+  margin-top: 14px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 10px;
+  background: #781f32;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.mvp2-role-surface .journal-assessment-settings {
+  min-width: 0;
+  padding: 15px 18px;
+  border: 1px solid #e8dad1;
+  border-radius: 14px;
+  background: #fffefd;
+}
+.mvp2-role-surface .journal-assessment-settings > summary {
+  color: #781f32;
+  font-weight: 700;
+  cursor: pointer;
+}
+.mvp2-role-surface .journal-assessment-settings[open] > label {
+  display: grid;
+  gap: 7px;
+  max-width: 420px;
+  margin-top: 14px;
+  color: #554b4e;
+  font-size: 13px;
+  font-weight: 650;
+}
+.mvp2-role-surface .journal-data-table .journal-attendance-controls button {
+  min-height: 36px;
+  width: auto;
+  padding: 8px 11px;
+  border-radius: 8px;
+  font-size: 12px;
+}
 .mvp2-role-surface .staff-journal :is(.staff-journal-actions, .staff-journal-catalog) {
   gap: 10px;
 }
@@ -2056,66 +2256,6 @@
   scrollbar-width: none;
 }
 
-/* These two segmented controls still use an absolutely-positioned sliding segment.
-   Keep its containing block local so the segment cannot escape and paint over the page. */
-.mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений'],
-.mvp2-role-surface .staff-schedule__tabs {
-  position: relative;
-  isolation: isolate;
-}
-
-.mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений']::before,
-.mvp2-role-surface .staff-schedule__tabs[role='tablist']::before,
-.mvp2-role-surface .staff-schedule__tabs[aria-label='Период']::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  inset-block: 5px;
-  left: 5px;
-  width: var(--mvp2-segment-width, calc((100% - 15px) / 2));
-  border-radius: 9px;
-  background: var(--accent, #781f32);
-  box-shadow: 0 3px 9px rgb(120 31 50 / 13%);
-  transform: translateX(var(--mvp2-segment-offset, 0));
-  transition: transform 280ms var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
-  pointer-events: none;
-}
-
-.mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений'] {
-  --mvp2-segment-width: calc((100% - 24px) / 4);
-}
-.mvp2-role-surface
-  .staff-applications
-  > nav[aria-label='Очередь заявлений']:has(a[aria-current]:nth-child(2))::before {
-  --mvp2-segment-offset: calc(100% + 4px);
-}
-.mvp2-role-surface
-  .staff-applications
-  > nav[aria-label='Очередь заявлений']:has(a[aria-current]:nth-child(3))::before {
-  --mvp2-segment-offset: calc(200% + 8px);
-}
-.mvp2-role-surface
-  .staff-applications
-  > nav[aria-label='Очередь заявлений']:has(a[aria-current]:nth-child(4))::before {
-  --mvp2-segment-offset: calc(300% + 12px);
-}
-
-.mvp2-role-surface .staff-schedule__tabs[role='tablist'] {
-  --mvp2-segment-width: calc((100% - 22px) / 3);
-}
-.mvp2-role-surface
-  .staff-schedule__tabs[role='tablist']:has(button[aria-selected='true']:nth-child(2))::before {
-  --mvp2-segment-offset: calc(100% + 4px);
-}
-.mvp2-role-surface
-  .staff-schedule__tabs[role='tablist']:has(button[aria-selected='true']:nth-child(3))::before {
-  --mvp2-segment-offset: calc(200% + 8px);
-}
-.mvp2-role-surface
-  .staff-schedule__tabs[aria-label='Период']:has(button[aria-pressed='true']:nth-child(2))::before {
-  --mvp2-segment-offset: calc(100% + 4px);
-}
-
 .mvp2-role-surface .journal-tabs > button,
 .mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений'] > a,
 .mvp2-role-surface .staff-schedule__tabs > button {
@@ -2789,11 +2929,15 @@
   .mvp2-role-surface .journal-student {
     grid-template-columns: minmax(0, 1fr);
   }
+  .mvp2-role-surface .journal-data-table {
+    min-width: 640px;
+  }
+  .mvp2-role-surface .journal-attendance-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений']::before,
-  .mvp2-role-surface .staff-schedule__tabs::before,
   .mvp2-role-surface
     :is(
       .journal-tabs > button,

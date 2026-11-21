@@ -19,9 +19,13 @@ import {
   type Page,
 } from './journalQueries'
 import {
+  JournalCatalog,
   JournalCard,
   JournalCourseSection,
   JournalPageHeader,
+  JournalResourcePicker,
+  JournalSearch as Search,
+  JournalTable,
   JournalTabPanel,
   JournalTabs,
 } from './JournalWorkspace'
@@ -83,40 +87,6 @@ function Pager<T>({
         </nav>
       )}
     </>
-  )
-}
-
-function Search({
-  label,
-  onSearch,
-  initial = '',
-}: {
-  label: string
-  onSearch: (query: string) => void
-  initial?: string
-}) {
-  const [draft, setDraft] = useState(initial)
-  return (
-    <form
-      className="staff-journal-actions"
-      role="search"
-      aria-label={label}
-      onSubmit={(event) => {
-        event.preventDefault()
-        onSearch(draft.trim())
-      }}
-    >
-      <label>
-        {label}
-        <input
-          type="search"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          maxLength={100}
-        />
-      </label>
-      <button type="submit">Найти</button>
-    </form>
   )
 }
 
@@ -330,22 +300,6 @@ function GroupJournal({
           <p>Итоговая оценка выставляется вручную и не вычисляется автоматически из баллов.</p>
         </div>
         <Search label="Поиск по студентам группы" onSearch={setSearch} />
-        <div className="journal-final-header" aria-hidden="true">
-          <span>Студент</span>
-          <div>
-            <span>
-              Результат ·{' '}
-              {
-                { exam: 'экзамен', graded_pass: 'дифференцированный зачёт', pass_fail: 'зачёт' }[
-                  attestation
-                ]
-              }
-            </span>
-            <span>Дата пересдачи</span>
-            <span>Место пересдачи</span>
-            <span>Действия</span>
-          </div>
-        </div>
         <Pager<Schema['StaffFinalRow']>
           key={search}
           access={access}
@@ -353,7 +307,24 @@ function GroupJournal({
           filters={{ q: search }}
         >
           {(items) => (
-            <div className="journal-student-list journal-student-list--final">
+            <JournalTable
+              label="Итоговая аттестация группы"
+              columns={[
+                { id: 'student', label: 'Студент' },
+                {
+                  id: 'result',
+                  label: 'Результат',
+                  hint: {
+                    exam: 'Экзамен',
+                    graded_pass: 'Дифференцированный зачёт',
+                    pass_fail: 'Зачёт',
+                  }[attestation],
+                },
+                { id: 'date', label: 'Дата пересдачи' },
+                { id: 'location', label: 'Место пересдачи' },
+                { id: 'actions', label: 'Действия' },
+              ]}
+            >
               {items.map((row) => (
                 <FinalRow
                   key={row.student_id}
@@ -363,9 +334,10 @@ function GroupJournal({
                   access={access}
                   readPath={readPath}
                   onHistory={() => finalHistory(row.student_id, row.full_name)}
+                  display="table-row"
                 />
               ))}
-            </div>
+            </JournalTable>
           )}
         </Pager>
         <section className="journal-finals">
@@ -401,21 +373,14 @@ function GroupJournal({
     const readPath = `${path}/assessments/${resource}/results`
     return (
       <>
-        <h3>Выбор работы</h3>
         <Pager<Schema['JournalAssessment']> access={access} path={`${path}/assessments`}>
           {(items) => (
-            <div className="staff-journal-actions">
-              {items.map((item) => (
-                <button
-                  type="button"
-                  key={item.id}
-                  aria-pressed={resource === item.id}
-                  onClick={() => onResource(item.id)}
-                >
-                  {item.title}
-                </button>
-              ))}
-            </div>
+            <JournalResourcePicker
+              heading="Выбор работы"
+              resources={items.map((item) => ({ id: item.id, label: item.title }))}
+              selected={resource}
+              onSelect={onResource}
+            />
           )}
         </Pager>
         {assessments.isError && (
@@ -440,7 +405,15 @@ function GroupJournal({
               filters={{ q: search }}
             >
               {(items) => (
-                <div className="journal-student-list">
+                <JournalTable
+                  label="Таблица оценок"
+                  columns={[
+                    { id: 'student', label: 'Студент' },
+                    { id: 'work', label: 'Работа' },
+                    { id: 'date', label: 'Дата' },
+                    { id: 'score', label: 'Баллы' },
+                  ]}
+                >
                   {items.map((row) => (
                     <ScoreRow
                       key={row.student_id}
@@ -455,9 +428,10 @@ function GroupJournal({
                           path: `${readPath}/${row.student_id}/history`,
                         })
                       }
+                      display="table-row"
                     />
                   ))}
-                </div>
+                </JournalTable>
               )}
             </Pager>
           </>
@@ -470,21 +444,17 @@ function GroupJournal({
   const readPath = `${path}/lessons/${resource}/attendance`
   return (
     <>
-      <h3>Выбор занятия</h3>
       <Pager<Schema['JournalLesson']> access={access} path={`${path}/lessons`}>
         {(items) => (
-          <div className="staff-journal-actions">
-            {items.map((item) => (
-              <button
-                type="button"
-                key={item.id}
-                aria-pressed={resource === item.id}
-                onClick={() => onResource(item.id)}
-              >
-                {formatDateTime(item.starts_at)}
-              </button>
-            ))}
-          </div>
+          <JournalResourcePicker
+            heading="Выбор занятия"
+            resources={items.map((item) => ({
+              id: item.id,
+              label: formatDateTime(item.starts_at),
+            }))}
+            selected={resource}
+            onSelect={onResource}
+          />
         )}
       </Pager>
       {lessons.isError && (
@@ -506,7 +476,14 @@ function GroupJournal({
             filters={{ q: search }}
           >
             {(items) => (
-              <div className="journal-student-list">
+              <JournalTable
+                label="Таблица посещаемости"
+                columns={[
+                  { id: 'student', label: 'Студент' },
+                  { id: 'attendance', label: 'Посещаемость' },
+                  { id: 'updated', label: 'Последнее изменение' },
+                ]}
+              >
                 {items.map((row) => (
                   <AttendanceRow
                     key={row.student_id}
@@ -514,9 +491,10 @@ function GroupJournal({
                     lessonId={resource}
                     access={access}
                     readPath={readPath}
+                    display="table-row"
                   />
                 ))}
-              </div>
+              </JournalTable>
             )}
           </Pager>
         </>
@@ -593,21 +571,17 @@ function StaffJournal({ access }: { access: JournalAccess }) {
           filters={{ q }}
         >
           {(items) => (
-            <ul className="staff-journal-catalog">
-              {items.map((item) => (
-                <li key={`${item.course_offering_id}:${item.group.id}`}>
-                  <button
-                    type="button"
-                    aria-pressed={courseId === item.course_offering_id && group === item.group.id}
-                    onClick={() =>
-                      set({ course: item.course_offering_id, group: item.group.id, resource: '' })
-                    }
-                  >
-                    {item.discipline.name} · {item.group.name} · {item.term.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <JournalCatalog
+              entries={items.map((item) => ({
+                id: `${item.course_offering_id}:${item.group.id}`,
+                label: `${item.discipline.name} · ${item.group.name} · ${item.term.name}`,
+              }))}
+              selected={`${courseId}:${group}`}
+              onSelect={(value) => {
+                const [course, selectedGroup] = value.split(':')
+                if (course && selectedGroup) set({ course, group: selectedGroup, resource: '' })
+              }}
+            />
           )}
         </Pager>
       </JournalCard>
@@ -633,8 +607,8 @@ function StaffJournal({ access }: { access: JournalAccess }) {
             onSelect={(value) => set({ tab: value, resource: '' })}
             options={(
               [
-                ['attendance', 'Посещаемость', attendance],
                 ['work', 'Работы и баллы', grades],
+                ['attendance', 'Посещаемость', attendance],
                 ['finals', 'Итоги аттестации', grades],
               ] as const
             )

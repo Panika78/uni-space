@@ -233,6 +233,12 @@ function renderJournal(url = '/teacher/journals?course=11&group=21&tab=attendanc
   return { ...rendered, client }
 }
 
+async function openFinals(user: ReturnType<typeof userEvent.setup>) {
+  const tab = await screen.findByRole('tab', { name: 'Итоги аттестации' })
+  await user.click(tab)
+  return screen.findByRole('region', { name: 'Таблица итоговой аттестации' })
+}
+
 it('restores all three attendance states from the server and saves individual changes', async () => {
   const user = userEvent.setup()
   renderJournal()
@@ -263,9 +269,13 @@ it('separates an ungraded result from zero and supports scores and manual final 
   const user = userEvent.setup()
   renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
   expect(await screen.findByText('Контрольная')).toBeInTheDocument()
-  const zero = await screen.findByRole('spinbutton', { name: 'Баллы: Ёлкин Борис' })
+  const zero = await screen.findByRole('spinbutton', {
+    name: 'Баллы: Ёлкин Борис · Контрольная',
+  })
   expect(zero).toHaveValue(0)
-  const ungraded = screen.getByRole('spinbutton', { name: 'Баллы: Анна Иванова' })
+  const ungraded = screen.getByRole('spinbutton', {
+    name: 'Баллы: Анна Иванова · Контрольная',
+  })
   expect(ungraded).toHaveValue(null)
   await user.clear(ungraded)
   await user.type(ungraded, '10')
@@ -275,12 +285,12 @@ it('separates an ungraded result from zero and supports scores and manual final 
     expect.stringContaining('/assessments/44/results/1'),
     expect.objectContaining({ method: 'PUT', body: JSON.stringify({ score: 10 }) }),
   )
-  const finals = screen.getByRole('region', { name: /Итоги аттестации/ })
+  const finals = await openFinals(user)
   await user.selectOptions(within(finals).getByLabelText('Итог: Анна Иванова'), '4')
   await waitFor(() => expect(fixtures.final.grade_value).toBe(4))
   expect(
-    within(finals).getByText(
-      'Итог выставляется вручную; сумма баллов не преобразуется в оценку автоматически.',
+    screen.getByText(
+      'Итоговая оценка выставляется вручную и не вычисляется автоматически из баллов.',
     ),
   ).toBeInTheDocument()
 })
@@ -289,7 +299,9 @@ it('does not write an unchanged score on blur and displays a newer server score 
   const user = userEvent.setup()
   fixtures.scores[0]!.score = 5
   const { client } = renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
-  const score = await screen.findByRole('spinbutton', { name: 'Баллы: Анна Иванова' })
+  const score = await screen.findByRole('spinbutton', {
+    name: 'Баллы: Анна Иванова · Контрольная',
+  })
   expect(score).toHaveValue(5)
   vi.mocked(apiFetch).mockClear()
 
@@ -323,7 +335,9 @@ it('does not write an unchanged score on blur and displays a newer server score 
 it('clears a successfully saved score draft without clearing a newer edit', async () => {
   const user = userEvent.setup()
   const { client } = renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
-  const score = await screen.findByRole('spinbutton', { name: 'Баллы: Анна Иванова' })
+  const score = await screen.findByRole('spinbutton', {
+    name: 'Баллы: Анна Иванова · Контрольная',
+  })
   await user.clear(score)
   await user.type(score, '5')
   await user.tab()
@@ -338,11 +352,13 @@ it('clears a successfully saved score draft without clearing a newer edit', asyn
 it('keeps a failed score draft for Retry and retries the same revision exactly once', async () => {
   const user = userEvent.setup()
   renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
-  const score = await screen.findByRole('spinbutton', { name: 'Баллы: Анна Иванова' })
+  const score = await screen.findByRole('spinbutton', {
+    name: 'Баллы: Анна Иванова · Контрольная',
+  })
   failNextScoreWrite = true
   await user.type(score, '6')
   await user.tab()
-  const student = score.closest<HTMLElement>('.journal-student')!
+  const student = score.closest<HTMLElement>('tr')!
   const retry = await within(student).findByRole('button', { name: 'Повторить' })
   expect(score).toHaveValue(6)
   await user.click(retry)
@@ -361,7 +377,7 @@ it('keeps a failed score draft for Retry and retries the same revision exactly o
 it('retains final grade drafts and retry across journal tabs, then reconciles cleared retake fields', async () => {
   const user = userEvent.setup()
   renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
-  const finals = await screen.findByRole('region', { name: /Итоги аттестации/ })
+  const finals = await openFinals(user)
   const grade = await within(finals).findByLabelText('Итог: Анна Иванова')
   failNextFinalWrite = true
   await user.selectOptions(grade, '2')
@@ -370,7 +386,7 @@ it('retains final grade drafts and retry across journal tabs, then reconciles cl
 
   await user.click(screen.getByRole('tab', { name: 'Посещаемость' }))
   await user.click(screen.getByRole('tab', { name: 'Работы и баллы' }))
-  const remountedFinals = await screen.findByRole('region', { name: /Итоги аттестации/ })
+  const remountedFinals = await openFinals(user)
   const retainedGrade = within(remountedFinals).getByLabelText('Итог: Анна Иванова')
   expect(retainedGrade).toHaveValue('2')
   await user.click(within(remountedFinals).getByRole('button', { name: 'Повторить' }))
@@ -401,7 +417,8 @@ it('keeps retake fields locked until a debt is confirmed by the server', async (
   const user = userEvent.setup()
   Object.assign(fixtures.final, { grade_value: 4, has_debt: false })
   renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
-  const finals = await screen.findByRole('region', { name: /Итоги аттестации/ })
+  const finals = await openFinals(user)
+  await user.click(within(finals).getByText('Пересдача'))
   const grade = await within(finals).findByLabelText('Итог: Анна Иванова')
   const date = await within(finals).findByLabelText('Дата пересдачи: Анна Иванова')
   const location = await within(finals).findByLabelText('Место пересдачи: Анна Иванова')
@@ -455,7 +472,7 @@ it('does not confirm or clear a final draft when a successful response normalize
   })
 
   renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
-  const finals = await screen.findByRole('region', { name: /Итоги аттестации/ })
+  const finals = await openFinals(user)
   const date = await within(finals).findByLabelText('Дата пересдачи: Студент 1')
   await user.type(date, '2027-01-10')
   await user.tab()

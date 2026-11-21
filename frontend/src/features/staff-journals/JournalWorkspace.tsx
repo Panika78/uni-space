@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type ReactNode } from 'react'
+import { Children, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 
 export function JournalPageHeader({
   eyebrow,
@@ -61,6 +61,131 @@ export function JournalCourseSection({
 }
 
 export type JournalTabOption = { id: string; label: string }
+
+export function JournalSearch({
+  label,
+  initial = '',
+  onSearch,
+}: {
+  label: string
+  initial?: string
+  onSearch: (query: string) => void
+}) {
+  const [draft, setDraft] = useState(initial)
+  return (
+    <form
+      className="staff-journal-actions"
+      role="search"
+      aria-label={label}
+      onSubmit={(event) => {
+        event.preventDefault()
+        onSearch(draft.trim())
+      }}
+    >
+      <label>
+        {label}
+        <input
+          type="search"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          maxLength={100}
+        />
+      </label>
+      <button type="submit">Найти</button>
+    </form>
+  )
+}
+
+export type JournalCatalogEntry = { id: string; label: string }
+
+export function JournalCatalog({
+  entries,
+  selected,
+  onSelect,
+}: {
+  entries: readonly JournalCatalogEntry[]
+  selected: string
+  onSelect: (id: string) => void
+}) {
+  return (
+    <ul className="staff-journal-catalog">
+      {entries.map((entry) => (
+        <li key={entry.id}>
+          <button
+            type="button"
+            aria-pressed={selected === entry.id}
+            onClick={() => onSelect(entry.id)}
+          >
+            {entry.label}
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+export type JournalResource = { id: string; label: string }
+
+export type JournalTableColumn = { id: string; label: string; hint?: string }
+
+export function JournalTable({
+  label,
+  columns,
+  children,
+}: {
+  label: string
+  columns: readonly JournalTableColumn[]
+  children: ReactNode
+}) {
+  return (
+    <div className="journal-table-scroll" role="region" aria-label={label} tabIndex={0}>
+      <table className="journal-data-table">
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th key={column.id} scope="col">
+                {column.label}
+                {column.hint && <small>{column.hint}</small>}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>{Children.toArray(children)}</tbody>
+      </table>
+    </div>
+  )
+}
+
+export function JournalResourcePicker({
+  heading,
+  resources,
+  selected,
+  onSelect,
+}: {
+  heading: string
+  resources: readonly JournalResource[]
+  selected: string
+  onSelect: (id: string) => void
+}) {
+  return (
+    <>
+      <h3>{heading}</h3>
+      <div className="staff-journal-actions">
+        {resources.map((resource) => (
+          <button
+            type="button"
+            key={resource.id}
+            data-resource-id={resource.id}
+            aria-pressed={selected === resource.id}
+            onClick={() => onSelect(resource.id)}
+          >
+            {resource.label}
+          </button>
+        ))}
+      </div>
+    </>
+  )
+}
 
 export function JournalTabs({
   ariaLabel,

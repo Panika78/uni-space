@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { apiFetch, ApiClientError } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
@@ -7,9 +7,12 @@ import { EmptyState, ErrorState, LoadingState } from '../../shared/ui/StatusStat
 import { TeacherAnnouncements } from '../announcements/TeacherAnnouncements'
 import { useRoleContext } from '../auth/RoleContext'
 import {
+  JournalCatalog,
   JournalCard,
   JournalCourseSection,
   JournalPageHeader,
+  JournalTable,
+  JournalSearch,
   JournalTabPanel,
   JournalTabs,
 } from '../staff-journals/JournalWorkspace'
@@ -101,9 +104,15 @@ export function TeacherJournalsPage() {
   const [params, setParams] = useSearchParams()
   const courseId = params.get('course') ?? ''
   const groupId = params.get('group') ?? ''
-  const activeTab = params.get('tab') === 'work' ? 'work' : 'attendance'
+  const requestedTab = params.get('tab')
+  const activeTab =
+    requestedTab === 'work' || requestedTab === 'finals' || requestedTab === 'announcements'
+      ? requestedTab
+      : 'attendance'
   const lessonId = params.get('lesson') ?? ''
   const assessmentId = params.get('assessment') ?? ''
+  const catalogSearch = params.get('q') ?? ''
+  const [studentSearch, setStudentSearch] = useState('')
   const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({})
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [dirtyDrafts, setDirtyDrafts] = useState<Record<string, boolean>>({})
@@ -181,13 +190,6 @@ export function TeacherJournalsPage() {
   const assessments = assessmentsQuery.data ?? []
   const selectedLesson = lessons.find((item) => item.id === lessonId)
   const selectedAssessment = assessments.find((item) => item.id === assessmentId)
-  const resultsQueryKey = [
-    'teacher-journal-results',
-    userId,
-    selectedCourse,
-    selectedGroup,
-    selectedAssessment?.id,
-  ]
   const assessmentDateDraft = selectedAssessment
     ? (drafts[scopedKey(`date:${selectedAssessment.id}:date`)] ??
       selectedAssessment.planned_date ??
@@ -220,21 +222,63 @@ export function TeacherJournalsPage() {
     gcTime: 0,
     refetchOnMount: 'always',
   })
-  const resultsQuery = useQuery({
-    queryKey: resultsQueryKey,
-    enabled: Boolean(path && selectedAssessment),
-    queryFn: ({ signal }) =>
-      getAllPages<Result>(
-        `${path}/assessments/${encodeURIComponent(selectedAssessment!.id)}/results`,
-        signal,
-      ),
-    staleTime: 0,
-    gcTime: 0,
-    refetchOnMount: 'always',
+  const resultQueries = useQueries({
+    queries: assessments.map((assessment) => ({
+      queryKey: ['teacher-journal-results', userId, selectedCourse, selectedGroup, assessment.id],
+      enabled: Boolean(path),
+      queryFn: ({ signal }) =>
+        getAllPages<Result>(
+          `${path}/assessments/${encodeURIComponent(assessment.id)}/results`,
+          signal,
+        ),
+      staleTime: 0,
+      gcTime: 0,
+      refetchOnMount: 'always' as const,
+    })),
   })
+  const resultQueryByAssessment = new Map(
+    assessments.map((assessment, index) => [assessment.id, resultQueries[index]]),
+  )
+  const resultsQuery = resultQueryByAssessment.get(selectedAssessment?.id ?? '')
   const studentNames = useMemo(
     () => new Map((rosterQuery.data ?? []).map((student) => [student.id, student.full_name])),
     [rosterQuery.data],
+  )
+  const workRowsByStudent = new Map<
+    string,
+    { studentId: string; fullName: string; results: Map<string, Result> }
+  >()
+  for (const student of rosterQuery.data ?? []) {
+    workRowsByStudent.set(student.id, {
+      studentId: student.id,
+      fullName: student.full_name,
+      results: new Map(),
+    })
+  }
+  for (const [assessmentId, query] of assessments.map(
+    (assessment, index) => [assessment.id, resultQueries[index]] as const,
+  )) {
+    for (const result of query?.data ?? []) {
+      const current = workRowsByStudent.get(result.student_id) ?? {
+        studentId: result.student_id,
+        fullName: result.full_name,
+        results: new Map<string, Result>(),
+      }
+      current.results.set(assessmentId, result)
+      workRowsByStudent.set(result.student_id, current)
+    }
+  }
+  const workRows = [...workRowsByStudent.values()].filter((row) =>
+    row.fullName.toLocaleLowerCase('ru-RU').includes(studentSearch.toLocaleLowerCase('ru-RU')),
+  )
+  const workPointsByStudent = new Map(
+    [...workRowsByStudent.values()].map((row) => [
+      row.studentId,
+      {
+        score: assessments.reduce((sum, item) => sum + (row.results.get(item.id)?.score ?? 0), 0),
+        max: assessments.reduce((sum, item) => sum + item.max_score, 0),
+      },
+    ]),
   )
 
   function setSelection(key: string, value: string) {
@@ -249,6 +293,7 @@ export function TeacherJournalsPage() {
     if (key === 'tab') {
       next.delete('lesson')
       next.delete('assessment')
+      setStudentSearch('')
     }
     if (key === 'lesson' || key === 'assessment')
       next.set('tab', key === 'lesson' ? 'attendance' : 'work')
@@ -393,6 +438,7 @@ export function TeacherJournalsPage() {
   }
 
   async function verifyScore(
+    assessment: Assessment,
     row: Result,
     score: number | null,
     value: string,
@@ -402,13 +448,20 @@ export function TeacherJournalsPage() {
   ) {
     try {
       const actual = await apiFetch<Page<Result>>(
-        `${path}/assessments/${encodeURIComponent(selectedAssessment!.id)}/results?student_id=${encodeURIComponent(row.student_id)}&limit=1`,
+        `${path}/assessments/${encodeURIComponent(assessment.id)}/results?student_id=${encodeURIComponent(row.student_id)}&limit=1`,
         { authenticated: true, cache: 'no-store' },
       )
       const saved = actual.items[0]
       if ((saved?.score ?? null) === score) {
         if (currentInputRevision(key) !== inputRevision) return
-        queryClient.setQueryData<Result[]>(resultsQueryKey, (current) =>
+        const keyForAssessment = [
+          'teacher-journal-results',
+          userId,
+          selectedCourse,
+          selectedGroup,
+          assessment.id,
+        ]
+        queryClient.setQueryData<Result[]>(keyForAssessment, (current) =>
           current?.map((item) =>
             item.student_id === row.student_id
               ? { ...item, score: saved?.score ?? null, result_id: saved?.result_id ?? null }
@@ -417,13 +470,16 @@ export function TeacherJournalsPage() {
         )
         clearDraft(key, inputRevision)
         setSave(key, { phase: 'saved', value: score }, revision)
-        void resultsQuery.refetch()
+        void resultQueryByAssessment.get(assessment.id)?.refetch()
         return
       }
       if (currentInputRevision(key) === inputRevision)
         setSave(
           key,
-          { phase: 'error', retry: () => void saveScore(row, value, inputRevision, true) },
+          {
+            phase: 'error',
+            retry: () => void saveScore(assessment, row, value, inputRevision, true),
+          },
           revision,
         )
     } catch {
@@ -433,7 +489,8 @@ export function TeacherJournalsPage() {
         {
           phase: 'error',
           uncertain: true,
-          retry: () => void verifyScore(row, score, value, key, revision, inputRevision),
+          retry: () =>
+            void verifyScore(assessment, row, score, value, key, revision, inputRevision),
         },
         revision,
       )
@@ -461,27 +518,24 @@ export function TeacherJournalsPage() {
   }
 
   async function saveScore(
+    assessment: Assessment,
     row: Result,
     value: string,
-    inputRevision = currentInputRevision(
-      scopedKey(`score:${selectedAssessment?.id}:${row.student_id}`),
-    ) ?? 0,
+    inputRevision = currentInputRevision(scopedKey(`score:${assessment.id}:${row.student_id}`)) ??
+      0,
     explicitRetry = false,
   ) {
-    const key = scopedKey(`score:${selectedAssessment?.id}:${row.student_id}`)
+    const key = scopedKey(`score:${assessment.id}:${row.student_id}`)
     if (!dirtyDrafts[key] || currentInputRevision(key) !== inputRevision) return
     if (!explicitRetry && attemptedInputRevisions.current.get(key) === inputRevision) return
     attemptedInputRevisions.current.set(key, inputRevision)
     const score = value === '' ? null : Number(value)
-    if (
-      score !== null &&
-      (!Number.isInteger(score) || score < 0 || score > (selectedAssessment?.max_score ?? 0))
-    ) {
+    if (score !== null && (!Number.isInteger(score) || score < 0 || score > assessment.max_score)) {
       setSaveStates((current) => ({
         ...current,
         [key]: {
           phase: 'error',
-          retry: () => void saveScore(row, value, inputRevision, true),
+          retry: () => void saveScore(assessment, row, value, inputRevision, true),
         },
       }))
       return
@@ -490,11 +544,18 @@ export function TeacherJournalsPage() {
       if (currentInputRevision(key) !== inputRevision) return
       try {
         const saved = await apiFetch<ScoreWriteResponse>(
-          `${path}/assessments/${encodeURIComponent(selectedAssessment!.id)}/results/${encodeURIComponent(row.student_id)}`,
+          `${path}/assessments/${encodeURIComponent(assessment.id)}/results/${encodeURIComponent(row.student_id)}`,
           { authenticated: true, method: 'PUT', body: JSON.stringify({ score }) },
         )
         if (currentInputRevision(key) === inputRevision) {
-          queryClient.setQueryData<Result[]>(resultsQueryKey, (current) =>
+          const keyForAssessment = [
+            'teacher-journal-results',
+            userId,
+            selectedCourse,
+            selectedGroup,
+            assessment.id,
+          ]
+          queryClient.setQueryData<Result[]>(keyForAssessment, (current) =>
             current?.map((item) =>
               item.student_id === row.student_id
                 ? {
@@ -509,9 +570,9 @@ export function TeacherJournalsPage() {
           clearDraft(key, inputRevision)
           setSave(key, { phase: 'saved', value: saved.score }, revision)
         }
-        void resultsQuery.refetch()
+        void resultQueryByAssessment.get(assessment.id)?.refetch()
       } catch {
-        await verifyScore(row, score, value, key, revision, inputRevision)
+        await verifyScore(assessment, row, score, value, key, revision, inputRevision)
       }
     })
   }
@@ -862,18 +923,20 @@ export function TeacherJournalsPage() {
       </main>
     )
 
-  const grouped = new Map<string, Assignment[]>()
-  for (const assignment of assignments) {
-    const key = assignment.course_offering_id
-    grouped.set(key, [...(grouped.get(key) ?? []), assignment])
-  }
+  const searchValue = catalogSearch.toLocaleLowerCase('ru-RU')
+  const visibleAssignments = assignments.filter((assignment) =>
+    [assignment.discipline.name, assignment.group.name, assignment.term.name]
+      .join(' ')
+      .toLocaleLowerCase('ru-RU')
+      .includes(searchValue),
+  )
   const currentLessonQuery = attendanceQuery
-  const currentWorkQuery = activeTab === 'work' && assessmentId ? resultsQuery : assessmentsQuery
+  const currentWorkQuery = resultsQuery
   const queryError =
     (selectedLesson && currentLessonQuery.isError) ||
-    (selectedAssessment && resultsQuery.isError) ||
-    (activeTab === 'work' && assessmentsQuery.isError) ||
-    (activeTab === 'work' && finalsQuery.isError) ||
+    (selectedAssessment && resultsQuery?.isError) ||
+    (activeTab === 'work' && resultQueries.some((query) => query?.isError)) ||
+    (activeTab === 'finals' && finalsQuery.isError) ||
     (selectedCourse && lessonsQuery.isError)
 
   return (
@@ -898,48 +961,36 @@ export function TeacherJournalsPage() {
         <>
           <JournalCard
             heading="Дисциплины и группы"
-            description="Выберите дисциплину и группу из ваших действующих назначений."
+            description="Каталог сгруппирован по учебным периодам и группам."
           >
-            <nav className="teacher-journal__selectors" aria-label="Доступные журналы">
-              {[...grouped].map(([offeringId, entries]) => {
-                const offering = entries[0]
-                const label = `${offering.discipline.name} · ${offering.term.name}`
-                return (
-                  <details
-                    key={offeringId}
-                    data-course-id={offeringId}
-                    open={selectedCourse === offeringId}
-                  >
-                    <summary>{label}</summary>
-                    <ul>
-                      {entries.map((item) => (
-                        <li key={item.group.id}>
-                          <button
-                            type="button"
-                            data-course-id={offeringId}
-                            data-group-id={item.group.id}
-                            aria-current={
-                              selectedCourse === offeringId && selectedGroup === item.group.id
-                                ? 'page'
-                                : undefined
-                            }
-                            onClick={() =>
-                              setParams({
-                                course: offeringId,
-                                group: item.group.id,
-                                tab: 'attendance',
-                              })
-                            }
-                          >
-                            {item.group.name}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
+            <JournalSearch
+              key={catalogSearch}
+              label="Поиск дисциплины, группы или семестра"
+              initial={catalogSearch}
+              onSearch={(value) => setSelection('q', value)}
+            />
+            <JournalCatalog
+              entries={visibleAssignments.map((item) => ({
+                id: `${item.course_offering_id}:${item.group.id}`,
+                label: `${item.discipline.name} · ${item.group.name} · ${item.term.name}`,
+              }))}
+              selected={chosen ? `${chosen.course_offering_id}:${chosen.group.id}` : ''}
+              onSelect={(value) => {
+                const [selectedCourseId, selectedGroupId] = value.split(':')
+                if (!selectedCourseId || !selectedGroupId) return
+                setParams(
+                  {
+                    course: selectedCourseId,
+                    group: selectedGroupId,
+                    tab: 'attendance',
+                    ...(catalogSearch ? { q: catalogSearch } : {}),
+                  },
+                  { preventScrollReset: true },
                 )
-              })}
-            </nav>
+                setStudentSearch('')
+              }}
+            />
+            {!visibleAssignments.length && <EmptyState title="Журналы не найдены" />}
           </JournalCard>
           {hasUnavailableDirectSelection && (
             <ErrorState
@@ -950,25 +1001,22 @@ export function TeacherJournalsPage() {
           )}
           {chosen && (
             <>
-              <TeacherAnnouncements
-                key={identity}
-                userId={userId}
-                courseId={courseId}
-                groupId={groupId}
-              />
-              <JournalCourseSection
-                heading={`${chosen.discipline.name} · ${chosen.group.name}`}
-                status="Журнал открыт"
-              >
+              <JournalCourseSection heading={`${chosen.discipline.name} · ${chosen.group.name}`}>
                 {(lessonsQuery.isPending ||
                   assessmentsQuery.isPending ||
-                  finalsQuery.isPending) && (
+                  (activeTab === 'finals' && finalsQuery.isPending) ||
+                  (activeTab === 'work' && resultQueries.some((query) => query?.isPending))) && (
                   <LoadingState title="Загружаем журнал…" variant="compact" />
                 )}
                 {(lessonsQuery.isError ||
-                  (activeTab === 'work' && (assessmentsQuery.isError || finalsQuery.isError))) && (
+                  (activeTab === 'work' && resultQueries.some((query) => query?.isError)) ||
+                  (activeTab === 'finals' && finalsQuery.isError)) && (
                   <QueryError
-                    error={lessonsQuery.error ?? assessmentsQuery.error ?? finalsQuery.error}
+                    error={
+                      lessonsQuery.error ??
+                      resultQueries.find((query) => query?.error)?.error ??
+                      finalsQuery.error
+                    }
                     retry={() => {
                       void lessonsQuery.refetch()
                       void assessmentsQuery.refetch()
@@ -980,32 +1028,49 @@ export function TeacherJournalsPage() {
                   ariaLabel="Разделы журнала"
                   idPrefix="teacher-journal"
                   options={[
-                    { id: 'attendance', label: 'Посещаемость' },
                     { id: 'work', label: 'Работы и баллы' },
+                    { id: 'attendance', label: 'Посещаемость' },
+                    { id: 'finals', label: 'Итоги аттестации' },
+                    { id: 'announcements', label: 'Объявления' },
                   ]}
                   selected={activeTab}
                   onSelect={(tab) => setSelection('tab', tab)}
                 />
                 {activeTab === 'attendance' ? (
                   <JournalTabPanel idPrefix="teacher-journal" tabId="attendance">
-                    <label>
-                      Занятие
-                      <select
-                        aria-label="Занятие"
-                        value={selectedLesson?.id ?? ''}
-                        onChange={(event) => setSelection('lesson', event.target.value)}
-                      >
-                        <option value="">Выберите занятие</option>
-                        {lessons.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {formatDateTime(item.starts_at)} · {item.kind}
-                            {item.status !== 'scheduled'
-                              ? ` · ${item.status === 'cancelled' ? 'Отменено' : 'Перенесено'}`
-                              : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <JournalCard
+                      heading="Посещаемость"
+                      description={`Отмечайте присутствие на выбранном занятии · ${chosen.group.name}`}
+                    >
+                      <div className="journal-attendance-toolbar">
+                        <label>
+                          Занятие
+                          <select
+                            aria-label="Занятие"
+                            value={selectedLesson?.id ?? ''}
+                            onChange={(event) => setSelection('lesson', event.target.value)}
+                          >
+                            <option value="">Выберите занятие</option>
+                            {lessons.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {formatDateTime(item.starts_at)} · {item.kind}
+                                {item.status !== 'scheduled'
+                                  ? ` · ${item.status === 'cancelled' ? 'Отменено' : 'Перенесено'}`
+                                  : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        {selectedLesson && (
+                          <aside className="journal-attendance-note">
+                            <strong>ⓘ Три состояния отметки</strong>
+                            <span>
+                              Присутствовал, отсутствовал и нет отметки — разные значения.
+                            </span>
+                          </aside>
+                        )}
+                      </div>
+                    </JournalCard>
                     {!lessons.length && !lessonsQuery.isPending && (
                       <EmptyState
                         title="Занятий нет"
@@ -1038,6 +1103,11 @@ export function TeacherJournalsPage() {
                           />
                         ) : (
                           <>
+                            <JournalSearch
+                              key={selectedLesson.id}
+                              label="Поиск по студентам"
+                              onSearch={setStudentSearch}
+                            />
                             <p className="teacher-journal__count">
                               Отмечено:{' '}
                               {
@@ -1046,76 +1116,210 @@ export function TeacherJournalsPage() {
                               }{' '}
                               из {attendanceQuery.data.length}
                             </p>
-                            <div className="journal-student-list">
-                              {attendanceQuery.data.map((row) => {
-                                const key = scopedKey(
-                                  `attendance:${selectedLesson.id}:${row.student_id}`,
+                            <JournalTable
+                              label="Таблица посещаемости"
+                              columns={[
+                                { id: 'student', label: 'Студент' },
+                                { id: 'attendance', label: 'Посещаемость' },
+                                { id: 'updated', label: 'Последнее изменение' },
+                              ]}
+                            >
+                              {attendanceQuery.data
+                                .filter((row) =>
+                                  row.full_name
+                                    .toLocaleLowerCase('ru-RU')
+                                    .includes(studentSearch.toLocaleLowerCase('ru-RU')),
                                 )
-                                return (
-                                  <article className="journal-student" key={row.student_id}>
-                                    <div className="journal-student__identity">
-                                      <strong>{row.full_name}</strong>
-                                      <span>
-                                        {row.subgroup_id ? 'Подгруппа' : 'Участник группы'}
-                                      </span>
-                                    </div>
-                                    <div
-                                      className="journal-attendance-controls"
-                                      role="group"
-                                      aria-label={`Посещаемость: ${row.full_name}`}
-                                    >
-                                      {statuses.map((status) => (
-                                        <button
-                                          key={status.value}
-                                          type="button"
-                                          title={status.title}
-                                          aria-label={`${status.title}: ${row.full_name}`}
-                                          aria-pressed={row.status === status.value}
-                                          disabled={!row.can_edit}
-                                          onClick={() => void saveAttendance(row, status.value)}
+                                .map((row) => {
+                                  const key = scopedKey(
+                                    `attendance:${selectedLesson.id}:${row.student_id}`,
+                                  )
+                                  return (
+                                    <tr key={row.student_id}>
+                                      <td className="journal-table-student">
+                                        {row.full_name}
+                                        {row.subgroup_id && <small>Подгруппа</small>}
+                                      </td>
+                                      <td>
+                                        <div
+                                          className="journal-attendance-controls"
+                                          role="group"
+                                          aria-label={`Посещаемость: ${row.full_name}`}
                                         >
-                                          {status.label}
-                                        </button>
-                                      ))}
-                                    </div>
-                                    <SaveLabel
-                                      state={saveStates[key]}
-                                      onRetry={saveStates[key]?.retry}
-                                    />
-                                  </article>
-                                )
-                              })}
-                            </div>
+                                          {statuses.map((status) => (
+                                            <button
+                                              key={status.value}
+                                              type="button"
+                                              title={status.title}
+                                              aria-label={`${status.title}: ${row.full_name}`}
+                                              aria-pressed={row.status === status.value}
+                                              disabled={!row.can_edit}
+                                              onClick={() => void saveAttendance(row, status.value)}
+                                            >
+                                              {status.label}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </td>
+                                      <td>
+                                        {row.updated_at ? formatDateTime(row.updated_at) : '—'}
+                                        <SaveLabel
+                                          state={saveStates[key]}
+                                          onRetry={saveStates[key]?.retry}
+                                        />
+                                      </td>
+                                    </tr>
+                                  )
+                                })}
+                            </JournalTable>
                           </>
                         )}
                       </>
                     )}
                   </JournalTabPanel>
-                ) : (
+                ) : activeTab === 'work' ? (
                   <JournalTabPanel idPrefix="teacher-journal" tabId="work">
-                    <label>
-                      Работа
-                      <select
-                        aria-label="Работа"
-                        value={selectedAssessment?.id ?? ''}
-                        onChange={(event) => setSelection('assessment', event.target.value)}
-                      >
-                        <option value="">Выберите работу</option>
-                        {assessments.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.title} · {item.max_score} б. · {formatDate(item.planned_date)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {!assessments.length && !assessmentsQuery.isPending && (
-                      <EmptyState
-                        title="Утверждённых работ нет"
-                        description="Для группы пока не назначены работы."
-                      />
-                    )}
-                    {selectedAssessment && (
-                      <>
+                    <JournalCard
+                      heading="Рабочая ведомость: оценочные работы"
+                      description={`${chosen.group.name} · ${chosen.term.name} · Максимумы утверждены заранее`}
+                    >
+                      {assessmentsQuery.isError ? (
+                        <QueryError
+                          error={assessmentsQuery.error}
+                          retry={() => void assessmentsQuery.refetch()}
+                        />
+                      ) : !assessments.length && !assessmentsQuery.isPending ? (
+                        <EmptyState
+                          title="Утверждённых работ нет"
+                          description="Для группы пока не назначены работы."
+                        />
+                      ) : (
+                        <>
+                          <JournalSearch
+                            key={`${selectedCourse}:${selectedGroup}:${activeTab}`}
+                            label="Поиск по студентам"
+                            onSearch={setStudentSearch}
+                          />
+                          {resultQueries.some((query) => query?.isPending) ? (
+                            <LoadingState title="Загружаем ведомость…" variant="compact" />
+                          ) : resultQueries.some((query) => query?.isError) ? (
+                            <QueryError
+                              error={resultQueries.find((query) => query?.error)?.error}
+                              retry={() => resultQueries.forEach((query) => void query?.refetch())}
+                            />
+                          ) : (
+                            <JournalTable
+                              label="Ведомость оценок"
+                              columns={[
+                                { id: 'student', label: 'Студент' },
+                                ...assessments.map((item) => ({
+                                  id: item.id,
+                                  label: item.title,
+                                  hint: `из ${item.max_score} баллов`,
+                                })),
+                                { id: 'sum', label: 'Сумма' },
+                              ]}
+                            >
+                              {workRows.map((row) => {
+                                const total = assessments.reduce(
+                                  (sum, item) => sum + (row.results.get(item.id)?.score ?? 0),
+                                  0,
+                                )
+                                const maxTotal = assessments.reduce(
+                                  (sum, item) => sum + item.max_score,
+                                  0,
+                                )
+                                return (
+                                  <tr key={row.studentId}>
+                                    <td className="journal-table-student">{row.fullName}</td>
+                                    {assessments.map((item) => {
+                                      const result = row.results.get(item.id)
+                                      if (!result) return <td key={item.id}>—</td>
+                                      const key = scopedKey(`score:${item.id}:${row.studentId}`)
+                                      const value =
+                                        drafts[key] ??
+                                        (result.score === null ? '' : String(result.score))
+                                      const scoreSaveState = saveStates[key]
+                                      const visibleScoreSaveState =
+                                        scoreSaveState?.phase === 'saved' &&
+                                        scoreSaveState.value !== result.score &&
+                                        !dirtyDrafts[key]
+                                          ? undefined
+                                          : scoreSaveState
+                                      return (
+                                        <td key={item.id}>
+                                          <div className="journal-score-cell">
+                                            <input
+                                              type="number"
+                                              min={0}
+                                              max={item.max_score}
+                                              step={1}
+                                              inputMode="numeric"
+                                              aria-label={`Баллы: ${row.fullName} · ${item.title}`}
+                                              disabled={!result.is_current_group_member}
+                                              value={value}
+                                              onChange={(event) =>
+                                                void changeDraft(key, event.target.value)
+                                              }
+                                              onBlur={() => {
+                                                if (dirtyDrafts[key])
+                                                  void saveScore(item, result, value)
+                                              }}
+                                            />
+                                            <span>/ {item.max_score}</span>
+                                            <SaveLabel
+                                              state={visibleScoreSaveState}
+                                              onRetry={visibleScoreSaveState?.retry}
+                                            />
+                                          </div>
+                                        </td>
+                                      )
+                                    })}
+                                    <td className="journal-table-score">
+                                      {total} / {maxTotal}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </JournalTable>
+                          )}
+                          <button
+                            type="button"
+                            className="journal-table-save"
+                            onClick={() => {
+                              for (const row of workRows) {
+                                for (const item of assessments) {
+                                  const result = row.results.get(item.id)
+                                  const key = scopedKey(`score:${item.id}:${row.studentId}`)
+                                  if (result && dirtyDraftsRef.current[key])
+                                    void saveScore(item, result, draftsRef.current[key] ?? '')
+                                }
+                              }
+                            }}
+                          >
+                            ✓ &nbsp; Сохранить изменения
+                          </button>
+                        </>
+                      )}
+                    </JournalCard>
+                    <details className="journal-assessment-settings">
+                      <summary>Планирование и связь работ с занятиями</summary>
+                      <label>
+                        Работа
+                        <select
+                          aria-label="Работа"
+                          value={selectedAssessment?.id ?? ''}
+                          onChange={(event) => setSelection('assessment', event.target.value)}
+                        >
+                          <option value="">Выберите работу</option>
+                          {assessments.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.title} · {item.max_score} б. · {formatDate(item.planned_date)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {selectedAssessment && (
                         <section className="journal-work-card" aria-label="Сведения о работе">
                           <div>
                             <h2>{selectedAssessment.title}</h2>
@@ -1162,10 +1366,9 @@ export function TeacherJournalsPage() {
                                   ''
                                 }
                                 onChange={(event) => {
-                                  const value = event.target.value
                                   changeDraft(
                                     scopedKey(`date:${selectedAssessment.id}:lesson`),
-                                    value,
+                                    event.target.value,
                                   )
                                   clearSaveState(scopedKey(`date:${selectedAssessment.id}`))
                                 }}
@@ -1215,74 +1418,19 @@ export function TeacherJournalsPage() {
                             />
                           </div>
                         </section>
-                        {resultsQuery.isPending ? (
-                          <LoadingState title="Загружаем результаты…" variant="compact" />
-                        ) : resultsQuery.isError ? (
-                          <QueryError
-                            error={resultsQuery.error}
-                            retry={() => void resultsQuery.refetch()}
-                          />
-                        ) : (
-                          <div className="journal-student-list">
-                            {(resultsQuery.data ?? []).map((row) => {
-                              const key = scopedKey(
-                                `score:${selectedAssessment.id}:${row.student_id}`,
-                              )
-                              const value =
-                                drafts[key] ?? (row.score === null ? '' : String(row.score))
-                              const scoreSaveState = saveStates[key]
-                              const visibleScoreSaveState =
-                                scoreSaveState?.phase === 'saved' &&
-                                scoreSaveState.value !== row.score &&
-                                !dirtyDrafts[key]
-                                  ? undefined
-                                  : scoreSaveState
-                              return (
-                                <article className="journal-student" key={row.student_id}>
-                                  <div className="journal-student__identity">
-                                    <strong>{row.full_name}</strong>
-                                    <span>
-                                      {row.is_current_group_member
-                                        ? 'Текущий участник'
-                                        : 'Исторический результат · только просмотр'}
-                                    </span>
-                                  </div>
-                                  <label className="journal-score">
-                                    Баллы
-                                    <input
-                                      type="number"
-                                      min={0}
-                                      max={selectedAssessment.max_score}
-                                      step={1}
-                                      inputMode="numeric"
-                                      aria-label={`Баллы: ${row.full_name}`}
-                                      disabled={!row.is_current_group_member}
-                                      value={value}
-                                      onChange={(event) =>
-                                        void changeDraft(key, event.target.value)
-                                      }
-                                      onBlur={() => {
-                                        if (dirtyDrafts[key]) void saveScore(row, value)
-                                      }}
-                                    />
-                                    <span>/ {selectedAssessment.max_score}</span>
-                                  </label>
-                                  <SaveLabel
-                                    state={visibleScoreSaveState}
-                                    onRetry={visibleScoreSaveState?.retry}
-                                  />
-                                </article>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </>
-                    )}
+                      )}
+                    </details>
+                  </JournalTabPanel>
+                ) : activeTab === 'finals' ? (
+                  <JournalTabPanel idPrefix="teacher-journal" tabId="finals">
                     <FinalResultsSection
                       key={scope}
                       rows={finalsQuery.data ?? []}
                       studentNames={studentNames}
+                      pointsByStudent={workPointsByStudent}
                       attestationType={chosen.attestation_type}
+                      studentSearch={studentSearch}
+                      onStudentSearch={setStudentSearch}
                       loading={finalsQuery.isPending}
                       error={finalsQuery.error}
                       refetch={() => void finalsQuery.refetch()}
@@ -1298,12 +1446,22 @@ export function TeacherJournalsPage() {
                       retryRoster={() => void rosterQuery.refetch()}
                     />
                   </JournalTabPanel>
+                ) : (
+                  <JournalTabPanel idPrefix="teacher-journal" tabId="announcements">
+                    <TeacherAnnouncements
+                      key={identity}
+                      userId={userId}
+                      courseId={courseId}
+                      groupId={groupId}
+                      expanded
+                    />
+                  </JournalTabPanel>
                 )}
               </JournalCourseSection>
             </>
           )}
           {queryError && !chosen && (
-            <p role="alert">{errorMessage(lessonsQuery.error ?? currentWorkQuery.error)}</p>
+            <p role="alert">{errorMessage(lessonsQuery.error ?? currentWorkQuery?.error)}</p>
           )}
         </>
       )}
@@ -1314,7 +1472,10 @@ export function TeacherJournalsPage() {
 function FinalResultsSection({
   rows,
   studentNames,
+  pointsByStudent,
   attestationType,
+  studentSearch,
+  onStudentSearch,
   loading,
   error,
   refetch,
@@ -1331,7 +1492,10 @@ function FinalResultsSection({
 }: {
   rows: FinalResult[]
   studentNames: Map<string, string | undefined>
+  pointsByStudent: Map<string, { score: number; max: number }>
   attestationType: Assignment['attestation_type']
+  studentSearch: string
+  onStudentSearch: (query: string) => void
   loading: boolean
   error: unknown
   refetch: () => void
@@ -1352,17 +1516,11 @@ function FinalResultsSection({
   rosterError: unknown
   retryRoster: () => void
 }) {
-  const title =
-    attestationType === 'pass_fail'
-      ? 'Зачёт'
-      : attestationType === 'graded_pass'
-        ? 'Дифференцированный зачёт'
-        : 'Экзамен'
   return (
     <section className="journal-finals" aria-labelledby="journal-finals-title">
       <div className="journal-finals-intro">
-        <h2 id="journal-finals-title">Итоги аттестации · {title}</h2>
-        <p>Итог выставляется вручную; сумма баллов не преобразуется в оценку автоматически.</p>
+        <h2 id="journal-finals-title">Итоговая аттестация</h2>
+        <p>Итоговая оценка выставляется вручную и не вычисляется автоматически из баллов.</p>
       </div>
       {loading ? (
         <LoadingState title="Загружаем итоги…" variant="compact" />
@@ -1373,121 +1531,149 @@ function FinalResultsSection({
       ) : rosterError ? (
         <QueryError error={rosterError} retry={retryRoster} />
       ) : (
-        <div className="journal-student-list journal-student-list--final">
-          {rows.map((row) => {
-            const key = `${scope}:final:${row.student_id}`
-            const value =
-              drafts[key] ??
-              (attestationType === 'pass_fail'
-                ? row.passed === null
-                  ? ''
-                  : row.passed
-                    ? 'true'
-                    : 'false'
-                : row.grade_value === null
-                  ? ''
-                  : String(row.grade_value))
-            const displayName = studentNames.get(row.student_id) ?? `Студент ${row.student_id}`
-            const setResult = (next: string) => {
-              const patch =
-                attestationType === 'pass_fail'
-                  ? { passed: next === '' ? null : next === 'true' }
-                  : { grade_value: next === '' ? null : Number(next) }
-              const revision = changeDraft(key, next)
-              const retry = () => void save(row, patch, key, retry, revision)
-              void save(row, patch, key, retry, revision)
-            }
-            const retakeDateKey = `${key}:retake_date`
-            const retakeLocationKey = `${key}:retake_location`
-            const retakeDate = drafts[retakeDateKey] ?? row.retake_date ?? ''
-            const retakeLocation = drafts[retakeLocationKey] ?? row.retake_location ?? ''
-            const draftedHasDebt = row.has_debt
-            return (
-              <article className="journal-student journal-student--final" key={row.student_id}>
-                <div className="journal-student__identity">
-                  <strong>{displayName}</strong>
-                  <span>
-                    {draftedHasDebt
-                      ? 'Есть долг'
-                      : value === ''
-                        ? 'Оценка не выставлена'
-                        : 'Долга нет'}
-                  </span>
-                </div>
-                <label className="journal-score">
-                  {attestationType === 'pass_fail' ? 'Результат' : 'Оценка'}
-                  {attestationType === 'pass_fail' ? (
-                    <select
-                      aria-label={`Итог: ${displayName}`}
-                      value={value}
-                      onChange={(event) => setResult(event.target.value)}
-                    >
-                      <option value="">Не выставлено</option>
-                      <option value="true">Зачтено</option>
-                      <option value="false">Не зачтено</option>
-                    </select>
-                  ) : (
-                    <select
-                      aria-label={`Итог: ${displayName}`}
-                      value={value}
-                      onChange={(event) => setResult(event.target.value)}
-                    >
-                      <option value="">Не выставлено</option>
-                      {[2, 3, 4, 5].map((grade) => (
-                        <option key={grade} value={grade}>
-                          {grade}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </label>
-                <SaveLabel state={states[key]} onRetry={states[key]?.retry} />
-                <div className="journal-retake-fields">
-                  <label>
-                    Дата пересдачи
-                    <input
-                      type="date"
-                      aria-label={`Дата пересдачи: ${displayName}`}
-                      value={retakeDate}
-                      disabled={!draftedHasDebt}
-                      onChange={(event) => changeDraft(retakeDateKey, event.target.value)}
-                      onBlur={() => {
-                        if (!dirtyDrafts[retakeDateKey]) return
-                        const patch = { retake_date: retakeDate || null }
-                        const revision = inputRevision(retakeDateKey)
-                        const retry = () => void save(row, patch, retakeDateKey, retry, revision)
-                        void save(row, patch, retakeDateKey, retry, revision)
-                      }}
-                    />
-                  </label>
-                  <label>
-                    Место пересдачи
-                    <input
-                      maxLength={200}
-                      aria-label={`Место пересдачи: ${displayName}`}
-                      value={retakeLocation}
-                      disabled={!draftedHasDebt}
-                      onChange={(event) => changeDraft(retakeLocationKey, event.target.value)}
-                      onBlur={() => {
-                        if (!dirtyDrafts[retakeLocationKey]) return
-                        const patch = { retake_location: retakeLocation || null }
-                        const revision = inputRevision(retakeLocationKey)
-                        const retry = () =>
-                          void save(row, patch, retakeLocationKey, retry, revision)
-                        void save(row, patch, retakeLocationKey, retry, revision)
-                      }}
-                    />
-                  </label>
-                  <SaveLabel state={states[retakeDateKey]} onRetry={states[retakeDateKey]?.retry} />
-                  <SaveLabel
-                    state={states[retakeLocationKey]}
-                    onRetry={states[retakeLocationKey]?.retry}
-                  />
-                </div>
-              </article>
-            )
-          })}
-        </div>
+        <>
+          <JournalSearch
+            key="finals-search"
+            label="Поиск по студентам"
+            initial={studentSearch}
+            onSearch={onStudentSearch}
+          />
+          <JournalTable
+            label="Таблица итоговой аттестации"
+            columns={[
+              { id: 'student', label: 'Студент' },
+              { id: 'points', label: 'Баллы за работы' },
+              { id: 'result', label: 'Результат зачёта' },
+              { id: 'comment', label: 'Комментарий' },
+            ]}
+          >
+            {rows
+              .filter((row) =>
+                (studentNames.get(row.student_id) ?? `Студент ${row.student_id}`)
+                  .toLocaleLowerCase('ru-RU')
+                  .includes(studentSearch.toLocaleLowerCase('ru-RU')),
+              )
+              .map((row) => {
+                const key = `${scope}:final:${row.student_id}`
+                const value =
+                  drafts[key] ??
+                  (attestationType === 'pass_fail'
+                    ? row.passed === null
+                      ? ''
+                      : row.passed
+                        ? 'true'
+                        : 'false'
+                    : row.grade_value === null
+                      ? ''
+                      : String(row.grade_value))
+                const displayName = studentNames.get(row.student_id) ?? `Студент ${row.student_id}`
+                const setResult = (next: string) => {
+                  const patch =
+                    attestationType === 'pass_fail'
+                      ? { passed: next === '' ? null : next === 'true' }
+                      : { grade_value: next === '' ? null : Number(next) }
+                  const revision = changeDraft(key, next)
+                  const retry = () => void save(row, patch, key, retry, revision)
+                  void save(row, patch, key, retry, revision)
+                }
+                const retakeDateKey = `${key}:retake_date`
+                const retakeLocationKey = `${key}:retake_location`
+                const retakeDate = drafts[retakeDateKey] ?? row.retake_date ?? ''
+                const retakeLocation = drafts[retakeLocationKey] ?? row.retake_location ?? ''
+                const points = pointsByStudent.get(row.student_id)
+                return (
+                  <tr key={row.student_id}>
+                    <td className="journal-table-student">{displayName}</td>
+                    <td className="journal-table-score">
+                      {points ? `${points.score} / ${points.max}` : '—'}
+                    </td>
+                    <td>
+                      <select
+                        aria-label={`Итог: ${displayName}`}
+                        value={value}
+                        onChange={(event) => setResult(event.target.value)}
+                      >
+                        <option value="">Не выставлено</option>
+                        {attestationType === 'pass_fail' ? (
+                          <>
+                            <option value="true">Зачтено</option>
+                            <option value="false">Не зачтено</option>
+                          </>
+                        ) : (
+                          [2, 3, 4, 5].map((grade) => (
+                            <option key={grade} value={grade}>
+                              {grade}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                      <SaveLabel state={states[key]} onRetry={states[key]?.retry} />
+                    </td>
+                    <td>
+                      <span>
+                        {row.has_debt
+                          ? 'Есть долг'
+                          : value === ''
+                            ? 'Итог записывается отдельно'
+                            : 'Долга нет'}
+                      </span>
+                      <details className="journal-retake-disclosure" open={row.has_debt}>
+                        <summary>Пересдача</summary>
+                        <div className="journal-retake-fields">
+                          <label>
+                            Дата пересдачи
+                            <input
+                              type="date"
+                              aria-label={`Дата пересдачи: ${displayName}`}
+                              value={retakeDate}
+                              disabled={!row.has_debt}
+                              onChange={(event) => changeDraft(retakeDateKey, event.target.value)}
+                              onBlur={() => {
+                                if (!dirtyDrafts[retakeDateKey]) return
+                                const patch = { retake_date: retakeDate || null }
+                                const revision = inputRevision(retakeDateKey)
+                                const retry = () =>
+                                  void save(row, patch, retakeDateKey, retry, revision)
+                                void save(row, patch, retakeDateKey, retry, revision)
+                              }}
+                            />
+                          </label>
+                          <label>
+                            Место пересдачи
+                            <input
+                              maxLength={200}
+                              aria-label={`Место пересдачи: ${displayName}`}
+                              value={retakeLocation}
+                              disabled={!row.has_debt}
+                              onChange={(event) =>
+                                changeDraft(retakeLocationKey, event.target.value)
+                              }
+                              onBlur={() => {
+                                if (!dirtyDrafts[retakeLocationKey]) return
+                                const patch = { retake_location: retakeLocation || null }
+                                const revision = inputRevision(retakeLocationKey)
+                                const retry = () =>
+                                  void save(row, patch, retakeLocationKey, retry, revision)
+                                void save(row, patch, retakeLocationKey, retry, revision)
+                              }}
+                            />
+                          </label>
+                          <SaveLabel
+                            state={states[retakeDateKey]}
+                            onRetry={states[retakeDateKey]?.retry}
+                          />
+                          <SaveLabel
+                            state={states[retakeLocationKey]}
+                            onRetry={states[retakeLocationKey]?.retry}
+                          />
+                        </div>
+                      </details>
+                    </td>
+                  </tr>
+                )
+              })}
+          </JournalTable>
+        </>
       )}
     </section>
   )

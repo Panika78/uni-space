@@ -199,6 +199,7 @@ export function ScoreRow({
   access,
   readPath,
   onHistory,
+  display = 'card',
 }: {
   row: Schema['StaffScoreRow']
   assessment: Schema['JournalAssessment']
@@ -206,6 +207,7 @@ export function ScoreRow({
   access: JournalAccess
   readPath: string
   onHistory: () => void
+  display?: 'card' | 'table-row'
 }) {
   const [validation, setValidation] = useState('')
   const path = `/api/v1/teaching/courses/${group}/assessments/${assessment.id}/results/${row.student_id}`
@@ -226,6 +228,48 @@ export function ScoreRow({
     }
     void save.save({ method: 'PUT', body: { score: value }, expected: { score: value } })
   }
+  if (display === 'table-row')
+    return (
+      <tr>
+        <td className="journal-table-student">
+          {row.full_name}
+          {(row.history_only || !row.is_current_group_member) && (
+            <small>{row.history_only ? 'Оценка удалена' : 'Исторический результат'}</small>
+          )}
+        </td>
+        <td>
+          <strong>{assessment.title}</strong>
+          <small className="journal-table-secondary">{assessment.type}</small>
+        </td>
+        <td>{assessment.planned_date ?? '—'}</td>
+        <td>
+          <div className="journal-score-cell">
+            <input
+              inputMode="numeric"
+              value={draft ?? String(row.score ?? '')}
+              aria-label={`Балл · ${row.full_name}`}
+              aria-invalid={Boolean(validation)}
+              disabled={!row.can_edit}
+              readOnly={save.busy}
+              onChange={(event) => {
+                save.change('score', event.target.value)
+                setValidation('')
+              }}
+              onBlur={submit}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur()
+              }}
+            />
+            <span>/ {assessment.max_score}</span>
+          </div>
+          {validation && <span role="alert">{validation}</span>}
+          <SaveLabel state={save.state} onRetry={save.state?.retry} />
+          <button type="button" className="journal-inline-action" onClick={onHistory}>
+            История
+          </button>
+        </td>
+      </tr>
+    )
   return (
     <article className="journal-student">
       <div className="journal-student__identity">
@@ -269,14 +313,57 @@ export function AttendanceRow({
   lessonId,
   access,
   readPath,
+  display = 'card',
 }: {
   row: Schema['StaffAttendanceRow']
   lessonId: string
   access: JournalAccess
   readPath: string
+  display?: 'card' | 'table-row'
 }) {
   const path = `/api/v1/attendance/lessons/${lessonId}/students/${row.student_id}`
   const save = useRowSave(access, readPath, row.student_id, path)
+  if (display === 'table-row')
+    return (
+      <tr>
+        <td className="journal-table-student">
+          {row.full_name}
+          {row.is_historical && <small>Историческая отметка</small>}
+        </td>
+        <td>
+          <div
+            className="journal-attendance-controls"
+            role="group"
+            aria-label={`Посещаемость · ${row.full_name}`}
+          >
+            {statuses.map(({ value, label, title }) => (
+              <button
+                type="button"
+                key={value}
+                aria-pressed={row.status === value}
+                aria-label={title}
+                title={title}
+                disabled={!row.can_edit || save.busy}
+                onClick={() => {
+                  if (row.status === value) return
+                  void save.save({
+                    method: value === 'unmarked' ? 'DELETE' : 'PUT',
+                    body: value === 'unmarked' ? undefined : { status: value },
+                    expected: { status: value },
+                  })
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </td>
+        <td>
+          {row.updated_at ?? '—'}
+          <SaveLabel state={save.state} onRetry={save.state?.retry} />
+        </td>
+      </tr>
+    )
   return (
     <article className="journal-student">
       <div className="journal-student__identity">
@@ -324,6 +411,7 @@ export function FinalRow({
   access,
   readPath,
   onHistory,
+  display = 'card',
 }: {
   row: Final
   fullName: string
@@ -331,6 +419,7 @@ export function FinalRow({
   access: JournalAccess
   readPath: string
   onHistory: () => void
+  display?: 'card' | 'table-row'
 }) {
   const isPass = attestation === 'pass_fail'
   const path = `/api/v1/final-results/courses/${row.course_offering_id}/students/${row.student_id}`
@@ -366,6 +455,87 @@ export function FinalRow({
               retake_location: clearsRetake ? null : patch.retake_location,
             },
           },
+    )
+  }
+  if (display === 'table-row') {
+    const formId = `staff-final-${row.student_id}`
+    return (
+      <tr>
+        <td className="journal-table-student">
+          {fullName}
+          <button type="button" className="journal-inline-action" onClick={onHistory}>
+            История изменений
+          </button>
+        </td>
+        <td>
+          <form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault()
+              submit()
+            }}
+          >
+            <select
+              aria-label={`Результат: ${fullName}`}
+              value={gradeValue}
+              onChange={(event) => save.change('grade', event.target.value, baseline, initial)}
+              disabled={save.busy}
+            >
+              <option value="">Не выставлен</option>
+              {isPass ? (
+                <>
+                  <option value="true">Зачтено</option>
+                  <option value="false">Не зачтено</option>
+                </>
+              ) : (
+                [2, 3, 4, 5].map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))
+              )}
+            </select>
+          </form>
+        </td>
+        <td>
+          <input
+            className="journal-table-input"
+            aria-label={`Дата пересдачи: ${fullName}`}
+            form={formId}
+            type="date"
+            value={date ?? row.retake_date ?? ''}
+            readOnly={save.busy}
+            onChange={(event) => save.change('date', event.target.value, baseline, initial)}
+          />
+        </td>
+        <td>
+          <input
+            className="journal-table-input"
+            aria-label={`Место пересдачи: ${fullName}`}
+            form={formId}
+            value={location ?? row.retake_location ?? ''}
+            maxLength={200}
+            readOnly={save.busy}
+            onChange={(event) => save.change('location', event.target.value, baseline, initial)}
+          />
+        </td>
+        <td>
+          <div className="journal-final-actions">
+            <button form={formId} type="submit" disabled={save.busy || conflict}>
+              Сохранить
+            </button>
+            <button
+              type="button"
+              disabled={save.busy || conflict || !row.result_id}
+              onClick={() => submit(true)}
+            >
+              Удалить
+            </button>
+          </div>
+          <SaveLabel state={save.state} onRetry={conflict ? undefined : save.state?.retry} />
+          {conflict && <p role="status">Итог изменился на сервере. Проверьте новую запись.</p>}
+        </td>
+      </tr>
     )
   }
   return (
