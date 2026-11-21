@@ -288,6 +288,7 @@ async function assertAllGrantsNavigation() {
       })
       const links = navigation.getByRole('link')
       const linkCount = await links.count()
+      const lastLinkLabel = (await links.last().innerText()).trim()
       await links.first().focus()
       for (let index = 1; index < linkCount; index++) await page.keyboard.press('Tab')
       assert.equal(await links.last().evaluate((node) => node === document.activeElement), true)
@@ -318,13 +319,8 @@ async function assertAllGrantsNavigation() {
       assert.ok(geometry.horizontal <= 1)
       if (geometry.scrollHeight > geometry.clientHeight) assert.ok(geometry.scroll > 0)
       await page.keyboard.press('Enter')
-      await heading(page, 'Публикация новостей')
-      assert.equal(
-        await navigation
-          .getByRole('link', { name: 'Публикация новостей' })
-          .getAttribute('aria-current'),
-        'page',
-      )
+      await heading(page, lastLinkLabel)
+      assert.equal(await links.last().getAttribute('aria-current'), 'page')
       await page.keyboard.press('Tab')
       assert.equal(
         await sidebar.getByRole('button').evaluate((node) => node === document.activeElement),
