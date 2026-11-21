@@ -22,7 +22,6 @@ export const staffSections: {
     permission: 'students.status.edit',
     label: 'Академические статусы',
     icon: 'chart',
-    visible: false,
   },
   { permission: 'groups.manage', label: 'Учебные группы', icon: 'groups', disabled: true },
   { permission: 'news.publish', label: 'Публикация новостей', icon: 'news' },
@@ -61,11 +60,13 @@ export function getRoleNavigation(context: AuthorizationContext): NavigationItem
           ? '/staff/applications'
           : permission === 'students.read'
             ? '/staff/students'
-            : permission === 'news.publish'
-              ? '/staff/news/new'
-              : permission === 'schedule.edit'
-                ? '/staff/schedule'
-                : '/staff',
+            : permission === 'students.status.edit'
+              ? '/staff/students/status'
+              : permission === 'news.publish'
+                ? '/staff/news/new'
+                : permission === 'schedule.edit'
+                  ? '/staff/schedule'
+                  : '/staff',
       label,
       icon,
       disabled,

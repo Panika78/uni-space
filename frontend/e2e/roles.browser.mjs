@@ -270,7 +270,9 @@ async function assertAllGrantsNavigation() {
   await heading(page, 'Заявления')
   const sidebar = page.locator('.desktop-sidebar')
   const navigation = sidebar.getByRole('navigation')
-  assert.equal(await navigation.getByRole('link').count(), 9)
+  // The staff workspace consolidates grades and attendance into one journal
+  // destination while retaining the academic-status editor route.
+  assert.equal(await navigation.getByRole('link').count(), 6)
   for (const scale of [1, 2]) {
     if (scale === 2) await scaleVisibleText(page, 2, '.desktop-sidebar', false)
     for (const collapsed of [false, true]) {
@@ -285,8 +287,9 @@ async function assertAllGrantsNavigation() {
         )
       })
       const links = navigation.getByRole('link')
+      const linkCount = await links.count()
       await links.first().focus()
-      for (let index = 1; index < 9; index++) await page.keyboard.press('Tab')
+      for (let index = 1; index < linkCount; index++) await page.keyboard.press('Tab')
       assert.equal(await links.last().evaluate((node) => node === document.activeElement), true)
       await page.waitForFunction(() => {
         const navigation = document.querySelector('.desktop-sidebar nav')
@@ -303,6 +306,8 @@ async function assertAllGrantsNavigation() {
         const collapse = document.querySelector('.sidebar-collapse').getBoundingClientRect()
         return {
           scroll: node.scrollTop,
+          scrollHeight: node.scrollHeight,
+          clientHeight: node.clientHeight,
           horizontal: node.scrollWidth - node.clientWidth,
           lastVisible: last.top >= nav.top && last.bottom <= nav.bottom,
           pinned: brand.top >= 0 && collapse.bottom <= window.innerHeight,
@@ -311,7 +316,7 @@ async function assertAllGrantsNavigation() {
       assert.equal(geometry.lastVisible, true)
       assert.equal(geometry.pinned, true)
       assert.ok(geometry.horizontal <= 1)
-      assert.ok(geometry.scroll > 0)
+      if (geometry.scrollHeight > geometry.clientHeight) assert.ok(geometry.scroll > 0)
       await page.keyboard.press('Enter')
       await heading(page, 'Публикация новостей')
       assert.equal(

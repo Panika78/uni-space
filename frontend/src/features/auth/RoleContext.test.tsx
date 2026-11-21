@@ -98,7 +98,7 @@ it.each(staffSections.filter(({ visible, disabled }) => visible !== false && !di
     const navigation = getRoleNavigation(context)
     expect(
       navigation.filter((section) => !section.disabled).map((section) => section.label),
-    ).toEqual([label])
+    ).toEqual(permission === 'students.status.edit' ? ['Поиск студентов', label] : [label])
     expect(navigation.find((section) => section.label === 'Учебные группы')).toMatchObject({
       disabled: true,
     })
@@ -111,7 +111,7 @@ it.each(staffSections.filter(({ visible, disabled }) => visible !== false && !di
     )
   },
 )
-it('merges status editors into student search and hides unimplemented staff modules', () => {
+it('keeps the status editor route alongside the implied student search permission', () => {
   context = {
     ...context,
     role: 'staff',
@@ -119,8 +119,9 @@ it('merges status editors into student search and hides unimplemented staff modu
   }
   const navigation = getRoleNavigation(context)
   expect(navigation.some((item) => item.label === 'Поиск студентов')).toBe(true)
+  expect(navigation.some((item) => item.to === '/staff/students/status')).toBe(true)
   expect(navigation.some((item) => item.label === 'Академические сведения')).toBe(false)
-  expect(navigation.some((item) => item.label === 'Академические статусы')).toBe(false)
+  expect(navigation.some((item) => item.label === 'Академические статусы')).toBe(true)
   expect(navigation.some((item) => item.to === '/staff#students.edit')).toBe(false)
   expect(getStartRoute(context)).toBe('/staff/students')
 })

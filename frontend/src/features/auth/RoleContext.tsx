@@ -211,7 +211,9 @@ export function StaffHome() {
                     ? '/staff/schedule'
                     : permission === 'students.read'
                       ? '/staff/students'
-                      : null
+                      : permission === 'students.status.edit'
+                        ? '/staff/students/status'
+                        : null
           const action =
             permission === 'grades.edit' || permission === 'attendance.edit'
               ? 'Открыть журнал'
@@ -223,7 +225,9 @@ export function StaffHome() {
                     ? 'Открыть редактор расписания'
                     : permission === 'students.read'
                       ? 'Открыть поиск студентов'
-                      : 'Модуль пока недоступен'
+                      : permission === 'students.status.edit'
+                        ? 'Открыть академические статусы'
+                        : 'Модуль пока недоступен'
           const description =
             permission === 'applications.review'
               ? 'Рассмотрение заявлений, возвраты и решения.'
@@ -237,7 +241,9 @@ export function StaffHome() {
                       ? 'Редактор объявлений для студенческой ленты.'
                       : permission === 'students.read'
                         ? 'Поиск, просмотр и доступные действия в карточке студента.'
-                        : 'Раздел доступен согласно выданным полномочиям.'
+                        : permission === 'students.status.edit'
+                          ? 'Просмотр и изменение академических статусов студентов.'
+                          : 'Раздел доступен согласно выданным полномочиям.'
           return (
             <section
               key={permission}

@@ -109,17 +109,24 @@ async function assertModeHighlight(page) {
   await page.waitForFunction(
     () => {
       const modes = document.querySelector('.schedule-modes')
-      const selected = modes.querySelector('[aria-pressed="true"]').getBoundingClientRect()
+      const selected = modes?.querySelector('[aria-pressed="true"]')
+      if (!modes || !selected) return false
+      const selectedBounds = selected.getBoundingClientRect()
       const bounds = modes.getBoundingClientRect()
-      const style = window.getComputedStyle(modes, '::before')
-      const transform = new window.DOMMatrix(style.transform)
-      const left = bounds.left + Number.parseFloat(style.left) + transform.e
-      const top = bounds.top + Number.parseFloat(style.top) + transform.f
+      const style = window.getComputedStyle(selected)
+      const accentProbe = document.createElement('span')
+      accentProbe.style.color = 'var(--accent)'
+      document.body.append(accentProbe)
+      const accent = window.getComputedStyle(accentProbe).color
+      accentProbe.remove()
       return (
-        Math.abs(left - selected.left) < 1.5 &&
-        Math.abs(top - selected.top) < 1.5 &&
-        Math.abs(left + Number.parseFloat(style.width) - selected.right) < 1.5 &&
-        Math.abs(top + Number.parseFloat(style.height) - selected.bottom) < 1.5
+        style.backgroundColor === accent &&
+        style.color === 'rgb(255, 255, 255)' &&
+        selectedBounds.left >= bounds.left &&
+        selectedBounds.right <= bounds.right &&
+        selectedBounds.top >= bounds.top &&
+        selectedBounds.bottom <= bounds.bottom &&
+        window.getComputedStyle(modes, '::before').content === 'none'
       )
     },
     null,

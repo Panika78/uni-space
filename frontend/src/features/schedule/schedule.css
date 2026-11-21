@@ -348,11 +348,6 @@
     min-width: max-content;
     padding: 4px;
   }
-  .schedule-modes::before {
-    inset-block: 4px;
-    inset-inline-start: 4px;
-    width: calc((100% - 8px) / 2);
-  }
   .schedule-modes button {
     min-width: 0;
     flex: 1;

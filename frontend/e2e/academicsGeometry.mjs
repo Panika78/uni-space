@@ -61,6 +61,7 @@ export async function assertAcademicsGeometry(page, width, label) {
             width: b.width,
             scroll: e.scrollWidth,
             client: e.clientWidth,
+            visible: getComputedStyle(e).display !== 'none',
             text: e.textContent.trim().slice(0, 100),
           }
         }),
@@ -70,24 +71,28 @@ export async function assertAcademicsGeometry(page, width, label) {
         headerCount,
         `${label}: every academic field must have a matching column header`,
       )
-      for (const cell of cells)
+      for (const cell of cells.filter((item) => item.visible))
         assert.ok(
           cell.scroll <= cell.client + 1,
           `${label}: cell content is not clipped ${JSON.stringify(cell)}`,
         )
-      for (let i = 1; i < cells.length; i++) {
-        const a = cells[i - 1],
-          b = cells[i]
+      const visibleCells = cells.filter((item) => item.visible)
+      for (let i = 1; i < visibleCells.length; i++) {
+        const a = visibleCells[i - 1],
+          b = visibleCells[i]
         assert.ok(
           b.x >= a.right - 1 || b.y >= a.bottom - 1,
           `${label}: academic fields do not overlap`,
         )
       }
       if (compact)
-        assert.ok(cells[1].y >= cells[0].bottom - 1, `${label}: title spans the compact card`)
+        assert.ok(
+          visibleCells[1].y >= visibleCells[0].bottom - 1,
+          `${label}: title spans the compact card`,
+        )
       else
         assert.ok(
-          Math.abs(cells[1].y - cells[0].y) < 1,
+          Math.abs(visibleCells[1].y - visibleCells[0].y) < 1,
           `${label}: wide container retains table layout`,
         )
     }

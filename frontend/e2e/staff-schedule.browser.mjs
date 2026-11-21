@@ -227,11 +227,13 @@ try {
   await movedOriginal.getByRole('button', { name: 'Следующее занятие' }).click()
   await firstPage.getByText('20:00–21:30').waitFor()
   assert.equal(await firstPage.getByLabel('Выбрать дату').inputValue(), firstMoveDate)
-  assert.ok(
-    (await firstPage.getByRole('combobox', { name: 'Аудитория' }).inputValue()).includes(
-      secondRoomName,
-    ),
+  const reloadedRoomPicker = firstPage.getByRole('combobox', { name: 'Аудитория' })
+  await firstPage.waitForFunction(
+    ({ label }) =>
+      document.querySelector('input[aria-label="Аудитория"]')?.value.includes(label) ?? false,
+    { label: secondRoomName },
   )
+  assert.ok((await reloadedRoomPicker.inputValue()).includes(secondRoomName))
   const selectedTargetRoomId = new URL(firstPage.url()).searchParams.get('resource_id')
   assert.ok(selectedTargetRoomId)
   await firstPage.reload()
@@ -240,6 +242,11 @@ try {
     ({ id }) => new URL(location.href).searchParams.get('resource_id') === id,
     { id: selectedTargetRoomId },
     { timeout: 5000 },
+  )
+  await firstPage.waitForFunction(
+    ({ label }) =>
+      document.querySelector('input[aria-label="Аудитория"]')?.value.includes(label) ?? false,
+    { label: secondRoomName },
   )
   assert.ok(
     (await firstPage.getByRole('combobox', { name: 'Аудитория' }).inputValue()).includes(
