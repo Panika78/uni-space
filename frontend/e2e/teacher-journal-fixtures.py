@@ -143,9 +143,11 @@ def main() -> None:
     logins = [f"{name}-{suffix}" for name in names]
     moscow = ZoneInfo("Europe/Moscow")
     now = datetime.now(moscow)
-    starts_at = (now - timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
+    starts_at = (now - timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
     lesson_day = starts_at.date()
     membership_changed_at = starts_at - timedelta(days=10)
+    today_starts_at = now.replace(minute=0, second=0, microsecond=0)
+    future_starts_at = (now + timedelta(days=1)).replace(minute=0, second=0, microsecond=0)
 
     with SessionLocal.begin() as db:
         faculty = OrgUnit(
@@ -284,12 +286,32 @@ def main() -> None:
             )
             for index in (0, 1)
         ]
+        lessons.extend(
+            [
+                Lesson(
+                    course_offering_id=courses[0].id,
+                    teacher_id=teachers[0].id,
+                    starts_at=today_starts_at,
+                    ends_at=today_starts_at + timedelta(minutes=90),
+                    kind="lecture",
+                    created_by_user_id=users[0].id,
+                ),
+                Lesson(
+                    course_offering_id=courses[0].id,
+                    teacher_id=teachers[0].id,
+                    starts_at=future_starts_at,
+                    ends_at=future_starts_at + timedelta(minutes=90),
+                    kind="seminar",
+                    created_by_user_id=users[0].id,
+                ),
+            ]
+        )
         db.add_all(lessons)
         db.flush()
         db.add_all(
             [
-                LessonGroup(lesson_id=lessons[index].id, group_id=groups[index].id)
-                for index in (0, 1)
+                LessonGroup(lesson_id=lessons[index].id, group_id=groups[0 if index >= 2 else index].id)
+                for index in (0, 1, 2, 3)
             ]
         )
         subgroup_lesson = Lesson(
@@ -424,6 +446,8 @@ def main() -> None:
             "TEACHER_JOURNAL_COURSE_A": str(courses[0].id),
             "TEACHER_JOURNAL_GROUP_A": str(groups[0].id),
             "TEACHER_JOURNAL_LESSON_A": str(lessons[0].id),
+            "TEACHER_JOURNAL_LESSON_TODAY": str(lessons[2].id),
+            "TEACHER_JOURNAL_LESSON_FUTURE": str(lessons[3].id),
             "TEACHER_JOURNAL_SUBGROUP_LESSON": str(subgroup_lesson.id),
             "TEACHER_JOURNAL_ASSESSMENT_A": str(groups_of_assessments[0].id),
             "TEACHER_JOURNAL_ASSESSMENT_A2": str(groups_of_assessments[1].id),
@@ -437,6 +461,8 @@ def main() -> None:
             "TEACHER_JOURNAL_STUDENT_C": str(students[2].id),
             "TEACHER_JOURNAL_FOREIGN_STUDENT": str(student_b.id),
             "TEACHER_JOURNAL_DATE": lesson_day.isoformat(),
+            "TEACHER_JOURNAL_TODAY_DATE": today_starts_at.date().isoformat(),
+            "TEACHER_JOURNAL_FUTURE_DATE": future_starts_at.date().isoformat(),
             "TEACHER_JOURNAL_TODAY": now.date().isoformat(),
             "TEACHER_JOURNAL_SUFFIX": suffix,
         }

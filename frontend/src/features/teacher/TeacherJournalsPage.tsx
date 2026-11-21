@@ -1239,42 +1239,32 @@ export function TeacherJournalsPage() {
                           </div>
                           <p>Даты с занятиями выделены; выберите дату, чтобы увидеть занятия.</p>
                         </section>
-                        <section
-                          className="teacher-journal__lesson-options"
-                          aria-label="Занятия на выбранную дату"
-                        >
-                          <h3>{calendarDate ? formatDate(calendarDate) : 'Выберите дату'}</h3>
-                          {(lessonsByDate.get(calendarDate) ?? []).length > 1 ? (
-                            <div role="group" aria-label="Выбор занятия">
-                              {(lessonsByDate.get(calendarDate) ?? []).map((item) => (
-                                <button
-                                  key={item.id}
-                                  type="button"
-                                  aria-pressed={selectedLesson?.id === item.id}
-                                  onClick={() => chooseLesson(item)}
-                                >
-                                  <strong>{formatDateTime(item.starts_at)}</strong>
-                                  <span>
-                                    {item.kind}
-                                    {item.status !== 'scheduled' ? ' · недоступно для отметки' : ''}
-                                  </span>
-                                </button>
-                              ))}
-                            </div>
-                          ) : selectedLesson ? (
-                            <p>
-                              {formatDateTime(selectedLesson.starts_at)} · {selectedLesson.kind}
-                            </p>
-                          ) : (
-                            <p>Выберите выделенную дату, чтобы открыть занятие.</p>
-                          )}
-                        </section>
-                        <aside className="journal-attendance-note">
-                          <strong>ⓘ Три состояния отметки</strong>
-                          <span>Присутствовал, отсутствовал и нет отметки — разные значения.</span>
-                        </aside>
                       </div>
                     </JournalCard>
+                    {(lessonsByDate.get(calendarDate) ?? []).length > 1 && (
+                      <section
+                        className="teacher-journal__lesson-options"
+                        aria-label="Занятия на выбранную дату"
+                      >
+                        <h3>Занятия на {formatDate(calendarDate)}</h3>
+                        <div role="group" aria-label="Выбор занятия">
+                          {(lessonsByDate.get(calendarDate) ?? []).map((item) => (
+                            <button
+                              key={item.id}
+                              type="button"
+                              aria-pressed={selectedLesson?.id === item.id}
+                              onClick={() => chooseLesson(item)}
+                            >
+                              <strong>{formatDateTime(item.starts_at)}</strong>
+                              <span>
+                                {item.kind}
+                                {item.status !== 'scheduled' ? ' · недоступно для отметки' : ''}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+                    )}
                     {!lessons.length && !lessonsQuery.isPending && (
                       <EmptyState
                         title="Занятий нет"
@@ -1309,8 +1299,8 @@ export function TeacherJournalsPage() {
                           <>
                             {attendanceQuery.data.some((row) => !row.can_edit) && (
                               <p className="teacher-journal__edit-limit" role="status">
-                                Неактивные отметки нельзя изменить: занятие ещё не началось,
-                                отменено или студент не входит в доступный состав группы.
+                                Отметки недоступны для отменённого занятия или студента вне текущего
+                                состава группы.
                               </p>
                             )}
                             <JournalSearch
@@ -1889,18 +1879,18 @@ function FinalResultsSection({
                           {row.retake_location ?? 'место не задано'}
                         </small>
                       ) : null}
-                      <button
-                        type="button"
-                        className="journal-retake-open"
-                        disabled={!row.has_debt}
-                        aria-label={`${row.retake_date || row.retake_location ? 'Изменить' : 'Назначить'} пересдачу: ${displayName}`}
-                        title={!row.has_debt ? 'Доступно только при наличии долга' : undefined}
-                        onClick={() => setRetakeStudentId(row.student_id)}
-                      >
-                        {row.retake_date || row.retake_location
-                          ? 'Изменить пересдачу'
-                          : 'Назначить пересдачу'}
-                      </button>
+                      {row.has_debt && (
+                        <button
+                          type="button"
+                          className="journal-retake-open"
+                          aria-label={`${row.retake_date || row.retake_location ? 'Изменить' : 'Назначить'} пересдачу: ${displayName}`}
+                          onClick={() => setRetakeStudentId(row.student_id)}
+                        >
+                          {row.retake_date || row.retake_location
+                            ? 'Изменить пересдачу'
+                            : 'Назначить пересдачу'}
+                        </button>
+                      )}
                       <SaveLabel
                         state={states[retakeSaveKey]}
                         onRetry={states[retakeSaveKey]?.retry}

@@ -275,21 +275,44 @@ it('offers only a timezone-correct calendar and filters lessons by selected date
     starts_at: '2026-11-18T22:30:00Z', // 19 November in Europe/Moscow
     ends_at: '2026-11-19T00:00:00Z',
   }
+  const secondNextDayLesson = {
+    ...lesson,
+    id: '33',
+    starts_at: '2026-11-19T08:30:00Z',
+    ends_at: '2026-11-19T10:00:00Z',
+  }
   vi.mocked(apiFetch).mockImplementation(async (input, init = {}) => {
     const url = String(input)
-    if (url.endsWith('/lessons?limit=100')) return page([lesson, nextDayLesson])
-    if (url.endsWith('/lessons/32/attendance?limit=100')) return page([])
+    if (url.endsWith('/lessons?limit=100'))
+      return page([lesson, nextDayLesson, secondNextDayLesson])
+    if (
+      url.endsWith('/lessons/32/attendance?limit=100') ||
+      url.endsWith('/lessons/33/attendance?limit=100')
+    )
+      return page([])
     return original(input, init)
   })
 
   renderJournal()
   const calendar = await screen.findByRole('region', { name: 'Календарь занятий' })
+  expect(calendar.parentElement?.children).toHaveLength(1)
   expect(await within(calendar).findByRole('button', { name: /16.*занятий: 1/ })).toBeEnabled()
   expect(within(calendar).getByRole('button', { name: /17.*занятий нет/ })).toBeDisabled()
-  await user.click(within(calendar).getByRole('button', { name: /19.*занятий: 1/ }))
+  await user.click(within(calendar).getByRole('button', { name: /19.*занятий: 2/ }))
   await waitFor(() =>
     expect(apiFetch).toHaveBeenCalledWith(
       '/api/v1/teaching/courses/11/groups/21/lessons/32/attendance?limit=100',
+      expect.objectContaining({ authenticated: true }),
+    ),
+  )
+  const lessonPicker = screen.getByRole('group', { name: 'Выбор занятия' })
+  expect(
+    calendar.compareDocumentPosition(lessonPicker) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy()
+  await user.click(within(lessonPicker).getByRole('button', { name: /19 нояб\. 2026 г\., 11:30/ }))
+  await waitFor(() =>
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/api/v1/teaching/courses/11/groups/21/lessons/33/attendance?limit=100',
       expect.objectContaining({ authenticated: true }),
     ),
   )
@@ -520,7 +543,7 @@ it('retains final grade drafts and retry across journal tabs, then reconciles cl
   await waitFor(() => expect(fixtures.final.retake_date).toBeNull())
   expect(
     within(remountedFinals).queryByRole('button', { name: /пересдачу: Анна Иванова/ }),
-  ).toBeDisabled()
+  ).not.toBeInTheDocument()
   await user.selectOptions(retainedGrade, '2')
   await waitFor(() => expect(fixtures.final.grade_value).toBe(2))
   await user.click(
@@ -538,21 +561,25 @@ it('keeps resit assignment unavailable until debt is confirmed by the server', a
   renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
   const finals = await openFinals(user)
   const grade = await within(finals).findByLabelText('Итог: Анна Иванова')
-  const resitButton = within(finals).getByRole('button', {
-    name: 'Назначить пересдачу: Анна Иванова',
-  })
+  expect(
+    within(finals).queryByRole('button', { name: 'Назначить пересдачу: Анна Иванова' }),
+  ).not.toBeInTheDocument()
   expect(grade).toHaveValue('4')
-  expect(resitButton).toBeDisabled()
 
   failNextFinalWrite = true
   await user.selectOptions(grade, '2')
   await screen.findByRole('button', { name: 'Повторить' })
   expect(grade).toHaveValue('2')
-  expect(resitButton).toBeDisabled()
+  expect(
+    within(finals).queryByRole('button', { name: 'Назначить пересдачу: Анна Иванова' }),
+  ).not.toBeInTheDocument()
   expect(fixtures.final.grade_value).toBe(4)
 
   await user.click(screen.getByRole('button', { name: 'Повторить' }))
   await waitFor(() => expect(fixtures.final.grade_value).toBe(2))
+  const resitButton = await within(finals).findByRole('button', {
+    name: 'Назначить пересдачу: Анна Иванова',
+  })
   await waitFor(() => expect(resitButton).toBeEnabled())
   await user.click(resitButton)
   const dialog = await screen.findByRole('dialog')

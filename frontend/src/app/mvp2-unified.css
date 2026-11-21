@@ -774,6 +774,9 @@
   align-items: start;
   gap: 16px;
 }
+.mvp2-role-surface .teacher-journal .journal-attendance-toolbar {
+  grid-template-columns: minmax(0, 1fr);
+}
 .mvp2-role-surface .journal-attendance-toolbar > .journal-attendance-note {
   grid-column: 1 / -1;
 }

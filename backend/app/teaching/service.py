@@ -392,11 +392,9 @@ def list_journal_attendance(db, course_id, group_id, lesson_id, params):
     # their NULL origin fields yield NULL, which must never leak into a bool
     # response or make the historical mark appear current.
     membership_matches = membership_matches.is_(True)
-    now = datetime.now(UTC)
     student_sort_id = Student.id.label("student_sort_id")
     can_edit = and_(
         Lesson.status == "scheduled",
-        Lesson.starts_at <= now,
         or_(Attendance.lesson_id.is_(None), membership_matches),
         or_(Attendance.lesson_id.is_not(None), Lesson.starts_at >= Student.membership_changed_at),
     )
