@@ -442,6 +442,9 @@ async function checkPreferences(page, width) {
         const margin = window.getComputedStyle(
           document.querySelector('.student-main-column'),
         ).marginLeft
+        const collapsed = document
+          .querySelector('.student-shell')
+          ?.classList.contains('sidebar-collapsed')
         const expected =
           width <= 720
             ? '0px'
@@ -451,7 +454,9 @@ async function checkPreferences(page, width) {
                 ? '230px'
                 : width <= 1450
                   ? '252px'
-                  : '272px'
+                  : collapsed
+                    ? '76px'
+                    : '272px'
         return margin === expected
       }, viewport)
       for (const direction of ['rtl', 'ltr']) {
@@ -630,7 +635,9 @@ async function noOverflow(page) {
   await waitForResponsiveLayout(page)
   await page.waitForFunction(() => {
     const main = document.querySelector('.student-main-column')
-    const collapsed = document.body.classList.contains('sidebar-collapsed')
+    const collapsed = document
+      .querySelector('.student-shell')
+      ?.classList.contains('sidebar-collapsed')
     const width = window.innerWidth
     const expected =
       width <= 720
