@@ -52,10 +52,10 @@
 .student-course__tabs {
   position: relative;
   isolation: isolate;
-  display: flex;
-  width: fit-content;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: min(100%, 27rem);
   max-width: 100%;
-  overflow-x: auto;
   gap: 4px;
   padding: 5px;
   border: 1px solid var(--line);
@@ -87,16 +87,17 @@
 .student-course__tabs button {
   position: relative;
   z-index: 1;
-  flex: 0 0 auto;
-  min-height: 44px;
-  padding-inline: 0.95rem;
+  min-width: 0;
+  min-height: 48px;
+  padding: 7px 9px;
   border: 0;
   border-radius: 9px;
   background: transparent;
   color: #65565a;
   font-size: 13px;
   font-weight: 700;
-  white-space: nowrap;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
   transition: color 160ms ease;
 }
 .student-course__tabs button[aria-selected='true'] {
@@ -171,6 +172,7 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+  margin-inline: 8px;
   border: 0;
   background: transparent;
 }
@@ -259,9 +261,6 @@
     min-width: 0;
     max-width: 100%;
   }
-  .student-course__panel {
-    overflow-x: clip;
-  }
   .student-course__group {
     margin: 0 8px 12px;
     border-radius: 16px;
@@ -272,6 +271,16 @@
   .student-course__panel > button {
     max-width: calc(100% - 16px);
     margin-inline: 8px;
+  }
+  .student-course__tabs {
+    width: 100%;
+    gap: 2px;
+    padding: 4px;
+  }
+  .student-course__tabs button {
+    min-height: 48px;
+    padding: 6px 4px;
+    font-size: 11px;
   }
   .student-course__rows--attendance {
     grid-template-columns: minmax(0, 1fr);
