@@ -633,7 +633,17 @@ async function noOverflow(page) {
     const collapsed = document.body.classList.contains('sidebar-collapsed')
     const width = window.innerWidth
     const expected =
-      width <= 720 ? 0 : width <= 1050 ? 230 : width <= 1450 ? 252 : collapsed ? 76 : 272
+      width <= 720
+        ? 0
+        : width <= 920
+          ? 76
+          : width <= 1050
+            ? 230
+            : width <= 1450
+              ? 252
+              : collapsed
+                ? 76
+                : 272
     return Math.abs(Number.parseFloat(window.getComputedStyle(main).marginLeft) - expected) < 0.5
   })
   const overflow = await page.evaluate(() => ({

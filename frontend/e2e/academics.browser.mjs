@@ -86,7 +86,11 @@ try {
     await page.setViewportSize({ width, height: 1000 })
     for (const factor of [1, 1.5, 2]) {
       await page.reload()
-      await page.getByText(longCopy.items[0].discipline.name, { exact: true }).first().waitFor()
+      await page
+        .locator('.academics-mobile-course-link:visible, .academics-desktop-course-name:visible')
+        .filter({ hasText: longCopy.items[0].discipline.name })
+        .first()
+        .waitFor()
       await scaleVisibleText(page, factor)
       await page.screenshot({
         path: `work/academics-long-copy-${width}-${factor}.png`,

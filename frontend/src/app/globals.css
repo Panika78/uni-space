@@ -2459,6 +2459,7 @@ textarea {
   flex-shrink: 0;
 }
 .desktop-sidebar .student-navigation {
+  grid-template-columns: minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
@@ -2469,7 +2470,12 @@ textarea {
   scroll-padding-block: 6px;
 }
 .desktop-sidebar .student-navigation__link {
+  min-width: 0;
   flex-shrink: 0;
+  overflow-wrap: anywhere;
+}
+.desktop-sidebar .navigation-status {
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 .desktop-sidebar .navigation-label {
