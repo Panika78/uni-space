@@ -18,6 +18,13 @@ import {
   type JournalAccess,
   type Page,
 } from './journalQueries'
+import {
+  JournalCard,
+  JournalCourseSection,
+  JournalPageHeader,
+  JournalTabPanel,
+  JournalTabs,
+} from './JournalWorkspace'
 import '../teacher/teacherJournals.css'
 import './staffJournals.css'
 
@@ -564,11 +571,15 @@ function StaffJournal({ access }: { access: JournalAccess }) {
   const [openedScope, setOpenedScope] = useState('')
   return (
     <div className="staff-journal">
-      <p className="section-eyebrow">Кабинет сотрудника</p>
-      <h1>Журнал деканата</h1>
-      <p className="service-subtitle">Дисциплины, группы, успеваемость и история изменений.</p>
-      <section aria-labelledby="staff-journal-catalog">
-        <h2 id="staff-journal-catalog">Дисциплины и группы</h2>
+      <JournalPageHeader
+        eyebrow="Кабинет сотрудника"
+        title="Журнал деканата"
+        description="Дисциплины, группы, успеваемость и история изменений."
+      />
+      <JournalCard
+        heading="Дисциплины и группы"
+        description="Каталог сгруппирован по учебным периодам и группам."
+      >
         <Search
           key={q}
           label="Поиск дисциплины, группы или семестра"
@@ -599,7 +610,7 @@ function StaffJournal({ access }: { access: JournalAccess }) {
             </ul>
           )}
         </Pager>
-      </section>
+      </JournalCard>
       {selected.isError && (
         <ErrorState
           title="Журнал недоступен"
@@ -611,12 +622,16 @@ function StaffJournal({ access }: { access: JournalAccess }) {
         <EmptyState title="Журнал не найден" />
       )}
       {course && !selected.isError && (
-        <section>
-          <h2>
-            {course.discipline.name} · {course.group.name}
-          </h2>
-          <nav className="staff-journal-actions" aria-label="Разделы журнала">
-            {(
+        <JournalCourseSection
+          heading={`${course.discipline.name} · ${course.group.name}`}
+          status="Журнал открыт"
+        >
+          <JournalTabs
+            ariaLabel="Разделы журнала"
+            idPrefix="staff-journal"
+            selected={tab}
+            onSelect={(value) => set({ tab: value, resource: '' })}
+            options={(
               [
                 ['attendance', 'Посещаемость', attendance],
                 ['work', 'Работы и баллы', grades],
@@ -624,30 +639,23 @@ function StaffJournal({ access }: { access: JournalAccess }) {
               ] as const
             )
               .filter(([, , allowed]) => allowed)
-              .map(([value, label]) => (
-                <button
-                  type="button"
-                  key={value}
-                  aria-pressed={tab === value}
-                  onClick={() => set({ tab: value, resource: '' })}
-                >
-                  {label}
-                </button>
-              ))}
-          </nav>
-          <GroupJournal
-            key={`${courseId}:${group}:${tab}`}
-            course={course}
-            tab={tab}
-            resource={resource}
-            access={access}
-            onResource={(value) => set({ tab, resource: value })}
-            onHistory={(target) => {
-              setOpenedScope(historyScope)
-              setHistory(target)
-            }}
+              .map(([id, label]) => ({ id, label }))}
           />
-        </section>
+          <JournalTabPanel idPrefix="staff-journal" tabId={tab}>
+            <GroupJournal
+              key={`${courseId}:${group}:${tab}`}
+              course={course}
+              tab={tab}
+              resource={resource}
+              access={access}
+              onResource={(value) => set({ tab, resource: value })}
+              onHistory={(target) => {
+                setOpenedScope(historyScope)
+                setHistory(target)
+              }}
+            />
+          </JournalTabPanel>
+        </JournalCourseSection>
       )}
       {grades && history && openedScope === historyScope && (
         <HistoryDialog

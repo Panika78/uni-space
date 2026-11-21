@@ -500,7 +500,6 @@
     .section-page > section,
     .section-page > article,
     .staff-journal > section,
-    .teacher-journal__panel,
     .staff-students-page .staff-student-filters,
     .staff-news-page form,
     .admin-users > section,
@@ -540,7 +539,6 @@
 .mvp2-role-surface
   :is(
     .staff-journal > section,
-    .teacher-journal__panel,
     .staff-applications__filters,
     .staff-schedule__filters,
     .staff-news-page form,
@@ -609,6 +607,48 @@
 }
 .mvp2-role-surface .staff-journal > section > h2 {
   margin: 0 0 14px;
+}
+.mvp2-role-surface .journal-workspace-card__header,
+.mvp2-role-surface .journal-course-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  margin-bottom: 12px;
+}
+.mvp2-role-surface .journal-workspace-card__header h2,
+.mvp2-role-surface .journal-course-section__header h2 {
+  margin: 0;
+  color: #30282b;
+  font-size: clamp(19px, 1.6vw, 23px);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.mvp2-role-surface .journal-workspace-card__header p {
+  margin: 6px 0 0;
+  color: #71666a;
+  line-height: 1.5;
+}
+.mvp2-role-surface .journal-course-section__status {
+  flex: 0 0 auto;
+  padding: 8px 11px;
+  border-radius: 9px;
+  background: #eaf4ed;
+  color: #286d48;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.mvp2-role-surface .journal-tab-panel {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.mvp2-role-surface .journal-tab-panel:focus-visible {
+  outline: 3px solid #a7475a;
+  outline-offset: 3px;
+  border-radius: 10px;
 }
 .mvp2-role-surface .staff-journal :is(.staff-journal-actions, .staff-journal-catalog) {
   gap: 10px;
@@ -917,7 +957,7 @@
 .mvp2-role-surface
   .staff-journal
   .journal-attendance-controls
-  button[aria-pressed='true'][aria-label='Присутствовал'] {
+  button[aria-pressed='true'][aria-label^='Присутствовал'] {
   border-color: #a7d5b4;
   background: #e9f4eb;
   color: #286d48;
@@ -925,7 +965,7 @@
 .mvp2-role-surface
   .staff-journal
   .journal-attendance-controls
-  button[aria-pressed='true'][aria-label='Отсутствовал'] {
+  button[aria-pressed='true'][aria-label^='Отсутствовал'] {
   border-color: #f0ca8c;
   background: #fff0d7;
   color: #925515;
@@ -1996,19 +2036,15 @@
 
 /* Compact segmented controls mirror the services switch; the selected state exists on
    the first paint, so opening a route never animates from a false default position. */
-.mvp2-role-surface .teacher-journal__tabs,
-.mvp2-role-surface .staff-journal nav[aria-label='Разделы журнала'],
+.mvp2-role-surface .journal-tabs,
 .mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений'],
 .mvp2-role-surface .staff-schedule__tabs {
-  position: relative;
-  isolation: isolate;
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
+  display: flex;
+  flex-wrap: wrap;
   width: fit-content;
   max-width: 100%;
   gap: 4px;
-  overflow-x: auto;
+  margin: 12px 0 18px;
   padding: 5px;
   border: 1px solid var(--line, #e8dad1);
   border-radius: 13px;
@@ -2016,8 +2052,6 @@
   scrollbar-width: none;
 }
 
-.mvp2-role-surface .teacher-journal__tabs::before,
-.mvp2-role-surface .staff-journal nav[aria-label='Разделы журнала']::before,
 .mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений']::before,
 .mvp2-role-surface .staff-schedule__tabs[role='tablist']::before,
 .mvp2-role-surface .staff-schedule__tabs[aria-label='Период']::before {
@@ -2033,27 +2067,6 @@
   transform: translateX(var(--mvp2-segment-offset, 0));
   transition: transform 280ms var(--ease, cubic-bezier(0.22, 1, 0.36, 1));
   pointer-events: none;
-}
-
-.mvp2-role-surface .teacher-journal__tabs:has(button[aria-selected='true']:nth-child(2))::before {
-  --mvp2-segment-offset: calc(100% + 4px);
-}
-
-.mvp2-role-surface .staff-journal nav[aria-label='Разделы журнала'] {
-  --mvp2-segment-width: calc((100% - 15px) / 2);
-}
-.mvp2-role-surface .staff-journal nav[aria-label='Разделы журнала']:has(button:nth-child(3)) {
-  --mvp2-segment-width: calc((100% - 22px) / 3);
-}
-.mvp2-role-surface
-  .staff-journal
-  nav[aria-label='Разделы журнала']:has(button[aria-pressed='true']:nth-child(2)) {
-  --mvp2-segment-offset: calc(100% + 4px);
-}
-.mvp2-role-surface
-  .staff-journal
-  nav[aria-label='Разделы журнала']:has(button[aria-pressed='true']:nth-child(3)) {
-  --mvp2-segment-offset: calc(200% + 8px);
 }
 
 .mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений'] {
@@ -2091,12 +2104,12 @@
   --mvp2-segment-offset: calc(100% + 4px);
 }
 
-.mvp2-role-surface .teacher-journal__tabs > button,
-.mvp2-role-surface .staff-journal nav[aria-label='Разделы журнала'] > button,
+.mvp2-role-surface .journal-tabs > button,
 .mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений'] > a,
 .mvp2-role-surface .staff-schedule__tabs > button {
   position: relative;
   z-index: 1;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 40px;
   padding: 9px 14px;
@@ -2113,11 +2126,12 @@
   transition: color 160ms ease;
 }
 
-.mvp2-role-surface .teacher-journal__tabs > button[aria-selected='true'],
-.mvp2-role-surface .staff-journal nav[aria-label='Разделы журнала'] > button[aria-pressed='true'],
+.mvp2-role-surface .journal-tabs > button[aria-selected='true'],
 .mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений'] > a[aria-current],
 .mvp2-role-surface .staff-schedule__tabs > button.is-active {
+  background: #781f32;
   color: white;
+  box-shadow: 0 3px 9px rgb(120 31 50 / 13%);
 }
 
 .mvp2-role-surface
@@ -2664,12 +2678,14 @@
   .mvp2-role-surface .staff-journal form[role='search'] button {
     width: 100%;
   }
-  .mvp2-role-surface .staff-journal nav[aria-label='Разделы журнала'] {
+  .mvp2-role-surface .journal-tabs {
     display: grid;
+    grid-auto-flow: column;
     grid-auto-columns: minmax(0, 1fr);
     width: 100%;
+    overflow: visible;
   }
-  .mvp2-role-surface .staff-journal nav[aria-label='Разделы журнала'] > button {
+  .mvp2-role-surface .journal-tabs > button {
     min-height: 48px;
     padding: 7px 4px;
     font-size: 10px;
@@ -2764,12 +2780,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mvp2-role-surface .teacher-journal__tabs::before,
   .mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений']::before,
   .mvp2-role-surface .staff-schedule__tabs::before,
   .mvp2-role-surface
     :is(
-      .teacher-journal__tabs > button,
+      .journal-tabs > button,
       .staff-applications > nav[aria-label='Очередь заявлений'] > a,
       .staff-schedule__tabs > button
     ) {

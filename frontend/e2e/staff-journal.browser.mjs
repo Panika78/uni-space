@@ -82,7 +82,7 @@ async function saved(page, path, method, action) {
 const row = (page) => page.locator('article.journal-student').filter({ hasText: studentName })
 const score = (page) => page.getByLabel(`Балл · ${studentName}`)
 const sectionButton = (page, name) =>
-  page.getByRole('navigation', { name: 'Разделы журнала' }).getByRole('button', { name })
+  page.getByRole('tablist', { name: 'Разделы журнала' }).getByRole('tab', { name })
 
 try {
   const mobile = await browser.newContext({ viewport: { width: 360, height: 800 } })
