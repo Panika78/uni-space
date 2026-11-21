@@ -1,4 +1,4 @@
-/* global process, console, window, document, getComputedStyle */
+/* global process, console, window, document, getComputedStyle, URL */
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
@@ -466,16 +466,21 @@ try {
     `${baseURL}/teacher/journals?course=${env.TEACHER_JOURNAL_COURSE_A}&group=${env.TEACHER_JOURNAL_GROUP_A}&tab=attendance&lesson=${env.TEACHER_JOURNAL_LESSON_A}`,
   )
   await page.getByRole('button', { name: 'Присутствовал: Мария Петрова' }).waitFor()
+  const readBack = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return (
+      response.request().method() === 'GET' &&
+      url.pathname.endsWith(`/lessons/${env.TEACHER_JOURNAL_LESSON_A}/attendance`) &&
+      url.searchParams.get('student_id') === env.TEACHER_JOURNAL_STUDENT_C
+    )
+  })
   await page.getByRole('button', { name: 'Отсутствовал: Мария Петрова' }).click()
+  const reconciled = await readBack
+  assert.equal(reconciled.status(), 200)
+  assert.equal((await reconciled.json()).items[0].status, 'absent')
   await waitForAttendance(page, 'Отсутствовал', 'Мария Петрова')
-  assert.equal(
-    await page
-      .getByRole('button', { name: 'Отсутствовал: Мария Петрова' })
-      .getAttribute('aria-pressed'),
-    'true',
-  )
+  await page.unrouteAll({ behavior: 'wait' })
   assert.equal(writes, 1)
-  await page.unrouteAll()
   check('lost write response reconciled by authoritative GET without duplicate mutation')
 
   const announcementPanel = page.locator('.journal-announcements')
