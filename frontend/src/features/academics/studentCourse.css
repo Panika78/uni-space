@@ -73,8 +73,8 @@
   left: 5px;
   width: var(--tab-width, 0px);
   border-radius: 9px;
-  background: var(--accent);
-  box-shadow: 0 3px 9px rgb(120 31 50 / 13%);
+  background: #fffefd;
+  box-shadow: 0 2px 7px rgb(66 31 37 / 9%);
   transform: translateX(var(--tab-x, 0));
   transition: none;
   pointer-events: none;
@@ -101,12 +101,16 @@
   transition: color 160ms ease;
 }
 .student-course__tabs button[aria-selected='true'] {
-  color: #fff;
+  color: #781f32;
 }
 .student-course__panel {
+  box-sizing: border-box;
+  container-name: student-course-panel;
+  container-type: inline-size;
   min-width: 0;
   width: 100%;
   margin-top: 1rem;
+  padding: 12px;
   min-height: 270px;
 }
 .student-course__panel > * {
@@ -138,7 +142,7 @@
   margin: 0;
 }
 .student-course__group {
-  margin: 0 8px 0.75rem;
+  margin: 0 0 0.75rem;
   overflow: hidden;
 }
 .student-course__group summary {
@@ -172,7 +176,7 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
-  margin-inline: 8px;
+  margin-inline: 0;
   border: 0;
   background: transparent;
 }
@@ -224,7 +228,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin: 0.75rem 8px 0;
+  margin: 0.75rem 0 0;
   min-height: 44px;
   padding: 10px 18px;
   border: 1px solid #decac2;
@@ -256,21 +260,34 @@
   display: block;
   font-size: 0.875rem;
 }
+@container student-course-panel (max-width: 680px) {
+  .student-course__rows--attendance {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@container student-course-panel (max-width: 520px) {
+  .student-course__rows--attendance li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.35rem;
+  }
+  .student-course__rows--attendance li > .attendance-mark {
+    text-align: start;
+  }
+}
 @media (max-width: 520px) {
   .student-course {
     min-width: 0;
     max-width: 100%;
   }
   .student-course__group {
-    margin: 0 8px 12px;
+    margin: 0 0 12px;
     border-radius: 16px;
   }
   .student-course__more {
-    max-width: calc(100% - 8px);
+    max-width: 100%;
   }
   .student-course__panel > button {
-    max-width: calc(100% - 16px);
-    margin-inline: 8px;
+    max-width: 100%;
   }
   .student-course__tabs {
     width: 100%;
