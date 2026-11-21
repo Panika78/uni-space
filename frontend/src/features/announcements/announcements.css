@@ -1,47 +1,147 @@
 .journal-announcements {
-  margin-block: 1rem;
+  margin-block: 16px 20px;
   min-width: 0;
-  padding: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  padding: 16px;
+  border: 1px solid var(--line, #e8dad1);
+  border-radius: 16px;
+  background: var(--surface, #fffefd);
+  box-shadow: 0 6px 20px rgb(66 31 37 / 4%);
 }
 
-.journal-announcements summary,
+.journal-announcements > summary,
 .announcement-feed summary {
   cursor: pointer;
+}
+.journal-announcements > summary {
+  color: #30282b;
+  font-size: 16px;
+  font-weight: 700;
+}
+.journal-announcements[open] > summary {
+  margin-bottom: 14px;
 }
 
 .journal-announcements fieldset {
   display: grid;
-  gap: 0.75rem;
-  margin: 0.75rem 0;
+  gap: 14px;
+  margin: 0;
+  padding: 16px;
   min-width: 0;
+  border: 1px solid var(--line, #e8dad1);
+  border-radius: 13px;
+  background: #fffefd;
+}
+.journal-announcements legend {
+  padding-inline: 6px;
+  color: #30282b;
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .journal-announcements form label {
   display: grid;
-  gap: 0.25rem;
+  gap: 7px;
   min-width: 0;
+  color: #554b4e;
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .journal-announcements form :is(input:not([type='checkbox']), textarea, select) {
   width: 100%;
   min-width: 0;
-  padding: 0.4rem;
-  border: 1px solid var(--border);
-  border-radius: 0.25rem;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #e8dad1);
+  border-radius: 10px;
+  background: #fffefd;
+  color: #292326;
+  font: inherit;
+}
+.journal-announcements form textarea {
+  min-height: 132px;
+  resize: vertical;
 }
 
 .journal-announcements form .announcement-check {
-  display: flex;
+  display: inline-flex;
+  width: fit-content;
   align-items: center;
+  gap: 9px;
+  cursor: pointer;
+}
+.journal-announcements form .announcement-check input[type='checkbox'] {
+  width: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent, #781f32);
 }
 
 .journal-announcements button {
   justify-self: start;
-  padding: 0.35rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.35rem;
+  min-height: 42px;
+  padding: 9px 16px;
+  border: 1px solid var(--line, #e8dad1);
+  border-radius: 10px;
+  background: #781f32;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.journal-announcements button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.journal-announcements form > p[role='status'] {
+  margin: 10px 0 0;
+  color: #71666a;
+  font-size: 13px;
+}
+.journal-announcements .announcement-feed {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0 0;
+}
+.journal-announcements .announcement-feed > li {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line, #e8dad1);
+  border-radius: 12px;
+  background: #fffefd;
+}
+.journal-announcements .announcement-feed details > summary {
+  display: grid;
+  gap: 5px;
+  overflow-wrap: anywhere;
+}
+.journal-announcements .announcement-byline,
+.journal-announcements .announcement-excerpt {
+  color: #71666a;
+  font-size: 12px;
+}
+.journal-announcements .announcement-important {
+  width: fit-content;
+  margin: 0;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: #f2ece8;
+  color: #71666a;
+  font-size: 11px;
+  font-weight: 650;
+}
+.journal-announcements .announcement-body {
+  margin: 10px 0 0;
+  color: #292326;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.journal-announcements > button {
+  margin-top: 10px;
 }
 
 .journal-announcements :focus-visible,
@@ -135,7 +235,7 @@
 }
 .announcement-feed li {
   padding: 0.75rem 0;
-  border-block-end: 1px solid var(--border);
+  border-block-end: 1px solid var(--line, #e8dad1);
 }
 
 .announcement-byline,
@@ -163,6 +263,15 @@
 }
 
 @media (max-width: 560px) {
+  .journal-announcements {
+    padding: 13px;
+  }
+  .journal-announcements fieldset {
+    padding: 13px;
+  }
+  .journal-announcements form textarea {
+    min-height: 116px;
+  }
   .student-course .announcement-card {
     padding: 20px;
   }

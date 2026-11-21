@@ -1676,15 +1676,15 @@
     .teacher-journal__selectors summary,
     .teacher-journal__selectors button[data-course-id][data-group-id],
     .teacher-journal select,
-    .teacher-journal input,
-    .staff-journal input,
+    .teacher-journal input:not([type='checkbox']),
+    .staff-journal input:not([type='checkbox']),
     .staff-journal select,
     .staff-applications__filters :is(input, select),
     .staff-applications__dialog textarea,
-    .staff-schedule__filters input,
+    .staff-schedule__filters input:not([type='checkbox']),
     .staff-schedule__filters select,
-    .staff-schedule__form-fields :is(input, select),
-    .staff-schedule__picker input,
+    .staff-schedule__form-fields :is(input:not([type='checkbox']), select),
+    .staff-schedule__picker input:not([type='checkbox']),
     .staff-students-page :is(input, select),
     .staff-news-page :is(input, select, textarea),
     .admin-users :is(input, select, textarea)
@@ -1695,6 +1695,10 @@
   background-color: #fffefd;
   color: #292326;
   font: inherit;
+}
+.mvp2-role-surface .teacher-journal .journal-announcements input[type='checkbox'] {
+  min-height: 18px;
+  height: 18px;
 }
 
 .mvp2-role-surface .staff-student-filters :is(input, select),
@@ -2050,6 +2054,14 @@
   border-radius: 13px;
   background: #f2e7e2;
   scrollbar-width: none;
+}
+
+/* These two segmented controls still use an absolutely-positioned sliding segment.
+   Keep its containing block local so the segment cannot escape and paint over the page. */
+.mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений'],
+.mvp2-role-surface .staff-schedule__tabs {
+  position: relative;
+  isolation: isolate;
 }
 
 .mvp2-role-surface .staff-applications > nav[aria-label='Очередь заявлений']::before,
