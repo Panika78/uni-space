@@ -456,7 +456,7 @@ async function checkPreferences(page, width) {
                   ? '252px'
                   : collapsed
                     ? '76px'
-                    : '272px'
+                    : '252px'
         return margin === expected
       }, viewport)
       for (const direction of ['rtl', 'ltr']) {
@@ -650,7 +650,7 @@ async function noOverflow(page) {
               ? 252
               : collapsed
                 ? 76
-                : 272
+                : 252
     return Math.abs(Number.parseFloat(window.getComputedStyle(main).marginLeft) - expected) < 0.5
   })
   const overflow = await page.evaluate(() => ({
