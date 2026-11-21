@@ -38,6 +38,7 @@ export async function assertAcademicsGeometry(page, width, label) {
   )
   const compact = container.width <= 48 * root
   for (const table of await tables.all()) {
+    const headerCount = await table.locator('thead th').count()
     const snapshot = await table.ariaSnapshot()
     assert.match(snapshot, /columnheader.*Дисциплина/, `${label}: table headers remain accessible`)
     const rows = table.locator('tbody tr')
@@ -64,7 +65,11 @@ export async function assertAcademicsGeometry(page, width, label) {
           }
         }),
       )
-      assert.equal(cells.length, 3, `${label}: all three fields must exist`)
+      assert.equal(
+        cells.length,
+        headerCount,
+        `${label}: every academic field must have a matching column header`,
+      )
       for (const cell of cells)
         assert.ok(
           cell.scroll <= cell.client + 1,
