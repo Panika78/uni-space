@@ -784,6 +784,50 @@
   font-size: clamp(14px, 0.25vw + 13px, 15px);
   font-weight: 650;
 }
+.mvp2-role-surface .teacher-journal__lesson-options {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #eadbd3;
+  border-radius: 13px;
+  background: #fffefd;
+}
+.mvp2-role-surface .teacher-journal__lesson-options > h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+.mvp2-role-surface .teacher-journal__lesson-options > p {
+  margin: 0;
+  color: var(--muted);
+}
+.mvp2-role-surface .teacher-journal__lesson-options [role='group'] {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+.mvp2-role-surface .teacher-journal__lesson-options [role='group'] > button {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid #dfd0c9;
+  border-radius: 9px;
+  background: #fffefd;
+  color: #30282b;
+  font: inherit;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.mvp2-role-surface .teacher-journal__lesson-options [role='group'] > button[aria-pressed='true'] {
+  border-color: #781f32;
+  background: #fff8f4;
+  box-shadow: inset 3px 0 #781f32;
+}
+.mvp2-role-surface .teacher-journal__lesson-options [role='group'] > button:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
 .mvp2-role-surface .journal-attendance-note {
   display: grid;
   gap: 5px;
@@ -2952,4 +2996,197 @@
     ) {
     transition: none !important;
   }
+}
+
+/* Teacher and staff journal tables become labeled cards on narrow screens. */
+@media (max-width: 640px) {
+  .mvp2-role-surface .journal-table-scroll--mobile-cards {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+    scrollbar-gutter: auto;
+  }
+  .mvp2-role-surface .journal-table-scroll--mobile-cards .journal-data-table,
+  .mvp2-role-surface .journal-table-scroll--mobile-cards .journal-data-table tbody {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+  .mvp2-role-surface .journal-table-scroll--mobile-cards .journal-data-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .mvp2-role-surface .journal-table-scroll--mobile-cards .journal-data-table tbody {
+    display: grid;
+    gap: 10px;
+  }
+  .mvp2-role-surface .journal-table-scroll--mobile-cards .journal-data-table tr {
+    display: grid;
+    min-width: 0;
+    padding: 4px 12px;
+    border: 1px solid #eadbd3;
+    border-radius: 13px;
+    background: #fffefd;
+  }
+  .mvp2-role-surface .journal-table-scroll--mobile-cards .journal-data-table td {
+    display: grid;
+    grid-template-columns: minmax(100px, 0.72fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 9px 0;
+    border-top: 1px solid #eee3dd;
+    overflow-wrap: anywhere;
+  }
+  .mvp2-role-surface .journal-table-scroll--mobile-cards .journal-data-table td:first-child {
+    border-top: 0;
+  }
+  .mvp2-role-surface .journal-table-scroll--mobile-cards .journal-data-table td::before {
+    content: attr(data-label);
+    color: #71666a;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .mvp2-role-surface
+    .journal-table-scroll--mobile-cards
+    .journal-data-table
+    .journal-table-student {
+    min-width: 0;
+  }
+  .mvp2-role-surface .journal-table-scroll--mobile-cards .journal-data-table :is(input, select) {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .mvp2-role-surface .journal-table-scroll--mobile-cards .journal-final-actions {
+    justify-content: flex-start;
+  }
+  .mvp2-role-surface .journal-table-scroll--mobile-cards .journal-attendance-controls {
+    width: auto;
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 560px) {
+  .mvp2-role-surface .teacher-journal .journal-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-flow: row;
+  }
+  .mvp2-role-surface .staff-journal .journal-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-flow: row;
+  }
+  .mvp2-role-surface :is(.teacher-journal, .staff-journal) .journal-tabs > button {
+    min-width: 0;
+    min-height: 44px;
+    padding: 7px 6px;
+    font-size: 12px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+  .mvp2-role-surface .teacher-journal__lesson-options {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid #eadbd3;
+    border-radius: 13px;
+    background: #fffefd;
+  }
+  .mvp2-role-surface .teacher-journal__lesson-options [role='group'] {
+    display: grid;
+    gap: 8px;
+  }
+}
+
+.mvp2-role-surface .journal-retake-open {
+  display: block;
+  max-width: 100%;
+  margin-top: 7px;
+  padding: 7px 10px;
+  border: 1px solid #d8b8b5;
+  border-radius: 9px;
+  background: #fff8f4;
+  color: #781f32;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.mvp2-role-surface .journal-retake-open:disabled {
+  color: #71666a;
+  background: #f4efec;
+  cursor: not-allowed;
+}
+.mvp2-role-surface .teacher-journal__retake-summary,
+.mvp2-role-surface .journal-retake-summary,
+.mvp2-role-surface .journal-edit-limitation {
+  display: block;
+  margin-top: 5px;
+  color: #71666a;
+  font-size: 13px;
+}
+.mvp2-role-surface .teacher-journal-dialog {
+  box-sizing: border-box;
+  width: min(480px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  padding: 22px;
+  overflow: auto;
+  border: 1px solid #eadbd3;
+  border-radius: 16px;
+  background: #fffefd;
+  color: #30282b;
+}
+.mvp2-role-surface .teacher-journal-dialog::backdrop {
+  background: rgb(47 34 37 / 42%);
+}
+.mvp2-role-surface .teacher-journal-dialog form {
+  display: grid;
+  gap: 14px;
+}
+.mvp2-role-surface .teacher-journal-dialog h2 {
+  margin: 0;
+  font-size: clamp(20px, 2vw, 24px);
+}
+.mvp2-role-surface .teacher-journal-dialog label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 650;
+}
+.mvp2-role-surface .teacher-journal-dialog input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid #dfd0c9;
+  border-radius: 9px;
+  background: #fffefd;
+  color: #30282b;
+  font: inherit;
+}
+.mvp2-role-surface .teacher-journal-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.mvp2-role-surface .teacher-journal-dialog__actions button {
+  min-height: 42px;
+  padding: 9px 14px;
+  border: 1px solid #781f32;
+  border-radius: 9px;
+  background: #781f32;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.mvp2-role-surface .teacher-journal-dialog__actions button[type='button'] {
+  background: #fffefd;
+  color: #781f32;
 }

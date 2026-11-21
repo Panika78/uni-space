@@ -132,13 +132,20 @@ export function JournalTable({
   label,
   columns,
   children,
+  className,
 }: {
   label: string
   columns: readonly JournalTableColumn[]
   children: ReactNode
+  className?: string
 }) {
   return (
-    <div className="journal-table-scroll" role="region" aria-label={label} tabIndex={0}>
+    <div
+      className={['journal-table-scroll', className].filter(Boolean).join(' ')}
+      role="region"
+      aria-label={label}
+      tabIndex={0}
+    >
       <table className="journal-data-table">
         <thead>
           <tr>

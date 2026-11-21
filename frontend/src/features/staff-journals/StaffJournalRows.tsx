@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ApiClientError, isDefinitiveApiRejection } from '../../shared/api/client'
 import type { components } from '../../shared/api/schema'
@@ -231,18 +231,18 @@ export function ScoreRow({
   if (display === 'table-row')
     return (
       <tr>
-        <td className="journal-table-student">
+        <td className="journal-table-student" data-label="Студент">
           {row.full_name}
           {(row.history_only || !row.is_current_group_member) && (
             <small>{row.history_only ? 'Оценка удалена' : 'Исторический результат'}</small>
           )}
         </td>
-        <td>
+        <td data-label="Работа">
           <strong>{assessment.title}</strong>
           <small className="journal-table-secondary">{assessment.type}</small>
         </td>
-        <td>{assessment.planned_date ?? '—'}</td>
-        <td>
+        <td data-label="Дата">{assessment.planned_date ?? '—'}</td>
+        <td data-label="Баллы">
           <div className="journal-score-cell">
             <input
               inputMode="numeric"
@@ -326,11 +326,11 @@ export function AttendanceRow({
   if (display === 'table-row')
     return (
       <tr>
-        <td className="journal-table-student">
+        <td className="journal-table-student" data-label="Студент">
           {row.full_name}
           {row.is_historical && <small>Историческая отметка</small>}
         </td>
-        <td>
+        <td data-label="Посещаемость">
           <div
             className="journal-attendance-controls"
             role="group"
@@ -342,7 +342,11 @@ export function AttendanceRow({
                 key={value}
                 aria-pressed={row.status === value}
                 aria-label={title}
-                title={title}
+                title={
+                  !row.can_edit
+                    ? 'Изменение недоступно по правилам журнала или правам доступа'
+                    : title
+                }
                 disabled={!row.can_edit || save.busy}
                 onClick={() => {
                   if (row.status === value) return
@@ -357,8 +361,13 @@ export function AttendanceRow({
               </button>
             ))}
           </div>
+          {!row.can_edit && (
+            <small className="journal-edit-limitation">
+              Отметка недоступна по правилам занятия или правам доступа.
+            </small>
+          )}
         </td>
-        <td>
+        <td data-label="Последнее изменение">
           {row.updated_at ?? '—'}
           <SaveLabel state={save.state} onRetry={save.state?.retry} />
         </td>
@@ -370,6 +379,11 @@ export function AttendanceRow({
         <strong>{row.full_name}</strong>
         {row.is_historical && <small>Историческая отметка</small>}
       </div>
+      {!row.can_edit && (
+        <small className="journal-edit-limitation">
+          Отметка недоступна по правилам занятия или правам доступа.
+        </small>
+      )}
       <div
         className="journal-attendance-controls"
         role="group"
@@ -421,6 +435,8 @@ export function FinalRow({
   onHistory: () => void
   display?: 'card' | 'table-row'
 }) {
+  const [retakeOpen, setRetakeOpen] = useState(false)
+  const dialog = useRef<HTMLDialogElement>(null)
   const isPass = attestation === 'pass_fail'
   const path = `/api/v1/final-results/courses/${row.course_offering_id}/students/${row.student_id}`
   const save = useRowSave(access, readPath, row.student_id, path)
@@ -434,6 +450,11 @@ export function FinalRow({
     date: row.retake_date ?? '',
     location: row.retake_location ?? '',
   }
+  useEffect(() => {
+    const element = dialog.current
+    if (retakeOpen && row.has_debt && element && !element.open) element.showModal()
+    else if ((!retakeOpen || !row.has_debt) && element?.open) element.close()
+  }, [retakeOpen, row.has_debt])
   function submit(remove = false) {
     if (save.busy || conflict) return
     const patch = {
@@ -457,178 +478,152 @@ export function FinalRow({
           },
     )
   }
-  if (display === 'table-row') {
-    const formId = `staff-final-${row.student_id}`
-    return (
-      <tr>
-        <td className="journal-table-student">
-          {fullName}
-          <button type="button" className="journal-inline-action" onClick={onHistory}>
-            История изменений
-          </button>
-        </td>
-        <td>
-          <form
-            id={formId}
-            onSubmit={(event) => {
-              event.preventDefault()
-              submit()
-            }}
-          >
-            <select
-              aria-label={`Результат: ${fullName}`}
-              value={gradeValue}
-              onChange={(event) => save.change('grade', event.target.value, baseline, initial)}
-              disabled={save.busy}
-            >
-              <option value="">Не выставлен</option>
-              {isPass ? (
-                <>
-                  <option value="true">Зачтено</option>
-                  <option value="false">Не зачтено</option>
-                </>
-              ) : (
-                [2, 3, 4, 5].map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))
-              )}
-            </select>
-          </form>
-        </td>
-        <td>
-          <input
-            className="journal-table-input"
-            aria-label={`Дата пересдачи: ${fullName}`}
-            form={formId}
-            type="date"
-            value={date ?? row.retake_date ?? ''}
-            readOnly={save.busy}
-            onChange={(event) => save.change('date', event.target.value, baseline, initial)}
-          />
-        </td>
-        <td>
-          <input
-            className="journal-table-input"
-            aria-label={`Место пересдачи: ${fullName}`}
-            form={formId}
-            value={location ?? row.retake_location ?? ''}
-            maxLength={200}
-            readOnly={save.busy}
-            onChange={(event) => save.change('location', event.target.value, baseline, initial)}
-          />
-        </td>
-        <td>
-          <div className="journal-final-actions">
-            <button form={formId} type="submit" disabled={save.busy || conflict}>
+  function saveRetake(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!row.has_debt || save.busy || conflict) return
+    const patch = {
+      retake_date: (date ?? row.retake_date) || null,
+      retake_location: (location ?? row.retake_location)?.trim() || null,
+    }
+    void save.save({
+      method: 'PATCH',
+      body: patch,
+      expected: patch,
+    })
+  }
+  function closeRetake() {
+    if (save.busy) return
+    save.change('date', initial.date, baseline, initial)
+    save.change('location', initial.location, baseline, initial)
+    setRetakeOpen(false)
+  }
+  const resultControl = (
+    <select
+      aria-label={`Результат: ${fullName}`}
+      value={gradeValue}
+      onChange={(event) => save.change('grade', event.target.value, baseline, initial)}
+      disabled={save.busy}
+    >
+      <option value="">Не выставлен</option>
+      {isPass ? (
+        <>
+          <option value="true">Зачтено</option>
+          <option value="false">Не зачтено</option>
+        </>
+      ) : (
+        [2, 3, 4, 5].map((value) => (
+          <option key={value} value={value}>
+            {value}
+          </option>
+        ))
+      )}
+    </select>
+  )
+  const retakeButton = (
+    <button
+      type="button"
+      className="journal-retake-open"
+      disabled={!row.has_debt}
+      aria-label={`${row.retake_date || row.retake_location ? 'Изменить' : 'Назначить'} пересдачу: ${fullName}`}
+      title={!row.has_debt ? 'Доступно только при наличии долга' : undefined}
+      onClick={() => setRetakeOpen(true)}
+    >
+      {row.retake_date || row.retake_location ? 'Изменить пересдачу' : 'Назначить пересдачу'}
+    </button>
+  )
+  const actions = (
+    <div className="journal-final-actions">
+      <button type="button" disabled={save.busy || conflict} onClick={() => submit()}>
+        Сохранить итог
+      </button>
+      <button
+        type="button"
+        disabled={save.busy || conflict || !row.result_id}
+        onClick={() => submit(true)}
+      >
+        Удалить итог
+      </button>
+      <button type="button" className="journal-inline-action" onClick={onHistory}>
+        История изменений
+      </button>
+    </div>
+  )
+  return (
+    <>
+      {display === 'table-row' ? (
+        <tr>
+          <td className="journal-table-student" data-label="Студент">
+            {fullName}
+          </td>
+          <td data-label="Результат">{resultControl}</td>
+          <td data-label="Дата пересдачи">{row.retake_date ?? '—'}</td>
+          <td data-label="Место пересдачи">
+            {row.retake_location ?? '—'}
+            {retakeButton}
+          </td>
+          <td data-label="Действия">
+            {actions}
+            <SaveLabel state={save.state} onRetry={conflict ? undefined : save.state?.retry} />
+            {conflict && <p role="status">Итог изменился на сервере. Проверьте новую запись.</p>}
+          </td>
+        </tr>
+      ) : (
+        <article className="journal-student journal-student--final">
+          <div className="journal-student__identity">
+            <strong>{fullName}</strong>
+            {actions}
+          </div>
+          <label className="journal-score">Итог{resultControl}</label>
+          <div className="journal-retake-summary">
+            Пересдача · {row.retake_date ?? 'не назначена'} ·{' '}
+            {row.retake_location ?? 'место не указано'}
+          </div>
+          {retakeButton}
+          <SaveLabel state={save.state} onRetry={conflict ? undefined : save.state?.retry} />
+          {conflict && (
+            <div role="status">Итог изменился на сервере. Проверьте актуальную запись.</div>
+          )}
+        </article>
+      )}
+      <dialog
+        ref={dialog}
+        className="teacher-journal-dialog"
+        aria-labelledby={`staff-retake-title-${row.student_id}`}
+        onCancel={(event) => {
+          event.preventDefault()
+          closeRetake()
+        }}
+        onClose={() => setRetakeOpen(false)}
+      >
+        <form onSubmit={saveRetake}>
+          <h2 id={`staff-retake-title-${row.student_id}`}>Пересдача · {fullName}</h2>
+          <label>
+            Дата пересдачи
+            <input
+              type="date"
+              value={date ?? row.retake_date ?? ''}
+              onChange={(event) => save.change('date', event.target.value, baseline, initial)}
+            />
+          </label>
+          <label>
+            Место пересдачи
+            <input
+              value={location ?? row.retake_location ?? ''}
+              maxLength={200}
+              onChange={(event) => save.change('location', event.target.value, baseline, initial)}
+            />
+          </label>
+          <SaveLabel state={save.state} onRetry={save.state?.retry} />
+          <div className="teacher-journal-dialog__actions">
+            <button type="submit" disabled={save.busy || conflict}>
               Сохранить
             </button>
-            <button
-              type="button"
-              disabled={save.busy || conflict || !row.result_id}
-              onClick={() => submit(true)}
-            >
-              Удалить
+            <button type="button" disabled={save.busy} onClick={closeRetake}>
+              Отмена
             </button>
           </div>
-          <SaveLabel state={save.state} onRetry={conflict ? undefined : save.state?.retry} />
-          {conflict && <p role="status">Итог изменился на сервере. Проверьте новую запись.</p>}
-        </td>
-      </tr>
-    )
-  }
-  return (
-    <article className="journal-student journal-student--final">
-      <div className="journal-student__identity">
-        <strong>{fullName}</strong>
-        <button type="button" className="journal-inline-action" onClick={onHistory}>
-          История изменений
-        </button>
-      </div>
-      <form
-        className="journal-retake-fields"
-        onSubmit={(event) => {
-          event.preventDefault()
-          submit()
-        }}
-      >
-        <label className="journal-score">
-          Итог
-          <select
-            value={gradeValue}
-            onChange={(event) => {
-              save.change('grade', event.target.value, baseline, initial)
-            }}
-            disabled={save.busy}
-          >
-            <option value="">Не выставлен</option>
-            {isPass ? (
-              <>
-                <option value="true">Зачтено</option>
-                <option value="false">Не зачтено</option>
-              </>
-            ) : (
-              [2, 3, 4, 5].map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))
-            )}
-          </select>
-        </label>
-        <label>
-          Дата пересдачи
-          <input
-            type="date"
-            value={date ?? row.retake_date ?? ''}
-            readOnly={save.busy}
-            onChange={(event) => {
-              save.change('date', event.target.value, baseline, initial)
-            }}
-          />
-        </label>
-        <label>
-          Место пересдачи
-          <input
-            value={location ?? row.retake_location ?? ''}
-            maxLength={200}
-            readOnly={save.busy}
-            onChange={(event) => {
-              save.change('location', event.target.value, baseline, initial)
-            }}
-          />
-        </label>
-        <div className="staff-journal-actions">
-          <button type="submit" disabled={save.busy || conflict}>
-            Сохранить итог
-          </button>
-          <button
-            type="button"
-            disabled={save.busy || conflict || !row.result_id}
-            onClick={() => submit(true)}
-          >
-            Удалить итог
-          </button>
-        </div>
-      </form>
-      {conflict && (
-        <div role="status">
-          Итог изменился на сервере. Проверьте новую запись перед применением черновика.
-          <p>
-            На сервере:{' '}
-            {String(
-              row.grade_value ??
-                (row.passed === null ? 'Не выставлен' : row.passed ? 'Зачтено' : 'Не зачтено'),
-            )}{' '}
-            · {row.retake_date ?? 'Без даты'} · {row.retake_location ?? 'Без места'}
-          </p>
-          <button type="button" onClick={() => save.acceptBaseline(baseline)}>
-            Оставить мой черновик
-          </button>
-        </div>
-      )}
-      <SaveLabel state={save.state} onRetry={conflict ? undefined : save.state?.retry} />
-    </article>
+        </form>
+      </dialog>
+    </>
   )
 }

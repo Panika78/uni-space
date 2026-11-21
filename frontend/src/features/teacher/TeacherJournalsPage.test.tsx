@@ -266,7 +266,7 @@ it('restores all three attendance states from the server and saves individual ch
   await waitFor(() => expect(fixtures.marks[2]?.status).toBe('attended'))
 })
 
-it('offers a timezone-correct calendar and filters lesson choices by selected date', async () => {
+it('offers only a timezone-correct calendar and filters lessons by selected date', async () => {
   const user = userEvent.setup()
   const original = vi.mocked(apiFetch).getMockImplementation()!
   const nextDayLesson = {
@@ -287,7 +287,13 @@ it('offers a timezone-correct calendar and filters lesson choices by selected da
   expect(await within(calendar).findByRole('button', { name: /16.*занятий: 1/ })).toBeEnabled()
   expect(within(calendar).getByRole('button', { name: /17.*занятий нет/ })).toBeDisabled()
   await user.click(within(calendar).getByRole('button', { name: /19.*занятий: 1/ }))
-  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Занятие' })).toHaveValue('32'))
+  await waitFor(() =>
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/api/v1/teaching/courses/11/groups/21/lessons/32/attendance?limit=100',
+      expect.objectContaining({ authenticated: true }),
+    ),
+  )
+  expect(screen.queryByRole('combobox', { name: 'Занятие' })).not.toBeInTheDocument()
   expect(screen.getAllByText(/19 нояб\. 2026 г\./).length).toBeGreaterThan(0)
 })
 
@@ -489,53 +495,69 @@ it('retains final grade drafts and retry across journal tabs, then reconciles cl
   await user.click(within(remountedFinals).getByRole('button', { name: 'Повторить' }))
   await waitFor(() => expect(fixtures.final.grade_value).toBe(2))
 
-  const date = within(remountedFinals).getByLabelText('Дата пересдачи: Анна Иванова')
-  const location = within(remountedFinals).getByLabelText('Место пересдачи: Анна Иванова')
+  await user.click(
+    within(remountedFinals).getByRole('button', { name: 'Назначить пересдачу: Анна Иванова' }),
+  )
+  const dialog = await screen.findByRole('dialog')
+  const date = within(dialog).getByLabelText('Дата пересдачи')
+  const location = within(dialog).getByLabelText('Место пересдачи')
   await user.type(date, '2027-01-10')
-  await user.tab()
-  await waitFor(() => expect(fixtures.final.retake_date).toBe('2027-01-10'))
-  await user.clear(location)
   await user.type(location, 'A-101')
-  await user.tab()
+  await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
+  await waitFor(() => expect(fixtures.final.retake_date).toBe('2027-01-10'))
   await waitFor(() => expect(fixtures.final.retake_location).toBe('A-101'))
+  await user.click(within(dialog).getByRole('button', { name: 'Отмена' }))
+  await user.click(
+    within(remountedFinals).getByRole('button', { name: 'Изменить пересдачу: Анна Иванова' }),
+  )
+  const reopenedDialog = await screen.findByRole('dialog')
+  expect(within(reopenedDialog).getByLabelText('Дата пересдачи')).toHaveValue('2027-01-10')
+  expect(within(reopenedDialog).getByLabelText('Место пересдачи')).toHaveValue('A-101')
+  await user.click(within(reopenedDialog).getByRole('button', { name: 'Отмена' }))
 
   await user.selectOptions(retainedGrade, '4')
   await waitFor(() => expect(fixtures.final.grade_value).toBe(4))
   await waitFor(() => expect(fixtures.final.retake_date).toBeNull())
-  await waitFor(() => expect(date).toHaveValue(''))
-  expect(location).toHaveValue('')
+  expect(
+    within(remountedFinals).queryByRole('button', { name: /пересдачу: Анна Иванова/ }),
+  ).toBeDisabled()
   await user.selectOptions(retainedGrade, '2')
   await waitFor(() => expect(fixtures.final.grade_value).toBe(2))
-  expect(date).toHaveValue('')
-  expect(location).toHaveValue('')
+  await user.click(
+    within(remountedFinals).getByRole('button', { name: 'Назначить пересдачу: Анна Иванова' }),
+  )
+  const newDialog = await screen.findByRole('dialog')
+  expect(within(newDialog).getByLabelText('Дата пересдачи')).toHaveValue('')
+  expect(within(newDialog).getByLabelText('Место пересдачи')).toHaveValue('')
+  await user.click(within(newDialog).getByRole('button', { name: 'Отмена' }))
 })
 
-it('keeps retake fields locked until a debt is confirmed by the server', async () => {
+it('keeps resit assignment unavailable until debt is confirmed by the server', async () => {
   const user = userEvent.setup()
   Object.assign(fixtures.final, { grade_value: 4, has_debt: false })
   renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
   const finals = await openFinals(user)
-  await user.click(within(finals).getByText('Пересдача'))
   const grade = await within(finals).findByLabelText('Итог: Анна Иванова')
-  const date = await within(finals).findByLabelText('Дата пересдачи: Анна Иванова')
-  const location = await within(finals).findByLabelText('Место пересдачи: Анна Иванова')
+  const resitButton = within(finals).getByRole('button', {
+    name: 'Назначить пересдачу: Анна Иванова',
+  })
   expect(grade).toHaveValue('4')
-  expect(date).toBeDisabled()
-  expect(location).toBeDisabled()
+  expect(resitButton).toBeDisabled()
 
   failNextFinalWrite = true
   await user.selectOptions(grade, '2')
   await screen.findByRole('button', { name: 'Повторить' })
   expect(grade).toHaveValue('2')
-  expect(date).toBeDisabled()
-  expect(location).toBeDisabled()
+  expect(resitButton).toBeDisabled()
   expect(fixtures.final.grade_value).toBe(4)
 
   await user.click(screen.getByRole('button', { name: 'Повторить' }))
   await waitFor(() => expect(fixtures.final.grade_value).toBe(2))
-  await waitFor(() => expect(date).toBeEnabled())
-  await user.type(date, '2027-01-10')
-  await user.tab()
+  await waitFor(() => expect(resitButton).toBeEnabled())
+  await user.click(resitButton)
+  const dialog = await screen.findByRole('dialog')
+  await user.type(within(dialog).getByLabelText('Дата пересдачи'), '2027-01-10')
+  await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
   await waitFor(() => expect(fixtures.final.retake_date).toBe('2027-01-10'))
 })
 
@@ -570,10 +592,14 @@ it('does not confirm or clear a final draft when a successful response normalize
 
   renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
   const finals = await openFinals(user)
-  const date = await within(finals).findByLabelText('Дата пересдачи: Студент 1')
+  await user.click(within(finals).getByRole('button', { name: 'Назначить пересдачу: Студент 1' }))
+  const dialog = await screen.findByRole('dialog')
+  const date = within(dialog).getByLabelText('Дата пересдачи')
   await user.type(date, '2027-01-10')
-  await user.tab()
-  await screen.findByText(/Сервер сохранил другое значение/)
+  await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
+  await waitFor(() =>
+    expect(screen.getAllByText(/Сервер сохранил другое значение/).length).toBeGreaterThan(0),
+  )
   expect(date).toHaveValue('2027-01-10')
   expect(fixtures.final.retake_date).toBe('2027-01-10')
   expect(screen.queryByText('Сохранено')).not.toBeInTheDocument()
@@ -581,6 +607,6 @@ it('does not confirm or clear a final draft when a successful response normalize
   normalizeRetakeResponse = false
   await user.clear(date)
   await user.type(date, '2027-01-10')
-  await user.tab()
-  await waitFor(() => expect(within(finals).getByText('Сохранено')).toBeInTheDocument())
+  await user.click(within(dialog).getByRole('button', { name: 'Сохранить' }))
+  await waitFor(() => expect(within(dialog).getByText('Сохранено')).toBeInTheDocument())
 })
