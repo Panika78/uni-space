@@ -4,7 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createQueryClient } from '../../app/queryClient'
-import { apiFetch } from '../../shared/api/client'
+import { ApiClientError, apiFetch } from '../../shared/api/client'
 import { TeacherJournalsPage } from './TeacherJournalsPage'
 
 const fixtures = vi.hoisted(() => ({
@@ -257,12 +257,109 @@ it('restores all three attendance states from the server and saves individual ch
   )
   await user.click(screen.getByRole('button', { name: 'Нет отметки: Анна Иванова' }))
   await waitFor(() => expect(fixtures.marks[0]?.status).toBe('unmarked'))
+  expect(await screen.findByText('Сохранено')).toBeInTheDocument()
   expect(apiFetch).toHaveBeenCalledWith(
     '/api/v1/attendance/lessons/31/students/1',
     expect.objectContaining({ method: 'DELETE', authenticated: true }),
   )
   await user.click(screen.getByRole('button', { name: 'Присутствовал: Мария Петрова' }))
   await waitFor(() => expect(fixtures.marks[2]?.status).toBe('attended'))
+})
+
+it('offers a timezone-correct calendar and filters lesson choices by selected date', async () => {
+  const user = userEvent.setup()
+  const original = vi.mocked(apiFetch).getMockImplementation()!
+  const nextDayLesson = {
+    ...lesson,
+    id: '32',
+    starts_at: '2026-11-18T22:30:00Z', // 19 November in Europe/Moscow
+    ends_at: '2026-11-19T00:00:00Z',
+  }
+  vi.mocked(apiFetch).mockImplementation(async (input, init = {}) => {
+    const url = String(input)
+    if (url.endsWith('/lessons?limit=100')) return page([lesson, nextDayLesson])
+    if (url.endsWith('/lessons/32/attendance?limit=100')) return page([])
+    return original(input, init)
+  })
+
+  renderJournal()
+  const calendar = await screen.findByRole('region', { name: 'Календарь занятий' })
+  expect(await within(calendar).findByRole('button', { name: /16.*занятий: 1/ })).toBeEnabled()
+  expect(within(calendar).getByRole('button', { name: /17.*занятий нет/ })).toBeDisabled()
+  await user.click(within(calendar).getByRole('button', { name: /19.*занятий: 1/ }))
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Занятие' })).toHaveValue('32'))
+  expect(screen.getAllByText(/19 нояб\. 2026 г\./).length).toBeGreaterThan(0)
+})
+
+it('restores the previous attendance mark and explains a definitive API rejection', async () => {
+  const user = userEvent.setup()
+  const original = vi.mocked(apiFetch).getMockImplementation()!
+  vi.mocked(apiFetch).mockImplementation(async (input, init = {}) => {
+    if (String(input).includes('/attendance/lessons/31/students/1') && init.method === 'PUT')
+      throw new ApiClientError('Conflict', 'invalid_transition', 409)
+    return original(input, init)
+  })
+
+  renderJournal()
+  const markPresent = await screen.findByRole('button', {
+    name: 'Присутствовал: Анна Иванова',
+  })
+  await user.click(screen.getByRole('button', { name: 'Отсутствовал: Анна Иванова' }))
+  expect(
+    await screen.findByText(/Данные изменились или занятие уже нельзя редактировать/),
+  ).toBeInTheDocument()
+  expect(markPresent).toHaveAttribute('aria-pressed', 'true')
+})
+
+it('persists a linked lesson and reports the saved association', async () => {
+  const user = userEvent.setup()
+  let savedAssessment = { ...assessment, lesson_id: null }
+  vi.mocked(apiFetch).mockImplementation(async (input, init = {}) => {
+    const url = String(input)
+    if (url.startsWith('/api/v1/teaching/assignments')) return page([assignment])
+    if (url.endsWith('/students?limit=100')) return page([])
+    if (url.endsWith('/lessons?limit=100')) return page([lesson])
+    if (url.endsWith('/assessments?limit=100')) return page([savedAssessment])
+    if (url.endsWith('/assessments/44/results?limit=100')) return page([])
+    if (url.endsWith('/dates') && init.method === 'PATCH') {
+      const item = JSON.parse(String(init.body)).items[0]
+      savedAssessment = {
+        ...savedAssessment,
+        planned_date: item.planned_date,
+        lesson_id: item.lesson_id,
+        date_needs_confirmation: false,
+      }
+      return {
+        items: [
+          {
+            assessment_group_id: '44',
+            planned_date: item.planned_date,
+            lesson_id: item.lesson_id,
+            date_needs_confirmation: false,
+          },
+        ],
+      }
+    }
+    if (url.includes('/assessments?assessment_group_id=')) return page([savedAssessment])
+    if (url.endsWith('/dates')) return { items: [] }
+    throw new Error(`Unexpected journal request: ${url}`)
+  })
+
+  renderJournal('/teacher/journals?course=11&group=21&tab=work&assessment=44')
+  await user.click(await screen.findByText('Планирование и связь работ с занятиями'))
+  await user.selectOptions(
+    await screen.findByRole('combobox', { name: 'Связать с занятием' }),
+    '31',
+  )
+  expect(await screen.findByText(/Не сохранено, выбрано занятие:/)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Сохранить дату и связь' }))
+  await waitFor(() => expect(savedAssessment.lesson_id).toBe('31'))
+  expect(await screen.findByText('Сохранено')).toBeInTheDocument()
+  expect(screen.getByText(/Связано с занятием:/)).toBeInTheDocument()
+  expect(apiFetch).toHaveBeenCalledWith(
+    expect.stringMatching(/\/dates$/),
+    expect.objectContaining({ method: 'PATCH' }),
+  )
 })
 
 it('separates an ungraded result from zero and supports scores and manual final grades', async () => {

@@ -37,8 +37,7 @@
   margin: 0;
 }
 .journal-announcements--workspace > form {
-  padding: 0 0 16px;
-  border-bottom: 1px solid var(--line, #e8dad1);
+  padding: 0;
 }
 .journal-announcements--workspace .announcement-feed-panel > h2 {
   margin: 0 0 12px;

@@ -23,6 +23,7 @@ import '../staff-journals/staffJournals.css'
 type Assignment = components['schemas']['TeachingAssignmentResponse']
 type Lesson = components['schemas']['JournalLesson']
 type Attendance = components['schemas']['JournalAttendanceRow']
+type AttendanceResponse = components['schemas']['AttendanceResponse']
 type Assessment = components['schemas']['JournalAssessment']
 type Result = components['schemas']['JournalResult']
 type FinalResult = components['schemas']['ManualFinalResultResponse']
@@ -48,6 +49,19 @@ function moscowCalendarDate(value: string) {
   }).formatToParts(new Date(value))
   const dateParts = Object.fromEntries(parts.map(({ type, value: part }) => [type, part]))
   return `${dateParts.year}-${dateParts.month}-${dateParts.day}`
+}
+
+function dateFromKey(value: string) {
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(Date.UTC(year!, month! - 1, day!))
+}
+
+function dateKey(value: Date) {
+  return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, '0')}-${String(value.getUTCDate()).padStart(2, '0')}`
+}
+
+function isDateKey(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && dateKey(dateFromKey(value)) === value
 }
 
 async function getAllPages<T>(path: string, signal?: AbortSignal): Promise<T[]> {
@@ -110,6 +124,7 @@ export function TeacherJournalsPage() {
       ? requestedTab
       : 'attendance'
   const lessonId = params.get('lesson') ?? ''
+  const requestedLessonDate = params.get('lesson_date') ?? ''
   const assessmentId = params.get('assessment') ?? ''
   const catalogSearch = params.get('q') ?? ''
   const [studentSearch, setStudentSearch] = useState('')
@@ -189,6 +204,47 @@ export function TeacherJournalsPage() {
   const lessons = lessonsQuery.data ?? []
   const assessments = assessmentsQuery.data ?? []
   const selectedLesson = lessons.find((item) => item.id === lessonId)
+  const selectedLessonDate = selectedLesson ? moscowCalendarDate(selectedLesson.starts_at) : ''
+  const firstLessonDate = lessons[0] ? moscowCalendarDate(lessons[0].starts_at) : ''
+  const calendarDate =
+    selectedLessonDate ||
+    (isDateKey(requestedLessonDate) ? requestedLessonDate : '') ||
+    firstLessonDate
+  const [calendarNavigation, setCalendarNavigation] = useState<{
+    selectedDate: string
+    month: Date
+  } | null>(null)
+  const calendarMonth =
+    calendarNavigation?.selectedDate === calendarDate
+      ? calendarNavigation.month
+      : dateFromKey(calendarDate || moscowCalendarDate(new Date().toISOString()))
+  const lessonsByDate = new Map<string, Lesson[]>()
+  for (const item of lessons) {
+    const key = moscowCalendarDate(item.starts_at)
+    lessonsByDate.set(key, [...(lessonsByDate.get(key) ?? []), item])
+  }
+  const calendarCells = (() => {
+    const first = new Date(Date.UTC(calendarMonth.getUTCFullYear(), calendarMonth.getUTCMonth(), 1))
+    const offset = (first.getUTCDay() + 6) % 7
+    const days = new Date(
+      Date.UTC(calendarMonth.getUTCFullYear(), calendarMonth.getUTCMonth() + 1, 0),
+    ).getUTCDate()
+    return [
+      ...Array.from({ length: offset }, () => null),
+      ...Array.from({ length: days }, (_, index) =>
+        dateKey(
+          new Date(
+            Date.UTC(calendarMonth.getUTCFullYear(), calendarMonth.getUTCMonth(), index + 1),
+          ),
+        ),
+      ),
+    ]
+  })()
+  const calendarMonthLabel = new Intl.DateTimeFormat('ru-RU', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'Europe/Moscow',
+  }).format(calendarMonth)
   const selectedAssessment = assessments.find((item) => item.id === assessmentId)
   const assessmentDateDraft = selectedAssessment
     ? (drafts[scopedKey(`date:${selectedAssessment.id}:date`)] ??
@@ -204,14 +260,15 @@ export function TeacherJournalsPage() {
   const lessonDateMismatch = Boolean(
     linkedLessonDraft && moscowCalendarDate(linkedLessonDraft.starts_at) !== assessmentDateDraft,
   )
+  const attendanceQueryKey = [
+    'teacher-journal-attendance',
+    userId,
+    selectedCourse,
+    selectedGroup,
+    selectedLesson?.id,
+  ]
   const attendanceQuery = useQuery({
-    queryKey: [
-      'teacher-journal-attendance',
-      userId,
-      selectedCourse,
-      selectedGroup,
-      selectedLesson?.id,
-    ],
+    queryKey: attendanceQueryKey,
     enabled: Boolean(path && selectedLesson),
     queryFn: ({ signal }) =>
       getAllPages<Attendance>(
@@ -298,6 +355,36 @@ export function TeacherJournalsPage() {
     if (key === 'lesson' || key === 'assessment')
       next.set('tab', key === 'lesson' ? 'attendance' : 'work')
     setParams(next, { preventScrollReset: true })
+  }
+
+  function chooseLesson(item: Lesson) {
+    const next = new URLSearchParams(params)
+    next.set('lesson', item.id)
+    next.set('lesson_date', moscowCalendarDate(item.starts_at))
+    next.set('tab', 'attendance')
+    setParams(next, { preventScrollReset: true })
+  }
+
+  function chooseLessonDate(value: string) {
+    const available = lessonsByDate.get(value) ?? []
+    if (!available.length) return
+    const next = new URLSearchParams(params)
+    next.set('lesson_date', value)
+    next.set(
+      'lesson',
+      (available.find((item) => item.id === selectedLesson?.id) ?? available[0]!).id,
+    )
+    next.set('tab', 'attendance')
+    setParams(next, { preventScrollReset: true })
+  }
+
+  function shiftCalendarMonth(delta: number) {
+    setCalendarNavigation({
+      selectedDate: calendarDate,
+      month: new Date(
+        Date.UTC(calendarMonth.getUTCFullYear(), calendarMonth.getUTCMonth() + delta, 1),
+      ),
+    })
   }
 
   function setSave(key: string, state: SaveState, revision?: number) {
@@ -419,17 +506,37 @@ export function TeacherJournalsPage() {
         { authenticated: true, cache: 'no-store' },
       )
       if ((actual.items[0]?.status ?? 'unmarked') === status) {
+        const confirmed = actual.items[0]
+        queryClient.setQueryData<Attendance[]>(attendanceQueryKey, (current) =>
+          current?.map((item) =>
+            item.student_id === row.student_id
+              ? { ...item, status, updated_at: confirmed?.updated_at ?? item.updated_at }
+              : item,
+          ),
+        )
         setSave(key, { phase: 'saved' }, revision)
         void attendanceQuery.refetch()
         return
       }
-      setSave(key, { phase: 'error', retry: () => void saveAttendance(row, status) }, revision)
-    } catch {
+      queryClient.setQueryData<Attendance[]>(attendanceQueryKey, (current) =>
+        current?.map((item) => (item.student_id === row.student_id ? row : item)),
+      )
+      setSave(
+        key,
+        {
+          phase: 'error',
+          message: 'Изменение не сохранено. Возможно, занятие уже нельзя редактировать.',
+          retry: () => void saveAttendance(row, status),
+        },
+        revision,
+      )
+    } catch (error) {
       setSave(
         key,
         {
           phase: 'error',
           uncertain: true,
+          message: errorMessage(error),
           retry: () => void verifyAttendance(row, status, key, revision),
         },
         revision,
@@ -498,10 +605,14 @@ export function TeacherJournalsPage() {
   }
 
   async function saveAttendance(row: Attendance, status: 'attended' | 'absent' | 'unmarked') {
+    if (!selectedLesson || !row.can_edit) return
     const key = scopedKey(`attendance:${selectedLesson?.id}:${row.student_id}`)
     await enqueue(key, async (revision) => {
+      queryClient.setQueryData<Attendance[]>(attendanceQueryKey, (current) =>
+        current?.map((item) => (item.student_id === row.student_id ? { ...item, status } : item)),
+      )
       try {
-        await apiFetch(
+        const saved = await apiFetch<AttendanceResponse>(
           `/api/v1/attendance/lessons/${encodeURIComponent(selectedLesson!.id)}/students/${encodeURIComponent(row.student_id)}`,
           {
             authenticated: true,
@@ -509,9 +620,33 @@ export function TeacherJournalsPage() {
             ...(status === 'unmarked' ? {} : { body: JSON.stringify({ status }) }),
           },
         )
+        queryClient.setQueryData<Attendance[]>(attendanceQueryKey, (current) =>
+          current?.map((item) =>
+            item.student_id === row.student_id
+              ? { ...item, status: saved.status, updated_at: saved.updated_at }
+              : item,
+          ),
+        )
         setSave(key, { phase: 'saved' }, revision)
         void attendanceQuery.refetch()
-      } catch {
+      } catch (error) {
+        // The write may have reached the server before a network failure; verify
+        // against the authoritative attendance endpoint before showing an error.
+        if (error instanceof ApiClientError && error.status !== undefined && error.status < 500) {
+          queryClient.setQueryData<Attendance[]>(attendanceQueryKey, (current) =>
+            current?.map((item) => (item.student_id === row.student_id ? row : item)),
+          )
+          setSave(
+            key,
+            {
+              phase: 'error',
+              message: errorMessage(error),
+              retry: () => void saveAttendance(row, status),
+            },
+            revision,
+          )
+          return
+        }
         await verifyAttendance(row, status, key, revision)
       }
     })
@@ -629,6 +764,7 @@ export function TeacherJournalsPage() {
           key,
           {
             phase: 'error',
+            message: 'Сервер не подтвердил связь работы с занятием. Проверьте данные и повторите.',
             retry: () =>
               void saveAssessmentDate(
                 date,
@@ -705,27 +841,26 @@ export function TeacherJournalsPage() {
         const updated = saved.items.find(
           (item) => item.assessment_group_id === selectedAssessment.id,
         )
-        if (updated) {
-          queryClient.setQueryData<Assessment[]>(assessmentsQueryKey, (current) =>
-            current?.map((item) =>
-              item.id === updated.assessment_group_id
-                ? {
-                    ...item,
-                    planned_date: updated.planned_date,
-                    lesson_id: updated.lesson_id,
-                    date_needs_confirmation: updated.date_needs_confirmation,
-                  }
-                : item,
-            ),
-          )
-          clearDraft(dateKey, dateRevision)
-          clearDraft(lessonKey, lessonRevision)
-          if (
-            currentInputRevision(dateKey) === dateRevision &&
-            currentInputRevision(lessonKey) === lessonRevision
-          )
-            setSave(key, { phase: 'saved' }, revision)
-        }
+        if (!updated) throw new Error('Assessment date update was not returned by the server')
+        queryClient.setQueryData<Assessment[]>(assessmentsQueryKey, (current) =>
+          current?.map((item) =>
+            item.id === updated.assessment_group_id
+              ? {
+                  ...item,
+                  planned_date: updated.planned_date,
+                  lesson_id: updated.lesson_id,
+                  date_needs_confirmation: updated.date_needs_confirmation,
+                }
+              : item,
+          ),
+        )
+        clearDraft(dateKey, dateRevision)
+        clearDraft(lessonKey, lessonRevision)
+        if (
+          currentInputRevision(dateKey) === dateRevision &&
+          currentInputRevision(lessonKey) === lessonRevision
+        )
+          setSave(key, { phase: 'saved' }, revision)
         void assessmentsQuery.refetch()
       } catch {
         await verifyAssessmentDate(
@@ -1048,10 +1183,15 @@ export function TeacherJournalsPage() {
                           <select
                             aria-label="Занятие"
                             value={selectedLesson?.id ?? ''}
-                            onChange={(event) => setSelection('lesson', event.target.value)}
+                            onChange={(event) => {
+                              const item = lessons.find(
+                                (lesson) => lesson.id === event.target.value,
+                              )
+                              if (item) chooseLesson(item)
+                            }}
                           >
                             <option value="">Выберите занятие</option>
-                            {lessons.map((item) => (
+                            {(lessonsByDate.get(calendarDate) ?? []).map((item) => (
                               <option key={item.id} value={item.id}>
                                 {formatDateTime(item.starts_at)} · {item.kind}
                                 {item.status !== 'scheduled'
@@ -1061,6 +1201,56 @@ export function TeacherJournalsPage() {
                             ))}
                           </select>
                         </label>
+                        <section
+                          className="teacher-journal-calendar"
+                          aria-label="Календарь занятий"
+                        >
+                          <header>
+                            <button
+                              type="button"
+                              aria-label="Предыдущий месяц"
+                              onClick={() => shiftCalendarMonth(-1)}
+                            >
+                              ‹
+                            </button>
+                            <strong>{calendarMonthLabel}</strong>
+                            <button
+                              type="button"
+                              aria-label="Следующий месяц"
+                              onClick={() => shiftCalendarMonth(1)}
+                            >
+                              ›
+                            </button>
+                          </header>
+                          <div
+                            className="teacher-journal-calendar__grid"
+                            aria-label={calendarMonthLabel}
+                          >
+                            {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((day) => (
+                              <span key={day}>{day}</span>
+                            ))}
+                            {calendarCells.map((value, index) => {
+                              if (!value) return <span key={`empty-${index}`} aria-hidden="true" />
+                              const count = lessonsByDate.get(value)?.length ?? 0
+                              const day = Number(value.slice(-2))
+                              return (
+                                <button
+                                  key={value}
+                                  type="button"
+                                  aria-label={`${day} ${calendarMonthLabel}${count ? `, занятий: ${count}` : ', занятий нет'}`}
+                                  aria-pressed={value === calendarDate}
+                                  disabled={!count}
+                                  className={count ? 'has-lessons' : undefined}
+                                  onClick={() => chooseLessonDate(value)}
+                                >
+                                  {day}
+                                  {count > 1 && <small>{count}</small>}
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <p>Даты с занятиями выделены; выберите дату, чтобы увидеть занятия.</p>
+                        </section>
                         {selectedLesson && (
                           <aside className="journal-attendance-note">
                             <strong>ⓘ Три состояния отметки</strong>
@@ -1153,7 +1343,9 @@ export function TeacherJournalsPage() {
                                               title={status.title}
                                               aria-label={`${status.title}: ${row.full_name}`}
                                               aria-pressed={row.status === status.value}
-                                              disabled={!row.can_edit}
+                                              disabled={
+                                                !row.can_edit || saveStates[key]?.phase === 'saving'
+                                              }
                                               onClick={() => void saveAttendance(row, status.value)}
                                             >
                                               {status.label}
@@ -1366,10 +1558,15 @@ export function TeacherJournalsPage() {
                                   ''
                                 }
                                 onChange={(event) => {
-                                  changeDraft(
-                                    scopedKey(`date:${selectedAssessment.id}:lesson`),
-                                    event.target.value,
+                                  const nextLessonId = event.target.value
+                                  const selected = lessons.find((item) => item.id === nextLessonId)
+                                  const dateKey = scopedKey(`date:${selectedAssessment.id}:date`)
+                                  const lessonKey = scopedKey(
+                                    `date:${selectedAssessment.id}:lesson`,
                                   )
+                                  if (selected)
+                                    changeDraft(dateKey, moscowCalendarDate(selected.starts_at))
+                                  changeDraft(lessonKey, nextLessonId)
                                   clearSaveState(scopedKey(`date:${selectedAssessment.id}`))
                                 }}
                               >
@@ -1382,6 +1579,15 @@ export function TeacherJournalsPage() {
                                     </option>
                                   ))}
                               </select>
+                              {linkedLessonDraft && (
+                                <span className="journal-date-link-status" role="status">
+                                  {dirtyDrafts[scopedKey(`date:${selectedAssessment.id}:lesson`)] ||
+                                  dirtyDrafts[scopedKey(`date:${selectedAssessment.id}:date`)]
+                                    ? 'Не сохранено, выбрано занятие:'
+                                    : 'Связано с занятием:'}{' '}
+                                  {formatDateTime(linkedLessonDraft.starts_at)}
+                                </span>
+                              )}
                             </label>
                             <button
                               type="button"
