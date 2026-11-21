@@ -131,7 +131,10 @@ try {
   await statusPage.waitForURL('**/staff/students')
   await heading(statusPage, 'Поиск студентов')
   await statusPage.getByRole('heading', { name: 'Ёжова Елена E2E' }).waitFor()
-  const statusTrigger = statusPage.getByRole('button', { name: 'Изменить статус' })
+  const targetStudentCard = statusPage
+    .locator('.staff-student-card')
+    .filter({ has: statusPage.getByRole('heading', { name: 'Ёжова Елена E2E', exact: true }) })
+  const statusTrigger = targetStudentCard.getByRole('button', { name: 'Изменить статус' })
   await statusTrigger.click()
   let statusDialog = statusPage.getByRole('dialog', { name: 'Изменение статуса' })
   await statusDialog.getByText('Ёжова Елена E2E · E2E-27', { exact: true }).waitFor()
