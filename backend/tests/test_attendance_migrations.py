@@ -261,9 +261,7 @@ def test_demo_membership_upgrade_repairs_only_initial_verified_profiles(migratio
             )
             db.add(user)
             db.flush()
-            student = Student(
-                user_id=user.id, group_id=groups[code].id, academic_status="enrolled"
-            )
+            student = Student(user_id=user.id, group_id=groups[code].id, academic_status="enrolled")
             db.add(student)
             db.flush()
             profiles[login] = student
@@ -290,9 +288,7 @@ def test_demo_membership_upgrade_repairs_only_initial_verified_profiles(migratio
     run_migration(engine, "check")
     with Session(engine) as db:
         repaired = {login: db.get(Student, student_id) for login, student_id in ids.items()}
-        assert repaired["demo-pz101"].membership_changed_at == datetime(
-            2026, 8, 31, 21, tzinfo=UTC
-        )
+        assert repaired["demo-pz101"].membership_changed_at == datetime(2026, 8, 31, 21, tzinfo=UTC)
         assert repaired["demo-pz101"].membership_version == 0
         assert (
             repaired["demo-pm201"].membership_changed_at,
@@ -307,6 +303,4 @@ def test_demo_membership_upgrade_repairs_only_initial_verified_profiles(migratio
         db.flush()
         db.refresh(repaired["demo-pz101"])
         assert repaired["demo-pz101"].membership_version == 1
-        assert repaired["demo-pz101"].membership_changed_at > datetime(
-            2026, 8, 31, 21, tzinfo=UTC
-        )
+        assert repaired["demo-pz101"].membership_changed_at > datetime(2026, 8, 31, 21, tzinfo=UTC)
