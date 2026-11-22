@@ -281,6 +281,7 @@ def test_demo_membership_upgrade_repairs_only_initial_verified_profiles(migratio
             for login, profile in profiles.items()
         }
         ids = {login: profile.id for login, profile in profiles.items()}
+        other_group_id = other_group.id
         db.commit()
 
     run_migration(engine, "upgrade", "head")
@@ -299,7 +300,7 @@ def test_demo_membership_upgrade_repairs_only_initial_verified_profiles(migratio
             repaired["ordinary-student"].membership_version,
         ) == before["ordinary-student"]
         # The membership trigger still protects subsequent real transfers.
-        repaired["demo-pz101"].group_id = other_group.id
+        repaired["demo-pz101"].group_id = other_group_id
         db.flush()
         db.refresh(repaired["demo-pz101"])
         assert repaired["demo-pz101"].membership_version == 1
