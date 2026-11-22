@@ -384,6 +384,9 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
     pz = db_session.scalar(select(Student).join(User).where(User.login == "demo-pz101"))
     pm = db_session.scalar(select(Student).join(User).where(User.login == "demo-pm201"))
     assert pz is not None and pm is not None and pz.group_id != pm.group_id
+    term_start = datetime.combine(seed.TERM_START, seed.time.min, seed.MOSCOW)
+    assert (pz.membership_changed_at, pm.membership_changed_at) == (term_start, term_start)
+    assert (pz.membership_version, pm.membership_version) == (0, 0)
     pz_user = db_session.get(User, pz.user_id)
     pm_user = db_session.get(User, pm.user_id)
     assert pz_user.password_hash.startswith("$argon2id$")
@@ -734,6 +737,52 @@ def test_demo_seed_is_repeatable_and_preserves_user_application(db_session, monk
             db_session.expire_all()
             assert db_session.get(seed.Attendance, attendance_key).status == "attended"
             assert db_session.get(seed.Attendance, attendance_key).marked_by_user_id is not None
+
+            # Unlike updating a seeded absence, a newly recorded mark exercises
+            # the membership boundary that used to reject past demo lessons.
+            unmarked_lesson = db_session.scalar(
+                select(Lesson)
+                .join(seed.CourseOffering)
+                .join(seed.Discipline)
+                .where(seed.Discipline.name == "Математический анализ")
+                .where(Lesson.status == "scheduled")
+                .where(Lesson.starts_at < datetime(2026, 11, 16, tzinfo=seed.MOSCOW))
+                .where(
+                    ~select(seed.Attendance.lesson_id)
+                    .where(seed.Attendance.lesson_id == Lesson.id)
+                    .where(seed.Attendance.student_id == pz.id)
+                    .exists()
+                )
+                .order_by(Lesson.starts_at)
+                .limit(1)
+            )
+            assert unmarked_lesson is not None
+            unmarked_key = (unmarked_lesson.id, pz.id)
+            assert db_session.get(seed.Attendance, unmarked_key) is None
+            unmarked_journal = (
+                f"/api/v1/teaching/courses/{unmarked_lesson.course_offering_id}"
+                f"/groups/{pz.group_id}/lessons/{unmarked_lesson.id}/attendance?limit=100"
+            )
+            before_mark = client.get(unmarked_journal, headers=linked_teacher_headers)
+            assert before_mark.status_code == 200, before_mark.text
+            roster_row = next(
+                row for row in before_mark.json()["items"] if row["student_id"] == str(pz.id)
+            )
+            assert (roster_row["status"], roster_row["can_edit"]) == ("unmarked", True)
+            marked = client.put(
+                f"/api/v1/attendance/lessons/{unmarked_lesson.id}/students/{pz.id}",
+                headers=linked_teacher_headers,
+                json={"status": "attended"},
+            )
+            assert marked.status_code == 200, marked.text
+            after_mark = client.get(unmarked_journal, headers=linked_teacher_headers)
+            assert after_mark.status_code == 200
+            assert any(
+                row["student_id"] == str(pz.id) and row["status"] == "attended"
+                for row in after_mark.json()["items"]
+            )
+            db_session.expire_all()
+            assert db_session.get(seed.Attendance, unmarked_key).status == "attended"
 
             login = client.post(
                 "/api/v1/auth/login",

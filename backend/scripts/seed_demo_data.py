@@ -697,15 +697,22 @@ def seed_demo_data() -> None:
                 },
                 mutable={"full_name": {legacy_name, full_name}},
             )
+            student_values = {
+                "group_id": groups[key].id,
+                "subgroup_id": subgroups["2-я подгруппа"].id if key == "pm" else None,
+                "academic_status": "enrolled",
+            }
+            if existing is None:
+                # These fictional students have attended since the start of the
+                # seeded term, not since the database/account creation time.
+                student_values["membership_changed_at"] = datetime.combine(
+                    TERM_START, time.min, MOSCOW
+                )
             students[key] = one_or_create(
                 db,
                 Student,
                 {"user_id": users[key].id},
-                {
-                    "group_id": groups[key].id,
-                    "subgroup_id": subgroups["2-я подгруппа"].id if key == "pm" else None,
-                    "academic_status": "enrolled",
-                },
+                student_values,
                 mutable={
                     "subgroup_id": {None, subgroups["2-я подгруппа"].id} if key == "pm" else {None}
                 },

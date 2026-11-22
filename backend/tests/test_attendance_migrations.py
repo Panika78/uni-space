@@ -201,3 +201,112 @@ def test_origin_upgrade_preserves_unknown_legacy_marks_and_downgrade(migration_d
         assert db.scalar(text("SELECT to_regprocedure('track_student_membership()')")) is None
     run_migration(engine, "upgrade", "head")
     run_migration(engine, "check")
+
+
+def test_demo_membership_upgrade_repairs_only_initial_verified_profiles(migration_database):  # noqa: F811
+    from datetime import UTC, date, datetime
+
+    from sqlalchemy.orm import Session
+
+    from app.models import AcademicTerm, OrgUnit, Program, Student, StudyGroup, User
+
+    engine = migration_database
+    run_migration(engine, "upgrade", "20261121_01")
+    with Session(engine) as db:
+        faculty = OrgUnit(name="Факультет естественных наук", type="faculty")
+        db.add(faculty)
+        db.flush()
+        programs = {}
+        groups = {}
+        for code, group_name in (("ПЗ", "ПЗ-101"), ("ПМ", "ПМ-201")):
+            program = Program(
+                code=code,
+                name="Тестовая программа",
+                direction_code=f"TEST-{code}",
+                direction_name="Тестовое направление",
+                faculty_id=faculty.id,
+            )
+            db.add(program)
+            db.flush()
+            programs[code] = program
+            group = StudyGroup(name=group_name, program_id=program.id, course_number=1)
+            db.add(group)
+            db.flush()
+            groups[code] = group
+        other_group = StudyGroup(
+            name="Другая группа", program_id=programs["ПМ"].id, course_number=1
+        )
+        db.add(other_group)
+        db.add(
+            AcademicTerm(
+                name="Осенний семестр 2026/2027",
+                starts_on=date(2026, 9, 1),
+                ends_on=date(2027, 1, 31),
+            )
+        )
+        db.flush()
+
+        profiles = {}
+        for login, name, code in (
+            ("demo-pz101", "Иван Сергеевич Гончаров", "ПЗ"),
+            ("demo-pm201", "Амели Викторовна Волкова", "ПМ"),
+            ("ordinary-student", "Вымышленный студент", "ПЗ"),
+        ):
+            user = User(
+                login=login,
+                password_hash="test-only",
+                full_name=name,
+                role="student",
+                is_active=True,
+            )
+            db.add(user)
+            db.flush()
+            student = Student(
+                user_id=user.id, group_id=groups[code].id, academic_status="enrolled"
+            )
+            db.add(student)
+            db.flush()
+            profiles[login] = student
+
+        # A genuine transfer away and back must remain protected even when
+        # the current group and the demo identity match the migration target.
+        transferred = profiles["demo-pm201"]
+        transferred.group_id = other_group.id
+        db.flush()
+        transferred.group_id = groups["ПМ"].id
+        db.flush()
+        for profile in profiles.values():
+            db.refresh(profile)
+        assert transferred.membership_version == 2
+        before = {
+            login: (profile.membership_changed_at, profile.membership_version)
+            for login, profile in profiles.items()
+        }
+        ids = {login: profile.id for login, profile in profiles.items()}
+        db.commit()
+
+    run_migration(engine, "upgrade", "head")
+    run_migration(engine, "upgrade", "head")
+    run_migration(engine, "check")
+    with Session(engine) as db:
+        repaired = {login: db.get(Student, student_id) for login, student_id in ids.items()}
+        assert repaired["demo-pz101"].membership_changed_at == datetime(
+            2026, 8, 31, 21, tzinfo=UTC
+        )
+        assert repaired["demo-pz101"].membership_version == 0
+        assert (
+            repaired["demo-pm201"].membership_changed_at,
+            repaired["demo-pm201"].membership_version,
+        ) == before["demo-pm201"]
+        assert (
+            repaired["ordinary-student"].membership_changed_at,
+            repaired["ordinary-student"].membership_version,
+        ) == before["ordinary-student"]
+        # The membership trigger still protects subsequent real transfers.
+        repaired["demo-pz101"].group_id = other_group.id
+        db.flush()
+        db.refresh(repaired["demo-pz101"])
+        assert repaired["demo-pz101"].membership_version == 1
+        assert repaired["demo-pz101"].membership_changed_at > datetime(
+            2026, 8, 31, 21, tzinfo=UTC
+        )
