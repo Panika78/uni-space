@@ -1228,13 +1228,19 @@ def test_demo_seed_rejects_modified_lesson_relations_without_repairing_them(
         mutate()
         db_session.flush()
         damaged = {
-            table: tuple(tuple(row) for row in db_session.execute(text(f'SELECT * FROM "{table}"')))
+            table: tuple(
+                tuple(row)
+                for row in db_session.execute(text(f'SELECT * FROM "{table}" ORDER BY 1, 2'))
+            )
             for table in ("lessons", "lesson_groups", "lesson_rooms")
         }
         with pytest.raises(RuntimeError, match="unexpected lesson_"):
             seed.seed_demo_data()
         after = {
-            table: tuple(tuple(row) for row in db_session.execute(text(f'SELECT * FROM "{table}"')))
+            table: tuple(
+                tuple(row)
+                for row in db_session.execute(text(f'SELECT * FROM "{table}" ORDER BY 1, 2'))
+            )
             for table in ("lessons", "lesson_groups", "lesson_rooms")
         }
         assert after == damaged, description
@@ -1281,12 +1287,15 @@ def test_demo_seed_rejects_modified_lesson_relations_without_repairing_them(
         db_session.add(LessonRoom(lesson_id=moved_id, room_id=replacement_room))
         db_session.flush()
         before_chain_failure = tuple(
-            tuple(row) for row in db_session.execute(text('SELECT * FROM "lessons"'))
+            tuple(row) for row in db_session.execute(text('SELECT * FROM "lessons" ORDER BY 1, 2'))
         )
         with pytest.raises(RuntimeError, match="unexpected lesson_rooms"):
             seed.seed_demo_data()
         assert (
-            tuple(tuple(row) for row in db_session.execute(text('SELECT * FROM "lessons"')))
+            tuple(
+                tuple(row)
+                for row in db_session.execute(text('SELECT * FROM "lessons" ORDER BY 1, 2'))
+            )
             == before_chain_failure
         )
         assert set(
